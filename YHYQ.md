@@ -275,3 +275,8 @@
 - 完整 workspace 首轮测试发现旧用例 `launch_lifecycle_cleans_helper_and_codex_when_status_save_fails` 与新增的早期 `starting` 状态冲突：无效状态路径会在启动前失败，因此旧断言不再实际覆盖启动后的清理逻辑。
 - 已增强启动生命周期测试桩：新增首次 `starting` 写入失败时不得启动 Codex 的用例，并让原清理用例在注入完成后再破坏状态目录，继续验证 helper 与已启动 Codex 进程会被清理。
 - 修复后 16 项 `launch_lifecycle_` 定向测试全部通过，生产环境的早期状态写入行为保持不变。
+- 用户要求继续完成剩余验证、推送、GitHub Actions 构建与 `v1.2.55` Release 发布。
+- 已恢复交接现场并确认无残留 Cargo/Rust 测试进程；当前唯一未提交改动是模型目录测试对“排序第一项为默认模型”的新规则适配。
+- 完整 Rust 测试暴露 GPT-5.6 Sol 的旧断言仍期待默认开放 Ultra；根据用户指定的“逐模型最高等级默认 Xhigh，可手动调整到 Ultra”，将默认断言收敛为 Low、Medium、High、Xhigh，并新增显式配置 Ultra 时完整六档可见的回归测试。
+- 定向模型目录集成测试 7 项全部通过，显式 Ultra 元数据单元测试通过，Rust 格式检查通过。
+- 首次并行运行两个 Cargo 测试因共享构建锁超过 180 秒，已确认并终止该轮遗留的 Cargo/Rust 编译进程；改为串行执行后 2 秒完成且零失败。

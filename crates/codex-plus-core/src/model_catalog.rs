@@ -813,7 +813,7 @@ fn unique_strings(values: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::CustomRelayModel;
+    use crate::settings::{CustomRelayModel, ReasoningEffort};
 
     #[test]
     fn custom_models_catalog_includes_every_configured_model() {
@@ -887,6 +887,27 @@ mod tests {
         assert_eq!(catalog["model_provider"], "custom-models");
         assert_eq!(catalog["provider_name"], "Custom Models");
         assert!(catalog["models"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn relay_model_metadata_honors_explicit_ultra_maximum() {
+        let model = "gpt-5.6-sol".to_string();
+        let profile = RelayProfile {
+            model_list: model.clone(),
+            model_reasoning_efforts: HashMap::from([(model.clone(), ReasoningEffort::Ultra)]),
+            ..RelayProfile::default()
+        };
+
+        let metadata = relay_profile_model_ui_metadata_map(&profile, &[model]);
+        assert_eq!(
+            metadata["gpt-5.6-sol"]["supportedReasoningEfforts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|entry| entry["reasoningEffort"].as_str())
+                .collect::<Vec<_>>(),
+            ["low", "medium", "high", "xhigh", "max", "ultra"]
+        );
     }
 }
 
