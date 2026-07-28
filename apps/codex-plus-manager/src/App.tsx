@@ -3721,6 +3721,28 @@ function EnhanceScreen({
               <FeatureToggle title={t("会话 ID 标识")} detail={t("在侧边栏会话标题前显示短 ID 和 UUIDv7 创建时间，方便定位历史会话。")} checked={form.codexAppThreadIdBadge} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppThreadIdBadge", value)} />
               <FeatureToggle title={t("对话居中宽度")} detail={t("把主对话和输入框限制到固定最大宽度，适合大屏阅读。")} checked={form.codexAppConversationView} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppConversationView", value)} />
               <FeatureToggle title={t("切换对话保留位置")} detail={t("切换 thread 时恢复上一次浏览位置。")} checked={form.codexAppThreadScrollRestore} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppThreadScrollRestore", value)} />
+              <FeatureToggle
+                title={t("Instructions 提示词")}
+                detail={t("为 Codex 配置独立的全局 instructions 文件。")}
+                checked={form.codexAppInstructionsEnabled}
+                disabled={!masterEnabled}
+                onChange={(value) => setEnhanceFlag("codexAppInstructionsEnabled", value)}
+              />
+              {form.codexAppInstructionsEnabled ? (
+                <div className="instructions-fields">
+                  <Field label={t("提示词正文")}>
+                    <Textarea
+                      disabled={!masterEnabled}
+                      onChange={(event) => onFormChange({ ...form, codexAppInstructions: event.currentTarget.value })}
+                      placeholder={t("输入需要在所有 Codex 会话中生效的 instructions")}
+                      rows={8}
+                      spellCheck={false}
+                      value={form.codexAppInstructions}
+                    />
+                  </Field>
+                  <code>~/.codex/TSC_ZYL_PJ/do_special.md</code>
+                </div>
+              ) : null}
             </FeatureGroup>
             <FeatureGroup title="Stepwise" detail={t("基于当前对话生成下一步建议，使用独立 API 配置。")}>
               <FeatureToggle title="Stepwise" detail={t("在 Codex 页面显示可拖动的后续建议浮层；建议由单独配置的 Stepwise API 生成。")} checked={form.codexAppStepwiseEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseEnabled", value)} />
@@ -5853,78 +5875,139 @@ function CustomModelsRelayProfileEditor({
           </label>
         </Field>
       </div>
-      <div className="custom-model-blocks">
-        {models.map((model, index) => (
-          <div className="custom-model-block" key={model.id}>
-            <div className="custom-model-block-head">
-              <strong>{tf("模型 {0}", [index + 1])}</strong>
-              <Button onClick={() => removeModel(index)} size="sm" type="button" variant="ghost">
-                <Trash2 className="h-4 w-4" />
-                {t("删除模型")}
-              </Button>
-            </div>
-            <div className="relay-fields">
-              <Field label={t("模型名称")}>
-                <Input value={model.model} onChange={(event) => updateModel(index, { model: event.currentTarget.value })} placeholder="gpt-5.4" />
-              </Field>
-              <Field label="Base URL">
-                <Input value={model.baseUrl} onChange={(event) => updateModel(index, { baseUrl: event.currentTarget.value })} placeholder="https://api.example.com/v1" />
-              </Field>
-              <Field label="Key">
-                <Input type="password" value={model.apiKey} onChange={(event) => updateModel(index, { apiKey: event.currentTarget.value })} />
-              </Field>
-              <Field label={t("上游协议")}>
-                <div className="protocol-options">
-                  {RELAY_PROTOCOL_OPTIONS.map((option) => (
-                    <button
-                      className={`protocol-option ${model.protocol === option.value ? "active" : ""}`}
-                      key={option.value}
-                      onClick={() => updateModel(index, { protocol: option.value })}
-                      type="button"
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </Field>
-              <Field label={t("上下文窗口")}>
-                <Input value={model.contextWindow} onChange={(event) => updateModel(index, { contextWindow: event.currentTarget.value })} placeholder="200000 / 1M" />
-              </Field>
-              <Field label={t("自动压缩百分比")}>
-                <label className="inline-toggle">
-                  <input
-                    checked={model.autoCompactEnabled}
-                    onChange={(event) => updateModel(index, { autoCompactEnabled: event.currentTarget.checked })}
-                    type="checkbox"
-                  />
-                  <span>{t("启用自动压缩")}</span>
-                  <ToggleVisual />
-                </label>
-                <Input
-                  disabled={!model.autoCompactEnabled}
-                  inputMode="numeric"
-                  max={100}
-                  min={1}
-                  type="number"
-                  value={model.autoCompactPercent || 80}
-                  onChange={(event) => updateModel(index, { autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
-                />
-              </Field>
-            </div>
-            <Toolbar>
-              <Button onClick={() => void testModel(model)} size="sm" type="button" variant="secondary">
-                {t("测试此模型")}
-              </Button>
-            </Toolbar>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderModels}>
+        <SortableContext items={modelIds} strategy={verticalListSortingStrategy}>
+          <div className="custom-model-blocks">
+            {models.map((model, index) => (
+              <SortableCustomModelBlock
+                id={model.id}
+                index={index}
+                key={model.id}
+                model={model}
+                onChange={updateModel}
+                onRemove={removeModel}
+                onTest={testModel}
+              />
+            ))}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
       <Toolbar>
         <Button onClick={addModel} size="sm" type="button" variant="secondary">
           <Plus className="h-4 w-4" />
           {t("添加模型")}
         </Button>
       </Toolbar>
+    </div>
+  );
+}
+
+function SortableCustomModelBlock({
+  id,
+  index,
+  model,
+  onChange,
+  onRemove,
+  onTest,
+}: {
+  id: string;
+  index: number;
+  model: CustomRelayModel;
+  onChange: (index: number, patch: Partial<CustomRelayModel>) => void;
+  onRemove: (index: number) => void;
+  onTest: (model: CustomRelayModel) => Promise<void>;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  return (
+    <div
+      className={`custom-model-sortable ${isDragging ? "dragging" : ""}`}
+      ref={setNodeRef}
+      style={style}
+    >
+      <div className="custom-model-block">
+        <div className="custom-model-block-head">
+          <div className="custom-model-block-title">
+            <button
+              aria-label={t("长按拖动模型排序")}
+              className="model-drag-handle"
+              title={t("长按拖动模型排序")}
+              type="button"
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
+            <strong>{tf("模型 {0}", [index + 1])}</strong>
+          </div>
+          <Button
+            aria-label={t("删除模型")}
+            onClick={() => onRemove(index)}
+            size="icon"
+            title={t("删除模型")}
+            type="button"
+            variant="ghost"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+        <div className="relay-fields">
+          <Field label={t("模型名称")}>
+            <Input value={model.model} onChange={(event) => onChange(index, { model: event.currentTarget.value })} placeholder="gpt-5.4" />
+          </Field>
+          <Field label="Base URL">
+            <Input value={model.baseUrl} onChange={(event) => onChange(index, { baseUrl: event.currentTarget.value })} placeholder="https://api.example.com/v1" />
+          </Field>
+          <Field label="Key">
+            <Input type="password" value={model.apiKey} onChange={(event) => onChange(index, { apiKey: event.currentTarget.value })} />
+          </Field>
+          <Field label={t("上游协议")}>
+            <div className="protocol-options">
+              {RELAY_PROTOCOL_OPTIONS.map((option) => (
+                <button
+                  className={`protocol-option ${model.protocol === option.value ? "active" : ""}`}
+                  key={option.value}
+                  onClick={() => onChange(index, { protocol: option.value })}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+          <Field label={t("上下文窗口")}>
+            <Input value={model.contextWindow} onChange={(event) => onChange(index, { contextWindow: event.currentTarget.value })} placeholder="200000 / 1M" />
+          </Field>
+          <Field label={t("自动压缩百分比")}>
+            <label className="inline-toggle">
+              <input
+                checked={model.autoCompactEnabled}
+                onChange={(event) => onChange(index, { autoCompactEnabled: event.currentTarget.checked })}
+                type="checkbox"
+              />
+              <span>{t("启用自动压缩")}</span>
+              <ToggleVisual />
+            </label>
+            <Input
+              disabled={!model.autoCompactEnabled}
+              inputMode="numeric"
+              max={100}
+              min={1}
+              type="number"
+              value={model.autoCompactPercent || 80}
+              onChange={(event) => onChange(index, { autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
+            />
+          </Field>
+        </div>
+        <Toolbar>
+          <Button onClick={() => void onTest(model)} size="sm" type="button" variant="secondary">
+            {t("测试此模型")}
+          </Button>
+        </Toolbar>
+      </div>
     </div>
   );
 }

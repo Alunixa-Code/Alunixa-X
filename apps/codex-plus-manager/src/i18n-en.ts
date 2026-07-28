@@ -112,6 +112,23 @@ export const EN_PLAIN: Record<string, string> = {
   "记忆嵌入模型": "Memory embedding model",
   "开启后使用 OpenAI 兼容嵌入接口；关闭或接口异常时使用本地 BM25 关键词匹配。":
     "Use an OpenAI-compatible embedding endpoint when enabled. When disabled or unavailable, use local BM25 keyword matching.",
+  "Instructions 提示词": "Instructions prompt",
+  "为 Codex 配置独立的全局 instructions 文件。":
+    "Configure a dedicated global instructions file for Codex.",
+  "提示词正文": "Instructions content",
+  "输入需要在所有 Codex 会话中生效的 instructions":
+    "Enter instructions that should apply to every Codex conversation",
+  "思考等级": "Reasoning effort",
+  "按供应商设置每个模型的最高思考等级": "Set each model's maximum reasoning effort by provider",
+  "模型最高思考等级": "Maximum model reasoning effort",
+  "供应商模型列表为空，请先在供应商配置中添加模型。":
+    "No provider models are available. Add models in provider settings first.",
+  "保存思考等级": "Save reasoning effort",
+  "长按拖动模型排序": "Press and hold to reorder models",
+  "启动模型": "Startup model",
+  "排序第一项": "First model in the list",
+  "优先使用上次有效模型；没有历史记录时使用排序第一项。":
+    "Use the last valid model when available; otherwise use the first model in the list.",
   "纯文本模型请配置此项": "Choose image handling for text-only models",
   "原样发送图片": "Send images as-is",
   "为纯文本模型移除消息中的图片": "Remove images before sending to a text-only model",
@@ -787,12 +804,15 @@ export const EN_TEMPLATE: Record<string, string> = {
   "{0} 个": "{0}",
   "{0} 个 Codex++ 可识别项目，默认策略：{1}": "{0} project(s) recognized by Codex++, default strategy: {1}",
   "{0} 个供应商": "{0} provider(s)",
+  "{0} 个供应商，默认 Extra High": "{0} provider(s), default Extra High",
   "{0} 个供应商配置；可拖动排序，点编辑进入详情": "{0} provider configuration(s); drag to reorder, click edit for details",
+  "{0} 个模型": "{0} model(s)",
   "{0} 个市场脚本，已安装 {1} 个，本地整体 {2}": "{0} marketplace script(s), {1} installed, local overall {2}",
   "{0} 个项目": "{0} project(s)",
   "{0} 副本": "{0} copy",
   "{0} 条": "{0} item(s)",
   "供应商 {0}": "Provider {0}",
+  "{0} 最高思考等级": "Maximum reasoning effort for {0}",
   "供应商「{0}」缺少独立 config.toml，已停止切换，避免继续显示上一套配置文件。请先在该供应商详情里保存 config.toml。":
     "Provider “{0}” is missing its own config.toml, so the switch was stopped to avoid showing the previous config files. Save config.toml in this provider's details first.",
   "删除会话“{0}”？此操作会删除本地数据库记录和 rollout 文件，并创建备份。":

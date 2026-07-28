@@ -250,3 +250,7 @@
 - 已在管理器增加独立“思考等级”页面与普通供应商模型长按拖拽基础，自定义模型拖拽界面仍处于阶段性实现，后续继续收口并验证。
 - 已执行 `cargo check -p codex-plus-core`，第一阶段 Rust 核心检查通过。
 - 用户要求继续完成八项任务，最终推送 `Alunixa-Code/CodexPlusPlusPlus`，通过 GitHub Actions 构建并发布 Release。
+- 已完成普通供应商与自定义供应商模型的方形长按拖拽手柄，自定义模型块现通过 `DndContext` 和 `SortableContext` 持久化用户顺序。
+- 已补齐“思考等级”页面的桌面与窄屏样式，六档选项为 Light、Medium、High、Extra High、Max、Ultra。
+- 已在“Codex增强”的“对话与输入”分组加入 Instructions 提示词开关、正文输入框和固定文件路径展示。
+- 已补齐本阶段中英文词条；`npm run check` 通过，i18n 校验只剩仓库既有的完整配置导入导出与分页词条差异。
