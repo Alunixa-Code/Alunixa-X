@@ -261,3 +261,6 @@
 - 已将 `OpenAI.ChatGPT-Desktop` Windows 包加入 Codex App 路径发现与 AppUserModelId 识别，同时仍优先选择专用 `OpenAI.Codex` 包。
 - 定向验证通过：桥接路由 26 项、official remote 7 项、Windows 包识别 7 项、注入脚本合约 1 项、前端 12 项、TypeScript、Vite 生产构建、管理器与启动器 Rust 检查和差异检查。
 - 已按清理要求删除本次 Vite 生成的 `apps/codex-plus-manager/dist`。
+- 用户要求从现有检查点继续完成剩余上游同步、完整验证、推送、GitHub Actions 构建与 Release 发布。
+- 已复核工作树干净，当前 `main` 位于阶段提交 `37e8404`，提交作者配置为 `Alunixa Bot`，目标远端仍为 `Alunixa-Code/CodexPlusPlusPlus`。
+- 已完成上游 `v1.2.37` 至 `v1.2.42` 剩余差异审计：计划同步 `CODEX_SQLITE_HOME` 的统一数据库路径解析、跨数据库删除撤销、安全恢复路径限制、长确认弹窗滚动布局及其测试稳定性修复；伴侣皮肤与上传资源不属于本次需求，继续保持默认紫色主题。
