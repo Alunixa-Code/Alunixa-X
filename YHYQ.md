@@ -297,3 +297,6 @@
 - 已核对发布前状态：目标远端为 `Alunixa-Code/CodexPlusPlusPlus`，远端 `main` 尚未包含当前提交，`v1.2.55` 标签不存在；本次将推送当前 `main` 并创建注释标签。
 - `v1.2.55` 发布说明将记录：思考等级独立页与六档上限、普通/自定义供应商模型排序、上次模型恢复与默认排序第一项、退出登录、启动注入兜底、Instructions 文件、`CODEX_SQLITE_HOME`、多库撤销安全校验、确认弹窗滚动、默认紫色主题和完整验证结果。
 - 主分支 Actions `30385928788` 的 Windows 与 macOS arm64 构建成功，macOS x64 构建也完成但在 `actions/upload-artifact@v4` 创建 artifact 时连续 5 次 GitHub Results API 请求超时；该失败属于 Actions 上传基础设施，不是代码测试或编译失败，已准备只重跑失败 job。
+- `v1.2.55` Release 工作流 `30385959925` 已成功完成，六项资产全部上传并通过校验：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
+- 主分支工作流 `30385928788` 重跑后已成功完成，Windows artifacts、macOS DMG x64 和 macOS DMG arm64 全部通过；Windows job 的前端测试、TypeScript、Rust 测试和打包均成功。
+- 已将自动生成的 Release 简略正文更新为完整 v1.2.55 中文发布说明，明确记录功能、修复、仓库迁移、作者身份、构建资产和验证结果。
