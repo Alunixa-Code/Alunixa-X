@@ -294,3 +294,5 @@
 - 浏览器直开前端时因没有 Tauri `invoke` bridge 出现调用失败 toast，这是预览环境限制；Tauri 桌面运行时依赖由应用注入，不影响生产构建。
 - 已停止所有视觉检查服务，准备删除一次性 `tools/visual_check.py`、`tools/start-vite-visual.ps1`、`tools/run-visual-check.ps1`、前端 `dist`、`node_modules` 和临时截图目录。
 - 清理结果：视觉脚本、`dist`、临时截图和 Vite 日志已删除，1420/1437 端口无监听；`node_modules` 因 Rollup 原生文件被系统占用暂未删除，仓库中没有跟踪该目录，不影响发布。
+- 已核对发布前状态：目标远端为 `Alunixa-Code/CodexPlusPlusPlus`，远端 `main` 尚未包含当前提交，`v1.2.55` 标签不存在；本次将推送当前 `main` 并创建注释标签。
+- `v1.2.55` 发布说明将记录：思考等级独立页与六档上限、普通/自定义供应商模型排序、上次模型恢复与默认排序第一项、退出登录、启动注入兜底、Instructions 文件、`CODEX_SQLITE_HOME`、多库撤销安全校验、确认弹窗滚动、默认紫色主题和完整验证结果。
