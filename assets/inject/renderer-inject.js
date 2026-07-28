@@ -470,7 +470,7 @@
   const codexThreadServiceTierKey = "codexThreadServiceTierOverrides";
   const codexThreadServiceTierMaxEntries = 120;
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
-  const codexServiceTierRequestOverrideVersion = "3";
+  const codexServiceTierRequestOverrideVersion = "4";
   const codexAppServerModelRequestPatchVersion = "2";
   const codexPluginMarketplaceUnlockVersion = "12";
   const codexPluginAutoExpandVersion = "1";
@@ -2331,6 +2331,52 @@
     return new Set(["thread/start", "thread/resume", "turn/start"]);
   }
 
+  let codexLastRecordedModelSignature = "";
+  let codexLastRecordedModelAt = 0;
+
+  function codexRequestMethodAndParams(message) {
+    if (!message || typeof message !== "object") return null;
+    if (message.type === "send-cli-request-for-host") {
+      return { method: String(message.method || ""), params: message.params };
+    }
+    if ((message.type === "mcp-request" || message.type === "worker-request") && message.request) {
+      return { method: String(message.request.method || ""), params: message.request.params };
+    }
+    if (message.type === "thread-prewarm-start" && message.request) {
+      return { method: "thread/start", params: message.request.params };
+    }
+    if (message.type === "prewarm-thread-start-for-host") {
+      return { method: "thread/start", params: message.params };
+    }
+    if (message.type === "start-conversation" || message.type === "start-thread-for-host") {
+      return { method: "thread/start", params: message };
+    }
+    if (message.type === "start-turn-for-host") {
+      return { method: "turn/start", params: message.params };
+    }
+    return null;
+  }
+
+  function recordCodexModelSelection(message) {
+    const request = codexRequestMethodAndParams(message);
+    if (!request || !codexServiceTierRequestMethods().has(request.method)) return;
+    const model = codexServiceTierModelFromValue(request.params)
+      || codexServiceTierModelFromValue(message)
+      || codexServiceTierCurrentModelName();
+    if (!model) return;
+    const signature = `${request.method}:${normalizeCodexServiceTierModelName(model)}`;
+    const now = Date.now();
+    if (signature === codexLastRecordedModelSignature && now - codexLastRecordedModelAt < 1500) return;
+    codexLastRecordedModelSignature = signature;
+    codexLastRecordedModelAt = now;
+    void postJson("/model-selection/set", { model }).catch((error) => {
+      sendCodexPlusDiagnostic("model_selection_record_failed", {
+        errorName: error?.name || "",
+        errorMessage: error?.message || String(error),
+      });
+    });
+  }
+
   function codexServiceTierThreadIdForRequest(method, params, threadIdHint = "") {
     if (method === "thread/start") return validThreadScrollSessionKey(params?.threadId || threadIdHint);
     return validThreadScrollSessionKey(params?.threadId || params?.conversationId || threadIdHint || currentSessionRef().session_id);
@@ -2464,7 +2510,6 @@
   }
 
   function installCodexServiceTierDispatcherPatch() {
-    if (!codexPlusSettings().serviceTierControls) return;
     if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
     const loadDispatcher = async () => {
       const errors = [];
@@ -5246,6 +5291,7 @@
     const originalMessage = { ...(payload || {}), type };
     const dispatch = (message) => {
       const serviceTierMessage = codexServiceTierRequestOverride(message);
+      recordCodexModelSelection(serviceTierMessage);
       const nextType = serviceTierMessage?.type || type;
       const { type: _type, ...nextPayload } = serviceTierMessage || {};
       return dispatcher.__codexServiceTierOriginalDispatchMessage(nextType, nextPayload);

@@ -261,6 +261,13 @@ where
     let settings = hooks.load_settings().await?;
     let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
     let status_store = options.status_store.clone();
+    status_store.save_latest(&launch_status(
+        "starting",
+        "Codex++ launcher is preparing the app and injection bridge.",
+        debug_port,
+        helper_port,
+        &app_dir,
+    ))?;
     let mut helper_started = false;
     let mut launched = None;
     let mut keep_launched_on_error = false;

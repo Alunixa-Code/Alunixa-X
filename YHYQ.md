@@ -254,3 +254,10 @@
 - 已补齐“思考等级”页面的桌面与窄屏样式，六档选项为 Light、Medium、High、Extra High、Max、Ultra。
 - 已在“Codex增强”的“对话与输入”分组加入 Instructions 提示词开关、正文输入框和固定文件路径展示。
 - 已补齐本阶段中英文词条；`npm run check` 通过，i18n 校验只剩仓库既有的完整配置导入导出与分页词条差异。
+- 已新增 `/model-selection/set` 桥接路由，注入 dispatcher 会从 `thread/start`、`thread/resume` 和 `turn/start` 真实请求中记录当前供应商最后使用的有效模型。
+- dispatcher 注入不再依赖 Fast 按钮开关，关闭 Fast 时仍可记录模型并维持无项目任务请求兜底。
+- 已恢复“退出登录”按钮和 `chatgpt_account_logout` 命令；退出会清理保存的 ChatGPT token，官方混合供应商会保留 API Key 并转回纯 API。
+- 已在启动流程早期写入 `starting` 状态，已有 launcher 重连分支会持久化 `starting`、`running` 或 `running_degraded`，管理器在检测到 Codex 进程但缺少有效状态时会显示等待注入的兜底概览。
+- 已将 `OpenAI.ChatGPT-Desktop` Windows 包加入 Codex App 路径发现与 AppUserModelId 识别，同时仍优先选择专用 `OpenAI.Codex` 包。
+- 定向验证通过：桥接路由 26 项、official remote 7 项、Windows 包识别 7 项、注入脚本合约 1 项、前端 12 项、TypeScript、Vite 生产构建、管理器与启动器 Rust 检查和差异检查。
+- 已按清理要求删除本次 Vite 生成的 `apps/codex-plus-manager/dist`。

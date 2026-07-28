@@ -25,6 +25,10 @@ export const EN_PLAIN: Record<string, string> = {
     "Securely connect a ChatGPT account to this Codex host using browser OAuth or a device code.",
   "不会读取、导入或保存浏览器 Cookie": "Browser cookies are never read, imported, or stored.",
   "打开 ChatGPT 官网": "Open ChatGPT website",
+  "退出登录": "Sign out",
+  "退出 ChatGPT 账号？官方手机远控将断开，纯 API Key 配置会保留。":
+    "Sign out of ChatGPT? Official mobile remote control will disconnect, while pure API key settings will be preserved.",
+  "ChatGPT 账号已退出。": "Signed out of ChatGPT.",
   "取消连接": "Cancel connection",
   "设备码重新登录": "Sign in again with device code",
   "设备码登录": "Device-code sign-in",
@@ -1009,6 +1013,7 @@ export const EN_BACKEND_PATTERNS: Array<[RegExp, string]> = [
   [/^发起 ChatGPT 设备码登录失败：(.+)$/, "Failed to start ChatGPT device-code sign-in: $1"],
   [/^检查 ChatGPT 登录状态失败：(.+)$/, "Failed to check ChatGPT sign-in status: $1"],
   [/^取消 ChatGPT 登录失败：(.+)$/, "Failed to cancel ChatGPT sign-in: $1"],
+  [/^退出 ChatGPT 登录失败：(.+)$/, "Failed to sign out of ChatGPT: $1"],
   [/^读取官方手机远控状态失败：(.+)$/, "Failed to read official mobile remote-control status: $1"],
   [/^启用官方手机远控失败：(.+)$/, "Failed to enable official mobile remote control: $1"],
   [/^关闭官方手机远控失败：(.+)$/, "Failed to disable official mobile remote control: $1"],

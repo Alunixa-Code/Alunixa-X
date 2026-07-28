@@ -61,6 +61,7 @@ impl BridgeContext {
 pub trait BridgeSettingsService: Send + Sync {
     async fn get_settings(&self) -> anyhow::Result<BackendSettings>;
     async fn set_settings(&self, payload: Value) -> anyhow::Result<BackendSettings>;
+    async fn record_model_selection(&self, model: String) -> anyhow::Result<bool>;
 
     async fn codex_app_version(&self) -> anyhow::Result<String> {
         Ok(String::new())
@@ -120,8 +121,8 @@ pub async fn handle_bridge_request(
     payload: Value,
 ) -> serde_json::Value {
     let started = Instant::now();
-    let quiet_status_request = path == "/backend/status";
-    if !quiet_status_request {
+    let quiet_request = matches!(path, "/backend/status" | "/model-selection/set");
+    if !quiet_request {
         let _ = crate::diagnostic_log::append_diagnostic_log(
             "bridge.request",
             json!({
@@ -172,6 +173,7 @@ pub async fn handle_bridge_request(
         "/codex/restart" => ctx.runtime.restart_codex(payload.clone()).await,
         "/backend/status" => ctx.runtime.backend_status().await,
         "/codex-model-catalog" | "/codex-config-model" => ctx.runtime.codex_model_catalog().await,
+        "/model-selection/set" => record_model_selection_value(&ctx, payload.clone()).await,
         "/diagnostics/log" => diagnostic_log_value(payload.clone()),
         "/ads" => ctx.runtime.ads().await,
         "/zed-remote/status" => ctx.runtime.zed_remote_status().await,
@@ -271,7 +273,7 @@ pub async fn handle_bridge_request(
     };
 
     let response = result.unwrap_or_else(|error| failed_from_error(&payload, error));
-    if !quiet_status_request {
+    if !quiet_request {
         let _ = crate::diagnostic_log::append_diagnostic_log(
             "bridge.response",
             json!({
@@ -321,6 +323,29 @@ impl BridgeSettingsService for CoreSettingsService {
             )?;
         }
         Ok(settings)
+    }
+
+    async fn record_model_selection(&self, model: String) -> anyhow::Result<bool> {
+        let mut settings = self.store.load()?;
+        let active_id = settings.active_relay_id.clone();
+        let Some(profile) = settings
+            .relay_profiles
+            .iter_mut()
+            .find(|profile| profile.id == active_id)
+        else {
+            return Ok(false);
+        };
+        let known = profile
+            .ordered_model_names()
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()));
+        if !known {
+            return Ok(false);
+        }
+        if profile.record_last_used_model(&model) {
+            self.store.save(&settings)?;
+        }
+        Ok(true)
     }
 
     async fn codex_app_version(&self) -> anyhow::Result<String> {
@@ -686,6 +711,27 @@ async fn settings_value(
     let settings = result?;
     let codex_app_version = ctx.settings.codex_app_version().await.unwrap_or_default();
     settings_payload_value(settings, codex_app_version)
+}
+
+async fn record_model_selection_value(
+    ctx: &BridgeContext,
+    payload: Value,
+) -> anyhow::Result<Value> {
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if model.is_empty() {
+        anyhow::bail!("model is required");
+    }
+    let recorded = ctx.settings.record_model_selection(model.clone()).await?;
+    Ok(json!({
+        "status": "ok",
+        "model": model,
+        "recorded": recorded
+    }))
 }
 
 fn result_value<T>(result: anyhow::Result<T>) -> anyhow::Result<Value>

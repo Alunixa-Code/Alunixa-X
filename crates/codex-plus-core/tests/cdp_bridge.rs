@@ -709,6 +709,11 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("data-codex-service-tier-controls"));
     assert!(script.contains("removeCodexServiceTierBadges"));
     assert!(script.contains("installCodexServiceTierDispatcherPatch"));
+    assert!(script.contains("recordCodexModelSelection"));
+    assert!(script.contains("postJson(\"/model-selection/set\""));
+    assert!(!script.contains(
+        "function installCodexServiceTierDispatcherPatch() {\n    if (!codexPlusSettings().serviceTierControls) return;"
+    ));
     assert!(script.contains("服务模式"));
     assert!(script.contains("data-codex-service-tier-status"));
     assert!(script.contains("data-codex-service-tier-inherit"));

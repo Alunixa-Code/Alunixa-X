@@ -127,6 +127,7 @@ pub fn run() {
             commands::chatgpt_device_login_start,
             commands::chatgpt_web_login_status,
             commands::chatgpt_web_login_cancel,
+            commands::chatgpt_account_logout,
             commands::official_remote_control_status,
             commands::official_remote_control_enable,
             commands::official_remote_control_disable,

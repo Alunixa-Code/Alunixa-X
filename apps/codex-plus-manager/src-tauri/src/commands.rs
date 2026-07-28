@@ -2150,6 +2150,30 @@ pub async fn chatgpt_web_login_cancel(
 }
 
 #[tauri::command]
+pub async fn chatgpt_account_logout() -> CommandResult<SettingsPayload> {
+    let store = SettingsStore::default();
+    let settings = store.load().unwrap_or_default();
+    let home = codex_plus_core::relay_config::default_codex_home_dir();
+    let mut runtime = official_remote_runtime().lock().await;
+    match runtime
+        .logout(Some(settings.codex_app_path.as_str()), &store, &home)
+        .await
+    {
+        Ok(settings) => {
+            log_manager_event(
+                "manager.chatgpt_account.logout",
+                json!({ "activeRelayId": settings.active_relay_id }),
+            );
+            settings_payload("ChatGPT 账号已退出。", "退出后重新读取设置失败")
+        }
+        Err(error) => failed(
+            &format!("退出 ChatGPT 登录失败：{error}"),
+            fallback_settings_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
 pub async fn official_remote_control_status()
 -> CommandResult<codex_plus_core::official_remote::RemoteControlSnapshot> {
     let saved_app_path = saved_codex_app_path();
@@ -3869,14 +3893,38 @@ fn load_overview_payload() -> (
     Option<LaunchStatus>,
 ) {
     let settings = SettingsStore::default().load().unwrap_or_default();
-    (
-        codex_plus_core::app_paths::resolve_codex_app_dir_with_saved(
-            None,
-            Some(settings.codex_app_path.as_str()),
-        ),
-        install::inspect_entrypoints(),
-        StatusStore::default().load_latest().unwrap_or(None),
-    )
+    let codex_app = codex_plus_core::app_paths::resolve_codex_app_dir_with_saved(
+        None,
+        Some(settings.codex_app_path.as_str()),
+    );
+    let mut latest_launch = StatusStore::default().load_latest().unwrap_or(None);
+    let codex_processes = codex_plus_core::watcher::find_codex_processes();
+    if !codex_processes.is_empty()
+        && latest_launch
+            .as_ref()
+            .map(|status| {
+                !matches!(
+                    status.status.as_str(),
+                    "starting" | "running" | "running_degraded"
+                )
+            })
+            .unwrap_or(true)
+    {
+        latest_launch = Some(LaunchStatus {
+            status: "running_degraded".to_string(),
+            message: "已检测到 Codex 桌面进程，Codex++ 正在等待启动器或注入桥接状态。".to_string(),
+            started_at_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            debug_port: None,
+            helper_port: None,
+            codex_app: codex_app
+                .as_deref()
+                .map(|path| path.to_string_lossy().to_string()),
+        });
+    }
+    (codex_app, install::inspect_entrypoints(), latest_launch)
 }
 
 fn install_background_failure(action: &str, error: impl std::fmt::Display) -> InstallActionResult {

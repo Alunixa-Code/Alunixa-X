@@ -27,6 +27,12 @@ const APP_PACKAGE_SPECS: &[AppPackageSpec] = &[
         executable_names: CODEX_PACKAGE_EXECUTABLES,
         priority: 1,
     },
+    AppPackageSpec {
+        identity: "OpenAI.ChatGPT-Desktop",
+        app_id: "App",
+        executable_names: CODEX_PACKAGE_EXECUTABLES,
+        priority: 2,
+    },
 ];
 
 pub fn find_latest_codex_app_dir(root: &Path) -> Option<PathBuf> {
@@ -80,7 +86,7 @@ fn find_latest_codex_app_dir_from_appx_package() -> Option<PathBuf> {
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            "$names=@('OpenAI.Codex','OpenAI.CodexBeta'); Get-AppxPackage | Where-Object { $names -contains $_.Name } | Sort-Object Version -Descending | Select-Object -First 1 -ExpandProperty InstallLocation",
+            "$names=@('OpenAI.Codex','OpenAI.CodexBeta','OpenAI.ChatGPT-Desktop'); Get-AppxPackage | Where-Object { $names -contains $_.Name } | Sort-Object @{Expression={if ($_.Name -like 'OpenAI.Codex*') {0} else {1}};Ascending=$true}, @{Expression={$_.Version};Descending=$true} | Select-Object -First 1 -ExpandProperty InstallLocation",
         ])
         .output()
         .ok()?;

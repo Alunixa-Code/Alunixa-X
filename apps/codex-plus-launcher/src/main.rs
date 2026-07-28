@@ -6,10 +6,12 @@ use codex_plus_core::launcher::{
 };
 use codex_plus_core::models::{DeleteResult, ExportResult, SessionRef};
 use codex_plus_core::routes::{BridgeContext, BridgeDataService, BridgeRuntimeService};
+use codex_plus_core::status::LaunchStatus;
 use codex_plus_core::user_scripts::UserScriptManager;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 struct LauncherHooks {
@@ -186,6 +188,12 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     let settings = hooks.load_settings().await?;
     ensure_codex_plus_hooks(&settings).await;
     let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
+    save_existing_launch_status(
+        &options,
+        &app_dir,
+        "starting",
+        "Codex++ is reconnecting to the existing Codex app.",
+    );
     let launch_result = hooks
         .launch_codex(
             &app_dir,
@@ -215,14 +223,29 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     } else {
         false
     };
-    if injection_ready {
+    let (status, message) = if injection_ready {
         hooks
             .start_bridge_watchdog(options.debug_port, options.helper_port)
             .await?;
         hooks.write_status("running").await;
+        ("running", "Codex++ reconnected to the existing Codex app.")
     } else if settings.enhancements_enabled {
         hooks.write_status("running_degraded").await;
-    }
+        (
+            "running_degraded",
+            "Codex is running; Codex++ is still waiting for the injection bridge.",
+        )
+    } else if launch_result.is_ok() {
+        hooks.write_status("running").await;
+        ("running", "Codex is running with enhancements disabled.")
+    } else {
+        hooks.write_status("failed").await;
+        (
+            "failed",
+            "Codex++ could not reactivate the existing Codex app.",
+        )
+    };
+    save_existing_launch_status(&options, &app_dir, status, message);
     let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
         "launcher.activate_existing_codex",
         json!({
@@ -237,6 +260,26 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
         }),
     );
     launch_result.map(|_| ())
+}
+
+fn save_existing_launch_status(
+    options: &LaunchOptions,
+    app_dir: &Path,
+    status: &str,
+    message: &str,
+) {
+    let started_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let _ = options.status_store.save_latest(&LaunchStatus {
+        status: status.to_string(),
+        message: message.to_string(),
+        started_at_ms,
+        debug_port: Some(options.debug_port),
+        helper_port: Some(options.helper_port),
+        codex_app: Some(app_dir.to_string_lossy().to_string()),
+    });
 }
 
 fn log_launcher_already_running(debug_port: u16) {

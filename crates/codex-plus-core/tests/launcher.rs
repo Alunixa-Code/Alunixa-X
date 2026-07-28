@@ -42,7 +42,7 @@ fn app_paths_find_latest_windows_package_prefers_highest_version_app_dir() {
 }
 
 #[test]
-fn app_paths_find_latest_windows_package_ignores_chatgpt_desktop_package() {
+fn app_paths_find_latest_windows_package_prefers_codex_over_chatgpt_desktop() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("OpenAI.Codex_26.707.3748.0_x64__abc/app")).unwrap();
     std::fs::create_dir_all(
@@ -66,6 +66,29 @@ fn app_paths_find_latest_windows_package_ignores_chatgpt_desktop_package() {
     assert_eq!(
         packaged_app_user_model_id(&latest).as_deref(),
         Some("OpenAI.Codex_abc!App")
+    );
+}
+
+#[test]
+fn app_paths_find_latest_windows_package_accepts_chatgpt_desktop_fallback() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(
+        temp.path()
+            .join("OpenAI.ChatGPT-Desktop_1.2026.133.0_x64__abc/app"),
+    )
+    .unwrap();
+
+    let latest = find_latest_codex_app_dir(temp.path()).unwrap();
+
+    assert_eq!(
+        latest,
+        temp.path()
+            .join("OpenAI.ChatGPT-Desktop_1.2026.133.0_x64__abc/app")
+    );
+    assert_eq!(codex_app_version(&latest).as_deref(), Some("1.2026.133.0"));
+    assert_eq!(
+        packaged_app_user_model_id(&latest).as_deref(),
+        Some("OpenAI.ChatGPT-Desktop_abc!App")
     );
 }
 
@@ -1470,6 +1493,8 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             model_list: String::new(),
             model_windows: String::new(),
             model_vlm: String::new(),
+            model_reasoning_efforts: Default::default(),
+            last_used_model: String::new(),
             vlm_api_key: String::new(),
             vlm_model: String::new(),
             vlm_base_url: String::new(),

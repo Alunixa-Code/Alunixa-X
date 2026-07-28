@@ -279,6 +279,27 @@ impl OfficialRemoteRuntime {
         result
     }
 
+    pub async fn logout(
+        &mut self,
+        saved_app_path: Option<&str>,
+        store: &SettingsStore,
+        home: &Path,
+    ) -> anyhow::Result<BackendSettings> {
+        if self.pending_login.is_some() {
+            anyhow::bail!("请先取消正在等待的 ChatGPT 登录");
+        }
+        let result = async {
+            self.ensure_client(saved_app_path)
+                .await?
+                .request("account/logout", None)
+                .await?;
+            clear_chatgpt_login_after_logout(store, home)
+        }
+        .await;
+        self.client = None;
+        result
+    }
+
     pub async fn enable(
         &mut self,
         saved_app_path: Option<&str>,
@@ -478,6 +499,89 @@ pub fn migrate_active_profile_after_chatgpt_login(
     .context("写入官方混合供应商失败")?;
     store.save(&settings).context("保存官方混合供应商失败")?;
     Ok(settings)
+}
+
+pub fn clear_chatgpt_login_after_logout(
+    store: &SettingsStore,
+    home: &Path,
+) -> anyhow::Result<BackendSettings> {
+    let mut settings = store.load().context("读取供应商设置失败")?;
+    for profile in &mut settings.relay_profiles {
+        if !auth_contents_has_chatgpt_login(&profile.auth_contents) {
+            continue;
+        }
+        let api_key = relay_profile_api_key(profile);
+        profile.auth_contents = api_key_auth_contents(&api_key)?;
+        if profile.relay_mode == RelayMode::Official {
+            profile.official_mix_api_key = false;
+            if !api_key.trim().is_empty() {
+                profile.relay_mode = RelayMode::PureApi;
+                profile.api_key = api_key;
+            }
+        }
+        normalize_relay_profile_for_storage(profile)
+            .context("清理供应商中的 ChatGPT 登录副本失败")?;
+    }
+
+    if settings.relay_profiles_enabled {
+        let active = settings.active_relay_profile();
+        let common_config = [
+            settings.relay_common_config_contents.trim(),
+            settings.relay_context_config_contents.trim(),
+        ]
+        .into_iter()
+        .filter(|section| !section.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+        crate::relay_config::apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
+            home,
+            &active,
+            &common_config,
+            settings.computer_use_guard_enabled,
+        )
+        .context("恢复退出登录后的当前供应商失败")?;
+    }
+    store
+        .save(&settings)
+        .context("保存退出登录后的供应商设置失败")?;
+    Ok(settings)
+}
+
+fn auth_contents_has_chatgpt_login(contents: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(contents) else {
+        return false;
+    };
+    let mode_is_chatgpt = value
+        .get("auth_mode")
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.eq_ignore_ascii_case("chatgpt"));
+    let has_tokens = value
+        .get("tokens")
+        .and_then(Value::as_object)
+        .is_some_and(|tokens| {
+            ["access_token", "id_token", "refresh_token"]
+                .iter()
+                .any(|key| {
+                    tokens
+                        .get(*key)
+                        .and_then(Value::as_str)
+                        .is_some_and(|token| !token.trim().is_empty())
+                })
+        });
+    mode_is_chatgpt || has_tokens
+}
+
+fn api_key_auth_contents(api_key: &str) -> anyhow::Result<String> {
+    if api_key.trim().is_empty() {
+        return Ok(String::new());
+    }
+    Ok(format!(
+        "{}\n",
+        serde_json::to_string_pretty(&json!({
+            "auth_mode": "apikey",
+            "OPENAI_API_KEY": api_key.trim()
+        }))?
+    ))
 }
 
 struct AppServerClient {
@@ -952,6 +1056,56 @@ mod tests {
         let live_auth = std::fs::read_to_string(home.join("auth.json")).unwrap();
         assert!(live_auth.contains("\"auth_mode\": \"chatgpt\""));
         assert!(!live_auth.contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn logout_clears_chatgpt_copies_and_restores_active_api_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        let store = SettingsStore::new(temp.path().join("settings.json"));
+        std::fs::create_dir_all(&home).unwrap();
+        let chatgpt_auth = r#"{"auth_mode":"chatgpt","tokens":{"access_token":"account-token","refresh_token":"refresh-token"}}"#;
+        std::fs::write(home.join("auth.json"), chatgpt_auth).unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "mixed".to_string(),
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "mixed".to_string(),
+                    name: "Mixed".to_string(),
+                    model: "gpt-test".to_string(),
+                    model_list: "gpt-test".to_string(),
+                    base_url: "https://example.test/v1".to_string(),
+                    api_key: "sk-provider".to_string(),
+                    protocol: RelayProtocol::Responses,
+                    relay_mode: RelayMode::Official,
+                    official_mix_api_key: true,
+                    auth_contents: chatgpt_auth.to_string(),
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "official".to_string(),
+                    name: "Official".to_string(),
+                    relay_mode: RelayMode::Official,
+                    auth_contents: chatgpt_auth.to_string(),
+                    ..RelayProfile::default()
+                },
+            ],
+            ..BackendSettings::default()
+        };
+        store.save(&settings).unwrap();
+
+        let logged_out = clear_chatgpt_login_after_logout(&store, &home).unwrap();
+
+        let mixed = &logged_out.relay_profiles[0];
+        assert_eq!(mixed.relay_mode, RelayMode::PureApi);
+        assert!(!mixed.official_mix_api_key);
+        assert_eq!(mixed.api_key, "sk-provider");
+        assert!(mixed.auth_contents.contains("OPENAI_API_KEY"));
+        assert!(!mixed.auth_contents.contains("access_token"));
+        assert!(logged_out.relay_profiles[1].auth_contents.is_empty());
+        let live_auth = std::fs::read_to_string(home.join("auth.json")).unwrap();
+        assert!(live_auth.contains("OPENAI_API_KEY"));
+        assert!(!live_auth.contains("account-token"));
     }
 
     #[test]

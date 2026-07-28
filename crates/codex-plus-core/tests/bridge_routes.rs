@@ -38,6 +38,7 @@ async fn bridge_routes_cover_all_current_paths() {
         ("/backend/status", json!({})),
         ("/codex-model-catalog", json!({})),
         ("/codex-config-model", json!({})),
+        ("/model-selection/set", json!({"model": "gpt-5.4"})),
         ("/ads", json!({})),
         ("/zed-remote/status", json!({})),
         (
@@ -173,6 +174,28 @@ async fn settings_set_does_not_persist_runtime_codex_app_version() {
     let persisted = settings.settings.lock().unwrap().clone();
     let persisted_value = serde_json::to_value(persisted).unwrap();
     assert!(persisted_value.get("codexAppVersion").is_none());
+}
+
+#[tokio::test]
+async fn model_selection_route_records_known_active_provider_model() {
+    let mut backend = BackendSettings::default();
+    backend.relay_profiles[0].model_list = "gpt-first\ngpt-last".to_string();
+    backend.relay_profiles[0].model = "gpt-first".to_string();
+    let settings = Arc::new(FakeSettings::with_settings(backend));
+    let ctx = BridgeContext::new(
+        settings.clone(),
+        Arc::new(FakeRuntime::default()),
+        Arc::new(FakeData::default()),
+    );
+
+    let result =
+        handle_bridge_request(ctx, "/model-selection/set", json!({"model": "GPT-LAST"})).await;
+
+    assert_eq!(result["status"], json!("ok"));
+    assert_eq!(result["recorded"], json!(true));
+    let persisted = settings.settings.lock().unwrap();
+    assert_eq!(persisted.relay_profiles[0].last_used_model, "gpt-last");
+    assert_eq!(persisted.relay_profiles[0].model, "gpt-last");
 }
 
 #[tokio::test]
@@ -1071,6 +1094,26 @@ impl BridgeSettingsService for FakeSettings {
         let updated: BackendSettings = serde_json::from_value(Value::Object(raw.clone())).unwrap();
         *self.settings.lock().unwrap() = updated.clone();
         Ok(updated)
+    }
+
+    async fn record_model_selection(&self, model: String) -> anyhow::Result<bool> {
+        let mut settings = self.settings.lock().unwrap();
+        let active_id = settings.active_relay_id.clone();
+        let Some(profile) = settings
+            .relay_profiles
+            .iter_mut()
+            .find(|profile| profile.id == active_id)
+        else {
+            return Ok(false);
+        };
+        let known = profile
+            .ordered_model_names()
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()));
+        if known {
+            profile.record_last_used_model(&model);
+        }
+        Ok(known)
     }
 
     async fn codex_app_version(&self) -> anyhow::Result<String> {

@@ -38,6 +38,7 @@ import {
   LayoutDashboard,
   Link2,
   LogIn,
+  LogOut,
   MessageCircle,
   FileCode2,
   Moon,
@@ -2234,6 +2235,26 @@ export function App() {
     }
   };
 
+  const logoutChatGpt = async () => {
+    if (officialRemoteBusy || pendingChatGptLogin) return;
+    if (!window.confirm(t("退出 ChatGPT 账号？官方手机远控将断开，纯 API Key 配置会保留。"))) return;
+    setOfficialRemoteBusy(true);
+    try {
+      const result = await run(() => call<SettingsResult>("chatgpt_account_logout"));
+      if (!result) return;
+      showResultNotice(t("退出登录"), result);
+      if (!isSuccessStatus(result.status)) return;
+      setSettings(result);
+      setSettingsForm(normalizeSettings(result.settings));
+      setRemotePairing(null);
+      setOfficialRemote(null);
+      await refreshRelay(true);
+      await refreshOfficialRemote(true);
+    } finally {
+      setOfficialRemoteBusy(false);
+    }
+  };
+
   const runOfficialRemoteSnapshotCommand = async (command: string) => {
     if (officialRemoteBusy) return null;
     setOfficialRemoteBusy(true);
@@ -2552,6 +2573,7 @@ export function App() {
       startChatGptWebLogin,
       startChatGptDeviceLogin,
       cancelChatGptLogin,
+      logoutChatGpt,
       enableOfficialRemote,
       disableOfficialRemote,
       startOfficialRemotePairing,
@@ -2870,6 +2892,7 @@ type Actions = {
   startChatGptWebLogin: () => Promise<void>;
   startChatGptDeviceLogin: () => Promise<void>;
   cancelChatGptLogin: () => Promise<void>;
+  logoutChatGpt: () => Promise<void>;
   enableOfficialRemote: () => Promise<void>;
   disableOfficialRemote: () => Promise<void>;
   startOfficialRemotePairing: () => Promise<void>;
@@ -3047,6 +3070,12 @@ function RemoteControlScreen({
               </Button>
             ) : (
               <>
+                {signedIn ? (
+                  <Button disabled={busy} onClick={() => void actions.logoutChatGpt()} variant="outline">
+                    <LogOut className="h-4 w-4" />
+                    {t("退出登录")}
+                  </Button>
+                ) : null}
                 <Button disabled={busy} onClick={() => void actions.startChatGptDeviceLogin()}>
                   <KeyRound className="h-4 w-4" />
                   {signedIn ? t("设备码重新登录") : t("设备码登录")}
