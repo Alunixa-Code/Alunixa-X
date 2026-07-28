@@ -270,3 +270,5 @@
 - 启动器撤销入口会传入完整候选数据库白名单；备份恢复拒绝白名单外数据库，且在写文件前校验 Base64 内容与 rollout 路径。
 - 已同步长确认弹窗修复：正文区域独立滚动，操作栏固定在底部；本分支 `Toolbar` 增加可选 `className`，原有调用行为不变。
 - 本阶段验证通过：数据层 `storage_adapter` 21 项、CDP 注入合约 79 项、前端 12 项、TypeScript、启动器 `cargo check`、JavaScript 语法与 Rust 格式检查全部成功。
+- 已将正式发布版本统一提升到 `1.2.55`，同步更新 Rust workspace、Cargo.lock、前端 package、package-lock 与 Tauri 配置；所有发布版本源校验一致，旧 `1.2.54` 在版本元数据中零命中。
+- 已在 `CHANGELOG.md` 增加 `1.2.55` 完整变更说明，覆盖思考等级页、模型排序、默认模型、退出登录、启动注入、Instructions、SQLite Home、组合撤销与长确认弹窗修复，并明确保持默认紫色主题。

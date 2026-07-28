@@ -1,5 +1,17 @@
 # 更新日志
 
+## 1.2.55 - 2026-07-28
+
+- 新增独立“思考等级”页面，汇总全部普通与自定义供应商模型；每个模型都可单独设置最高思考等级，默认 Extra High，并支持 Light、Medium、High、Extra High、Max、Ultra 六档。
+- 逐模型上限会注入 Codex 原生模型元数据，Claude 等非 GPT 模型同样生效；继续使用 Codex 原生 Effort 滑块、选项和动效，实际请求可保留到 Ultra。
+- 普通供应商与自定义供应商模型列表新增方形长按拖拽手柄，排序结果持久化；Codex 启动时优先恢复上次真实使用且仍有效的模型，否则使用当前供应商排序第一项。
+- 恢复 ChatGPT 账号退出登录入口；退出时清理 ChatGPT 登录态，官方混合供应商保留现有 API Key 并切回纯 API 模式。
+- 增强启动注入状态：启动早期即写入 `starting`，已有实例重连也会持久化运行状态，管理器检测到 Codex 进程时提供等待注入概览兜底，并兼容 `OpenAI.ChatGPT-Desktop` Windows 包。
+- Codex增强新增 Instructions 提示词开关与编辑器，启用后维护 `~/.codex/TSC_ZYL_PJ/do_special.md` 和 `model_instructions_file`；供应商切换、导入、重置与其他配置写入都会保留该设置。
+- 同步上游 `v1.2.37` 至 `v1.2.42` 中与当前功能相关的修复：`CODEX_SQLITE_HOME` 统一控制 session、thread reference 和 logs 数据库，并在覆盖目录无效时回退常规 Codex Home。
+- 修复同一会话存在于多个数据库时撤销只能恢复一处的问题；组合恢复会先完成数据库白名单、冲突和事务预演检查，拒绝非候选数据库与非法备份文件路径。
+- 修复长确认弹窗正文遮挡底部按钮的问题，正文现在独立滚动且操作栏保持可见；保持默认紫色主题，不同步无关的伴侣皮肤与上传资源。
+
 ## 1.2.54 - 2026-07-21
 
 - 为支持的 GPT-5.6 模型补全 Codex 原生 Effort 档位：Sol 与 Terra 现在显示 Light、Medium、High、Extra High、Max 和 Ultra，Luna 按模型元数据显示到 Max。
