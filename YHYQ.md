@@ -284,3 +284,6 @@
 - 已将 `model_suffix` 的 GPT-5.6 Sol/Terra 无显式上限断言改为四档至 Xhigh，并将“当前模型置前”的旧收集顺序断言改为保留 `model_list` 用户顺序；生产代码不变。
 - 定向 `model_suffix` 首次重跑已通过 14/15 项，剩余 Luna 构建期上限断言仍期待原生 Max；已按“默认 Xhigh、显式设置才扩展”的规则同步改为四档，独立 `model_ui_metadata` 仍保留 Luna 原生 Max 元数据覆盖。
 - 修正后 `model_suffix` 15 项全部通过，Rust 格式检查通过。
+- 第二轮完整 workspace 回归发现 `relay_config` 的 4 条旧测试仍假设无后缀普通模型不生成 catalog，或假设后缀测试自动把当前模型置于列表首位；这些假设与逐模型思考等级 catalog 和用户排序/上次模型规则冲突。
+- 已将对应测试改为验证普通模型也生成当前供应商 catalog、旧 managed catalog 被当前 profile 替换，并在后缀专项测试中显式设置 `last_used_model` 以隔离测试意图。
+- `relay_config` 定向测试 106 项全部通过，Rust formatter 已自动整理并通过定向验证。
