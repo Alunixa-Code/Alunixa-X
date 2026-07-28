@@ -7169,6 +7169,7 @@
       undo.addEventListener("click", async () => {
         const result = await postJson("/undo", { undo_token: undoToken });
         toast.textContent = result.message || "撤销完成";
+        if (result.status === "undone") window.location.reload();
         setTimeout(() => toast.remove(), 5000);
       });
       toast.appendChild(undo);
@@ -8218,7 +8219,7 @@
     const shouldReload = isCurrentSessionRow(row, ref);
     row.remove();
     if (shouldReload) {
-      window.location.reload();
+      setTimeout(() => window.location.reload(), 10000);
     }
   }
 
