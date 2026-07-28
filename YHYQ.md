@@ -287,3 +287,6 @@
 - 第二轮完整 workspace 回归发现 `relay_config` 的 4 条旧测试仍假设无后缀普通模型不生成 catalog，或假设后缀测试自动把当前模型置于列表首位；这些假设与逐模型思考等级 catalog 和用户排序/上次模型规则冲突。
 - 已将对应测试改为验证普通模型也生成当前供应商 catalog、旧 managed catalog 被当前 profile 替换，并在后缀专项测试中显式设置 `last_used_model` 以隔离测试意图。
 - `relay_config` 定向测试 106 项全部通过，Rust formatter 已自动整理并通过定向验证。
+- 第三轮完整 `cargo test --workspace -- --test-threads=1` 全部通过，覆盖所有 workspace crate、Rust 集成测试和文档测试，零失败；本轮总耗时约 6 分钟，启动器 76 项与 relay_config 106 项均通过。
+- 前端 `npm ci` 已在 `apps/codex-plus-manager` 按 lockfile 完成；审计仍报告既有 1 个 low、2 个 high 依赖风险，本次未扩大依赖升级范围。
+- 前端 12 项测试、TypeScript、Vite 生产构建、品牌地址保护和 Rust 格式检查均通过；构建产物 `apps/codex-plus-manager/dist` 当前用于后续视觉检查和发布前打包。
