@@ -111,20 +111,16 @@ fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
     let models = catalog["models"].as_array().unwrap();
 
     for (slug, default_reasoning, expected_efforts) in [
-        (
-            "gpt-5.6-sol",
-            "low",
-            vec!["low", "medium", "high", "xhigh", "max", "ultra"],
-        ),
+        ("gpt-5.6-sol", "low", vec!["low", "medium", "high", "xhigh"]),
         (
             "gpt-5.6-terra",
             "medium",
-            vec!["low", "medium", "high", "xhigh", "max", "ultra"],
+            vec!["low", "medium", "high", "xhigh"],
         ),
         (
             "gpt-5.6-luna",
             "medium",
-            vec!["low", "medium", "high", "xhigh", "max"],
+            vec!["low", "medium", "high", "xhigh"],
         ),
     ] {
         let model = models.iter().find(|model| model["slug"] == slug).unwrap();
@@ -193,8 +189,10 @@ fn collect_entries_adopts_suffix_for_current_model_from_list() {
     let entries =
         collect_catalog_entries("qwen3-coder\ndeepseek-v4-pro", &windows, "deepseek-v4-pro");
     assert_eq!(entries.len(), 2);
-    assert_eq!(entries[0].slug, "deepseek-v4-pro");
-    assert_eq!(entries[0].suffix_window, Some(1_000_000));
+    assert_eq!(entries[0].slug, "qwen3-coder");
+    assert_eq!(entries[0].suffix_window, None);
+    assert_eq!(entries[1].slug, "deepseek-v4-pro");
+    assert_eq!(entries[1].suffix_window, Some(1_000_000));
 }
 
 #[test]

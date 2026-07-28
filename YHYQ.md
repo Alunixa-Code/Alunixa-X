@@ -280,3 +280,7 @@
 - 完整 Rust 测试暴露 GPT-5.6 Sol 的旧断言仍期待默认开放 Ultra；根据用户指定的“逐模型最高等级默认 Xhigh，可手动调整到 Ultra”，将默认断言收敛为 Low、Medium、High、Xhigh，并新增显式配置 Ultra 时完整六档可见的回归测试。
 - 定向模型目录集成测试 7 项全部通过，显式 Ultra 元数据单元测试通过，Rust 格式检查通过。
 - 首次并行运行两个 Cargo 测试因共享构建锁超过 180 秒，已确认并终止该轮遗留的 Cargo/Rust 编译进程；改为串行执行后 2 秒完成且零失败。
+- 完整 `cargo test --workspace -- --test-threads=1` 已完成大部分 workspace 回归：核心 218、广告 3、桥接 26、CDP 79、状态 4、更新策略 6、存储 5、语言 5、安装器 11、启动器 76、模型目录 7 项全部通过；`model_suffix` 仅有两条旧断言与当前默认 Xhigh和保持模型列表排序的新契约不符。
+- 已将 `model_suffix` 的 GPT-5.6 Sol/Terra 无显式上限断言改为四档至 Xhigh，并将“当前模型置前”的旧收集顺序断言改为保留 `model_list` 用户顺序；生产代码不变。
+- 定向 `model_suffix` 首次重跑已通过 14/15 项，剩余 Luna 构建期上限断言仍期待原生 Max；已按“默认 Xhigh、显式设置才扩展”的规则同步改为四档，独立 `model_ui_metadata` 仍保留 Luna 原生 Max 元数据覆盖。
+- 修正后 `model_suffix` 15 项全部通过，Rust 格式检查通过。
