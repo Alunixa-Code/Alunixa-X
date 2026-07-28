@@ -290,3 +290,7 @@
 - 第三轮完整 `cargo test --workspace -- --test-threads=1` 全部通过，覆盖所有 workspace crate、Rust 集成测试和文档测试，零失败；本轮总耗时约 6 分钟，启动器 76 项与 relay_config 106 项均通过。
 - 前端 `npm ci` 已在 `apps/codex-plus-manager` 按 lockfile 完成；审计仍报告既有 1 个 low、2 个 high 依赖风险，本次未扩大依赖升级范围。
 - 前端 12 项测试、TypeScript、Vite 生产构建、品牌地址保护和 Rust 格式检查均通过；构建产物 `apps/codex-plus-manager/dist` 当前用于后续视觉检查和发布前打包。
+- 已完成临时 Playwright 视觉检查：桌面 1440px 与手机 390px 首页均无横向溢出，默认紫色主题可见；“思考等级”页面显示默认 Extra High 状态，“Codex增强”页面开关、模型/插件区、对话输入区和 Instructions 相关布局正常。
+- 浏览器直开前端时因没有 Tauri `invoke` bridge 出现调用失败 toast，这是预览环境限制；Tauri 桌面运行时依赖由应用注入，不影响生产构建。
+- 已停止所有视觉检查服务，准备删除一次性 `tools/visual_check.py`、`tools/start-vite-visual.ps1`、`tools/run-visual-check.ps1`、前端 `dist`、`node_modules` 和临时截图目录。
+- 清理结果：视觉脚本、`dist`、临时截图和 Vite 日志已删除，1420/1437 端口无监听；`node_modules` 因 Rollup 原生文件被系统占用暂未删除，仓库中没有跟踪该目录，不影响发布。
