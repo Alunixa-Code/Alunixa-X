@@ -80,7 +80,7 @@ pub async fn read_codex_model_catalog() -> Value {
 fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Value {
     let models = relay_profile_model_ids(profile);
     let model_details = relay_profile_model_details(profile);
-    let model = profile.model.trim().to_string();
+    let model = profile.preferred_model_name();
     let default_model = models.first().cloned().unwrap_or_default();
     let provider_name = if profile.name.trim().is_empty() {
         profile.id.trim()
@@ -88,7 +88,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         profile.name.trim()
     };
     let model_count = models.len();
-    let model_metadata = model_ui_metadata_map(&models);
+    let model_metadata = relay_profile_model_ui_metadata_map(profile, &models);
     json!({
         "status": if models.is_empty() { "not_configured" } else { "ok" },
         "path": home.join("config.toml").to_string_lossy(),
@@ -150,36 +150,21 @@ fn relay_profile_model_details(profile: &RelayProfile) -> Vec<Value> {
 }
 
 fn relay_profile_model_ids(profile: &RelayProfile) -> Vec<String> {
-    if profile.relay_mode == RelayMode::CustomModels {
-        let default_model = profile
-            .default_custom_model()
-            .map(|model| model.model.as_str())
-            .unwrap_or_default();
-        return unique_strings(
-            std::iter::once(default_model)
-                .chain(
-                    profile
-                        .custom_models
-                        .iter()
-                        .map(|model| model.model.as_str()),
-                )
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-                .collect(),
+    profile.ordered_model_names()
+}
+
+fn relay_profile_model_ui_metadata_map(profile: &RelayProfile, models: &[String]) -> Value {
+    let mut metadata = Map::new();
+    for model in models {
+        metadata.insert(
+            model.clone(),
+            crate::model_suffix::model_ui_metadata_with_maximum(
+                model,
+                profile.reasoning_effort_for_model(model),
+            ),
         );
     }
-
-    unique_strings(
-        profile
-            .model_list
-            .split(['\r', '\n', ','])
-            .chain(std::iter::once(profile.model.as_str()))
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .collect(),
-    )
+    Value::Object(metadata)
 }
 
 fn model_ui_metadata_map(models: &[String]) -> Value {

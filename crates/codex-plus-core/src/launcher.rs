@@ -267,6 +267,12 @@ where
 
     let result: anyhow::Result<LaunchHandle> = async {
         let home = crate::relay_config::default_codex_home_dir();
+        crate::codex_instructions::apply_model_instructions_policy(
+            &home,
+            settings.codex_app_instructions_enabled,
+            &settings.codex_app_instructions,
+        )
+        .context("failed to apply Codex model instructions")?;
         if settings.provider_sync_enabled {
             crate::codex_app_state::capture_app_state_snapshot_nonfatal(&home, "launcher.before");
             hooks.run_provider_sync().await?;
@@ -296,6 +302,12 @@ where
             && settings.active_relay_profile().relay_mode == RelayMode::CustomModels
         {
             hooks.apply_active_relay_profile(&settings).await?;
+        }
+        if settings.relay_profiles_enabled {
+            crate::relay_config::apply_preferred_model_to_home(
+                &home,
+                &settings.active_relay_profile(),
+            )?;
         }
         if let Err(error) = crate::relay_config::set_codex_sub_agent_max_threads_in_home(
             &home,

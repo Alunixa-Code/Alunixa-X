@@ -244,3 +244,9 @@
 - 用户要求在“Codex增强”增加 instructions 提示词设置：启用后写入 `model_instructions_file = "~/.codex/TSC_ZYL_PJ/do_special.md"`，创建对应目录与文件，并把用户输入持久化到该 Markdown，供应商切换与其他配置写入不得覆盖该设置。
 - 用户要求全部完成后推送到 `Alunixa-Code/CodexPlusPlusPlus`，通过 GitHub Actions 构建并发布 GitHub Release。
 - 已创建修改前检查点提交 `93b0900`。
+- 已完成第一阶段核心实现：设置结构新增六档思考等级、逐供应商模型上限、上次使用模型和 instructions 配置，供应商模型顺序改为用户排序优先。
+- 已新增固定 instructions 文件策略：只维护 `~/.codex/TSC_ZYL_PJ/do_special.md` 与对应 `model_instructions_file` 根键，供应商切换、导入、重置和启动写入会保留该配置。
+- 已完成任意供应商模型的六档原生元数据生成，并让启动器遵循“上次有效模型优先，否则排序第一项”的默认模型规则。
+- 已在管理器增加独立“思考等级”页面与普通供应商模型长按拖拽基础，自定义模型拖拽界面仍处于阶段性实现，后续继续收口并验证。
+- 已执行 `cargo check -p codex-plus-core`，第一阶段 Rust 核心检查通过。
+- 用户要求继续完成八项任务，最终推送 `Alunixa-Code/CodexPlusPlusPlus`，通过 GitHub Actions 构建并发布 Release。

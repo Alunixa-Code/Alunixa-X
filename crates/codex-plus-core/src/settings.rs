@@ -25,6 +25,51 @@ pub enum CodexAiShell {
     Pwsh,
 }
 
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    Default,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+    #[default]
+    Xhigh,
+    Max,
+    Ultra,
+}
+
+impl ReasoningEffort {
+    pub const ALL: [Self; 6] = [
+        Self::Low,
+        Self::Medium,
+        Self::High,
+        Self::Xhigh,
+        Self::Max,
+        Self::Ultra,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+            Self::Ultra => "ultra",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayContextSelection {
@@ -105,6 +150,18 @@ pub struct RelayProfile {
     pub model_windows: String,
     #[serde(rename = "modelVlm", default, skip_serializing_if = "String::is_empty")]
     pub model_vlm: String,
+    #[serde(
+        rename = "modelReasoningEfforts",
+        default,
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub model_reasoning_efforts: HashMap<String, ReasoningEffort>,
+    #[serde(
+        rename = "lastUsedModel",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub last_used_model: String,
     #[serde(
         rename = "vlmApiKey",
         default,
@@ -191,6 +248,8 @@ impl Default for RelayProfile {
             model_list: String::new(),
             model_windows: String::new(),
             model_vlm: String::new(),
+            model_reasoning_efforts: HashMap::new(),
+            last_used_model: String::new(),
             vlm_api_key: String::new(),
             vlm_model: String::new(),
             vlm_base_url: String::new(),
@@ -395,6 +454,10 @@ pub struct BackendSettings {
     pub codex_app_memory_embedding_api_key: String,
     #[serde(rename = "codexAppMemoryEmbeddingModel", default)]
     pub codex_app_memory_embedding_model: String,
+    #[serde(rename = "codexAppInstructionsEnabled", default)]
+    pub codex_app_instructions_enabled: bool,
+    #[serde(rename = "codexAppInstructions", default)]
+    pub codex_app_instructions: String,
     #[serde(rename = "codexAppImageOverlayEnabled", default)]
     pub codex_app_image_overlay_enabled: bool,
     #[serde(rename = "codexAppImageOverlayPath", default)]
@@ -486,6 +549,8 @@ impl Default for BackendSettings {
             codex_app_memory_embedding_base_url: String::new(),
             codex_app_memory_embedding_api_key: String::new(),
             codex_app_memory_embedding_model: String::new(),
+            codex_app_instructions_enabled: false,
+            codex_app_instructions: String::new(),
             codex_app_image_overlay_enabled: false,
             codex_app_image_overlay_path: String::new(),
             codex_app_image_overlay_opacity: default_image_overlay_opacity(),
@@ -544,6 +609,8 @@ impl BackendSettings {
                 model_list: String::new(),
                 model_windows: String::new(),
                 model_vlm: String::new(),
+                model_reasoning_efforts: HashMap::new(),
+                last_used_model: String::new(),
                 vlm_api_key: String::new(),
                 vlm_model: String::new(),
                 vlm_base_url: String::new(),
@@ -597,6 +664,8 @@ impl BackendSettings {
             model_list: String::new(),
             model_windows: String::new(),
             model_vlm: String::new(),
+            model_reasoning_efforts: HashMap::new(),
+            last_used_model: String::new(),
             vlm_api_key: String::new(),
             vlm_model: String::new(),
             vlm_base_url: String::new(),
@@ -774,6 +843,78 @@ pub fn percent_from_auto_compact_limit(context_window: u64, limit: u64) -> Optio
 }
 
 impl RelayProfile {
+    pub fn ordered_model_names(&self) -> Vec<String> {
+        let mut models = Vec::new();
+        if self.relay_mode == RelayMode::CustomModels {
+            for model in &self.custom_models {
+                push_unique_model_name(&mut models, &model.model);
+            }
+        } else {
+            for raw in self.model_list.split(['\r', '\n', ',']) {
+                let (model, _) = crate::model_suffix::parse_model_suffix(raw);
+                push_unique_model_name(&mut models, &model);
+            }
+        }
+        if models.is_empty() {
+            let (model, _) = crate::model_suffix::parse_model_suffix(&self.model);
+            push_unique_model_name(&mut models, &model);
+        }
+        models
+    }
+
+    pub fn preferred_model_name(&self) -> String {
+        let models = self.ordered_model_names();
+        let last_used = self.last_used_model.trim();
+        if !last_used.is_empty() {
+            if let Some(model) = models.iter().find(|model| model.as_str() == last_used) {
+                return model.clone();
+            }
+            if let Some(model) = models
+                .iter()
+                .find(|model| model.eq_ignore_ascii_case(last_used))
+            {
+                return model.clone();
+            }
+        }
+        models.into_iter().next().unwrap_or_default()
+    }
+
+    pub fn reasoning_effort_for_model(&self, model: &str) -> ReasoningEffort {
+        self.model_reasoning_efforts
+            .get(model.trim())
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn record_last_used_model(&mut self, requested_model: &str) -> bool {
+        let requested_model = requested_model.trim();
+        if requested_model.is_empty() {
+            return false;
+        }
+        let models = self.ordered_model_names();
+        let Some(model) = models
+            .iter()
+            .find(|model| model.as_str() == requested_model)
+            .or_else(|| {
+                models
+                    .iter()
+                    .find(|model| model.eq_ignore_ascii_case(requested_model))
+            })
+            .cloned()
+        else {
+            return false;
+        };
+        let changed = self.last_used_model != model || self.model != model;
+        self.last_used_model = model.clone();
+        self.model = model.clone();
+        if self.relay_mode == RelayMode::CustomModels {
+            if let Some(custom_model) = self.custom_models.iter().find(|item| item.model == model) {
+                self.default_custom_model_id = custom_model.id.clone();
+            }
+        }
+        changed
+    }
+
     pub fn default_custom_model(&self) -> Option<&CustomRelayModel> {
         if self.relay_mode != RelayMode::CustomModels {
             return None;
@@ -832,6 +973,14 @@ impl RelayProfile {
         }
         self.auto_compact_limit.clone()
     }
+}
+
+fn push_unique_model_name(models: &mut Vec<String>, model: &str) {
+    let model = model.trim();
+    if model.is_empty() || models.iter().any(|existing| existing == model) {
+        return;
+    }
+    models.push(model.to_string());
 }
 
 pub fn empty_as_default_stepwise_api_key_env<'de, D>(deserializer: D) -> Result<String, D::Error>

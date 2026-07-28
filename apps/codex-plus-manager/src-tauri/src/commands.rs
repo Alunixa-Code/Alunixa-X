@@ -538,6 +538,7 @@ pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload
                 settings.codex_app_disable_auto_update,
             )
         })
+        .and_then(|_| apply_codex_instructions_policy(&settings))
         .and_then(|_| apply_codex_hook_policy(&settings));
     match save_result {
         Ok(()) => {
@@ -570,6 +571,14 @@ pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload
 fn apply_codex_hook_policy(settings: &BackendSettings) -> anyhow::Result<()> {
     let launcher_path = codex_plus_core::install::option_or_current_exe(&None, SILENT_BINARY);
     codex_plus_core::codex_hooks::apply_codex_plus_hooks(settings, &launcher_path).map(|_| ())
+}
+
+fn apply_codex_instructions_policy(settings: &BackendSettings) -> anyhow::Result<()> {
+    codex_plus_core::codex_instructions::apply_model_instructions_policy(
+        &codex_plus_core::relay_config::default_codex_home_dir(),
+        settings.codex_app_instructions_enabled,
+        &settings.codex_app_instructions,
+    )
 }
 
 async fn trust_codex_hooks_and_log(codex_app_path: String) {
@@ -618,6 +627,7 @@ pub fn import_full_config(path: String) -> CommandResult<Value> {
                 codex_plus_core::codex_auto_update::apply_codex_auto_update_policy(
                     settings.codex_app_disable_auto_update,
                 )?;
+                apply_codex_instructions_policy(&settings)?;
                 apply_codex_hook_policy(&settings)?;
                 Ok(settings.codex_app_path)
             });
@@ -1960,6 +1970,7 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
                 settings.codex_app_disable_auto_update,
             )
         })
+        .and_then(|_| apply_codex_instructions_policy(&settings))
         .and_then(|_| apply_codex_hook_policy(&settings))
     {
         Ok(()) => {
@@ -3591,7 +3602,13 @@ fn save_relay_file_in_home(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, contents)?;
+    let contents = if kind == "config" {
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        codex_plus_core::codex_instructions::preserve_model_instructions_file(&existing, contents)?
+    } else {
+        contents.to_string()
+    };
+    codex_plus_core::settings::atomic_write(&path, contents.as_bytes())?;
     Ok(())
 }
 

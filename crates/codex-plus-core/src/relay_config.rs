@@ -1227,6 +1227,18 @@ fn write_codex_live_atomic(
     };
     let config_text = config_text.as_deref();
 
+    let config_text = match config_text {
+        Some(config_text) => {
+            let existing = read_optional_text(&config_path)?;
+            Some(crate::codex_instructions::preserve_model_instructions_file(
+                &existing,
+                config_text,
+            )?)
+        }
+        None => None,
+    };
+    let config_text = config_text.as_deref();
+
     if let Some(config_text) = config_text {
         validate_toml_config(config_text, &config_path)?;
     }
@@ -1719,11 +1731,7 @@ fn apply_model_catalog_to_config(
         };
     let entries =
         crate::model_suffix::collect_catalog_entries(&model_list, &model_windows, &profile.model);
-    // Known bundled metadata entries need a catalog even without a user-supplied window.
-    if !entries.iter().any(|entry| {
-        entry.suffix_window.is_some()
-            || crate::model_suffix::requires_bundled_metadata_catalog(&entry.slug)
-    }) {
+    if entries.is_empty() {
         return Ok(config_text.to_string());
     }
     let fallback = parse_optional_positive_u64(&profile.context_window, "上下文大小")?;
@@ -1731,7 +1739,11 @@ fn apply_model_catalog_to_config(
     if let Some(parent) = catalog_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut catalog_json = crate::model_suffix::build_model_catalog_json(&entries, fallback);
+    let mut catalog_json = crate::model_suffix::build_model_catalog_json_with_efforts(
+        &entries,
+        fallback,
+        &profile.model_reasoning_efforts,
+    );
     catalog_json = apply_auto_compact_limits_to_catalog_json(
         &catalog_json,
         profile,
@@ -1814,7 +1826,11 @@ fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<St
     let fallback = profile
         .default_custom_model()
         .and_then(|model| crate::settings::parse_context_window_tokens(&model.context_window));
-    let mut catalog_json = crate::model_suffix::build_model_catalog_json(&entries, fallback);
+    let mut catalog_json = crate::model_suffix::build_model_catalog_json_with_efforts(
+        &entries,
+        fallback,
+        &profile.model_reasoning_efforts,
+    );
     if !auto_limits.is_empty() {
         let mut catalog: Value = serde_json::from_str(&catalog_json)?;
         if let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) {
@@ -2350,24 +2366,12 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
     let provider_id = active_or_default_provider_id(&doc);
     set_provider_id(&mut doc, &provider_id);
 
-    let mut model = relay_profile_model(profile);
-    // 若用户未填写默认模型，但 model_list 有内容，则取第一条作为默认 model，
-    // 避免 codex 启动时回退到历史会话中带后缀的模型名。
-    if model.trim().is_empty() && !profile.model_list.trim().is_empty() {
-        if let Some(first) = profile
-            .model_list
-            .split(['\r', '\n', ','])
-            .map(str::trim)
-            .find(|value| !value.is_empty())
-        {
-            model = crate::model_suffix::parse_model_suffix(first).0;
-        }
-    }
-    if model.trim().is_empty() && profile.relay_mode == crate::settings::RelayMode::CustomModels {
-        if let Some(default_model) = profile.default_custom_model() {
-            model = default_model.model.trim().to_string();
-        }
-    }
+    let preferred_model = profile.preferred_model_name();
+    let model = if preferred_model.trim().is_empty() {
+        relay_profile_model(profile)
+    } else {
+        preferred_model
+    };
     // 若用户把后缀语法（如 deepseek-v4-flash[1M]）写在 model 字段，
     // 写入 config.toml 前需剥离后缀；codex 本身不理解后缀，只会按原串匹配 catalog slug。
     let (model, _) = crate::model_suffix::parse_model_suffix(&model);
@@ -2435,6 +2439,8 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
 }
 
 pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow::Result<()> {
+    profile.config_contents =
+        crate::codex_instructions::strip_managed_model_instructions_file(&profile.config_contents)?;
     if profile.model_windows.trim().is_empty() && profile.model_list.contains('[') {
         let (clean_list, windows) =
             crate::model_suffix::migrate_model_list_with_suffixes(&profile.model_list);
@@ -2483,9 +2489,7 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         if has_api_config {
             profile.config_contents.clear();
         }
-        if !profile.model_list.trim().is_empty() {
-            profile.model_list = merge_model_into_model_list(&profile.model, &profile.model_list);
-        }
+        profile.model_list = normalize_model_list_order(&profile.model_list);
         profile.model.clear();
         profile.base_url.clear();
         profile.upstream_base_url.clear();
@@ -2522,7 +2526,11 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         profile.auth_contents = remove_openai_api_key_from_auth_contents(&profile.auth_contents)?;
     }
     profile.model = relay_profile_model(profile);
-    profile.model_list = merge_model_into_model_list(&profile.model, &profile.model_list);
+    profile.model_list = normalize_model_list_order(&profile.model_list);
+    let preferred_model = profile.preferred_model_name();
+    if !preferred_model.is_empty() {
+        profile.model = preferred_model;
+    }
     profile.upstream_base_url = source_base_url.clone();
     profile.base_url = source_base_url;
     profile.api_key = relay_profile_api_key(profile);
@@ -2571,15 +2579,71 @@ fn normalize_custom_models_profile(profile: &mut RelayProfile) -> anyhow::Result
             anyhow::bail!("模型 {} 开启自动压缩时必须提供有效上下文窗口", model.model);
         }
     }
-    if profile.default_custom_model_id.trim().is_empty()
-        || !profile
+    if profile.last_used_model.trim().is_empty() {
+        if let Some(legacy_default) = profile
             .custom_models
             .iter()
-            .any(|model| model.id == profile.default_custom_model_id)
+            .find(|model| model.id == profile.default_custom_model_id)
+        {
+            if legacy_default.id != profile.custom_models[0].id {
+                profile.last_used_model = legacy_default.model.clone();
+            }
+        }
+    }
+    let preferred_model = profile.preferred_model_name();
+    let preferred = profile
+        .custom_models
+        .iter()
+        .find(|model| model.model == preferred_model)
+        .unwrap_or(&profile.custom_models[0]);
+    profile.default_custom_model_id = preferred.id.clone();
+    profile.model = preferred.model.clone();
+    let known_models = profile
+        .custom_models
+        .iter()
+        .map(|model| model.model.as_str())
+        .collect::<HashSet<_>>();
+    profile
+        .model_reasoning_efforts
+        .retain(|model, _| known_models.contains(model.as_str()));
+    if !profile.last_used_model.is_empty()
+        && !known_models.contains(profile.last_used_model.as_str())
     {
+        profile.last_used_model.clear();
         profile.default_custom_model_id = profile.custom_models[0].id.clone();
+        profile.model = profile.custom_models[0].model.clone();
     }
     Ok(())
+}
+
+pub fn apply_preferred_model_to_home(home: &Path, profile: &RelayProfile) -> anyhow::Result<bool> {
+    if matches!(
+        profile.relay_mode,
+        crate::settings::RelayMode::Aggregate | crate::settings::RelayMode::Official
+    ) && !profile.official_mix_api_key
+    {
+        return Ok(false);
+    }
+    let preferred_model = profile.preferred_model_name();
+    if preferred_model.is_empty() {
+        return Ok(false);
+    }
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let mut doc = parse_toml_document(&existing)?;
+    if doc.get("model").and_then(Item::as_str) == Some(preferred_model.as_str()) {
+        return Ok(false);
+    }
+    doc["model"] = toml_edit::value(preferred_model);
+    crate::settings::atomic_write(
+        &config_path,
+        ensure_trailing_newline(doc.to_string()).as_bytes(),
+    )?;
+    Ok(true)
 }
 
 fn remove_openai_api_key_from_auth_contents(auth_contents: &str) -> anyhow::Result<String> {
@@ -2617,15 +2681,12 @@ fn api_key_auth_with_mode(auth_contents: &str) -> anyhow::Result<String> {
     Ok(serde_json::to_string_pretty(&value)?)
 }
 
-fn merge_model_into_model_list(model: &str, model_list: &str) -> String {
-    let model = model.trim();
+fn normalize_model_list_order(model_list: &str) -> String {
     let mut models = Vec::new();
-    if !model.is_empty() {
-        models.push(model.to_string());
-    }
     for item in model_list.split(['\r', '\n', ',']).map(str::trim) {
-        if !item.is_empty() && !models.iter().any(|existing| existing == item) {
-            models.push(item.to_string());
+        let (model, _) = crate::model_suffix::parse_model_suffix(item);
+        if !model.is_empty() && !models.iter().any(|existing| existing == &model) {
+            models.push(model);
         }
     }
     models.join("\n")

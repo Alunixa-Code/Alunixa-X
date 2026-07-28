@@ -6,6 +6,8 @@
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
+use crate::settings::ReasoningEffort;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelCatalogEntry {
     pub slug: String,
@@ -73,9 +75,8 @@ pub(crate) fn parse_window_token(token: &str) -> Option<u64> {
         .filter(|value| *value > 0)
 }
 
-/// 收集 profile 的全部模型条目（当前 model + model_list），去重并从 `model_windows` map 读取窗口。
-/// 返回顺序：当前 model 在前。用于生成 catalog，包含全部模型以避免
-/// #1064 单模型副作用（catalog 只剩当前 model）。
+/// 收集 profile 的全部模型条目，保留 `model_list` 的用户排序并从
+/// `model_windows` map 读取窗口。当前 model 不在列表中时才追加到末尾。
 ///
 /// 当前 model 若不带后缀，但在 `model_windows` 中存在同名条目，
 /// 则采纳该窗口（让当前 model 的窗口也能生效）。
@@ -109,27 +110,22 @@ pub fn collect_catalog_entries(
         });
     }
 
-    // 处理当前 model，放到最前面。
+    // 当前 model 不在有序列表中时才追加，避免启动模型改写用户排序。
     let current_model = current_model.trim();
-    let mut entries = Vec::new();
     if !current_model.is_empty() {
         let (slug, _) = parse_model_suffix(current_model);
-        if !slug.is_empty() {
+        if !slug.is_empty() && seen.insert(slug.clone()) {
             let suffix_window = model_windows
                 .get(&slug)
                 .and_then(|token| parse_window_token(token));
-            entries.push(ModelCatalogEntry {
+            list_entries.push(ModelCatalogEntry {
                 display_name: slug.clone(),
-                slug: slug.clone(),
+                slug,
                 suffix_window,
             });
-            // 从 list_entries 中移除同 slug 条目，避免重复。
-            list_entries.retain(|entry| entry.slug != slug);
         }
     }
-
-    entries.append(&mut list_entries);
-    entries
+    list_entries
 }
 
 /// 内置 codex bundled catalog 模板（assets/codex-models.json），用于 clone entry
@@ -193,6 +189,36 @@ pub fn model_ui_metadata(slug: &str) -> Option<Value> {
     }))
 }
 
+pub fn model_ui_metadata_with_maximum(slug: &str, maximum: ReasoningEffort) -> Value {
+    let mut metadata = model_ui_metadata(slug).unwrap_or_else(|| {
+        json!({
+            "displayName": slug,
+            "description": slug,
+            "defaultReasoningEffort": "medium",
+            "additionalSpeedTiers": [],
+            "serviceTiers": []
+        })
+    });
+    let levels = ReasoningEffort::ALL
+        .into_iter()
+        .take_while(|effort| *effort <= maximum)
+        .map(|effort| {
+            json!({
+                "reasoningEffort": effort.as_str(),
+                "description": reasoning_effort_description(effort)
+            })
+        })
+        .collect::<Vec<_>>();
+    metadata["supportedReasoningEfforts"] = json!(levels);
+    let default = metadata
+        .get("defaultReasoningEffort")
+        .and_then(Value::as_str)
+        .and_then(reasoning_effort_from_str)
+        .unwrap_or(ReasoningEffort::Medium);
+    metadata["defaultReasoningEffort"] = json!(std::cmp::min(default, maximum).as_str());
+    metadata
+}
+
 /// 构建 codex model_catalog_json 内容。
 ///
 /// 采用 cc-switch 的 template-clone 思路：取 codex 自带 bundled entry 做模板，
@@ -204,7 +230,20 @@ pub fn build_model_catalog_json(
     entries: &[ModelCatalogEntry],
     fallback_window: Option<u64>,
 ) -> String {
-    build_model_catalog_json_with_template(entries, fallback_window, None)
+    build_model_catalog_json_with_efforts(entries, fallback_window, &HashMap::new())
+}
+
+pub fn build_model_catalog_json_with_efforts(
+    entries: &[ModelCatalogEntry],
+    fallback_window: Option<u64>,
+    reasoning_efforts: &HashMap<String, ReasoningEffort>,
+) -> String {
+    build_model_catalog_json_with_template_and_efforts(
+        entries,
+        fallback_window,
+        None,
+        reasoning_efforts,
+    )
 }
 
 /// 使用指定模板（或内置 bundled 模板）构建 catalog。
@@ -213,6 +252,20 @@ pub fn build_model_catalog_json_with_template(
     entries: &[ModelCatalogEntry],
     fallback_window: Option<u64>,
     template: Option<&Value>,
+) -> String {
+    build_model_catalog_json_with_template_and_efforts(
+        entries,
+        fallback_window,
+        template,
+        &HashMap::new(),
+    )
+}
+
+fn build_model_catalog_json_with_template_and_efforts(
+    entries: &[ModelCatalogEntry],
+    fallback_window: Option<u64>,
+    template: Option<&Value>,
+    reasoning_efforts: &HashMap<String, ReasoningEffort>,
 ) -> String {
     let models: Vec<Value> = entries
         .iter()
@@ -241,6 +294,18 @@ pub fn build_model_catalog_json_with_template(
             model["priority"] = json!(1000 + index);
             model["visibility"] = json!("list");
             model["supported_in_api"] = json!(true);
+            let maximum_effort = reasoning_efforts
+                .get(&entry.slug)
+                .copied()
+                .unwrap_or_default();
+            model["supported_reasoning_levels"] = reasoning_levels(maximum_effort);
+            let current_default = model
+                .get("default_reasoning_level")
+                .and_then(Value::as_str)
+                .and_then(reasoning_effort_from_str)
+                .unwrap_or(ReasoningEffort::Medium);
+            model["default_reasoning_level"] =
+                json!(std::cmp::min(current_default, maximum_effort).as_str());
             if !has_model_metadata {
                 model["additional_speed_tiers"] = json!([]);
                 model["service_tiers"] = json!([]);
@@ -251,6 +316,44 @@ pub fn build_model_catalog_json_with_template(
         })
         .collect();
     serde_json::to_string_pretty(&json!({ "models": models })).unwrap_or_default()
+}
+
+pub fn reasoning_levels(maximum: ReasoningEffort) -> Value {
+    Value::Array(
+        ReasoningEffort::ALL
+            .into_iter()
+            .take_while(|effort| *effort <= maximum)
+            .map(|effort| {
+                json!({
+                    "effort": effort.as_str(),
+                    "description": reasoning_effort_description(effort)
+                })
+            })
+            .collect(),
+    )
+}
+
+fn reasoning_effort_from_str(value: &str) -> Option<ReasoningEffort> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "low" => Some(ReasoningEffort::Low),
+        "medium" => Some(ReasoningEffort::Medium),
+        "high" => Some(ReasoningEffort::High),
+        "xhigh" => Some(ReasoningEffort::Xhigh),
+        "max" => Some(ReasoningEffort::Max),
+        "ultra" => Some(ReasoningEffort::Ultra),
+        _ => None,
+    }
+}
+
+fn reasoning_effort_description(effort: ReasoningEffort) -> &'static str {
+    match effort {
+        ReasoningEffort::Low => "Fast responses with lighter reasoning",
+        ReasoningEffort::Medium => "Balances speed and reasoning depth for everyday tasks",
+        ReasoningEffort::High => "Greater reasoning depth for complex problems",
+        ReasoningEffort::Xhigh => "Extra high reasoning depth for complex problems",
+        ReasoningEffort::Max => "Maximum reasoning depth for the hardest problems",
+        ReasoningEffort::Ultra => "Maximum reasoning with automatic task delegation",
+    }
 }
 
 fn model_template_entry(slug: &str) -> (Value, bool) {

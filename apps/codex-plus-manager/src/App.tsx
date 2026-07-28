@@ -9,6 +9,7 @@ import {
 } from "@dnd-kit/core";
 import {
   SortableContext,
+  arrayMove,
   sortableKeyboardCoordinates,
   useSortable,
   verticalListSortingStrategy,
@@ -21,6 +22,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Bell,
+  BrainCircuit,
   CheckCircle2,
   CircleArrowUp,
   Copy,
@@ -187,6 +189,8 @@ type BackendSettings = {
   codexAppMemoryEmbeddingBaseUrl: string;
   codexAppMemoryEmbeddingApiKey: string;
   codexAppMemoryEmbeddingModel: string;
+  codexAppInstructionsEnabled: boolean;
+  codexAppInstructions: string;
   codexAppImageOverlayEnabled: boolean;
   codexAppImageOverlayPath: string;
   codexAppImageOverlayOpacity: number;
@@ -207,6 +211,7 @@ type BackendSettings = {
 type ZedOpenStrategy = "addToFocusedWorkspace" | "reuseWindow" | "newWindow" | "default";
 type LaunchMode = "patch" | "relay";
 type CodexAiShell = "powershell" | "pwsh";
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 type ImageOverlayFitMode = "fill" | "fit" | "stretch" | "tile" | "center";
 
 export type RelayProfile = {
@@ -232,6 +237,8 @@ export type RelayProfile = {
   modelList: string;
   modelWindows: string;
   modelVlm: string;
+  modelReasoningEfforts: Record<string, ReasoningEffort>;
+  lastUsedModel: string;
   vlmApiKey: string;
   vlmModel: string;
   vlmBaseUrl: string;
@@ -793,12 +800,13 @@ type StartupResult = CommandResult<{
   showUpdate: boolean;
 }>;
 
-type Route = "overview" | "relay" | "remoteControl" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "reasoning" | "remoteControl" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
   { id: "relay", label: t("供应商配置"), icon: KeyRound },
+  { id: "reasoning", label: t("思考等级"), icon: BrainCircuit },
   { id: "remoteControl", label: t("手机远控"), icon: Smartphone },
   { id: "sessions", label: t("会话管理"), icon: MessageCircle },
   { id: "context", label: t("工具与插件"), icon: Network },
@@ -860,6 +868,8 @@ const defaultSettings: BackendSettings = {
   codexAppMemoryEmbeddingBaseUrl: "",
   codexAppMemoryEmbeddingApiKey: "",
   codexAppMemoryEmbeddingModel: "",
+  codexAppInstructionsEnabled: false,
+  codexAppInstructions: "",
   codexAppImageOverlayEnabled: false,
   codexAppImageOverlayPath: "",
   codexAppImageOverlayOpacity: 35,
@@ -892,6 +902,8 @@ const defaultSettings: BackendSettings = {
       modelList: "",
       modelWindows: "",
       modelVlm: "",
+      modelReasoningEfforts: {},
+      lastUsedModel: "",
       vlmApiKey: "",
       vlmModel: "",
       vlmBaseUrl: "",
@@ -1352,6 +1364,7 @@ export function App() {
       await refreshEnvConflicts(true);
       await refreshCcsProviders(true);
     }
+    if (next === "reasoning") await refreshSettings(true);
     if (next === "relayEnvironment") await refreshRelayEnvironment(true);
     if (next === "remoteControl") {
       await refreshSettings(true);
@@ -2678,6 +2691,13 @@ export function App() {
               actions={actions}
             />
           ) : null}
+          {route === "reasoning" ? (
+            <ReasoningEffortScreen
+              form={settingsForm}
+              onFormChange={setSettingsForm}
+              actions={actions}
+            />
+          ) : null}
           {route === "relayEnvironment" ? (
             <RelayEnvironmentScreen result={relayEnvironment} actions={actions} />
           ) : null}
@@ -3454,6 +3474,95 @@ function RelayScreen({
         </CardContent>
       </Panel>
     </>
+  );
+}
+
+function ReasoningEffortScreen({
+  form,
+  onFormChange,
+  actions,
+}: {
+  form: BackendSettings;
+  onFormChange: (value: BackendSettings) => void;
+  actions: Actions;
+}) {
+  const normalized = normalizeSettings(form);
+  const providers = normalized.relayProfiles
+    .filter((profile) => !isAggregateRelayProfile(profile))
+    .map((profile) => ({ profile, models: relayProfileModelNames(profile) }))
+    .filter((provider) => provider.models.length > 0);
+  const setMaximumEffort = (profileId: string, model: string, effort: ReasoningEffort) => {
+    const relayProfiles = normalized.relayProfiles.map((profile) => {
+      if (profile.id !== profileId) return profile;
+      const modelReasoningEfforts = { ...profile.modelReasoningEfforts };
+      if (effort === "xhigh") delete modelReasoningEfforts[model];
+      else modelReasoningEfforts[model] = effort;
+      return { ...profile, modelReasoningEfforts };
+    });
+    onFormChange({ ...normalized, relayProfiles });
+  };
+
+  return (
+    <Panel fill>
+      <CardHead
+        title={t("模型最高思考等级")}
+        detail={tf("{0} 个供应商，默认 Extra High", [providers.length])}
+      />
+      <CardContent>
+        {providers.length ? (
+          <div className="reasoning-provider-list">
+            {providers.map(({ profile, models }) => (
+              <section className="reasoning-provider-group" key={profile.id}>
+                <div className="reasoning-provider-head">
+                  <div>
+                    <strong>{profile.name || t("未命名供应商")}</strong>
+                    <span>{relayModeLabel(profile.relayMode)}</span>
+                  </div>
+                  <UiBadge variant="outline">{tf("{0} 个模型", [models.length])}</UiBadge>
+                </div>
+                <div className="reasoning-model-list">
+                  {models.map((model) => {
+                    const selected = profile.modelReasoningEfforts[model] || "xhigh";
+                    return (
+                      <div className="reasoning-model-row" key={model}>
+                        <code title={model}>{model}</code>
+                        <div
+                          aria-label={tf("{0} 最高思考等级", [model])}
+                          className="reasoning-effort-options"
+                          role="radiogroup"
+                        >
+                          {REASONING_EFFORT_OPTIONS.map((option) => (
+                            <button
+                              aria-checked={selected === option.value}
+                              className={selected === option.value ? "active" : ""}
+                              key={option.value}
+                              onClick={() => setMaximumEffort(profile.id, model, option.value)}
+                              role="radio"
+                              title={option.label}
+                              type="button"
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">{t("供应商模型列表为空，请先在供应商配置中添加模型。")}</div>
+        )}
+        <Toolbar>
+          <Button onClick={() => void actions.saveSettingsValue(normalized)}>
+            <Save className="h-4 w-4" />
+            {t("保存思考等级")}
+          </Button>
+        </Toolbar>
+      </CardContent>
+    </Panel>
   );
 }
 
@@ -5145,6 +5254,23 @@ function RelayProfileEditor({
   const [doctorResult, setDoctorResult] = useState<ProviderDoctorResult | null>(null);
   const [doctorOpen, setDoctorOpen] = useState(false);
   const [doctorRunning, setDoctorRunning] = useState(false);
+  const modelRowIds = modelWindowRows.map((_, index) => `relay-model-${index}`);
+  const modelRowSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { delay: 240, tolerance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const reorderModelRows = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = modelRowIds.indexOf(String(active.id));
+    const newIndex = modelRowIds.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    setModelWindowRows(arrayMove(modelWindowRows, oldIndex, newIndex));
+  };
   // 纯 Responses 模式（非聚合）下 VLM/Strip 不生效，禁用下拉
   if (isAggregateRelayProfile(profile)) {
     return (
@@ -5404,48 +5530,25 @@ function RelayProfileEditor({
           <Field className="relay-field-model-list" label={t("模型列表")}>
             <div className="relay-model-row-editor">
               <div className="relay-model-row relay-model-row-head">
+                <span aria-hidden="true" />
                 <span>{t("模型名称")}</span>
                 <span>{t("上下文窗口")}</span>
+                <span aria-hidden="true" />
               </div>
-              {modelWindowRows.map((row, index) => (
-                <div key={index}>
-                  <div className="relay-model-row">
-                    <Input
-                      value={row.model}
-                      onChange={(event) => updateModelWindowRow(index, { model: event.currentTarget.value })}
-                      placeholder="deepseek/deepseek-v4-flash"
+              <DndContext sensors={modelRowSensors} collisionDetection={closestCenter} onDragEnd={reorderModelRows}>
+                <SortableContext items={modelRowIds} strategy={verticalListSortingStrategy}>
+                  {modelWindowRows.map((row, index) => (
+                    <SortableModelWindowRow
+                      id={modelRowIds[index]}
+                      index={index}
+                      key={modelRowIds[index]}
+                      onChange={updateModelWindowRow}
+                      onRemove={removeModelWindowRow}
+                      row={row}
                     />
-                    <Input
-                      value={row.window}
-                      onChange={(event) => updateModelWindowRow(index, { window: event.currentTarget.value })}
-                      placeholder="1M"
-                    />
-                    <Button
-                      aria-label={t("删除模型")}
-                      onClick={() => removeModelWindowRow(index)}
-                      size="icon"
-                      title={t("删除模型")}
-                      type="button"
-                      variant="ghost"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="relay-model-row-actions">
-                    <select
-                      className="field-select text-xs"
-                      value={row.imageHandling}
-                      onChange={(e) => updateModelWindowRow(index, { imageHandling: e.currentTarget.value as ImageHandling })}
-                    >
-                      <option value="" disabled>{t("纯文本模型请配置此项")}</option>
-                      <option value="send-as-is" title={t("原样发送图片")}>send-as-is</option>
-                      <option value="strip" title={t("为纯文本模型移除消息中的图片")}>strip images</option>
-                      <option value="vlm" title={t("为纯文本模型配置图片分析路由")}>VLM analysis</option>
-                    </select>
-                    <span className="relay-model-row-hint">{t("多模态模型（支持图片输入的模型）请保持 send-as-is。")}</span>
-                  </div>
-                </div>
-              ))}
+                  ))}
+                </SortableContext>
+              </DndContext>
             </div>
             <div className="relay-model-list-tools">
               <Button
@@ -5550,6 +5653,79 @@ function RelayProfileEditor({
   );
 }
 
+function SortableModelWindowRow({
+  id,
+  index,
+  row,
+  onChange,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  row: ModelWindowRow;
+  onChange: (index: number, patch: Partial<ModelWindowRow>) => void;
+  onRemove: (index: number) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  return (
+    <div
+      className={`relay-model-sortable ${isDragging ? "dragging" : ""}`}
+      ref={setNodeRef}
+      style={style}
+    >
+      <div className="relay-model-row">
+        <button
+          aria-label={t("长按拖动模型排序")}
+          className="model-drag-handle"
+          title={t("长按拖动模型排序")}
+          type="button"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <Input
+          value={row.model}
+          onChange={(event) => onChange(index, { model: event.currentTarget.value })}
+          placeholder="deepseek/deepseek-v4-flash"
+        />
+        <Input
+          value={row.window}
+          onChange={(event) => onChange(index, { window: event.currentTarget.value })}
+          placeholder="1M"
+        />
+        <Button
+          aria-label={t("删除模型")}
+          onClick={() => onRemove(index)}
+          size="icon"
+          title={t("删除模型")}
+          type="button"
+          variant="ghost"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="relay-model-row-actions">
+        <select
+          className="field-select text-xs"
+          value={row.imageHandling}
+          onChange={(event) => onChange(index, { imageHandling: event.currentTarget.value as ImageHandling })}
+        >
+          <option value="" disabled>{t("纯文本模型请配置此项")}</option>
+          <option value="send-as-is" title={t("原样发送图片")}>send-as-is</option>
+          <option value="strip" title={t("为纯文本模型移除消息中的图片")}>strip images</option>
+          <option value="vlm" title={t("为纯文本模型配置图片分析路由")}>VLM analysis</option>
+        </select>
+        <span className="relay-model-row-hint">{t("多模态模型（支持图片输入的模型）请保持 send-as-is。")}</span>
+      </div>
+    </div>
+  );
+}
+
 function CustomModelsRelayProfileEditor({
   profile,
   form,
@@ -5566,38 +5742,58 @@ function CustomModelsRelayProfileEditor({
   actions: Actions;
 }) {
   const models = profile.customModels?.length ? profile.customModels : [createEmptyCustomModel()];
+  const modelIds = models.map((model) => model.id);
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { delay: 240, tolerance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
+  const applyModels = (
+    customModels: CustomRelayModel[],
+    patch: Partial<Pick<RelayProfile, "lastUsedModel" | "modelReasoningEfforts">> = {},
+  ) => {
+    onProfileChange(syncRelayProfileModelPreference({ ...profile, ...patch, customModels }));
+  };
   const updateModel = (index: number, patch: Partial<CustomRelayModel>) => {
     const nextModels = models.map((model, modelIndex) => (modelIndex === index ? { ...model, ...patch } : model));
-    onProfileChange({
-      ...profile,
-      customModels: nextModels,
-      defaultCustomModelId:
-        profile.defaultCustomModelId && nextModels.some((model) => model.id === profile.defaultCustomModelId)
-          ? profile.defaultCustomModelId
-          : nextModels[0]?.id || "",
-      model: (nextModels.find((model) => model.id === (profile.defaultCustomModelId || nextModels[0]?.id)) || nextModels[0])?.model || "",
+    const previousName = models[index]?.model.trim() || "";
+    const nextName = nextModels[index]?.model.trim() || "";
+    const modelReasoningEfforts = { ...profile.modelReasoningEfforts };
+    if (previousName && previousName !== nextName && modelReasoningEfforts[previousName]) {
+      modelReasoningEfforts[nextName] = modelReasoningEfforts[previousName];
+      delete modelReasoningEfforts[previousName];
+    }
+    applyModels(nextModels, {
+      lastUsedModel: profile.lastUsedModel === previousName ? nextName : profile.lastUsedModel,
+      modelReasoningEfforts,
     });
   };
   const addModel = () => {
     const model = createEmptyCustomModel();
-    onProfileChange({
-      ...profile,
-      customModels: [...models, model],
-      defaultCustomModelId: profile.defaultCustomModelId || model.id,
-    });
+    applyModels([...models, model]);
   };
   const removeModel = (index: number) => {
+    const removedName = models[index]?.model.trim() || "";
     const nextModels = models.filter((_, modelIndex) => modelIndex !== index);
     const fallback = nextModels[0] || createEmptyCustomModel();
     const ensured = nextModels.length ? nextModels : [fallback];
-    onProfileChange({
-      ...profile,
-      customModels: ensured,
-      defaultCustomModelId: ensured.some((model) => model.id === profile.defaultCustomModelId)
-        ? profile.defaultCustomModelId
-        : ensured[0].id,
-      model: (ensured.find((model) => model.id === profile.defaultCustomModelId) || ensured[0]).model,
+    const modelReasoningEfforts = { ...profile.modelReasoningEfforts };
+    delete modelReasoningEfforts[removedName];
+    applyModels(ensured, {
+      lastUsedModel: profile.lastUsedModel === removedName ? "" : profile.lastUsedModel,
+      modelReasoningEfforts,
     });
+  };
+  const reorderModels = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = modelIds.indexOf(String(active.id));
+    const newIndex = modelIds.indexOf(String(over.id));
+    if (oldIndex < 0 || newIndex < 0) return;
+    applyModels(arrayMove(models, oldIndex, newIndex));
   };
   const testModel = async (model: CustomRelayModel) => {
     await actions.testRelayProfile({
@@ -5632,25 +5828,13 @@ function CustomModelsRelayProfileEditor({
         <Field className="relay-field-name" label={t("名称")}>
           <Input value={profile.name} onChange={(event) => onProfileChange({ ...profile, name: event.currentTarget.value })} />
         </Field>
-        <Field className="relay-field-config-model" label={t("默认模型")}>
-          <select
-            className="field-select"
-            value={profile.defaultCustomModelId || models[0]?.id || ""}
-            onChange={(event) => {
-              const selected = models.find((model) => model.id === event.currentTarget.value) || models[0];
-              onProfileChange({
-                ...profile,
-                defaultCustomModelId: selected?.id || "",
-                model: selected?.model || "",
-              });
-            }}
-          >
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.model || t("未命名模型")}
-              </option>
-            ))}
-          </select>
+        <Field className="relay-field-config-model" label={t("启动模型")}>
+          <Input
+            readOnly
+            value={profile.lastUsedModel || models[0]?.model || ""}
+            placeholder={t("排序第一项")}
+          />
+          <p className="field-hint">{t("优先使用上次有效模型；没有历史记录时使用排序第一项。")}</p>
         </Field>
         <Field className="relay-field-goals" label={t("Codex 目标")}>
           <label className="inline-toggle">
@@ -6756,6 +6940,7 @@ function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
     overview: t("检查问题、启动与快速修复"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
+    reasoning: t("按供应商设置每个模型的最高思考等级"),
     remoteControl: t("连接 ChatGPT 账号并管理官方手机远控"),
     relayEnvironment: t("排查可能干扰中转站配置的本机环境"),
     sessions: t("查看、删除和修复 Codex 本地会话"),
@@ -7476,6 +7661,8 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
             modelList: "",
             modelWindows: "",
             modelVlm: "",
+            modelReasoningEfforts: {},
+            lastUsedModel: "",
             vlmApiKey: "",
             vlmModel: "",
             vlmBaseUrl: "",
@@ -7521,6 +7708,60 @@ function normalizeCodexAiShell(value: string | undefined): CodexAiShell {
   return value === "powershell" ? "powershell" : "pwsh";
 }
 
+const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: "low", label: "Light" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra High" },
+  { value: "max", label: "Max" },
+  { value: "ultra", label: "Ultra" },
+];
+
+function normalizeReasoningEffortMap(
+  value: Record<string, ReasoningEffort> | undefined,
+): Record<string, ReasoningEffort> {
+  const allowed = new Set(REASONING_EFFORT_OPTIONS.map((option) => option.value));
+  return Object.fromEntries(
+    Object.entries(value || {}).filter(
+      ([model, effort]) => model.trim().length > 0 && allowed.has(effort),
+    ),
+  );
+}
+
+function relayProfileModelNames(profile: RelayProfile): string[] {
+  const rawModels = isCustomModelsRelayProfile(profile)
+    ? profile.customModels.map((model) => model.model)
+    : profile.modelList.split(/[\r\n,]+/).map((model) => parseModelSuffix(model).slug);
+  const models = rawModels.map((model) => model.trim()).filter(Boolean);
+  if (!models.length && profile.model.trim()) models.push(parseModelSuffix(profile.model).slug);
+  return Array.from(new Set(models));
+}
+
+function syncRelayProfileModelPreference(profile: RelayProfile): RelayProfile {
+  const models = relayProfileModelNames(profile);
+  const requestedLastModel = profile.lastUsedModel || "";
+  const lastUsedModel = models.find((model) => model === requestedLastModel)
+    ?? models.find((model) => model.toLowerCase() === requestedLastModel.toLowerCase())
+    ?? "";
+  const preferredModel = lastUsedModel || models[0] || profile.model.trim();
+  const efforts = normalizeReasoningEffortMap(profile.modelReasoningEfforts);
+  const modelReasoningEfforts = Object.fromEntries(
+    Object.entries(efforts).filter(([model]) => models.includes(model)),
+  ) as Record<string, ReasoningEffort>;
+  const defaultCustomModelId = isCustomModelsRelayProfile(profile)
+    ? profile.customModels.find((model) => model.model.trim() === preferredModel)?.id
+      || profile.customModels[0]?.id
+      || ""
+    : profile.defaultCustomModelId;
+  return {
+    ...profile,
+    model: preferredModel,
+    lastUsedModel,
+    modelReasoningEfforts,
+    defaultCustomModelId,
+  };
+}
+
 function codexExtraArgsToInput(args: string[] | undefined) {
   return (args ?? []).join("\n");
 }
@@ -7556,6 +7797,9 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         autoCompactPercent: 80,
         modelList: "",
         modelWindows: "",
+        modelVlm: "",
+        modelReasoningEfforts: {},
+        lastUsedModel: "",
         customModels: [],
         defaultCustomModelId: "",
       },
@@ -7587,6 +7831,9 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     autoCompactPercent: typeof profile.autoCompactPercent === "number" ? Math.min(100, Math.max(1, Math.round(profile.autoCompactPercent))) : 80,
     modelList: profile.modelList || "",
     modelWindows: profile.modelWindows || "",
+    modelVlm: profile.modelVlm || "",
+    modelReasoningEfforts: normalizeReasoningEffortMap(profile.modelReasoningEfforts),
+    lastUsedModel: profile.lastUsedModel || "",
     userAgent: profile.userAgent || "",
     customModels: Array.isArray(profile.customModels)
       ? profile.customModels.map((model) => ({
@@ -7612,14 +7859,19 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     } else if (!normalized.defaultCustomModelId || !normalized.customModels.some((item) => item.id === normalized.defaultCustomModelId)) {
       normalized.defaultCustomModelId = normalized.customModels[0].id;
     }
-    const defaultModel = normalized.customModels.find((item) => item.id === normalized.defaultCustomModelId) || normalized.customModels[0];
-    normalized.model = defaultModel?.model || "";
+    if (!normalized.lastUsedModel) {
+      const legacyDefault = normalized.customModels.find((item) => item.id === normalized.defaultCustomModelId);
+      if (legacyDefault && legacyDefault.id !== normalized.customModels[0]?.id) {
+        normalized.lastUsedModel = legacyDefault.model;
+      }
+    }
     normalized.baseUrl = PROTOCOL_PROXY_BASE_URL;
     normalized.upstreamBaseUrl = "";
     normalized.apiKey = "codex-plus-custom";
-    return normalized;
+    return syncRelayProfileModelPreference(normalized);
   }
-  return relayProfileUsesLiveFiles(normalized) ? deriveRelayProfileFromFiles(normalized) : normalized;
+  const derived = relayProfileUsesLiveFiles(normalized) ? deriveRelayProfileFromFiles(normalized) : normalized;
+  return syncRelayProfileModelPreference(derived);
 }
 
 function hydrateAggregateRelayProfile(profile: RelayProfile, aggregate: AggregateRelayProfile | undefined): RelayProfile {
@@ -8284,6 +8536,8 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     modelList: "",
     modelWindows: "",
     modelVlm: "",
+    modelReasoningEfforts: {},
+    lastUsedModel: "",
     vlmApiKey: "",
     vlmModel: "",
     vlmBaseUrl: "",
@@ -8322,6 +8576,8 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       modelList: "",
       modelWindows: "",
       modelVlm: "",
+      modelReasoningEfforts: {},
+      lastUsedModel: "",
       vlmApiKey: "",
       vlmModel: "",
       vlmBaseUrl: "",
@@ -8527,6 +8783,8 @@ function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile
     modelList: "",
     modelWindows: "",
     modelVlm: "",
+    modelReasoningEfforts: {},
+    lastUsedModel: "",
     vlmApiKey: "",
     vlmModel: "",
     vlmBaseUrl: "",

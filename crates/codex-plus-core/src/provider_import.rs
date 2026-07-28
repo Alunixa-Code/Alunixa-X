@@ -212,6 +212,8 @@ fn relay_profile_from_request(
         model_list: String::new(),
         model_windows: String::new(),
         model_vlm: String::new(),
+        model_reasoning_efforts: Default::default(),
+        last_used_model: String::new(),
         vlm_api_key: String::new(),
         vlm_model: String::new(),
         vlm_base_url: String::new(),

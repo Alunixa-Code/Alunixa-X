@@ -10,6 +10,7 @@ pub mod codex_auto_update;
 pub mod codex_config_reload;
 pub mod codex_home;
 pub mod codex_hooks;
+pub mod codex_instructions;
 pub mod codex_local_storage;
 pub mod codex_sqlite;
 mod computer_use_guard;
