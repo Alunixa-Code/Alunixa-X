@@ -1532,7 +1532,7 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
 }
 
 #[tokio::test]
-async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
+async fn launch_lifecycle_stops_before_start_when_initial_status_save_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1543,12 +1543,43 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
             .join("latest-status.json"),
     );
     let events = Arc::new(Mutex::new(Vec::<String>::new()));
-    let hooks =
-        FakeHooks::new(events.clone()).with_launch_result(CodexLaunch::PackagedActivation {
+    let hooks = FakeHooks::new(events.clone());
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store,
+        },
+        &hooks,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.to_string().contains("failed to create directory"));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec!["select-debug:9229", "select-helper:57321", "load-settings",]
+    );
+}
+
+#[tokio::test]
+async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_parent = temp.path().join("status-parent");
+    std::fs::create_dir_all(&status_parent).unwrap();
+    let status_store = StatusStore::new(status_parent.join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_launch_result(CodexLaunch::PackagedActivation {
             app_user_model_id: "OpenAI.Codex_2p2nqsd0c76g0!App".to_string(),
             arguments: "--remote-debugging-port=9229".to_string(),
             process_id: Some(4242),
-        });
+        })
+        .with_status_parent_to_break(status_parent);
 
     let error = launch_and_inject_with_hooks(
         LaunchOptions {
@@ -1711,6 +1742,7 @@ struct FakeHooks {
     inject_error: Option<String>,
     provider_sync_unsupported: bool,
     plugin_marketplace_error: Option<String>,
+    status_parent_to_break: Option<PathBuf>,
 }
 
 impl FakeHooks {
@@ -1727,6 +1759,7 @@ impl FakeHooks {
             inject_error: None,
             provider_sync_unsupported: false,
             plugin_marketplace_error: None,
+            status_parent_to_break: None,
         }
     }
 
@@ -1757,6 +1790,11 @@ impl FakeHooks {
 
     fn with_plugin_marketplace_error(mut self, message: &str) -> Self {
         self.plugin_marketplace_error = Some(message.to_string());
+        self
+    }
+
+    fn with_status_parent_to_break(mut self, path: PathBuf) -> Self {
+        self.status_parent_to_break = Some(path);
         self
     }
 
@@ -1863,6 +1901,10 @@ impl LaunchHooks for FakeHooks {
 
     async fn ensure_injection(&self, debug_port: u16, helper_port: u16, _app_dir: &Path) -> bool {
         self.event(format!("inject:{debug_port}:{helper_port}"));
+        if let Some(path) = &self.status_parent_to_break {
+            std::fs::remove_dir_all(path).unwrap();
+            std::fs::write(path, "not a directory").unwrap();
+        }
         self.inject_error.is_none()
     }
 

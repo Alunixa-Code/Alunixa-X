@@ -272,3 +272,6 @@
 - 本阶段验证通过：数据层 `storage_adapter` 21 项、CDP 注入合约 79 项、前端 12 项、TypeScript、启动器 `cargo check`、JavaScript 语法与 Rust 格式检查全部成功。
 - 已将正式发布版本统一提升到 `1.2.55`，同步更新 Rust workspace、Cargo.lock、前端 package、package-lock 与 Tauri 配置；所有发布版本源校验一致，旧 `1.2.54` 在版本元数据中零命中。
 - 已在 `CHANGELOG.md` 增加 `1.2.55` 完整变更说明，覆盖思考等级页、模型排序、默认模型、退出登录、启动注入、Instructions、SQLite Home、组合撤销与长确认弹窗修复，并明确保持默认紫色主题。
+- 完整 workspace 首轮测试发现旧用例 `launch_lifecycle_cleans_helper_and_codex_when_status_save_fails` 与新增的早期 `starting` 状态冲突：无效状态路径会在启动前失败，因此旧断言不再实际覆盖启动后的清理逻辑。
+- 已增强启动生命周期测试桩：新增首次 `starting` 写入失败时不得启动 Codex 的用例，并让原清理用例在注入完成后再破坏状态目录，继续验证 helper 与已启动 Codex 进程会被清理。
+- 修复后 16 项 `launch_lifecycle_` 定向测试全部通过，生产环境的早期状态写入行为保持不变。
