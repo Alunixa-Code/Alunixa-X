@@ -233,3 +233,14 @@
 - `v1.2.54` 正式 Release 已核验包含六项 uploaded 资产并带 SHA-256 摘要：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
 - 已将自动生成的 Release 正文替换为完整中文说明，明确记录 GPT-5.6 Max/Ultra 原生 Effort 控件、模型名兼容、Ultra 请求透传、DeepSeek/OpenRouter 最高档映射、CI 稳定性修复和完整验证结果。
 - 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.54`。
+
+## 2026-07-28
+
+- 用户新增八项任务：增加独立“思考等级”页面并展示全部供应商模型，允许逐模型设置最高思考等级，默认 `xhigh`，可选 Light、Medium、High、Extra High、Max、Ultra 六档。
+- 用户要求供应商配置中的模型支持排序：每个模型左侧增加方形长按拖拽手柄，排序结果需要持久化。
+- 用户要求 Codex 启动默认模型遵循“上次退出时使用的模型优先，否则使用当前供应商排序第一项”。
+- 用户要求恢复 Codex 退出登录按钮，并排查个别 Windows 系统启动后没有 Codex++ 菜单、管理器概览也未识别启动状态的问题。
+- 用户要求选择性同步上游 `v1.2.37` 至 `v1.2.42` 的新内容，排除不必要或与当前分支冲突的改动，并保持默认紫色主题。
+- 用户要求在“Codex增强”增加 instructions 提示词设置：启用后写入 `model_instructions_file = "~/.codex/TSC_ZYL_PJ/do_special.md"`，创建对应目录与文件，并把用户输入持久化到该 Markdown，供应商切换与其他配置写入不得覆盖该设置。
+- 用户要求全部完成后推送到 `Alunixa-Code/CodexPlusPlusPlus`，通过 GitHub Actions 构建并发布 GitHub Release。
+- 已创建修改前检查点提交 `93b0900`。
