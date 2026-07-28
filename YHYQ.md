@@ -296,3 +296,4 @@
 - 清理结果：视觉脚本、`dist`、临时截图和 Vite 日志已删除，1420/1437 端口无监听；`node_modules` 因 Rollup 原生文件被系统占用暂未删除，仓库中没有跟踪该目录，不影响发布。
 - 已核对发布前状态：目标远端为 `Alunixa-Code/CodexPlusPlusPlus`，远端 `main` 尚未包含当前提交，`v1.2.55` 标签不存在；本次将推送当前 `main` 并创建注释标签。
 - `v1.2.55` 发布说明将记录：思考等级独立页与六档上限、普通/自定义供应商模型排序、上次模型恢复与默认排序第一项、退出登录、启动注入兜底、Instructions 文件、`CODEX_SQLITE_HOME`、多库撤销安全校验、确认弹窗滚动、默认紫色主题和完整验证结果。
+- 主分支 Actions `30385928788` 的 Windows 与 macOS arm64 构建成功，macOS x64 构建也完成但在 `actions/upload-artifact@v4` 创建 artifact 时连续 5 次 GitHub Results API 请求超时；该失败属于 Actions 上传基础设施，不是代码测试或编译失败，已准备只重跑失败 job。
