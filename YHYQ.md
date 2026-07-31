@@ -398,3 +398,7 @@
 - 已在当前真实 Codex 页面通过 CDP 重注入候选脚本，确认右上角状态变为绿色“后端已连接”且 3 秒 heartbeat 已启动；未修改或重启用户当前 Codex 进程喵~
 - 已通过 Playwright 渲染管理器手机远控页面，确认“退出登录”按钮只有一个且真实可见；临时测试脚本和 Vite 服务均已清理喵~
 - 正式修复版本确定为 `1.2.57`，版本源与 `CHANGELOG.md` 已同步，发布说明记录稳定轮询、Rust helper 归属校验和退出按钮永久显示喵~
+- 已将 `main` 与注释标签 `v1.2.57` 推送至 `Alunixa-Code/CodexPlusPlusPlus`，主分支 Actions `30629789186` 和 Release Actions `30629800905` 的 Windows、macOS x64、macOS arm64 全部成功喵~
+- `v1.2.57` Release 已正式发布并核验六项 uploaded 资产：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP；Release 正文已更新为完整中文修复与验证说明喵~
+- 发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.57` 喵~
+- 已删除 `target`、前端 `node_modules`、`dist` 以及本轮 CDP/Playwright/Release notes 临时文件和临时 Vite 服务，不保留构建垃圾喵~
