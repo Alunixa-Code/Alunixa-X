@@ -2287,3 +2287,14 @@ fn noop_handler() -> bridge::BridgeHandler {
             as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
     })
 }
+
+#[test]
+fn injection_script_enables_all_six_native_reasoning_efforts() {
+    let script = std::fs::read_to_string(injection_script_path()).unwrap();
+    assert!(script.contains("enabled-reasoning-efforts"));
+    assert!(script.contains(
+        "[\"low\", \"medium\", \"high\", \"xhigh\", \"max\", \"ultra\"]"
+    ));
+    assert!(script.contains("syncCodexReasoningEffortSettings"));
+    assert!(script.contains("reasoning_effort_settings_sync_failed"));
+}

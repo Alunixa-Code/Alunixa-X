@@ -2726,6 +2726,7 @@ export function App() {
           {route === "remoteControl" ? (
             <RemoteControlScreen
               remote={officialRemote}
+              authenticated={relay?.authenticated === true}
               pairing={remotePairing}
               pendingLogin={pendingChatGptLogin}
               busy={officialRemoteBusy}
@@ -3004,18 +3005,20 @@ function OverviewScreen({
 
 function RemoteControlScreen({
   remote,
+  authenticated,
   pairing,
   pendingLogin,
   busy,
   actions,
 }: {
   remote: RemoteControlResult | null;
+  authenticated: boolean;
   pairing: RemoteControlPairingResult | null;
   pendingLogin: PendingChatGptLogin | null;
   busy: boolean;
   actions: Actions;
 }) {
-  const signedIn = remote?.accountType === "chatgpt";
+  const signedIn = authenticated || remote?.accountType === "chatgpt";
   const connected = remote?.status === "connected";
   const status = remote?.status || "disabled";
   const accountLabel =
@@ -3585,7 +3588,7 @@ function ReasoningEffortScreen({
           <div className="empty">{t("供应商模型列表为空，请先在供应商配置中添加模型。")}</div>
         )}
         <Toolbar>
-          <Button onClick={() => void actions.saveSettingsValue(normalized)}>
+          <Button onClick={() => void actions.saveSettingsValue(normalized, false)}>
             <Save className="h-4 w-4" />
             {t("保存思考等级")}
           </Button>

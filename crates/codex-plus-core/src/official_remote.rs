@@ -288,14 +288,25 @@ impl OfficialRemoteRuntime {
         if self.pending_login.is_some() {
             anyhow::bail!("请先取消正在等待的 ChatGPT 登录");
         }
-        let result = async {
-            self.ensure_client(saved_app_path)
-                .await?
-                .request("account/logout", None)
-                .await?;
-            clear_chatgpt_login_after_logout(store, home)
+        let remote_logout = match self.ensure_client(saved_app_path).await {
+            Ok(client) => client.request("account/logout", None).await.err(),
+            Err(error) => Some(error),
+        };
+        let result = clear_chatgpt_login_after_logout(store, home).map_err(|local_error| {
+            if let Some(remote_error) = remote_logout.as_ref() {
+                anyhow::anyhow!(
+                    "app-server 退出失败：{remote_error}；本地登录态清理也失败：{local_error}"
+                )
+            } else {
+                local_error
+            }
+        });
+        if let Some(error) = remote_logout {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "official_remote.logout.remote_failed_local_cleared",
+                json!({ "error": error.to_string() }),
+            );
         }
-        .await;
         self.client = None;
         result
     }

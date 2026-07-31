@@ -1764,6 +1764,11 @@
     fastSupported: false,
   };
   const codexDefaultServiceTierSetting = { key: "default-service-tier", default: null };
+  const codexEnabledReasoningEffortsSetting = {
+    key: "enabled-reasoning-efforts",
+    default: ["low", "medium", "high", "xhigh", "max", "ultra"],
+  };
+  const codexEnabledReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
   const codexServiceTierFallbackFastValue = "priority";
   const codexServiceTierModulePromises = new Map();
   const codexServiceTierSupportedFastModels = new Set(["gpt-5.4", "gpt-5.5"]);
@@ -2329,6 +2334,46 @@
 
   function codexServiceTierRequestMethods() {
     return new Set(["thread/start", "thread/resume", "turn/start"]);
+  }
+
+  async function syncCodexReasoningEffortSettings(attempt = 0) {
+    try {
+      const settingStorage = await codexSettingStorageModule();
+      const current = await settingStorage.n(codexEnabledReasoningEffortsSetting);
+      if (JSON.stringify(current) !== JSON.stringify(codexEnabledReasoningEfforts)) {
+        await settingStorage.s(codexEnabledReasoningEffortsSetting, codexEnabledReasoningEfforts);
+      }
+      window.__codexPlusReasoningEffortSettingsSynced = true;
+      scheduleCodexModelWhitelistRefresh();
+    } catch (error) {
+      try {
+        const result = await codexStateCall("get-setting", {
+          params: { key: codexEnabledReasoningEffortsSetting.key },
+        });
+        const current = result && Object.prototype.hasOwnProperty.call(result, "value")
+          ? result.value
+          : codexEnabledReasoningEffortsSetting.default;
+        if (JSON.stringify(current) !== JSON.stringify(codexEnabledReasoningEfforts)) {
+          await codexStateCall("set-setting", {
+            params: {
+              key: codexEnabledReasoningEffortsSetting.key,
+              value: codexEnabledReasoningEfforts,
+            },
+          });
+        }
+        window.__codexPlusReasoningEffortSettingsSynced = true;
+        scheduleCodexModelWhitelistRefresh();
+      } catch (fallbackError) {
+        if (attempt < 60) {
+          setTimeout(() => void syncCodexReasoningEffortSettings(attempt + 1), 250);
+          return;
+        }
+        sendCodexPlusDiagnostic("reasoning_effort_settings_sync_failed", {
+          errorName: fallbackError?.name || error?.name || "",
+          errorMessage: fallbackError?.message || error?.message || String(fallbackError || error),
+        });
+      }
+    }
   }
 
   let codexLastRecordedModelSignature = "";
@@ -10006,6 +10051,7 @@
   }
 
   void loadBackendSettingsForStartup();
+  void syncCodexReasoningEffortSettings();
   installCodexProjectlessMainWindowProtection();
   if (!window.__CODEX_PLUS_TEST_PROJECTLESS__) void loadCodexProjectlessMainWindowSetting();
   installUpstreamBranchDropdownAdapter();
