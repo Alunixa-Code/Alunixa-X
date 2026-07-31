@@ -365,3 +365,7 @@
 - 已将重启终止从“只记录首次 PID 并等待”改为持续重新枚举 Codex/Beta 整棵进程树，按子进程优先顺序重复终止，并要求连续三次确认清空喵~
 - Codex 或 Codex++ 后台进程在 10 秒内未清空时，现在会返回剩余 PID 并取消启动新实例；重启 worker 的 helper 端口仍被旧进程占用时也不再继续拉起，避免双实例和持续 502 喵~
 - Watcher 19 项测试、管理器 Rust 检查与 Rust 格式检查通过，新增测试确认 Beta 内置 CLI 子进程会作为进程树子节点终止但不会被普通独立 CLI 过滤误杀喵~
+- 已将上游 HTTP client 改为按最终 User-Agent 复用的有界连接池，配置 5 秒连接超时、90 秒空闲连接与每主机 16 条空闲连接，避免每个 Responses 请求重新握手造成间歇性连接失败喵~
+- Responses、Chat Completions 与 CustomModels 仅在明确的连接建立错误上执行一次 150 毫秒短延迟重试，不对超时、响应状态或已发送后失败的请求盲目重放喵~
+- Responses、CustomModels、Chat Completions、Models 与 Audio 建连失败日志现在只记录脱敏 scheme/host/port、错误分类和底层首因，不再写入完整路径、查询参数或 URL 凭证喵~
+- 协议代理 57 项测试、launcher/manager Rust 检查和 Rust 格式检查通过，新增连接池复用与诊断 URL 脱敏测试喵~

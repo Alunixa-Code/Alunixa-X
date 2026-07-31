@@ -10,8 +10,9 @@ use codex_plus_core::protocol_proxy::{
     open_models_proxy_request, open_responses_proxy_request,
     open_responses_proxy_request_with_settings, responses_error_from_upstream,
     responses_to_anthropic_messages, responses_to_chat_completions, responses_to_completions,
-    responses_to_gemini_generate_content, send_upstream_request_with_header_timeout,
-    upstream_header_timeout, upstream_http_client, upstream_stream_header_timeout,
+    responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
+    send_upstream_request_with_header_timeout, upstream_header_timeout, upstream_http_client,
+    upstream_stream_header_timeout,
 };
 use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
@@ -1767,6 +1768,81 @@ fn upstream_header_timeout_is_bounded_for_hung_providers() {
     assert!(upstream_header_timeout() >= Duration::from_secs(30));
     assert!(upstream_header_timeout() <= Duration::from_secs(60));
     assert!(upstream_stream_header_timeout() >= Duration::from_secs(120));
+}
+
+#[test]
+fn diagnostic_endpoint_drops_paths_queries_and_credentials() {
+    assert_eq!(
+        sanitized_endpoint_for_tests("https://user:secret@example.test:8443/private/v1?token=abc"),
+        "https://example.test:8443"
+    );
+    assert_eq!(
+        sanitized_endpoint_for_tests("not a url"),
+        "invalid-endpoint"
+    );
+}
+
+#[tokio::test]
+async fn proxied_http_client_reuses_idle_connection_pool() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        for request_index in 0..2 {
+            let mut buffer = Vec::new();
+            let mut chunk = [0u8; 1024];
+            while !buffer.windows(4).any(|window| window == b"\r\n\r\n") {
+                let read = stream.read(&mut chunk).await.unwrap();
+                assert!(read > 0);
+                buffer.extend_from_slice(&chunk[..read]);
+            }
+            let connection = if request_index == 0 {
+                "keep-alive"
+            } else {
+                "close"
+            };
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: {connection}\r\n\r\nok"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        }
+        tokio::time::timeout(Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    });
+    let client_a = codex_plus_core::http_client::proxied_client("Pool-Test-Agent").unwrap();
+    let client_b = codex_plus_core::http_client::proxied_client("Pool-Test-Agent").unwrap();
+
+    assert_eq!(
+        client_a
+            .get(format!("http://{addr}/first"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "ok"
+    );
+    assert_eq!(
+        client_b
+            .get(format!("http://{addr}/second"))
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap(),
+        "ok"
+    );
+    assert!(server.await.unwrap());
 }
 
 #[tokio::test]

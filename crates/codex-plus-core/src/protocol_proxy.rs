@@ -14,10 +14,10 @@ use crate::relay_rotation::{RotationContext, RotationEvent};
 use crate::settings::{RelayProtocol, SettingsStore};
 
 pub const DEFAULT_PROTOCOL_PROXY_PORT: u16 = 57321;
-const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const UPSTREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 const UPSTREAM_STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(120);
 const UPSTREAM_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const UPSTREAM_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(150);
 const THINK_OPEN_TAG: &str = "<think>";
 const THINK_CLOSE_TAG: &str = "</think>";
 const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
@@ -832,10 +832,7 @@ pub fn upstream_stream_idle_timeout() -> Duration {
 }
 
 pub fn upstream_http_client() -> anyhow::Result<reqwest::Client> {
-    reqwest::Client::builder()
-        .connect_timeout(UPSTREAM_CONNECT_TIMEOUT)
-        .user_agent("CodexPlusPlus/ProtocolProxy")
-        .build()
+    crate::http_client::proxied_client("CodexPlusPlus/ProtocolProxy")
         .context("failed to build upstream HTTP client")
 }
 
@@ -1480,7 +1477,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             json!({
                 "relayId": relay.id,
                 "relayName": relay.name,
-                "endpoint": endpoint,
+                "endpoint": sanitized_endpoint(&endpoint),
                 "wireApi": wire_api,
                 "stream": is_stream,
                 "attempt": attempt + 1,
@@ -1490,22 +1487,20 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 "upstreamToolSummary": response_tools_diagnostic_summary(upstream_body.get("tools"))
             }),
         );
-        let upstream = match send_upstream_request_for_responses(
-            upstream_request_builder(
-                crate::http_client::proxied_client(&effective_user_agent(
-                    &relay.user_agent,
-                    original_user_agent,
-                ))?,
-                &endpoint,
-                relay.api_key.trim(),
-                is_stream,
-                &upstream_body,
-                wire_api,
-            ),
+        let client = crate::http_client::proxied_client(&effective_user_agent(
+            &relay.user_agent,
+            original_user_agent,
+        ))?;
+        let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
+            client,
+            &endpoint,
+            relay.api_key.trim(),
             is_stream,
+            &upstream_body,
+            wire_api,
         )
-        .await
-        {
+        .await;
+        let upstream = match upstream {
             Ok(upstream) => upstream,
             Err(error) => {
                 let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -1513,14 +1508,15 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                     json!({
                         "relayId": relay.id,
                         "relayName": relay.name,
-                        "endpoint": endpoint,
+                        "endpoint": sanitized_endpoint(&endpoint),
                         "wireApi": wire_api,
                         "stream": is_stream,
                         "attempt": attempt + 1,
                         "candidateCount": relay_count,
                         "headerTimeoutSeconds": header_timeout.as_secs(),
                         "willFailover": has_more_candidates,
-                        "error": error.to_string()
+                        "connectionRetried": connection_retried,
+                        "error": sanitized_upstream_error(&error)
                     }),
                 );
                 crate::relay_rotation::record_relay_request_failure(&settings);
@@ -1541,7 +1537,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             json!({
                 "relayId": relay.id,
                 "relayName": relay.name,
-                "endpoint": endpoint,
+                "endpoint": sanitized_endpoint(&endpoint),
                 "wireApi": wire_api,
                 "stream": is_stream,
                 "statusCode": status_code,
@@ -1579,7 +1575,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             json!({
                 "relayId": relay.id,
                 "relayName": relay.name,
-                "endpoint": endpoint,
+                "endpoint": sanitized_endpoint(&endpoint),
                 "wireApi": wire_api,
                 "stream": is_stream,
                 "statusCode": status_code,
@@ -1605,7 +1601,7 @@ pub async fn open_models_proxy_request(
         json!({
             "relayId": relay.id,
             "relayName": relay.name,
-            "endpoint": endpoint,
+            "endpoint": sanitized_endpoint(&endpoint),
             "wireApi": UpstreamWireApi::Responses
         }),
     );
@@ -1613,7 +1609,7 @@ pub async fn open_models_proxy_request(
         &relay.user_agent,
         original_user_agent,
     ))?
-    .get(endpoint);
+    .get(&endpoint);
     let request = match relay.protocol {
         RelayProtocol::AnthropicMessages => request
             .header("x-api-key", relay.api_key.trim())
@@ -1623,7 +1619,22 @@ pub async fn open_models_proxy_request(
         }
         _ => request.bearer_auth(relay.api_key.trim()),
     };
-    let upstream = send_upstream_request(request).await?;
+    let upstream = match send_upstream_request(request).await {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.models_request_failed",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "wireApi": UpstreamWireApi::Responses,
+                    "endpoint": sanitized_endpoint(&endpoint),
+                    "error": sanitized_upstream_error(&error)
+                }),
+            );
+            return Err(error).context("Models 上游请求失败");
+        }
+    };
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
@@ -1666,22 +1677,39 @@ pub async fn open_audio_transcriptions_proxy_request(
         json!({
             "relayId": relay.id,
             "relayName": relay.name,
-            "endpoint": endpoint,
+            "endpoint": sanitized_endpoint(&endpoint),
             "wireApi": UpstreamWireApi::AudioTranscriptions,
             "bodyBytes": body.len()
         }),
     );
-    let upstream = send_upstream_request(
+    let upstream = match send_upstream_request(
         crate::http_client::proxied_client(&effective_user_agent(
             &relay.user_agent,
             original_user_agent,
         ))?
-        .post(endpoint)
+        .post(&endpoint)
         .bearer_auth(relay.api_key.trim())
         .header(reqwest::header::CONTENT_TYPE, content_type)
         .body(body.to_vec()),
     )
-    .await?;
+    .await
+    {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.audio_transcriptions_request_failed",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "wireApi": UpstreamWireApi::AudioTranscriptions,
+                    "endpoint": sanitized_endpoint(&endpoint),
+                    "bodyBytes": body.len(),
+                    "error": sanitized_upstream_error(&error)
+                }),
+            );
+            return Err(error).context("Audio transcriptions 上游请求失败");
+        }
+    };
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
@@ -1728,16 +1756,39 @@ pub async fn open_chat_completions_proxy_request(
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let upstream = crate::http_client::proxied_client(&effective_user_agent(
+    let endpoint = chat_completions_url(&relay.base_url);
+    let client = crate::http_client::proxied_client(&effective_user_agent(
         &relay.user_agent,
         original_user_agent,
-    ))?
-    .post(chat_completions_url(&relay.base_url))
-    .bearer_auth(relay.api_key.trim())
-    .header(reqwest::header::CONTENT_TYPE, "application/json")
-    .json(&request_json)
-    .send()
-    .await?;
+    ))?;
+    let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
+        client,
+        &endpoint,
+        relay.api_key.trim(),
+        is_stream,
+        &request_json,
+        UpstreamWireApi::ChatCompletions,
+    )
+    .await;
+    let upstream = match upstream {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.chat_completions_request_failed",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "model": request_json.get("model").and_then(Value::as_str),
+                    "wireApi": UpstreamWireApi::ChatCompletions,
+                    "endpoint": sanitized_endpoint(&endpoint),
+                    "stream": is_stream,
+                    "connectionRetried": connection_retried,
+                    "error": sanitized_upstream_error(&error)
+                }),
+            );
+            return Err(error).context("Chat Completions 上游请求失败");
+        }
+    };
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
@@ -1814,6 +1865,106 @@ async fn upstream_request_parts(
                 UpstreamWireApi::GeminiGenerateContent,
             ))
         }
+    }
+}
+
+#[doc(hidden)]
+pub fn sanitized_endpoint_for_tests(endpoint: &str) -> String {
+    sanitized_endpoint(endpoint)
+}
+
+fn is_retryable_connection_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_connect)
+    })
+}
+
+fn sanitized_endpoint(endpoint: &str) -> String {
+    url::Url::parse(endpoint)
+        .ok()
+        .and_then(|url| {
+            let host = url.host_str()?;
+            let port = url
+                .port()
+                .map(|port| format!(":{port}"))
+                .unwrap_or_default();
+            Some(format!("{}://{host}{port}", url.scheme()))
+        })
+        .unwrap_or_else(|| "invalid-endpoint".to_string())
+}
+
+fn sanitized_upstream_error(error: &anyhow::Error) -> Value {
+    if let Some(error) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<reqwest::Error>())
+    {
+        let category = if error.is_connect() {
+            "connect"
+        } else if error.is_timeout() {
+            "timeout"
+        } else if error.is_decode() {
+            "decode"
+        } else if error.is_body() {
+            "body"
+        } else {
+            "request"
+        };
+        return json!({
+            "category": category,
+            "connect": error.is_connect(),
+            "timeout": error.is_timeout(),
+            "status": error.status().map(|status| status.as_u16()),
+            "source": std::error::Error::source(error).map(ToString::to_string)
+        });
+    }
+    json!({
+        "category": "other",
+        "source": error.root_cause().to_string()
+    })
+}
+
+async fn send_json_upstream_with_connect_retry(
+    client: reqwest::Client,
+    endpoint: &str,
+    api_key: &str,
+    is_stream: bool,
+    upstream_body: &Value,
+    wire_api: UpstreamWireApi,
+) -> (anyhow::Result<reqwest::Response>, bool) {
+    let first = send_upstream_request_for_responses(
+        upstream_request_builder(
+            client.clone(),
+            endpoint,
+            api_key,
+            is_stream,
+            upstream_body,
+            wire_api,
+        ),
+        is_stream,
+    )
+    .await;
+    match first {
+        Err(error) if is_retryable_connection_error(&error) => {
+            tokio::time::sleep(UPSTREAM_CONNECT_RETRY_DELAY).await;
+            (
+                send_upstream_request_for_responses(
+                    upstream_request_builder(
+                        client,
+                        endpoint,
+                        api_key,
+                        is_stream,
+                        upstream_body,
+                        wire_api,
+                    ),
+                    is_stream,
+                )
+                .await,
+                true,
+            )
+        }
+        result => (result, false),
     }
 }
 
@@ -2009,26 +2160,43 @@ async fn open_custom_models_proxy_request(
                 RelayProtocol::AnthropicMessages => "anthropicMessages",
                 RelayProtocol::GeminiGenerateContent => "geminiGenerateContent",
             },
-            "endpoint": endpoint,
+            "endpoint": sanitized_endpoint(&endpoint),
             "stream": is_stream
         }),
     );
-    let upstream = send_upstream_request_for_responses(
-        upstream_request_builder(
-            crate::http_client::proxied_client(&effective_user_agent(
-                &relay.user_agent,
-                original_user_agent,
-            ))?,
-            &endpoint,
-            model.api_key.trim(),
-            is_stream,
-            &upstream_body,
-            wire_api,
-        ),
+    let client = crate::http_client::proxied_client(&effective_user_agent(
+        &relay.user_agent,
+        original_user_agent,
+    ))?;
+    let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
+        client,
+        &endpoint,
+        model.api_key.trim(),
         is_stream,
+        &upstream_body,
+        wire_api,
     )
-    .await
-    .with_context(|| format!("自定义模型「{}」请求上游失败", model.model))?;
+    .await;
+    let upstream = match upstream {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.custom_model_request_failed",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "model": model.model,
+                    "wireApi": wire_api,
+                    "endpoint": sanitized_endpoint(&endpoint),
+                    "stream": is_stream,
+                    "connectionRetried": connection_retried,
+                    "error": sanitized_upstream_error(&error)
+                }),
+            );
+            return Err(error)
+                .with_context(|| format!("自定义模型「{}」请求上游失败", model.model));
+        }
+    };
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
