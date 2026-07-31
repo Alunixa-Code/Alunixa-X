@@ -374,3 +374,4 @@
 - 已补齐本轮图片清理、完整配置导入导出、供应商保存等英文词条，并清理已不再引用的旧词条；i18n 校验达到 plain 722/722、template 64/64 精确一致喵~
 - 完整 `cargo test --workspace -- --test-threads=1` 已通过全部 workspace crate、集成测试和文档测试，零失败，总耗时约 6 分 39 秒喵~
 - 前端 14 项 Node 测试、TypeScript 检查、Vite 生产构建、品牌保护、i18n 精确校验与 Rust 格式检查全部通过；Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
+- 发布前本地清理已完成：删除前端 `node_modules`、`dist`、Rust `target` 以及官方 Codex 源码审计临时目录，不保留下载或构建垃圾喵~
