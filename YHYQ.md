@@ -321,3 +321,5 @@
 - `cdp_bridge` 首次编译发现上一批六档断言误用了不存在的 `injection_script_path()`；已改回本测试文件统一使用的 `assets::injection_script(57321)` 入口。
 - `cdp_bridge` 首轮执行通过 79/80 项，唯一失败是旧测试仍要求直接调用单一 `vscode-api-*`；已将断言更新为验证新版候选模块数组与无哈希硬编码契约。
 - 新版注入合约最终 80 项全部通过，覆盖旧分包和新版单体模块发现、结构化设置/Host RPC/dispatcher 识别、Max/Ultra 同步、模型请求改写和无项目任务链路。
+- 已通过当前运行中的 `app-initial-cy-0TnkU.js` 实测新版接口：修复前 `enabled-reasoning-efforts` 为 `low/medium/high/xhigh/ultra` 且 `show-ultra-in-model-picker-slider=false`；同步后为完整六档并将 Ultra 原生滑块开关设为 `true`，通用 Host RPC 复读结果一致。
+- 同一实测确认新版 dispatcher 同时具备 `dispatchMessage`、`dispatchHostMessage` 与 `subscribe`，模型选择记录、请求改写和无项目导航所需能力均可由结构识别取得。
