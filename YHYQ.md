@@ -350,3 +350,8 @@
 - 已读取项目记录、相关历史索引、当前工作树和最近提交，确认分页历史注入与安全图片外置/恢复是当前首要未完成项，五个模型文件仍仅为 Windows 工作树状态噪声，不纳入后续提交喵~
 - 已为 dispatcher 与 app-server client 两条新任务请求链路注入官方 `historyMode: "paginated"`，覆盖 `thread/start`、`start-conversation`、`start-thread-for-host` 与两类预热封装，同时明确不修改 `thread/resume` 喵~
 - 已扩展 Node 合约测试验证 dispatcher、app-server、直接 `thread/start` 和预热均转为 paginated，续聊仍保留 legacy；JavaScript 语法检查与定向 `cdp_bridge` 合约测试通过喵~
+- 已将旧的一像素 GIF 全局去重原型重构为保守、安全、可逆的 rollout 图片外置：保留最新有效 `replacement_history`，含 `thread_rolled_back` 的文件完全跳过，只处理更新检查点之前的历史图片，并以 SHA-256 内容寻址形式将每个唯一 Data URL 仅保存一次喵~
+- 已实现备份 manifest、文件二次指纹校验、原子替换、路径约束、blob 哈希校验与逐字节恢复；五项定向测试覆盖旧检查点、回滚保护、运行时归档限定、唯一 blob 与路径穿越拒绝并全部通过喵~
+- 已在启动器加入非阻塞、nonfatal 的归档 rollout 自动清理任务，失败仅写诊断日志，不延迟或阻止 Codex 启动喵~
+- 已在管理器会话页面加入图片空间预览、安全清理、运行中保护提示、回滚保护统计、备份列表和恢复入口，并接入三个 Tauri 命令喵~
+- 已按 lockfile 安装前端依赖；TypeScript、13 项前端测试、Vite 生产构建、launcher/manager Rust 检查与图片清理测试通过；npm audit 仍报告仓库既有 1 个 low、2 个 high，i18n 校验仅包含仓库既有差异及本次两个待补模板词条喵~

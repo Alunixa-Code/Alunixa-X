@@ -449,6 +449,30 @@ type LocalSessionsResult = CommandResult<{
   hasMore: boolean;
 }>;
 
+type RolloutImageBackupSummary = {
+  id: string;
+  createdAt: string;
+  changedFiles: number;
+  imageCopies: number;
+  bytesReclaimed: number;
+  restoredAt: string | null;
+};
+
+type RolloutImageCleanupResult = CommandResult<{
+  scannedFiles: number;
+  candidateFiles: number;
+  changedFiles: number;
+  imageCopies: number;
+  uniqueImages: number;
+  bytesReclaimable: number;
+  bytesReclaimed: number;
+  backupDir: string | null;
+  skippedActiveSessions: boolean;
+  rollbackProtectedFiles: number;
+  invalidFiles: number;
+  backups: RolloutImageBackupSummary[];
+}>;
+
 type ZedRemoteProject = {
   id: string;
   label: string;
@@ -949,6 +973,8 @@ export function App() {
   const [ccsProviders, setCcsProviders] = useState<CcsProvidersResult | null>(null);
   const [pendingProviderImport, setPendingProviderImport] = useState<ProviderImportRequest | null>(null);
   const [localSessions, setLocalSessions] = useState<LocalSessionsResult | null>(null);
+  const [rolloutImageCleanup, setRolloutImageCleanup] = useState<RolloutImageCleanupResult | null>(null);
+  const [rolloutImageCleanupBusy, setRolloutImageCleanupBusy] = useState(false);
   const [zedRemoteProjects, setZedRemoteProjects] = useState<ZedRemoteProjectsResult | null>(null);
   const [liveContextEntries, setLiveContextEntries] = useState<CodexContextEntries | null>(null);
   const [logs, setLogs] = useState<LogsResult | null>(null);
@@ -1200,6 +1226,66 @@ export function App() {
     return result;
   };
 
+  const previewRolloutImageCleanup = async (silent = false) => {
+    const result = await run(() => call<RolloutImageCleanupResult>("preview_rollout_image_cleanup"));
+    if (result) {
+      setRolloutImageCleanup(result);
+      if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("会话图片清理"), result, { silentSuccess: true });
+    }
+    return result;
+  };
+
+  const applyRolloutImageCleanup = async () => {
+    const preview = rolloutImageCleanup ?? await previewRolloutImageCleanup(true);
+    if (!preview || preview.imageCopies <= 0) {
+      if (preview) showResultNotice(t("会话图片清理"), preview);
+      return;
+    }
+    const confirmed = await new Promise<boolean>((resolve) => {
+      setConfirmDialog({
+        title: t("清理旧图片副本"),
+        message: tf("将外置 {0} 个已被后续压缩检查点覆盖的图片副本，预计释放 {1}。仍生效的最新检查点和含回滚记录的会话不会修改，且会创建可恢复备份。继续前请完全退出 Codex / ChatGPT。", [preview.imageCopies, formatBytes(preview.bytesReclaimable)]),
+        confirmText: t("开始安全清理"),
+        cancelText: t("取消"),
+        resolve,
+      });
+    });
+    if (!confirmed) return;
+    setRolloutImageCleanupBusy(true);
+    try {
+      const result = await run(() => call<RolloutImageCleanupResult>("apply_rollout_image_cleanup"));
+      if (result) {
+        setRolloutImageCleanup(result);
+        showResultNotice(t("会话图片清理"), result);
+      }
+    } finally {
+      setRolloutImageCleanupBusy(false);
+    }
+  };
+
+  const restoreRolloutImageCleanup = async (backupId: string) => {
+    const confirmed = await new Promise<boolean>((resolve) => {
+      setConfirmDialog({
+        title: t("恢复会话图片"),
+        message: t("将把该批次外置的原始 Data URL 逐字节写回 rollout。继续前请完全退出 Codex / ChatGPT。"),
+        confirmText: t("恢复备份"),
+        cancelText: t("取消"),
+        resolve,
+      });
+    });
+    if (!confirmed) return;
+    setRolloutImageCleanupBusy(true);
+    try {
+      const result = await run(() => call<RolloutImageCleanupResult>("restore_rollout_image_cleanup", { backupId }));
+      if (result) {
+        setRolloutImageCleanup(result);
+        showResultNotice(t("恢复会话图片"), result);
+      }
+    } finally {
+      setRolloutImageCleanupBusy(false);
+    }
+  };
+
   const refreshZedRemoteProjects = async (silent = false) => {
     const result = await run(() => call<ZedRemoteProjectsResult>("list_zed_remote_projects"));
     if (result) {
@@ -1376,6 +1462,7 @@ export function App() {
       await refreshSettings(true);
       await refreshLocalSessions(true);
       await refreshProviderSyncTargets(true);
+      await previewRolloutImageCleanup(true);
     }
     if (next === "zedRemote") {
       await refreshSettings(true);
@@ -2566,6 +2653,9 @@ export function App() {
       setUserScriptEnabled,
       deleteUserScript,
       refreshLocalSessions,
+      previewRolloutImageCleanup,
+      applyRolloutImageCleanup,
+      restoreRolloutImageCleanup,
       deleteLocalSession,
       deleteLocalSessions,
       refreshZedRemoteProjects,
@@ -2615,7 +2705,7 @@ export function App() {
       disableWatcher: () => watcherAction("disable_watcher"),
       toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
     }),
-    [route, launchForm, settingsForm, settings, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, zedRemoteProjects, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, officialRemote, officialRemoteBusy, pendingChatGptLogin, remotePairing],
+    [route, launchForm, settingsForm, settings, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, rolloutImageCleanup, rolloutImageCleanupBusy, zedRemoteProjects, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, officialRemote, officialRemoteBusy, pendingChatGptLogin, remotePairing],
   );
   const hasUpdate = update?.updateAvailable === true;
 
@@ -2741,6 +2831,8 @@ export function App() {
               settings={settings}
               form={settingsForm}
               sessions={localSessions}
+              imageCleanup={rolloutImageCleanup}
+              imageCleanupBusy={rolloutImageCleanupBusy}
               providerSyncProgress={providerSyncProgress}
               providerSyncTargets={providerSyncTargets}
               selectedProviderSyncTarget={selectedProviderSyncTarget}
@@ -2886,6 +2978,9 @@ type Actions = {
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
   deleteUserScript: (key: string) => Promise<void>;
   refreshLocalSessions: (silent?: boolean, offset?: number) => Promise<LocalSessionsResult | null>;
+  previewRolloutImageCleanup: (silent?: boolean) => Promise<RolloutImageCleanupResult | null>;
+  applyRolloutImageCleanup: () => Promise<void>;
+  restoreRolloutImageCleanup: (backupId: string) => Promise<void>;
   deleteLocalSession: (session: LocalSession) => Promise<void>;
   deleteLocalSessions: (sessions: LocalSession[]) => Promise<void>;
   refreshZedRemoteProjects: () => Promise<ZedRemoteProjectsResult | null>;
@@ -4113,6 +4208,8 @@ function SessionsScreen({
   settings,
   form,
   sessions,
+  imageCleanup,
+  imageCleanupBusy,
   providerSyncProgress,
   providerSyncTargets,
   selectedProviderSyncTarget,
@@ -4122,6 +4219,8 @@ function SessionsScreen({
   settings: SettingsResult | null;
   form: BackendSettings;
   sessions: LocalSessionsResult | null;
+  imageCleanup: RolloutImageCleanupResult | null;
+  imageCleanupBusy: boolean;
   providerSyncProgress: ProviderSyncProgress;
   providerSyncTargets: ProviderSyncTargetsResult | null;
   selectedProviderSyncTarget: string;
@@ -4256,6 +4355,49 @@ function SessionsScreen({
           <Toolbar>
             <Button onClick={() => void actions.saveSettings()}>{t("保存自动修复设置")}</Button>
           </Toolbar>
+        </CardContent>
+      </Panel>
+      <Panel>
+        <CardHead title={t("会话图片空间清理")} detail={t("只外置已被更新压缩检查点覆盖的旧 Base64 图片；最新恢复上下文和含回滚记录的会话保持原样")} />
+        <CardContent>
+          <div className="metric-list">
+            <Metric label={t("已扫描 rollout")} value={tf("{0} 个", [imageCleanup?.scannedFiles ?? 0])} />
+            <Metric label={t("候选图片副本")} value={tf("{0} 个", [imageCleanup?.imageCopies ?? 0])} />
+            <Metric label={t("预计可释放")} value={formatBytes(imageCleanup?.bytesReclaimable ?? 0)} />
+            <Metric label={t("回滚保护会话")} value={tf("{0} 个", [imageCleanup?.rollbackProtectedFiles ?? 0])} />
+          </div>
+          {imageCleanup?.skippedActiveSessions ? (
+            <div className="hint-line">
+              <Info className="h-4 w-4" />
+              <span>{t("检测到 Codex / ChatGPT 正在运行，本次只检查 archived_sessions；退出应用后重新预览即可处理普通 sessions。")}</span>
+            </div>
+          ) : null}
+          <Toolbar>
+            <Button disabled={imageCleanupBusy} onClick={() => void actions.previewRolloutImageCleanup()} variant="outline">
+              <RefreshCw className="h-4 w-4" />
+              {t("预览空间占用")}
+            </Button>
+            <Button disabled={imageCleanupBusy || !imageCleanup?.imageCopies} onClick={() => void actions.applyRolloutImageCleanup()}>
+              <Trash2 className="h-4 w-4" />
+              {imageCleanupBusy ? t("正在处理…") : t("安全清理旧副本")}
+            </Button>
+          </Toolbar>
+          {(imageCleanup?.backups ?? []).length ? (
+            <div className="table">
+              {(imageCleanup?.backups ?? []).map((backup) => (
+                <div className="table-row" key={backup.id}>
+                  <div>
+                    <strong>{backup.id}</strong>
+                    <small>{tf("{0} 个文件 / {1} 个图片副本 / {2}", [backup.changedFiles, backup.imageCopies, formatBytes(backup.bytesReclaimed)])}</small>
+                  </div>
+                  <Badge status={backup.restoredAt ? "ok" : "archived"} />
+                  <Button disabled={imageCleanupBusy} onClick={() => void actions.restoreRolloutImageCleanup(backup.id)} size="sm" variant="outline">
+                    {backup.restoredAt ? t("再次恢复") : t("恢复原始图片")}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </CardContent>
       </Panel>
       <Panel>

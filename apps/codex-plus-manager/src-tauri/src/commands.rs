@@ -1369,6 +1369,65 @@ pub async fn apply_session_index_cleanup(
 }
 
 #[tauri::command]
+pub async fn preview_rollout_image_cleanup() -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        codex_plus_data::preview_rollout_image_cleanup(None)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("rollout image cleanup preview task failed: {error}"))
+    .and_then(|result| result);
+    match result {
+        Ok(preview) => ok(
+            &preview.message.clone(),
+            rollout_image_cleanup_payload(preview),
+        ),
+        Err(error) => failed(&format!("预览会话图片清理失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn apply_rollout_image_cleanup() -> CommandResult<Value> {
+    let result =
+        tauri::async_runtime::spawn_blocking(|| codex_plus_data::run_rollout_image_cleanup(None))
+            .await
+            .map_err(|error| anyhow::anyhow!("rollout image cleanup task failed: {error}"))
+            .and_then(|result| result);
+    match result {
+        Ok(cleanup) => ok(
+            &cleanup.message.clone(),
+            rollout_image_cleanup_payload(cleanup),
+        ),
+        Err(error) => failed(&format!("清理会话图片失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn restore_rollout_image_cleanup(backup_id: String) -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        codex_plus_data::restore_rollout_image_cleanup(None, &backup_id)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("rollout image restore task failed: {error}"))
+    .and_then(|result| result);
+    match result {
+        Ok(restore) => ok(
+            &restore.message.clone(),
+            rollout_image_cleanup_payload(restore),
+        ),
+        Err(error) => failed(&format!("恢复会话图片失败：{error}"), json!({})),
+    }
+}
+
+fn rollout_image_cleanup_payload(result: codex_plus_data::RolloutImageCleanupResult) -> Value {
+    let mut value = serde_json::to_value(result).unwrap_or_default();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("status");
+        object.remove("message");
+    }
+    value
+}
+
+#[tauri::command]
 pub async fn sync_providers_now(target_provider: Option<String>) -> CommandResult<Value> {
     let target_provider = target_provider
         .map(|value| value.trim().to_string())

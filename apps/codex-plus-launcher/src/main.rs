@@ -54,6 +54,7 @@ async fn main() -> Result<()> {
         activate_existing_codex_app(&options).await?;
         return Ok(());
     };
+    spawn_rollout_image_cleanup_nonfatal();
     if let Ok(settings) = codex_plus_core::settings::SettingsStore::default().load() {
         ensure_codex_plus_hooks(&settings).await;
     }
@@ -64,6 +65,54 @@ async fn main() -> Result<()> {
     let handle = launch_and_inject_with_hooks(options, &hooks).await?;
     handle.wait_for_codex_exit().await?;
     Ok(())
+}
+
+fn spawn_rollout_image_cleanup_nonfatal() {
+    tokio::spawn(async {
+        let result = tokio::task::spawn_blocking(|| {
+            let home = codex_plus_core::codex_sqlite::default_codex_home_dir();
+            codex_plus_data::rollout_image_cleanup::run_rollout_image_cleanup_in_home(&home, false)
+        })
+        .await;
+        log_rollout_image_cleanup_result(result);
+    });
+}
+
+fn log_rollout_image_cleanup_result(
+    result: std::result::Result<
+        anyhow::Result<codex_plus_data::RolloutImageCleanupResult>,
+        tokio::task::JoinError,
+    >,
+) {
+    match result {
+        Ok(Ok(cleanup)) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "launcher.rollout_image_cleanup.completed",
+                json!({
+                    "status": cleanup.status,
+                    "scanned_files": cleanup.scanned_files,
+                    "changed_files": cleanup.changed_files,
+                    "image_copies": cleanup.image_copies,
+                    "bytes_reclaimed": cleanup.bytes_reclaimed,
+                    "skipped_active_sessions": cleanup.skipped_active_sessions,
+                    "rollback_protected_files": cleanup.rollback_protected_files,
+                    "invalid_files": cleanup.invalid_files
+                }),
+            );
+        }
+        Ok(Err(error)) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "launcher.rollout_image_cleanup.failed",
+                json!({ "error": error.to_string() }),
+            );
+        }
+        Err(error) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "launcher.rollout_image_cleanup.task_failed",
+                json!({ "error": error.to_string() }),
+            );
+        }
+    }
 }
 
 async fn ensure_codex_plus_hooks(settings: &codex_plus_core::settings::BackendSettings) {

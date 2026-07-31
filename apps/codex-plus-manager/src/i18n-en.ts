@@ -5,6 +5,26 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "会话图片清理": "Session image cleanup",
+  "清理旧图片副本": "Clean old image copies",
+  "开始安全清理": "Start safe cleanup",
+  "恢复会话图片": "Restore session images",
+  "将把该批次外置的原始 Data URL 逐字节写回 rollout。继续前请完全退出 Codex / ChatGPT。":
+    "This writes the original externalized Data URLs back to the rollout byte for byte. Fully quit Codex / ChatGPT before continuing.",
+  "恢复备份": "Restore backup",
+  "会话图片空间清理": "Session image storage cleanup",
+  "只外置已被更新压缩检查点覆盖的旧 Base64 图片；最新恢复上下文和含回滚记录的会话保持原样":
+    "Externalize only old Base64 images superseded by newer compaction checkpoints; keep the active recovery context and rollback sessions unchanged.",
+  "已扫描 rollout": "Scanned rollouts",
+  "候选图片副本": "Candidate image copies",
+  "预计可释放": "Estimated reclaim",
+  "回滚保护会话": "Rollback-protected sessions",
+  "检测到 Codex / ChatGPT 正在运行，本次只检查 archived_sessions；退出应用后重新预览即可处理普通 sessions。":
+    "Codex / ChatGPT is running, so only archived_sessions was checked. Quit the app and preview again to include regular sessions.",
+  "预览空间占用": "Preview storage",
+  "安全清理旧副本": "Safely clean old copies",
+  "再次恢复": "Restore again",
+  "恢复原始图片": "Restore original images",
   "手机远控": "Mobile remote control",
   "ChatGPT 登录": "ChatGPT sign-in",
   "请在浏览器中完成登录，管理器会自动接收结果。":

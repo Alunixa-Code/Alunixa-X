@@ -13,6 +13,10 @@ pub use provider_sync::{
     load_provider_sync_targets, preview_session_index_cleanup, run_provider_sync,
     run_provider_sync_with_target,
 };
+pub use rollout_image_cleanup::{
+    RolloutImageBackupSummary, RolloutImageCleanupResult, RolloutImageCleanupStatus,
+    preview_rollout_image_cleanup, restore_rollout_image_cleanup, run_rollout_image_cleanup,
+};
 pub use storage::{
     LocalSession, SQLiteStorageAdapter, delete_local_from_paths,
     move_codex_thread_workspace_from_paths,
