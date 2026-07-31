@@ -370,3 +370,5 @@
 - Responses、CustomModels、Chat Completions、Models 与 Audio 建连失败日志现在只记录脱敏 scheme/host/port、错误分类和底层首因，不再写入完整路径、查询参数或 URL 凭证喵~
 - 协议代理 57 项测试、launcher/manager Rust 检查和 Rust 格式检查通过，新增连接池复用与诊断 URL 脱敏测试喵~
 - 正式发布版本确定为 `1.2.56`，将统一更新 Rust workspace、Cargo.lock、前端 package/package-lock 与 Tauri 配置，并在 CHANGELOG 完整记录新版模块兼容、Max/Ultra、分页历史、图片安全外置、状态校验、Beta 重启、供应商事务保存、退出登录、保存反馈和 502 连接修复喵~
+- 已统一全部 `1.2.56` 版本源并生成 Cargo.lock 版本更新；本地品牌保护校验通过喵~
+- 已补齐本轮图片清理、完整配置导入导出、供应商保存等英文词条，并清理已不再引用的旧词条；i18n 校验达到 plain 722/722、template 64/64 精确一致喵~
