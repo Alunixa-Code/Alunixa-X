@@ -372,3 +372,5 @@
 - 正式发布版本确定为 `1.2.56`，将统一更新 Rust workspace、Cargo.lock、前端 package/package-lock 与 Tauri 配置，并在 CHANGELOG 完整记录新版模块兼容、Max/Ultra、分页历史、图片安全外置、状态校验、Beta 重启、供应商事务保存、退出登录、保存反馈和 502 连接修复喵~
 - 已统一全部 `1.2.56` 版本源并生成 Cargo.lock 版本更新；本地品牌保护校验通过喵~
 - 已补齐本轮图片清理、完整配置导入导出、供应商保存等英文词条，并清理已不再引用的旧词条；i18n 校验达到 plain 722/722、template 64/64 精确一致喵~
+- 完整 `cargo test --workspace -- --test-threads=1` 已通过全部 workspace crate、集成测试和文档测试，零失败，总耗时约 6 分 39 秒喵~
+- 前端 14 项 Node 测试、TypeScript 检查、Vite 生产构建、品牌保护、i18n 精确校验与 Rust 格式检查全部通过；Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
