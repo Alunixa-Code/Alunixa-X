@@ -53,12 +53,32 @@ fn run_codex_restart_worker(args: &[String]) -> bool {
         codex_plus_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
     std::thread::sleep(std::time::Duration::from_millis(900));
-    codex_plus_core::watcher::stop_codex_processes_and_wait();
+    if let Err(error) = codex_plus_core::watcher::stop_codex_processes_and_wait() {
+        let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+            "manager.restart_worker.stop_failed",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": helper_port,
+                "error": error.to_string(),
+            }),
+        );
+        return true;
+    }
     for _ in 0..150 {
         if codex_plus_core::ports::can_bind_loopback_port(helper_port) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if !codex_plus_core::ports::can_bind_loopback_port(helper_port) {
+        let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+            "manager.restart_worker.helper_port_busy",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": helper_port,
+            }),
+        );
+        return true;
     }
     let launch_args = [
         "--debug-port".to_string(),

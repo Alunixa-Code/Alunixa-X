@@ -6,7 +6,7 @@ use codex_plus_core::watcher::{
 
 #[cfg(windows)]
 use codex_plus_core::watcher::{
-    WindowsProcessInfo, find_codex_processes_from_snapshot,
+    WindowsProcessInfo, find_codex_process_tree_from_snapshot, find_codex_processes_from_snapshot,
     find_session_index_cleanup_blocking_processes_from_snapshot,
 };
 
@@ -262,6 +262,10 @@ fn find_codex_processes_finds_beta_package_process_tree() {
     ];
 
     assert_eq!(find_codex_processes_from_snapshot(&processes), vec![51, 52]);
+    assert_eq!(
+        find_codex_process_tree_from_snapshot(&processes),
+        vec![53, 52, 51]
+    );
 }
 
 #[cfg(windows)]

@@ -11,8 +11,9 @@ pub use crate::windows_integration::WindowsProcessInfo;
 pub const WATCHER_INTERVAL_SECONDS: f64 = 3.0;
 pub const CDP_PROBE_TIMEOUT_SECONDS: f64 = 0.5;
 pub const TAKEOVER_FAILURE_BACKOFF_SECONDS: f64 = 30.0;
-pub const RESTART_STOP_WAIT_TIMEOUT_MS: u64 = 5_000;
+pub const RESTART_STOP_WAIT_TIMEOUT_MS: u64 = 10_000;
 const RESTART_STOP_WAIT_INTERVAL_MS: u64 = 100;
+const RESTART_STOP_EMPTY_STREAK: u32 = 3;
 pub const WATCHER_RUN_NAME: &str = "CodexPlusPlusWatcher";
 pub const WATCHER_RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 pub const WATCHER_STARTUP_SHORTCUT_NAME: &str = "CodexPlusPlusWatcher.lnk";
@@ -231,6 +232,53 @@ pub fn find_codex_processes_from_snapshot(
     ids
 }
 
+#[cfg(windows)]
+pub fn find_codex_process_tree_from_snapshot(
+    processes: &[crate::windows_integration::WindowsProcessInfo],
+) -> Vec<u32> {
+    let roots = find_codex_processes_from_snapshot(processes);
+    let mut selected = roots.iter().copied().collect::<HashSet<_>>();
+    loop {
+        let mut changed = false;
+        for process in processes {
+            if selected.contains(&process.parent_process_id) && selected.insert(process.process_id)
+            {
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Children go first so Electron cannot keep helpers alive while the main
+    // process is being terminated.
+    let parents = processes
+        .iter()
+        .map(|process| (process.process_id, process.parent_process_id))
+        .collect::<HashMap<_, _>>();
+    let mut ids = selected.into_iter().collect::<Vec<_>>();
+    ids.sort_by_key(|process_id| {
+        std::cmp::Reverse((process_tree_depth(*process_id, &parents), *process_id))
+    });
+    ids
+}
+
+#[cfg(windows)]
+fn process_tree_depth(process_id: u32, parents: &HashMap<u32, u32>) -> usize {
+    let mut depth = 0usize;
+    let mut cursor = process_id;
+    let mut visited = HashSet::new();
+    while cursor != 0 && visited.insert(cursor) {
+        let Some(parent) = parents.get(&cursor).copied() else {
+            break;
+        };
+        cursor = parent;
+        depth = depth.saturating_add(1);
+    }
+    depth
+}
+
 /// Return desktop processes that can write Codex task state while a destructive
 /// session-index cleanup is running. This is intentionally stricter than the
 /// watcher filter: any supported ChatGPT desktop process blocks deletion,
@@ -322,31 +370,50 @@ pub fn stop_launcher_processes() {
 pub fn stop_launcher_processes() {}
 
 #[cfg(windows)]
-pub fn stop_launcher_processes_and_wait() {
-    let processes = crate::windows_integration::enumerate_processes();
-    let killable = filter_killable_launcher_processes(
-        processes.iter().map(|process| {
-            (
-                process.process_id,
-                process.parent_process_id,
-                process.exe_file.as_str(),
-            )
-        }),
-        std::process::id(),
-    );
-    terminate_and_wait_for_exit(
-        killable,
-        RESTART_STOP_WAIT_TIMEOUT_MS,
-        RESTART_STOP_WAIT_INTERVAL_MS,
-    );
+pub fn stop_launcher_processes_and_wait() -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(RESTART_STOP_WAIT_TIMEOUT_MS);
+    loop {
+        let processes = crate::windows_integration::enumerate_processes();
+        let killable = filter_killable_launcher_processes(
+            processes.iter().map(|process| {
+                (
+                    process.process_id,
+                    process.parent_process_id,
+                    process.exe_file.as_str(),
+                )
+            }),
+            std::process::id(),
+        );
+        if killable.is_empty() {
+            return Ok(());
+        }
+        for process_id in &killable {
+            let _ = crate::windows_integration::terminate_process(*process_id);
+        }
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "Codex++ 后台进程未能在 {} 毫秒内退出，剩余 PID：{}",
+                RESTART_STOP_WAIT_TIMEOUT_MS,
+                killable
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        std::thread::sleep(Duration::from_millis(RESTART_STOP_WAIT_INTERVAL_MS));
+    }
 }
 
 #[cfg(not(windows))]
-pub fn stop_launcher_processes_and_wait() {}
+pub fn stop_launcher_processes_and_wait() -> anyhow::Result<()> {
+    Ok(())
+}
 
 #[cfg(windows)]
 pub fn stop_codex_processes() {
-    for process_id in find_codex_processes() {
+    let processes = crate::windows_integration::enumerate_processes();
+    for process_id in find_codex_process_tree_from_snapshot(&processes) {
         let _ = crate::windows_integration::terminate_process(process_id);
     }
 }
@@ -355,45 +422,57 @@ pub fn stop_codex_processes() {
 pub fn stop_codex_processes() {}
 
 #[cfg(windows)]
-pub fn stop_codex_processes_and_wait() {
-    terminate_and_wait_for_exit(
-        find_codex_processes(),
-        RESTART_STOP_WAIT_TIMEOUT_MS,
-        RESTART_STOP_WAIT_INTERVAL_MS,
-    );
+pub fn stop_codex_processes_and_wait() -> anyhow::Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(RESTART_STOP_WAIT_TIMEOUT_MS);
+    let mut saw_process = false;
+    let mut empty_streak = 0u32;
+    loop {
+        let processes = crate::windows_integration::enumerate_processes();
+        let process_ids = find_codex_process_tree_from_snapshot(&processes);
+        if process_ids.is_empty() {
+            if !saw_process {
+                return Ok(());
+            }
+            empty_streak = empty_streak.saturating_add(1);
+            if empty_streak >= RESTART_STOP_EMPTY_STREAK {
+                return Ok(());
+            }
+        } else {
+            saw_process = true;
+            empty_streak = 0;
+            for process_id in &process_ids {
+                let _ = crate::windows_integration::terminate_process(*process_id);
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            let remaining = find_codex_process_tree_from_snapshot(
+                &crate::windows_integration::enumerate_processes(),
+            );
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "watcher.codex_stop_timeout",
+                serde_json::json!({
+                    "remaining_process_ids": remaining,
+                    "timeout_ms": RESTART_STOP_WAIT_TIMEOUT_MS
+                }),
+            );
+            anyhow::bail!(
+                "Codex 进程树未能在 {} 毫秒内退出，剩余 PID：{}",
+                RESTART_STOP_WAIT_TIMEOUT_MS,
+                remaining
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        std::thread::sleep(Duration::from_millis(RESTART_STOP_WAIT_INTERVAL_MS));
+    }
 }
 
 #[cfg(not(windows))]
-pub fn stop_codex_processes_and_wait() {}
-
-#[cfg(windows)]
-fn terminate_and_wait_for_exit(process_ids: Vec<u32>, timeout_ms: u64, interval_ms: u64) {
-    if process_ids.is_empty() {
-        return;
-    }
-    for process_id in &process_ids {
-        let _ = crate::windows_integration::terminate_process(*process_id);
-    }
-    let deadline = std::time::Instant::now() + Duration::from_millis(timeout_ms);
-    loop {
-        let running_process_ids = crate::windows_integration::enumerate_processes()
-            .into_iter()
-            .map(|process| process.process_id);
-        let remaining = process_ids_still_running(&process_ids, running_process_ids);
-        if remaining.is_empty() || std::time::Instant::now() >= deadline {
-            if !remaining.is_empty() {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "watcher.stop_wait_timeout",
-                    serde_json::json!({
-                        "remaining_process_ids": remaining,
-                        "timeout_ms": timeout_ms
-                    }),
-                );
-            }
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(interval_ms));
-    }
+pub fn stop_codex_processes_and_wait() -> anyhow::Result<()> {
+    Ok(())
 }
 
 #[cfg(windows)]

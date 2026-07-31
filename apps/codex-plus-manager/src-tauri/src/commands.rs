@@ -468,8 +468,24 @@ pub fn launch_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
 
 #[tauri::command]
 pub fn restart_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
-    codex_plus_core::watcher::stop_launcher_processes_and_wait();
-    codex_plus_core::watcher::stop_codex_processes_and_wait();
+    if let Err(error) = codex_plus_core::watcher::stop_launcher_processes_and_wait() {
+        return failed(
+            &format!("Codex++ 后台进程未能完全停止，已取消重启：{error}"),
+            json!({
+                "debugPort": request.debug_port,
+                "helperPort": request.helper_port
+            }),
+        );
+    }
+    if let Err(error) = codex_plus_core::watcher::stop_codex_processes_and_wait() {
+        return failed(
+            &format!("Codex 进程未能完全停止，已取消重启：{error}"),
+            json!({
+                "debugPort": request.debug_port,
+                "helperPort": request.helper_port
+            }),
+        );
+    }
     spawn_codex_plus_launch(request, "Codex 已请求重启，启动任务正在后台运行。")
 }
 
