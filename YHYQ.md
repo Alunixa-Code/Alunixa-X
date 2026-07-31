@@ -383,3 +383,13 @@
 - 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.56` 喵~
 - 发布记录提交触发的主分支 Actions `30624668489` 首轮仅 macOS arm64 在 DMG 创建阶段遇到 runner `hdiutil: create failed - Resource busy`，其编译已成功且同轮 Windows/macOS x64 全部成功喵~
 - 已只重跑该失败 job，第二轮 macOS arm64 完成前端、release 二进制、DMG、包结构与上传全链路，最终主分支三平台工作流全部成功喵~
+- 用户反馈当前 Codex 右上角即使已连接也持续显示红色“未连接”，认为新版双链路一致性判定不如早期轮询稳定，要求恢复可靠状态显示喵~
+- 用户反馈 ChatGPT 退出登录按钮在当前实际界面中仍然没有显示，要求继续修复喵~
+- 已读取交接记录、YHYQ.md、工作树和最近提交，确认 v1.2.56 已发布而当前五个模型文件仍只有 Windows 换行状态噪声喵~
+- 已确认这些状态噪声与 HEAD 内容一致，并创建本轮修改前检查点提交 `8bdd81d` 喵~
+- 本轮将以实际运行进程、bridge/helper 响应和页面注入 DOM 为依据，定位红灯与按钮缺失的运行时根因喵~
+- 已确认红灯根因是 Codex 页面内直接访问 `127.0.0.1:57321/backend/status` 被新版 CSP/CORS 阻止，并非实际 helper 离线；同期 bridge 与模型请求均正常喵~
+- 状态检测已恢复为每 3 秒稳定轮询 CDP bridge，并由 Rust bridge 在进程内校验其自身 helper 的 HTTP 状态、版本、transport 与 launcher PID，避免页面跨 CSP 误报和旧 helper 单独骗绿喵~
+- 退出登录按钮已移到待登录条件之外永久显示；若存在陈旧登录任务，退出操作会先取消该任务，再执行账号退出与本地登录态清理喵~
+- 已新增真实 helper 生命周期回归测试，确认 helper 存活时 bridge 返回健康、helper 关闭后立即返回失败；JavaScript 语法、Rust 格式、CDP 定向测试和 launcher 定向测试通过喵~
+- 已修正退出登录前端契约测试的源码定位方式，避免 JSX 箭头符号截断正则；前端 14 项测试现全部通过喵~

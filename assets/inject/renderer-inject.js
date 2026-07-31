@@ -2755,54 +2755,9 @@
     refreshCodexServiceTierControls();
   }
 
-  function backendEventsUrl() {
-    const url = new URL(helperBase);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    url.pathname = "/backend/events";
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  }
-
-  function backendWebSocketAllowedByDocumentCsp() {
-    const policies = Array.from(document.querySelectorAll('meta[http-equiv="Content-Security-Policy"]'))
-      .map((node) => String(node.content || "").trim())
-      .filter(Boolean);
-    if (!policies.length) return true;
-    const endpoint = new URL(backendEventsUrl());
-    return policies.every((policy) => {
-      const directives = new Map(
-        policy.split(";")
-          .map((directive) => directive.trim().split(/\s+/).filter(Boolean))
-          .filter((parts) => parts.length)
-          .map((parts) => [parts[0].toLowerCase(), parts.slice(1)]),
-      );
-      const sources = directives.get("connect-src") || directives.get("default-src");
-      if (!sources) return true;
-      return sources.some((source) => {
-        const normalized = source.replace(/\/+$/, "");
-        return normalized === "*" ||
-          normalized === "ws:" ||
-          normalized === endpoint.origin ||
-          normalized === `${endpoint.protocol}//${endpoint.hostname}:*`;
-      });
-    });
-  }
-
   function markBackendDisconnected(message = "后端连接已断开") {
     codexPlusBackendStatus = { status: "failed", message };
     renderBackendStatus();
-  }
-
-  function scheduleBackendReconnect() {
-    if (window.__codexPlusBackendReconnectTimer) return;
-    const attempt = Number(window.__codexPlusBackendReconnectAttempt || 0);
-    const delay = Math.min(5000, 250 * (2 ** Math.min(attempt, 5)));
-    window.__codexPlusBackendReconnectAttempt = attempt + 1;
-    window.__codexPlusBackendReconnectTimer = window.setTimeout(() => {
-      window.__codexPlusBackendReconnectTimer = 0;
-      connectBackendStatusStream();
-    }, delay);
   }
 
   async function connectBackendStatusViaBridge() {
@@ -2810,73 +2765,28 @@
       return window.__codexPlusBackendBridgeStatusPromise;
     }
     const request = (async () => {
-      codexPlusBackendStatus = { status: "checking", message: "正在连接后端" };
-      renderBackendStatus();
-      const nextStatus = await postJson("/backend/status", {});
-      if (nextStatus?.status === "ok") {
-        window.__codexPlusBackendReconnectAttempt = 0;
-        codexPlusBackendStatus = {
-          ...nextStatus,
-          transport: nextStatus.transport || "cdp-bridge",
-        };
+      if (codexPlusBackendStatus.status !== "ok") {
+        codexPlusBackendStatus = { status: "checking", message: "正在连接后端" };
         renderBackendStatus();
-        return true;
       }
-      markBackendDisconnected(nextStatus?.message || "后端连接已断开");
-      scheduleBackendReconnect();
-      return false;
+      try {
+        const nextStatus = await postJson("/backend/status", {});
+        if (nextStatus?.status === "ok") {
+          codexPlusBackendStatus = nextStatus;
+          renderBackendStatus();
+          return true;
+        }
+        markBackendDisconnected(nextStatus?.message || "后端连接已断开");
+        return false;
+      } catch (error) {
+        markBackendDisconnected(error?.message || "后端连接已断开");
+        return false;
+      }
     })().finally(() => {
       window.__codexPlusBackendBridgeStatusPromise = null;
     });
     window.__codexPlusBackendBridgeStatusPromise = request;
     return request;
-  }
-
-  function connectBackendStatusStream() {
-    const current = window.__codexPlusBackendSocket;
-    if (current && (current.readyState === WebSocket.OPEN || current.readyState === WebSocket.CONNECTING)) return;
-    if (!backendWebSocketAllowedByDocumentCsp()) {
-      void connectBackendStatusViaBridge();
-      return;
-    }
-    codexPlusBackendStatus = { status: "checking", message: "正在连接后端" };
-    renderBackendStatus();
-    let socket;
-    try {
-      socket = new WebSocket(backendEventsUrl());
-    } catch (error) {
-      void connectBackendStatusViaBridge();
-      return;
-    }
-    window.__codexPlusBackendSocket = socket;
-    socket.addEventListener("open", () => {
-      if (window.__codexPlusBackendSocket !== socket) return;
-      window.__codexPlusBackendReconnectAttempt = 0;
-    });
-    socket.addEventListener("message", (event) => {
-      if (window.__codexPlusBackendSocket !== socket) return;
-      try {
-        const nextStatus = JSON.parse(String(event.data || ""));
-        if (nextStatus?.status) {
-          void connectBackendStatusViaBridge();
-        }
-      } catch {
-      }
-    });
-    socket.addEventListener("close", () => {
-      if (window.__codexPlusBackendSocket !== socket) return;
-      window.__codexPlusBackendSocket = null;
-      void connectBackendStatusViaBridge();
-    });
-    socket.addEventListener("error", () => {
-      if (window.__codexPlusBackendSocket !== socket) return;
-      try {
-        socket.close();
-      } catch {
-        window.__codexPlusBackendSocket = null;
-        void connectBackendStatusViaBridge();
-      }
-    });
   }
 
   async function openManagerFromCodex() {
@@ -2888,20 +2798,24 @@
     }
   }
 
-  function startBackendStatusStream() {
-    if (window.__codexPlusBackendStatusStreamInstalled) return;
-    window.__codexPlusBackendStatusStreamInstalled = true;
-    connectBackendStatusStream();
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") connectBackendStatusStream();
-    });
-    window.addEventListener("pagehide", () => {
-      window.clearTimeout(window.__codexPlusBackendReconnectTimer);
-      window.__codexPlusBackendReconnectTimer = 0;
-      const socket = window.__codexPlusBackendSocket;
-      window.__codexPlusBackendSocket = null;
-      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
-    }, { once: true });
+  function startBackendStatusPolling() {
+    window.clearInterval(window.__codexPlusBackendHeartbeat);
+    window.clearTimeout(window.__codexPlusBackendReconnectTimer);
+    window.__codexPlusBackendReconnectTimer = 0;
+    const socket = window.__codexPlusBackendSocket;
+    window.__codexPlusBackendSocket = null;
+    if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+    void connectBackendStatusViaBridge();
+    window.__codexPlusBackendHeartbeat = window.setInterval(() => {
+      if (document.visibilityState === "visible") void connectBackendStatusViaBridge();
+    }, 3000);
+    if (window.__codexPlusBackendVisibilityHandler) {
+      document.removeEventListener("visibilitychange", window.__codexPlusBackendVisibilityHandler);
+    }
+    window.__codexPlusBackendVisibilityHandler = () => {
+      if (document.visibilityState === "visible") void connectBackendStatusViaBridge();
+    };
+    document.addEventListener("visibilitychange", window.__codexPlusBackendVisibilityHandler);
   }
 
   function userScriptStatusLabel(status) {
@@ -5057,69 +4971,6 @@
     document.addEventListener("visibilitychange", window.__codexThreadScrollVisibilityHandler, true);
   }
 
-  function reconcileBackendStatuses(bridgeStatus, helperStatus) {
-    if (bridgeStatus?.status !== "ok") {
-      return {
-        status: "failed",
-        message: bridgeStatus?.timeout ? "注入桥接检查超时" : "注入桥接未连接",
-        version: helperStatus?.version || bridgeStatus?.version || "",
-        transport: "verification",
-      };
-    }
-    if (helperStatus?.status !== "ok") {
-      return {
-        status: "failed",
-        message: "本地 Helper 未连接",
-        version: bridgeStatus.version || "",
-        transport: "verification",
-      };
-    }
-    const bridgeProcessId = Number(bridgeStatus.processId);
-    const helperProcessId = Number(helperStatus.processId);
-    if (!Number.isSafeInteger(bridgeProcessId) || bridgeProcessId <= 0 ||
-        !Number.isSafeInteger(helperProcessId) || helperProcessId <= 0) {
-      return {
-        status: "failed",
-        message: "后端状态缺少进程标识，请重启 Codex",
-        version: bridgeStatus.version || helperStatus.version || "",
-        transport: "verification",
-      };
-    }
-    if (!bridgeStatus.version || bridgeStatus.version !== helperStatus.version) {
-      return {
-        status: "failed",
-        message: "后端版本不一致，请重启 Codex",
-        version: bridgeStatus.version || helperStatus.version || "",
-        transport: "verification",
-      };
-    }
-    if (bridgeProcessId !== helperProcessId) {
-      return {
-        status: "failed",
-        message: "后端进程不一致，请重启 Codex",
-        version: bridgeStatus.version,
-        transport: "verification",
-      };
-    }
-    if (bridgeStatus.transport !== "cdp-bridge" || helperStatus.transport !== "http-helper") {
-      return {
-        status: "failed",
-        message: "后端连接类型异常，请重启 Codex",
-        version: bridgeStatus.version,
-        transport: "verification",
-      };
-    }
-    return {
-      status: "ok",
-      message: "后端已连接",
-      version: bridgeStatus.version,
-      processId: bridgeProcessId,
-      transport: "verified",
-      bridgeTransport: bridgeStatus.transport,
-      helperTransport: helperStatus.transport,
-    };
-  }
-
   async function postJson(path, payload) {
     function bridgeWithBackendTimeout(path, payload) {
       return Promise.race([
@@ -5127,46 +4978,23 @@
         new Promise((resolve) => setTimeout(() => resolve({ status: "failed", message: "后端检查超时", timeout: true }), 2000)),
       ]);
     }
-    async function fetchBackendStatusFromHelper(path, payload) {
-      try {
-        const response = await fetch(`${helperBase}${path}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload || {}),
-        });
-        if (!response.ok) return { status: "failed", message: `Helper HTTP ${response.status}` };
-        return await response.json();
-      } catch (error) {
-        return { status: "failed", message: "未连接" };
-      }
-    }
     if (!window.__codexSessionDeleteBridge) {
-      if (path === "/backend/status") {
-        return reconcileBackendStatuses(null, await fetchBackendStatusFromHelper(path, payload));
-      }
       sendCodexPlusDiagnostic("bridge_missing_for_route", { path });
       return { status: "failed", message: "桥接不可用，请重启启动器" };
     }
     try {
       if (path === "/backend/status") {
-        const [bridgeStatus, helperStatus] = await Promise.all([
-          bridgeWithBackendTimeout(path, payload),
-          fetchBackendStatusFromHelper(path, payload),
-        ]);
-        const verified = reconcileBackendStatuses(bridgeStatus, helperStatus);
-        if (verified.status !== "ok") {
+        const bridgeStatus = await bridgeWithBackendTimeout(path, payload);
+        if (bridgeStatus?.status !== "ok") {
           sendCodexPlusDiagnostic("backend_status_verification_failed", {
             path,
-            message: verified.message || "",
+            message: bridgeStatus?.message || "",
             bridgeStatus: bridgeStatus?.status || "",
-            helperStatus: helperStatus?.status || "",
             bridgeProcessId: bridgeStatus?.processId || null,
-            helperProcessId: helperStatus?.processId || null,
             bridgeVersion: bridgeStatus?.version || "",
-            helperVersion: helperStatus?.version || "",
           });
         }
-        return verified;
+        return bridgeStatus;
       }
       return await window.__codexSessionDeleteBridge(path, payload);
     } catch (error) {
@@ -5176,17 +5004,7 @@
         errorMessage: error?.message || String(error),
       });
       if (path === "/backend/status") {
-        const helperStatus = await fetchBackendStatusFromHelper(path, payload);
-        const verified = reconcileBackendStatuses(null, helperStatus);
-        sendCodexPlusDiagnostic("backend_status_verification_failed", {
-          path,
-          errorName: error?.name || "",
-          errorMessage: error?.message || String(error),
-          bridgeStatus: "failed",
-          helperStatus: helperStatus?.status || "",
-          helperProcessId: helperStatus?.processId || null,
-        });
-        return verified;
+        return { status: "failed", message: "注入桥接未连接", transport: "verification" };
       }
       throw error;
     }
@@ -9474,7 +9292,7 @@
     installCodexProjectlessNewTaskButtons();
     installCodexPlusMenu();
     localizeCodexMenus();
-    startBackendStatusStream();
+    startBackendStatusPolling();
     installDeleteButtonEventDelegation();
     updateThreadScrollHandlers();
     installThreadScrollProgrammaticScrollGuard();

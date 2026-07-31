@@ -448,7 +448,9 @@ impl LaunchHooks for LauncherHooks {
     }
 
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
-        self.core.start_helper(helper_port).await
+        self.core.start_helper(helper_port).await?;
+        self.runtime.set_helper_port(helper_port);
+        Ok(())
     }
 
     async fn launch_codex(
@@ -659,6 +661,7 @@ impl LauncherDataService {
 
 struct LauncherRuntimeService {
     debug_port: Mutex<u16>,
+    helper_port: Mutex<Option<u16>>,
     websocket_url: Mutex<Option<String>>,
     user_scripts: UserScriptManager,
 }
@@ -667,6 +670,7 @@ impl LauncherRuntimeService {
     fn new(debug_port: u16, user_scripts: UserScriptManager) -> Self {
         Self {
             debug_port: Mutex::new(debug_port),
+            helper_port: Mutex::new(None),
             websocket_url: Mutex::new(None),
             user_scripts,
         }
@@ -678,6 +682,10 @@ impl LauncherRuntimeService {
 
     fn set_websocket_url(&self, websocket_url: &str) {
         *self.websocket_url.lock().unwrap() = Some(websocket_url.to_string());
+    }
+
+    fn set_helper_port(&self, helper_port: u16) {
+        *self.helper_port.lock().unwrap() = Some(helper_port);
     }
 }
 
@@ -737,13 +745,22 @@ impl BridgeRuntimeService for LauncherRuntimeService {
     }
 
     async fn backend_status(&self) -> anyhow::Result<Value> {
-        Ok(json!({
-            "status": "ok",
-            "message": "后端已连接",
-            "version": codex_plus_core::version::VERSION,
-            "transport": "cdp-bridge",
-            "processId": std::process::id()
-        }))
+        let helper_port = *self.helper_port.lock().unwrap();
+        let Some(helper_port) = helper_port else {
+            return Ok(backend_status_failed("本地 Helper 尚未启动"));
+        };
+        match probe_owned_helper(helper_port).await {
+            Ok(helper_status) => Ok(json!({
+                "status": "ok",
+                "message": "后端已连接",
+                "version": codex_plus_core::version::VERSION,
+                "transport": "verified",
+                "processId": std::process::id(),
+                "bridgeTransport": "cdp-bridge",
+                "helperTransport": helper_status.get("transport").and_then(Value::as_str).unwrap_or("http-helper")
+            })),
+            Err(error) => Ok(backend_status_failed(&error.to_string())),
+        }
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
@@ -807,6 +824,61 @@ impl BridgeRuntimeService for LauncherRuntimeService {
             &payload,
         ))
     }
+}
+
+fn backend_status_failed(message: &str) -> Value {
+    json!({
+        "status": "failed",
+        "message": message,
+        "version": codex_plus_core::version::VERSION,
+        "transport": "verification",
+        "processId": std::process::id()
+    })
+}
+
+async fn probe_owned_helper(helper_port: u16) -> anyhow::Result<Value> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let address = ("127.0.0.1", helper_port);
+    let mut stream = tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        tokio::net::TcpStream::connect(address),
+    )
+    .await
+    .context("本地 Helper 检查超时")?
+    .context("本地 Helper 未连接")?;
+    let request = format!(
+        "GET /backend/status HTTP/1.1\r\nHost: 127.0.0.1:{helper_port}\r\nConnection: close\r\n\r\n"
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        stream.write_all(request.as_bytes()),
+    )
+    .await
+    .context("本地 Helper 写入超时")??;
+    let mut response = Vec::new();
+    tokio::time::timeout(
+        std::time::Duration::from_millis(750),
+        stream.read_to_end(&mut response),
+    )
+    .await
+    .context("本地 Helper 响应超时")??;
+    let body_offset = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|offset| offset + 4)
+        .context("本地 Helper 响应无效")?;
+    let status = serde_json::from_slice::<Value>(&response[body_offset..])
+        .context("本地 Helper 状态无效")?;
+    let expected_process_id = u64::from(std::process::id());
+    let matches_owner = status.get("status").and_then(Value::as_str) == Some("ok")
+        && status.get("version").and_then(Value::as_str) == Some(codex_plus_core::version::VERSION)
+        && status.get("transport").and_then(Value::as_str) == Some("http-helper")
+        && status.get("processId").and_then(Value::as_u64) == Some(expected_process_id);
+    if !matches_owner {
+        anyhow::bail!("本地 Helper 与当前启动器不一致，请重启 Codex")
+    }
+    Ok(status)
 }
 
 async fn inject_with_context(
@@ -955,6 +1027,24 @@ mod tests {
 
         assert_eq!(options.debug_port, LaunchOptions::default().debug_port);
         assert_eq!(options.helper_port, LaunchOptions::default().helper_port);
+    }
+
+    #[tokio::test]
+    async fn bridge_status_checks_the_helper_owned_by_the_same_launcher() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let helper_port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let hooks = LauncherHooks::default();
+
+        hooks.start_helper(helper_port).await.unwrap();
+        let connected = hooks.runtime.backend_status().await.unwrap();
+        assert_eq!(connected["status"], "ok");
+        assert_eq!(connected["transport"], "verified");
+        assert_eq!(connected["processId"], std::process::id());
+
+        hooks.shutdown_helper(helper_port).await;
+        let disconnected = hooks.runtime.backend_status().await.unwrap();
+        assert_eq!(disconnected["status"], "failed");
     }
 
     #[test]

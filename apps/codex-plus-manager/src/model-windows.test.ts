@@ -61,9 +61,19 @@ describe("model-windows helpers", () => {
 
   it("退出登录始终可见且思考等级保存显示专用结果", () => {
     const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const logoutButtonIndex = source.indexOf("onClick={() => void actions.logoutChatGpt()}");
+    const pendingLoginControlsIndex = source.indexOf("{pendingLogin ? (", logoutButtonIndex);
+    const logoutAction = source.slice(
+      source.indexOf("const logoutChatGpt = async () =>"),
+      source.indexOf("const runOfficialRemoteSnapshotCommand", source.indexOf("const logoutChatGpt = async () =>")),
+    );
 
     assert.match(source, /<Button disabled=\{busy\} onClick=\{\(\) => void actions\.logoutChatGpt\(\)\}/);
     assert.doesNotMatch(source, /\{signedIn \? \(\s*<Button[^>]+logoutChatGpt/);
+    assert.notStrictEqual(logoutButtonIndex, -1);
+    assert.ok(pendingLoginControlsIndex > logoutButtonIndex);
+    assert.doesNotMatch(logoutAction, /if \(officialRemoteBusy \|\| pendingChatGptLogin\) return;/);
+    assert.match(logoutAction, /if \(pendingChatGptLogin\) \{[\s\S]+?chatgpt_web_login_cancel[\s\S]+?setPendingChatGptLogin\(null\)/);
     assert.match(source, /const saveReasoningEfforts = async \(\) =>/);
     assert.match(source, /saveSettingsValue\(normalized, true, true\)/);
     assert.match(source, /思考等级保存成功。/);

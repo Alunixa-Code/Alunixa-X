@@ -2332,10 +2332,18 @@ export function App() {
   };
 
   const logoutChatGpt = async () => {
-    if (officialRemoteBusy || pendingChatGptLogin) return;
+    if (officialRemoteBusy) return;
     if (!window.confirm(t("退出 ChatGPT 账号？官方手机远控将断开，纯 API Key 配置会保留。"))) return;
     setOfficialRemoteBusy(true);
     try {
+      if (pendingChatGptLogin) {
+        await run(() =>
+          call<ChatGptLoginProgressResult>("chatgpt_web_login_cancel", {
+            loginId: pendingChatGptLogin.loginId,
+          }),
+        );
+        setPendingChatGptLogin(null);
+      }
       const result = await run(() => call<SettingsResult>("chatgpt_account_logout"));
       if (!result) return;
       showResultNotice(t("退出登录"), result);
@@ -3174,6 +3182,10 @@ function RemoteControlScreen({
             <Badge status={signedIn ? "ok" : "not_checked"} />
           </div>
           <Toolbar>
+            <Button disabled={busy} onClick={() => void actions.logoutChatGpt()} variant="outline">
+              <LogOut className="h-4 w-4" />
+              {t("退出登录")}
+            </Button>
             {pendingLogin ? (
               <Button disabled={busy} onClick={() => void actions.cancelChatGptLogin()} variant="outline">
                 <Unplug className="h-4 w-4" />
@@ -3181,10 +3193,6 @@ function RemoteControlScreen({
               </Button>
             ) : (
               <>
-                <Button disabled={busy} onClick={() => void actions.logoutChatGpt()} variant="outline">
-                  <LogOut className="h-4 w-4" />
-                  {t("退出登录")}
-                </Button>
                 <Button disabled={busy} onClick={() => void actions.startChatGptDeviceLogin()}>
                   <KeyRound className="h-4 w-4" />
                   {signedIn ? t("设备码重新登录") : t("设备码登录")}

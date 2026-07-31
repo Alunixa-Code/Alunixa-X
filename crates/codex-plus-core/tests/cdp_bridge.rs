@@ -190,18 +190,17 @@ fn injection_script_prefers_embedded_local_ads() {
 }
 
 #[test]
-fn injection_script_requires_matching_bridge_and_helper_status() {
+fn injection_script_polls_verified_bridge_status_without_browser_helper_fetch() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("bridgeWithBackendTimeout"));
-    assert!(script.contains("reconcileBackendStatuses"));
-    assert!(script.contains("bridgeProcessId !== helperProcessId"));
-    assert!(script.contains("bridgeStatus.version !== helperStatus.version"));
-    assert!(script.contains("bridgeStatus.transport !== \"cdp-bridge\""));
-    assert!(script.contains("helperStatus.transport !== \"http-helper\""));
+    assert!(script.contains("startBackendStatusPolling"));
+    assert!(script.contains("__codexPlusBackendHeartbeat"));
+    assert!(!script.contains("reconcileBackendStatuses"));
+    assert!(!script.contains("fetchBackendStatusFromHelper"));
+    assert!(!script.contains("fetch(`${helperBase}${path}`"));
     assert!(!script.contains("/backend/repair"));
     assert!(script.contains("backend_status_verification_failed"));
-    assert!(!script.contains("backend_status_bridge_failed_http_fallback_ok"));
 }
 
 #[test]
@@ -1480,17 +1479,17 @@ fn runtime_evaluate_params_can_await_promises() {
 }
 
 #[test]
-fn injection_script_uses_backend_websocket_instead_of_periodic_heartbeat() {
+fn injection_script_uses_periodic_bridge_heartbeat_instead_of_browser_websocket() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("/backend/events"));
-    assert!(script.contains("new WebSocket"));
-    assert!(script.contains("connectBackendStatusStream"));
-    assert!(script.contains("backendWebSocketAllowedByDocumentCsp"));
+    assert!(!script.contains("/backend/events"));
+    assert!(!script.contains("new WebSocket"));
+    assert!(!script.contains("connectBackendStatusStream"));
+    assert!(!script.contains("backendWebSocketAllowedByDocumentCsp"));
     assert!(script.contains("connectBackendStatusViaBridge"));
     assert!(script.contains("void connectBackendStatusViaBridge();"));
-    assert!(!script.contains("codexPlusBackendStatus = nextStatus;"));
-    assert!(!script.contains("__codexPlusBackendHeartbeat"));
+    assert!(script.contains("codexPlusBackendStatus = nextStatus;"));
+    assert!(script.contains("__codexPlusBackendHeartbeat"));
     assert!(!script.contains("scheduleBackendHeartbeat"));
 }
 
