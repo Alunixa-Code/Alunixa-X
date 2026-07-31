@@ -315,3 +315,9 @@
 - 已确认当前 `OpenAI.CodexBeta_26.727.4816.0` 的实际主程序名为 `ChatGPT (Beta).exe`，旧进程过滤只识别 `Codex.exe` 与 `ChatGPT.exe`，导致状态、重启和终止均漏掉整个 Beta 进程树。
 - 已将 `ChatGPT (Beta).exe` 与 `Codex (Beta).exe` 纳入应用路径解析、Store 包进程识别、重启终止和会话索引清理保护，并补充真实 Beta 包主进程、子进程与内置 CLI 排除测试。
 - Beta 生命周期定向验证通过：`watcher` 19 项测试与 `launcher` 的 28 项应用路径测试全部零失败。
+- 已通过当前 Codex `9229` CDP 只读确认新版前端只引用 `app-initial-cy-0TnkU.js`；旧 `setting-storage-*` 与 `vscode-api-*` 资源已不存在。
+- 已确认新版单体模块可按结构识别设置 getter/setter、通用 Host RPC 和消息 dispatcher，并避免硬编码当前压缩导出名与资源哈希。
+- 已将注入层改为旧分包与新版 `app-initial-*` 双兼容，并同步 `show-ultra-in-model-picker-slider=true`，以恢复原生 Max/Ultra 滑块选项。
+- `cdp_bridge` 首次编译发现上一批六档断言误用了不存在的 `injection_script_path()`；已改回本测试文件统一使用的 `assets::injection_script(57321)` 入口。
+- `cdp_bridge` 首轮执行通过 79/80 项，唯一失败是旧测试仍要求直接调用单一 `vscode-api-*`；已将断言更新为验证新版候选模块数组与无哈希硬编码契约。
+- 新版注入合约最终 80 项全部通过，覆盖旧分包和新版单体模块发现、结构化设置/Host RPC/dispatcher 识别、Max/Ultra 同步、模型请求改写和无项目任务链路。

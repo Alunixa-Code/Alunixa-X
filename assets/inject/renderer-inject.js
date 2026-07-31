@@ -470,7 +470,7 @@
   const codexThreadServiceTierKey = "codexThreadServiceTierOverrides";
   const codexThreadServiceTierMaxEntries = 120;
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
-  const codexServiceTierRequestOverrideVersion = "4";
+  const codexServiceTierRequestOverrideVersion = "5";
   const codexAppServerModelRequestPatchVersion = "2";
   const codexPluginMarketplaceUnlockVersion = "12";
   const codexPluginAutoExpandVersion = "1";
@@ -1768,6 +1768,10 @@
     key: "enabled-reasoning-efforts",
     default: ["low", "medium", "high", "xhigh", "max", "ultra"],
   };
+  const codexShowUltraReasoningEffortSetting = {
+    key: "show-ultra-in-model-picker-slider",
+    default: false,
+  };
   const codexEnabledReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
   const codexServiceTierFallbackFastValue = "priority";
   const codexServiceTierModulePromises = new Map();
@@ -1792,9 +1796,11 @@
       try {
         const text = await fetch(src).then((response) => response.ok ? response.text() : "");
         const escaped = namePart.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const match = text.match(new RegExp(`["'](\\./assets/${escaped}[^"']+\\.js)["']`));
+        const match = text.match(new RegExp(`["'](\\./${escaped}[^"']+\\.js)["']`))
+          || text.match(new RegExp(`["'](\\./assets/${escaped}[^"']+\\.js)["']`));
         if (!match) continue;
-        return new URL(match[1], src).href;
+        const base = match[1].startsWith("./assets/") ? document.baseURI : src;
+        return new URL(match[1], base).href;
       } catch {
       }
     }
@@ -1826,12 +1832,53 @@
     }
   }
 
-  async function codexSettingStorageModule() {
-    const module = await loadCodexAppModule("setting-storage-");
-    if (typeof module.n !== "function" || typeof module.s !== "function") {
-      throw new Error("Codex setting-storage 接口不可用");
+  function codexModuleFunctionSource(candidate) {
+    if (typeof candidate !== "function") return "";
+    try {
+      return candidate.toString();
+    } catch {
+      return "";
     }
-    return module;
+  }
+
+  function codexSettingStorageFromModule(module, allowLegacyExports = false) {
+    if (!module || typeof module !== "object") return null;
+    if (allowLegacyExports && typeof module.n === "function" && typeof module.s === "function") {
+      return { n: module.n, s: module.s };
+    }
+    const functions = Object.values(module).filter((candidate) => typeof candidate === "function");
+    const getter = functions.find((candidate) => codexModuleFunctionSource(candidate).includes("get-setting"));
+    const setter = functions.find((candidate) => codexModuleFunctionSource(candidate).includes("set-setting"));
+    return getter && setter ? { n: getter, s: setter } : null;
+  }
+
+  function codexHostRpcFromModule(module, allowLegacyExports = false) {
+    if (!module || typeof module !== "object") return null;
+    if (allowLegacyExports && typeof module.n === "function") return module.n;
+    return Object.values(module).find((candidate) => {
+      const source = codexModuleFunctionSource(candidate).replace(/\s+/g, "");
+      return source.startsWith("asyncfunction")
+        && source.includes("...")
+        && source.includes("params")
+        && source.includes("select")
+        && source.includes("signal")
+        && source.includes("source");
+    }) || null;
+  }
+
+  async function codexSettingStorageModule() {
+    const errors = [];
+    for (const assetPrefix of ["setting-storage-", "app-initial-"]) {
+      try {
+        const module = await loadCodexAppModule(assetPrefix);
+        const storage = codexSettingStorageFromModule(module, assetPrefix !== "app-initial-");
+        if (storage) return storage;
+        errors.push(`${assetPrefix}: setting storage exports unavailable`);
+      } catch (error) {
+        errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
+      }
+    }
+    throw new Error(`Codex setting-storage 接口不可用 (${errors.join("; ")})`);
   }
 
   async function getCodexServiceTierSetting() {
@@ -2337,29 +2384,34 @@
   }
 
   async function syncCodexReasoningEffortSettings(attempt = 0) {
+    const expectations = [
+      [codexEnabledReasoningEffortsSetting, codexEnabledReasoningEfforts],
+      [codexShowUltraReasoningEffortSetting, true],
+    ];
     try {
       const settingStorage = await codexSettingStorageModule();
-      const current = await settingStorage.n(codexEnabledReasoningEffortsSetting);
-      if (JSON.stringify(current) !== JSON.stringify(codexEnabledReasoningEfforts)) {
-        await settingStorage.s(codexEnabledReasoningEffortsSetting, codexEnabledReasoningEfforts);
+      for (const [setting, expected] of expectations) {
+        const current = await settingStorage.n(setting);
+        if (JSON.stringify(current) !== JSON.stringify(expected)) {
+          await settingStorage.s(setting, expected);
+        }
       }
       window.__codexPlusReasoningEffortSettingsSynced = true;
       scheduleCodexModelWhitelistRefresh();
     } catch (error) {
       try {
-        const result = await codexStateCall("get-setting", {
-          params: { key: codexEnabledReasoningEffortsSetting.key },
-        });
-        const current = result && Object.prototype.hasOwnProperty.call(result, "value")
-          ? result.value
-          : codexEnabledReasoningEffortsSetting.default;
-        if (JSON.stringify(current) !== JSON.stringify(codexEnabledReasoningEfforts)) {
-          await codexStateCall("set-setting", {
-            params: {
-              key: codexEnabledReasoningEffortsSetting.key,
-              value: codexEnabledReasoningEfforts,
-            },
+        for (const [setting, expected] of expectations) {
+          const result = await codexStateCall("get-setting", {
+            params: { key: setting.key },
           });
+          const current = result && Object.prototype.hasOwnProperty.call(result, "value")
+            ? result.value
+            : setting.default;
+          if (JSON.stringify(current) !== JSON.stringify(expected)) {
+            await codexStateCall("set-setting", {
+              params: { key: setting.key, value: expected },
+            });
+          }
         }
         window.__codexPlusReasoningEffortSettingsSynced = true;
         scheduleCodexModelWhitelistRefresh();
@@ -2554,25 +2606,26 @@
     return dispatcherClass?.getInstance?.() || null;
   }
 
-  function installCodexServiceTierDispatcherPatch() {
-    if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
-    const loadDispatcher = async () => {
-      const errors = [];
-      for (const assetPrefix of ["setting-storage-", "vscode-api-"]) {
-        try {
-          const module = await loadCodexAppModule(assetPrefix);
-          const dispatcher = codexServiceTierDispatcherFromModule(module);
-          if (dispatcher) return { dispatcher, assetPrefix };
-          errors.push(`${assetPrefix}: dispatcher export unavailable`);
-        } catch (error) {
-          errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
-        }
+  async function loadCodexDispatcher() {
+    const errors = [];
+    for (const assetPrefix of ["setting-storage-", "vscode-api-", "app-initial-"]) {
+      try {
+        const module = await loadCodexAppModule(assetPrefix);
+        const dispatcher = codexServiceTierDispatcherFromModule(module);
+        if (dispatcher) return { dispatcher, assetPrefix };
+        errors.push(`${assetPrefix}: dispatcher export unavailable`);
+      } catch (error) {
+        errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
       }
-      throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);
-    };
+    }
+    throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);
+  }
+
+  function installCodexServiceTierDispatcherPatch(attempt = 0) {
+    if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
     const patch = async () => {
       try {
-        const { dispatcher, assetPrefix } = await loadDispatcher();
+        const { dispatcher, assetPrefix } = await loadCodexDispatcher();
         if (dispatcher.__codexServiceTierOriginalDispatchMessage) {
           window.__codexServiceTierRequestOverrideInstalled = codexServiceTierRequestOverrideVersion;
           return;
@@ -2584,6 +2637,10 @@
         window.__codexServiceTierRequestOverrideInstalled = codexServiceTierRequestOverrideVersion;
         sendCodexPlusDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
       } catch (error) {
+        if (attempt < 60) {
+          setTimeout(() => installCodexServiceTierDispatcherPatch(attempt + 1), 250);
+          return;
+        }
         sendCodexPlusDiagnostic("service_tier_dispatcher_patch_failed", {
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
@@ -5134,10 +5191,26 @@
   let chatsSortLastFetchAt = 0;
 
   async function codexStateApi() {
-    codexStateApiPromise = codexStateApiPromise || loadCodexAppModule("vscode-api-");
-    const api = await codexStateApiPromise;
-    if (typeof api.n !== "function") throw new Error("Codex 状态 API 不可用");
-    return api.n;
+    if (!codexStateApiPromise) {
+      codexStateApiPromise = (async () => {
+        const errors = [];
+        for (const assetPrefix of ["vscode-api-", "app-initial-"]) {
+          try {
+            const module = await loadCodexAppModule(assetPrefix);
+            const call = codexHostRpcFromModule(module, assetPrefix !== "app-initial-");
+            if (call) return call;
+            errors.push(`${assetPrefix}: host RPC export unavailable`);
+          } catch (error) {
+            errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
+          }
+        }
+        throw new Error(`Codex 状态 API 不可用 (${errors.join("; ")})`);
+      })().catch((error) => {
+        codexStateApiPromise = null;
+        throw error;
+      });
+    }
+    return await codexStateApiPromise;
   }
 
   async function codexStateCall(method, params) {
@@ -5387,8 +5460,7 @@
         || !codexProjectlessMainWindowLooksLikeHome()) {
       return false;
     }
-    const module = await loadCodexAppModule("vscode-api-");
-    const dispatcher = module?.g;
+    const { dispatcher } = await loadCodexDispatcher();
     if (!dispatcher || typeof dispatcher.dispatchHostMessage !== "function") {
       throw new Error("Codex 内部导航接口不可用");
     }
@@ -5627,6 +5699,8 @@
         }));
       },
       dispatcherFromModule: codexServiceTierDispatcherFromModule,
+      settingStorageFromModule: codexSettingStorageFromModule,
+      hostRpcFromModule: codexHostRpcFromModule,
     };
     return;
   }
@@ -7992,9 +8066,7 @@
     if (window.__codexUpstreamPendingWorktreeDispatcherPatch === patchVersion) return;
     const patch = async () => {
       try {
-        const module = await loadCodexAppModule("setting-storage-");
-        const dispatcherClass = typeof module.v === "function" && String(module.v).includes("dispatchMessage") ? module.v : null;
-        const dispatcher = dispatcherClass?.getInstance?.();
+        const { dispatcher } = await loadCodexDispatcher();
         if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") throw new Error("Codex dispatcher unavailable");
         if (!dispatcher.__codexUpstreamWorktreeOriginalDispatchMessage) {
           dispatcher.__codexUpstreamWorktreeOriginalDispatchMessage = dispatcher.dispatchMessage.bind(dispatcher);

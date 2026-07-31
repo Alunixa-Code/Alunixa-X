@@ -759,7 +759,7 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("当前 thread"));
     assert!(script.contains("standard"));
     assert!(script.contains("fast"));
-    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\"]"));
+    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
     assert!(script.contains("dispatcher export unavailable"));
     assert!(!script.contains("data-codex-max-reasoning-control"));
     assert!(!script.contains("codexAppMaxReasoningOverride"));
@@ -778,10 +778,11 @@ fn injection_script_prompts_for_markdown_export_path_when_supported() {
 }
 
 #[test]
-fn injection_script_discovers_vscode_api_asset_without_hardcoded_hash() {
+fn injection_script_discovers_compatible_app_asset_without_hardcoded_hash() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("loadCodexAppModule(\"vscode-api-\""));
+    assert!(script.contains("[\"vscode-api-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"setting-storage-\", \"app-initial-\"]"));
     assert!(script.contains("codexAppAssetUrlFromScriptText"));
     assert!(script.contains("fetch(src"));
     assert!(!script.contains("vscode-api-Dc9pX2Bc.js"));
@@ -852,6 +853,8 @@ fn injection_script_applies_fast_service_tier_contract() {
     );
     assert_eq!(cases["dispatcherFromSingleton"], true);
     assert_eq!(cases["dispatcherFromClass"], true);
+    assert_eq!(cases["settingStorageFromBundle"], true);
+    assert_eq!(cases["hostRpcFromBundle"], true);
 }
 
 fn run_service_tier_contract_harness() -> serde_json::Value {
@@ -1004,6 +1007,20 @@ class DispatcherClass {{
   dispatchMessage() {{}}
 }}
 const dispatcherFromClass = api.dispatcherFromModule({{ current: DispatcherClass }}) === DispatcherClass.instance;
+async function rpc(...args) {{
+  const [method, options] = args;
+  const {{ params, select, signal, source }} = options || {{}};
+  return {{ method, params, select, signal, source }};
+}}
+async function bundledGetSetting(setting) {{
+  return (await rpc("get-setting", {{ params: {{ key: setting.key }} }})).value ?? setting.default;
+}}
+async function bundledSetSetting(setting, value) {{
+  await rpc("set-setting", {{ params: {{ key: setting.key, value }} }});
+}}
+const settingStorage = api.settingStorageFromModule({{ getter: bundledGetSetting, setter: bundledSetSetting }});
+const settingStorageFromBundle = settingStorage?.n === bundledGetSetting && settingStorage?.s === bundledSetSetting;
+const hostRpcFromBundle = api.hostRpcFromModule({{ call: rpc }}) === rpc;
 
 process.stdout.write(JSON.stringify({{
   supportedFast,
@@ -1018,6 +1035,8 @@ process.stdout.write(JSON.stringify({{
   versionedTerraDescriptor,
   dispatcherFromSingleton,
   dispatcherFromClass,
+  settingStorageFromBundle,
+  hostRpcFromBundle,
 }}));
 "#,
         script_path = serde_json::to_string(&script_path.to_string_lossy().to_string())
@@ -2290,9 +2309,11 @@ fn noop_handler() -> bridge::BridgeHandler {
 
 #[test]
 fn injection_script_enables_all_six_native_reasoning_efforts() {
-    let script = std::fs::read_to_string(injection_script_path()).unwrap();
+    let script = assets::injection_script(57321);
     assert!(script.contains("enabled-reasoning-efforts"));
     assert!(script.contains("[\"low\", \"medium\", \"high\", \"xhigh\", \"max\", \"ultra\"]"));
     assert!(script.contains("syncCodexReasoningEffortSettings"));
+    assert!(script.contains("show-ultra-in-model-picker-slider"));
+    assert!(script.contains("[codexShowUltraReasoningEffortSetting, true]"));
     assert!(script.contains("reasoning_effort_settings_sync_failed"));
 }
