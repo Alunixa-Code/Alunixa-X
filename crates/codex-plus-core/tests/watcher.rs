@@ -108,9 +108,13 @@ fn codex_process_filter_keeps_chatgpt_desktop_package_processes() {
             24,
             r"C:\Program Files\WindowsApps\Other.ChatGPT_1.0.0.0_x64__abc\app\ChatGPT.exe",
         ),
+        (
+            25,
+            r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+        ),
     ];
 
-    assert_eq!(codex_process_ids(processes), vec![21, 22]);
+    assert_eq!(codex_process_ids(processes), vec![21, 22, 25]);
 }
 
 #[test]
@@ -229,6 +233,39 @@ fn find_codex_processes_combines_store_and_local_installs() {
 
 #[cfg(windows)]
 #[test]
+fn find_codex_processes_finds_beta_package_process_tree() {
+    let processes = [
+        WindowsProcessInfo {
+            process_id: 51,
+            parent_process_id: 0,
+            exe_file: "ChatGPT (Beta).exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+            )),
+        },
+        WindowsProcessInfo {
+            process_id: 52,
+            parent_process_id: 51,
+            exe_file: "ChatGPT (Beta).exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+            )),
+        },
+        WindowsProcessInfo {
+            process_id: 53,
+            parent_process_id: 51,
+            exe_file: "codex.exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\resources\codex.exe",
+            )),
+        },
+    ];
+
+    assert_eq!(find_codex_processes_from_snapshot(&processes), vec![51, 52]);
+}
+
+#[cfg(windows)]
+#[test]
 fn session_index_cleanup_process_guard_blocks_desktop_apps_but_not_cli() {
     let processes = [
         WindowsProcessInfo {
@@ -259,13 +296,24 @@ fn session_index_cleanup_process_guard_blocks_desktop_apps_but_not_cli() {
                 r"C:\Users\me\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.exe",
             )),
         },
+        WindowsProcessInfo {
+            process_id: 15,
+            parent_process_id: 0,
+            exe_file: "ChatGPT (Beta).exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+            )),
+        },
     ];
 
     assert_eq!(
         find_session_index_cleanup_blocking_processes_from_snapshot(&processes),
-        vec![11, 12, 13]
+        vec![11, 12, 13, 15]
     );
-    assert_eq!(find_codex_processes_from_snapshot(&processes), vec![11, 13]);
+    assert_eq!(
+        find_codex_processes_from_snapshot(&processes),
+        vec![11, 13, 15]
+    );
 }
 
 #[cfg(windows)]

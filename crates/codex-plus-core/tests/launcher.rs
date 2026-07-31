@@ -116,6 +116,23 @@ fn app_paths_find_latest_windows_package_detects_beta_package() {
 }
 
 #[test]
+fn app_paths_detects_beta_package_executable_name() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp
+        .path()
+        .join("OpenAI.CodexBeta_26.727.4816.0_x64__abc")
+        .join("app");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::write(app.join("ChatGPT (Beta).exe"), "").unwrap();
+
+    assert_eq!(
+        normalize_codex_app_path(&app.join("ChatGPT (Beta).exe")).as_deref(),
+        Some(app.as_path())
+    );
+    assert_eq!(build_codex_executable(&app), app.join("ChatGPT (Beta).exe"));
+}
+
+#[test]
 fn app_paths_find_latest_windows_package_returns_package_when_app_dir_missing() {
     let temp = tempfile::tempdir().unwrap();
     let package = temp.path().join("OpenAI.Codex_26.429.8261.0_x64__abc");

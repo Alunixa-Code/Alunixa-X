@@ -248,7 +248,12 @@ pub fn find_session_index_cleanup_blocking_processes_from_snapshot(
 ) -> Vec<u32> {
     let mut ids = processes
         .iter()
-        .filter(|process| process.exe_file == "Codex.exe" || process.exe_file == "ChatGPT.exe")
+        .filter(|process| {
+            matches!(
+                process.exe_file.as_str(),
+                "Codex.exe" | "Codex (Beta).exe" | "ChatGPT.exe" | "ChatGPT (Beta).exe"
+            )
+        })
         .map(|process| process.process_id)
         .collect::<Vec<_>>();
     ids.sort_unstable();

@@ -11,8 +11,20 @@ struct AppPackageSpec {
     priority: u8,
 }
 
-const CODEX_PACKAGE_EXECUTABLES: &[&str] = &["ChatGPT.exe", "Codex.exe", "codex.exe"];
-const STANDALONE_CODEX_EXECUTABLES: &[&str] = &["ChatGPT.exe", "Codex.exe", "codex.exe"];
+const CODEX_PACKAGE_EXECUTABLES: &[&str] = &[
+    "ChatGPT.exe",
+    "ChatGPT (Beta).exe",
+    "Codex.exe",
+    "Codex (Beta).exe",
+    "codex.exe",
+];
+const STANDALONE_CODEX_EXECUTABLES: &[&str] = &[
+    "ChatGPT.exe",
+    "ChatGPT (Beta).exe",
+    "Codex.exe",
+    "Codex (Beta).exe",
+    "codex.exe",
+];
 
 const APP_PACKAGE_SPECS: &[AppPackageSpec] = &[
     AppPackageSpec {
@@ -478,7 +490,14 @@ pub(crate) fn is_supported_windows_app_package_name(package_name: &str) -> bool 
 }
 
 pub(crate) fn is_supported_app_executable_name(name: &str) -> bool {
-    name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe")
+    [
+        "Codex.exe",
+        "Codex (Beta).exe",
+        "ChatGPT.exe",
+        "ChatGPT (Beta).exe",
+    ]
+    .into_iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 fn package_spec_from_path(path: &Path) -> Option<AppPackageSpec> {
