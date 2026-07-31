@@ -2745,3 +2745,7 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(settings.codex_app_ai_shell, CodexAiShell::Pwsh);
     }
 }
+
+pub fn atomic_replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
+    replace_file(source, target)
+}

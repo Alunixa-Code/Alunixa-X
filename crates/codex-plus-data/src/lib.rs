@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod markdown;
 pub mod provider_sync;
+pub mod rollout_image_cleanup;
 pub mod storage;
 
 pub use backup::BackupStore;
