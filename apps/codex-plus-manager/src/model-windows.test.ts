@@ -1,4 +1,5 @@
 import assert from "node:assert";
+import fs from "node:fs";
 import { describe, it } from "node:test";
 import type { RelayProfile } from "./App.tsx";
 import {
@@ -47,6 +48,17 @@ const _profileTypeCheck: RelayProfile = {
 void _profileTypeCheck;
 
 describe("model-windows helpers", () => {
+  it("供应商详情只在持久化或原子切换成功后关闭", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /const saveSettingsValue = async[^\n]+Promise<boolean>/);
+    assert.match(source, /const saved = isActive && form\.relayProfilesEnabled/);
+    assert.match(source, /await actions\.switchRelayProfile\(next, form\.activeRelayId\)/);
+    assert.match(source, /if \(!saved\) return;/);
+    assert.match(source, /供应商配置已保存。/);
+    assert.doesNotMatch(source, /await actions\.saveRelayFile\(\s*"config"/);
+  });
+
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {
     assert.strictEqual(
       modelWindowsMapToText("a\nb\nc", '{"a":"1M","c":"200K"}'),

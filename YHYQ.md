@@ -333,3 +333,7 @@
 - 已读取真实诊断日志并确认间歇性 502 发生在自定义模型 Responses 请求建立阶段：一次约 494 KB 的请求在 4.4 秒后失败，但前后其他请求仍返回 200，证明不是 helper 整体离线；旧日志只记录笼统 502，无法看到 reqwest 首因。
 - 已在 Responses、Chat Completions、Models 与 Audio 四类请求建立失败分支补充诊断记录，包含脱敏后的底层错误、供应商、请求模型、协议及目标 scheme/host，不记录 API Key 或完整敏感 URL。
 - 状态与代理诊断定向验证通过：bridge routes 26 项、CDP 注入 80 项、helper/launcher 13 项、JavaScript 语法与 Rust 格式全部零失败。
+- 已定位供应商保存失败的前端根因：`saveSettingsValue` 和 `saveRelayFile` 都丢弃成功/失败结果，详情保存即使失败也会关闭；活动供应商还会在 settings 保存后分两次裸写 config/auth，任一步失败都不阻止“已保存”流程，且 config 预览使用旧 form 快照。
+- 已让设置保存、live 文件保存与供应商切换返回明确布尔结果；非活动供应商只在 settings 持久化成功后关闭详情，活动供应商改为复用后端已有的原子切换/备份回滚事务，避免 settings、config.toml、auth.json 部分成功。
+- 供应商保存失败时现在保留编辑页和草稿；全部成功后才显示“供应商配置已保存”并返回列表，活动供应商保存也使用包含最新草稿的完整 `next` 快照。
+- 新增前端保存契约测试并通过前端 13 项 Node 测试；本机前端依赖此前已按清理要求删除，因此 TypeScript 与 Tauri 生产构建留到最终按 lockfile 临时安装后验证。
