@@ -381,3 +381,5 @@
 - `v1.2.56` Release 已核验为正式最新版本，包含 Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP 六项 uploaded 资产及 SHA-256 摘要喵~
 - 已将自动生成的简略 Release 正文更新为完整中文说明，明确记录新版模块与 Max/Ultra、分页历史、图片内容寻址外置、后端双链路状态、Beta 进程树、供应商事务、退出/保存反馈、连接池与脱敏诊断修复喵~
 - 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.56` 喵~
+- 发布记录提交触发的主分支 Actions `30624668489` 首轮仅 macOS arm64 在 DMG 创建阶段遇到 runner `hdiutil: create failed - Resource busy`，其编译已成功且同轮 Windows/macOS x64 全部成功喵~
+- 已只重跑该失败 job，第二轮 macOS arm64 完成前端、release 二进制、DMG、包结构与上传全链路，最终主分支三平台工作流全部成功喵~
