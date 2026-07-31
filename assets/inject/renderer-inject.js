@@ -5407,6 +5407,27 @@
     return null;
   }
 
+  function patchCodexPaginatedHistoryParams(params) {
+    if (!params || typeof params !== "object" || params.historyMode === "paginated") return params;
+    return { ...params, historyMode: "paginated" };
+  }
+
+  function applyCodexPaginatedHistoryRequestOverride(message) {
+    const params = codexProjectlessStartParams(message);
+    if (!params) return message;
+    const nextParams = patchCodexPaginatedHistoryParams(params);
+    if (nextParams === params) return message;
+    if (message.type === "send-cli-request-for-host") return { ...message, params: nextParams };
+    if (message.type === "mcp-request" || message.type === "worker-request") {
+      return { ...message, request: { ...message.request, params: nextParams } };
+    }
+    if (message.type === "thread-prewarm-start") {
+      return { ...message, request: { ...message.request, params: nextParams } };
+    }
+    if (message.type === "prewarm-thread-start-for-host") return { ...message, params: nextParams };
+    return nextParams;
+  }
+
   function patchCodexProjectlessStartParams(params, context) {
     if (!params || typeof params !== "object" || !codexProjectlessContextValid(context)) return params;
     const next = {
@@ -5459,9 +5480,10 @@
     const originalMessage = { ...(payload || {}), type };
     const dispatch = (message) => {
       const serviceTierMessage = codexServiceTierRequestOverride(message);
-      recordCodexModelSelection(serviceTierMessage);
-      const nextType = serviceTierMessage?.type || type;
-      const { type: _type, ...nextPayload } = serviceTierMessage || {};
+      const paginatedHistoryMessage = applyCodexPaginatedHistoryRequestOverride(serviceTierMessage);
+      recordCodexModelSelection(paginatedHistoryMessage);
+      const nextType = paginatedHistoryMessage?.type || type;
+      const { type: _type, ...nextPayload } = paginatedHistoryMessage || {};
       return dispatcher.__codexServiceTierOriginalDispatchMessage(nextType, nextPayload);
     };
     if (!codexProjectlessRequestNeedsOverride(originalMessage)) return dispatch(originalMessage);
@@ -5683,6 +5705,7 @@
       shouldEnforce: codexProjectlessMainWindowShouldEnforce,
       requestNeedsOverride: codexProjectlessRequestNeedsOverride,
       applyRequestOverride: applyCodexProjectlessRequestOverride,
+      applyPaginatedHistoryOverride: applyCodexPaginatedHistoryRequestOverride,
       appServerRequestNeedsOverride: codexProjectlessAppServerRequestNeedsOverride,
       applyAppServerRequestOverride: applyCodexProjectlessAppServerRequestOverride,
       patchAppServerClient: patchAppServerModelRequestClient,
@@ -6334,6 +6357,12 @@
     return request.apply(patchCodexProjectlessStartParams(request.params, context));
   }
 
+  function applyCodexPaginatedHistoryAppServerRequestOverride(method, params) {
+    const request = codexProjectlessAppServerStartRequest(method, params);
+    if (!request) return params;
+    return request.apply(patchCodexPaginatedHistoryParams(request.params));
+  }
+
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
     if (client.__codexPlusModelRequestPatch === codexAppServerModelRequestPatchVersion) return true;
@@ -6364,6 +6393,7 @@
           throw error;
         }
       }
+      nextParams = applyCodexPaginatedHistoryAppServerRequestOverride(method, nextParams);
       const result = await originalSendRequest(method, nextParams, options);
       if (!codexPlusModelUnlockEnabled()) return result;
       if (!codexPlusModelNames().length) await loadCodexModelCatalog();

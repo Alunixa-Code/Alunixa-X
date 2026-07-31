@@ -1071,6 +1071,7 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert!(script.contains("loadCodexAppModule(\"projectless-thread-\")"));
     assert!(script.contains("projectless_thread_start_overridden"));
     assert!(script.contains("projectless_app_server_start_overridden"));
+    assert!(script.contains("historyMode: \"paginated\""));
     assert!(script.contains("projectless_main_window_home_route_cleared"));
     assert!(script.contains("dispatcher.dispatchHostMessage"));
     assert!(script.contains("[\"use-host-config-\", \"app-server-manager-signals-\"]"));
@@ -1102,6 +1103,7 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["dispatchedType"], "start-conversation");
     assert_eq!(cases["dispatchedWorkspaceKind"], "projectless");
     assert_eq!(cases["dispatchedCwd"], "C:/generated/work");
+    assert_eq!(cases["dispatchedHistoryMode"], "paginated");
     assert_eq!(cases["appServerRequestNeedsOverride"], true);
     assert_eq!(cases["appServerPatchedWorkspaceKind"], "projectless");
     assert_eq!(cases["appServerPatchedCwd"], "C:/generated/work");
@@ -1112,6 +1114,10 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["appServerSentMethod"], "start-conversation");
     assert_eq!(cases["appServerSentWorkspaceKind"], "projectless");
     assert_eq!(cases["appServerSentCwd"], "C:/generated/work");
+    assert_eq!(cases["appServerSentHistoryMode"], "paginated");
+    assert_eq!(cases["directStartHistoryMode"], "paginated");
+    assert_eq!(cases["prewarmHistoryMode"], "paginated");
+    assert_eq!(cases["resumeHistoryMode"], "legacy");
     assert_eq!(cases["explicitProjectWins"], false);
     assert_eq!(cases["explicitProjectRequestIsUntouched"], false);
     assert_eq!(cases["disabledIsNoop"], false);
@@ -1206,6 +1212,20 @@ const projectRequest = {{
 }};
 const projectRequestNeedsOverride = api.requestNeedsOverride(projectRequest);
 const patchedRequest = api.applyRequestOverride(projectRequest, context);
+const directStart = api.applyPaginatedHistoryOverride({{
+  type: "send-cli-request-for-host",
+  method: "thread/start",
+  params: {{ historyMode: "legacy" }},
+}});
+const prewarmStart = api.applyPaginatedHistoryOverride({{
+  type: "thread-prewarm-start",
+  request: {{ method: "thread/start", params: {{}} }},
+}});
+const resumed = api.applyPaginatedHistoryOverride({{
+  type: "send-cli-request-for-host",
+  method: "thread/resume",
+  params: {{ historyMode: "legacy" }},
+}});
 const nativeProjectlessNeedsOverride = api.requestNeedsOverride({{
   type: "start-conversation",
   cwd: "C:/native/work",
@@ -1260,6 +1280,7 @@ process.stdout.write(JSON.stringify({{
   dispatchedType: dispatched[0]?.type,
   dispatchedWorkspaceKind: dispatched[0]?.payload?.workspaceKind,
   dispatchedCwd: dispatched[0]?.payload?.cwd,
+  dispatchedHistoryMode: dispatched[0]?.payload?.historyMode,
   appServerRequestNeedsOverride,
   appServerPatchedWorkspaceKind: appServerPatchedRequest.workspaceKind,
   appServerPatchedCwd: appServerPatchedRequest.cwd,
@@ -1270,6 +1291,10 @@ process.stdout.write(JSON.stringify({{
   appServerSentMethod: appServerSent[0]?.method,
   appServerSentWorkspaceKind: appServerSent[0]?.params?.workspaceKind,
   appServerSentCwd: appServerSent[0]?.params?.cwd,
+  appServerSentHistoryMode: appServerSent[0]?.params?.historyMode,
+  directStartHistoryMode: directStart.params.historyMode,
+  prewarmHistoryMode: prewarmStart.request.params.historyMode,
+  resumeHistoryMode: resumed.params.historyMode,
   explicitProjectWins, explicitProjectRequestIsUntouched, disabledIsNoop,
 }}));
 process.exit(0);

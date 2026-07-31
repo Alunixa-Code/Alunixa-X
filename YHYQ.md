@@ -348,3 +348,5 @@
 - 清理备份改为内容寻址 blob：每张唯一原始 Data URL 只保存一次，rollout 中写入短引用，恢复入口可按引用逐字节还原，不再使用一像素图片伪装备份喵~
 - 用户要求从 `90ec7b8` 检查点继续完成剩余 Bug 修复、验证、推送、GitHub Actions 构建与 Release 发布喵~
 - 已读取项目记录、相关历史索引、当前工作树和最近提交，确认分页历史注入与安全图片外置/恢复是当前首要未完成项，五个模型文件仍仅为 Windows 工作树状态噪声，不纳入后续提交喵~
+- 已为 dispatcher 与 app-server client 两条新任务请求链路注入官方 `historyMode: "paginated"`，覆盖 `thread/start`、`start-conversation`、`start-thread-for-host` 与两类预热封装，同时明确不修改 `thread/resume` 喵~
+- 已扩展 Node 合约测试验证 dispatcher、app-server、直接 `thread/start` 和预热均转为 paginated，续聊仍保留 legacy；JavaScript 语法检查与定向 `cdp_bridge` 合约测试通过喵~
