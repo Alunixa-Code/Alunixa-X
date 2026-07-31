@@ -323,3 +323,7 @@
 - 新版注入合约最终 80 项全部通过，覆盖旧分包和新版单体模块发现、结构化设置/Host RPC/dispatcher 识别、Max/Ultra 同步、模型请求改写和无项目任务链路。
 - 已通过当前运行中的 `app-initial-cy-0TnkU.js` 实测新版接口：修复前 `enabled-reasoning-efforts` 为 `low/medium/high/xhigh/ultra` 且 `show-ultra-in-model-picker-slider=false`；同步后为完整六档并将 Ultra 原生滑块开关设为 `true`，通用 Host RPC 复读结果一致。
 - 同一实测确认新版 dispatcher 同时具备 `dispatchMessage`、`dispatchHostMessage` 与 `subscribe`，模型选择记录、请求改写和无项目导航所需能力均可由结构识别取得。
+- 用户要求从其他 AI 的现有进度继续，不重复已经完成的六档思考等级、新版前端模块兼容与 Beta 进程识别工作，继续修复后端状态红绿误判、持续 502、模型偶发无法解锁、供应商配置保存失败、退出登录按钮、思考等级保存提示、Codex 重启/终止和会话图片 Base64 膨胀。
+- 已读取本文件、当前提交和工作树；基线为 `631c215`，六个模型相关文件仅因 Windows 换行/索引状态显示修改，文件内容与 HEAD 完全一致，后续保留且不回滚。
+- 已复核历史供应商切换约束：自定义/聚合供应商不能从本地代理 facade 反向重建，保存与切换必须保留结构化模型、密钥、URL、排序及当前配置，并将状态判定与同一 helper/Codex 进程绑定。
+- 下一阶段先统一 bridge/helper 状态契约并记录脱敏 502 首因，再修复供应商保存事务，随后实现只处理已关闭 rollout 的事务化图片去重并完成真实 Codex 运行验证。
