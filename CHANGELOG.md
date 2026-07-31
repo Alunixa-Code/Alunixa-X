@@ -1,5 +1,18 @@
 # 更新日志
 
+## 1.2.56 - 2026-07-31
+
+- 修复新版 Codex `app-initial-*` 单体模块下模型元数据、设置、Host RPC 与 dispatcher 识别失效的问题，原生 Effort 控件继续显示 Light、Medium、High、Extra High、Max、Ultra，并确保 Max/Ultra 真实请求不被降级。
+- 新任务统一使用 Codex 官方 `paginated` 历史模式，子代理不再复制父任务完整 rollout 前缀；续聊保持原有历史模式，避免破坏既有任务恢复。
+- 新增安全、可逆的 rollout 图片空间清理：仅外置已被更新压缩检查点覆盖的旧 Base64 图片，使用 SHA-256 唯一 blob、原子替换、备份和逐字节恢复；最新恢复上下文和含回滚记录的会话保持不变。
+- 修复右上角后端状态红绿误判：bridge 与 helper 必须同时在线且版本、进程 ID、transport 一致才显示绿色，旧 helper、错进程占端口或单链路残留都会显示明确错误。
+- 修复 `OpenAI.CodexBeta` 的 `ChatGPT (Beta).exe` 进程识别，并让重启持续重新枚举和终止整棵进程树；未完全退出或 helper 端口仍占用时取消新实例启动并返回剩余 PID。
+- 修复供应商详情保存失败仍关闭页面、活动供应商分步写入造成部分成功的问题；保存现在返回明确结果，活动供应商使用带备份回滚的原子切换事务，失败时保留草稿。
+- 退出登录按钮现在始终显示；即使 app-server 未识别账号或 `auth.json` 只有 `auth_mode: chatgpt`，仍可清理本地登录态并保留纯 API Key 配置。
+- 思考等级页面保存后显示专用成功或失败提示，不再只能看到不明确的通用设置反馈。
+- 上游 HTTP 请求按 User-Agent 复用有界连接池；Responses、Chat Completions 与自定义模型仅对连接建立错误执行一次短延迟重试，降低大请求间歇性 502，同时避免对超时或已响应请求盲目重放。
+- 代理诊断覆盖 Responses、Chat Completions、自定义模型、Models 与 Audio，请求失败日志只记录脱敏 scheme/host/port、错误分类与底层首因，不写入 API Key、URL 路径、查询参数或凭据。
+
 ## 1.2.55 - 2026-07-28
 
 - 新增独立“思考等级”页面，汇总全部普通与自定义供应商模型；每个模型都可单独设置最高思考等级，默认 Extra High，并支持 Light、Medium、High、Extra High、Max、Ultra 六档。
