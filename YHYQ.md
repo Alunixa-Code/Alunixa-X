@@ -375,3 +375,9 @@
 - 完整 `cargo test --workspace -- --test-threads=1` 已通过全部 workspace crate、集成测试和文档测试，零失败，总耗时约 6 分 39 秒喵~
 - 前端 14 项 Node 测试、TypeScript 检查、Vite 生产构建、品牌保护、i18n 精确校验与 Rust 格式检查全部通过；Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
 - 发布前本地清理已完成：删除前端 `node_modules`、`dist`、Rust `target` 以及官方 Codex 源码审计临时目录，不保留下载或构建垃圾喵~
+- 已将 `main` 推送到 `Alunixa-Code/CodexPlusPlusPlus`，创建并推送注释标签 `v1.2.56`；主分支与 Release 工作流均由 GitHub Actions 构建且全部成功喵~
+- 主分支 Actions `30623704497` 的 Windows artifacts、macOS x64 和 macOS arm64 三项均成功，Windows job 包含前端测试、TypeScript、完整 Rust 测试、release 二进制和安装包构建喵~
+- Release Actions `30623719449` 完成版本/品牌校验、Windows x64、macOS x64、macOS arm64 构建、包结构与六项资产校验，并成功发布 Release 喵~
+- `v1.2.56` Release 已核验为正式最新版本，包含 Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP 六项 uploaded 资产及 SHA-256 摘要喵~
+- 已将自动生成的简略 Release 正文更新为完整中文说明，明确记录新版模块与 Max/Ultra、分页历史、图片内容寻址外置、后端双链路状态、Beta 进程树、供应商事务、退出/保存反馈、连接池与脱敏诊断修复喵~
+- 正式发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.56` 喵~
