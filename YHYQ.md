@@ -393,3 +393,8 @@
 - 退出登录按钮已移到待登录条件之外永久显示；若存在陈旧登录任务，退出操作会先取消该任务，再执行账号退出与本地登录态清理喵~
 - 已新增真实 helper 生命周期回归测试，确认 helper 存活时 bridge 返回健康、helper 关闭后立即返回失败；JavaScript 语法、Rust 格式、CDP 定向测试和 launcher 定向测试通过喵~
 - 已修正退出登录前端契约测试的源码定位方式，避免 JSX 箭头符号截断正则；前端 14 项测试现全部通过喵~
+- 完整 `cargo test --workspace -- --test-threads=1` 已通过全部 Rust workspace、集成测试和文档测试，零失败；TypeScript、Vite 生产构建、JS 语法、Rust 格式与差异检查也全部通过喵~
+- 已构建本地 release 候选 helper 并验证 `/backend/status` 返回 `ok`、正确版本、`http-helper` transport 且 PID 与候选 launcher 进程一致喵~
+- 已在当前真实 Codex 页面通过 CDP 重注入候选脚本，确认右上角状态变为绿色“后端已连接”且 3 秒 heartbeat 已启动；未修改或重启用户当前 Codex 进程喵~
+- 已通过 Playwright 渲染管理器手机远控页面，确认“退出登录”按钮只有一个且真实可见；临时测试脚本和 Vite 服务均已清理喵~
+- 正式修复版本确定为 `1.2.57`，版本源与 `CHANGELOG.md` 已同步，发布说明记录稳定轮询、Rust helper 归属校验和退出按钮永久显示喵~

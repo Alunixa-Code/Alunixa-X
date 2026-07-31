@@ -1,5 +1,12 @@
 # 更新日志
 
+## 1.2.57 - 2026-07-31
+
+- 修复 Codex 右上角即使后端正常仍持续显示红色“未连接”的问题：页面恢复每 3 秒轮询 CDP bridge，不再从受 CSP/CORS 限制的页面直接访问本地 helper 或建立 WebSocket。
+- CDP bridge 会在 Rust 进程内探测自身启动的 helper，并校验状态、版本、transport 与 launcher PID；旧 helper、端口残留或进程归属不一致不会错误显示绿色。
+- ChatGPT“退出登录”按钮现在位于待登录条件之外并始终显示；存在陈旧浏览器或设备码登录任务时，会先取消任务再退出并清理本地登录态。
+- 新增真实 helper 生命周期、3 秒轮询/CSP 边界和退出按钮永久可见回归测试；完整 Rust workspace、前端测试、TypeScript、Vite 生产构建及真实 Codex 页面验证均通过。
+
 ## 1.2.56 - 2026-07-31
 
 - 修复新版 Codex `app-initial-*` 单体模块下模型元数据、设置、Host RPC 与 dispatcher 识别失效的问题，原生 Effort 控件继续显示 Light、Medium、High、Extra High、Max、Ultra，并确保 Max/Ultra 真实请求不被降级。
