@@ -1724,14 +1724,20 @@ export function App() {
     }
   };
 
-  const saveSettingsValue = async (next: BackendSettings, silent = true): Promise<boolean> => {
+  const saveSettingsValue = async (
+    next: BackendSettings,
+    silent = true,
+    suppressNotice = false,
+  ): Promise<boolean> => {
     const normalized = normalizeSettings(next);
     setSettingsForm(normalized);
     const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
     if (result) {
       setSettings(result);
       setSettingsForm(normalizeSettings(result.settings));
-      if (!silent || !isSuccessStatus(result.status)) showNotice(t("设置保存"), result.message, result.status);
+      if (!suppressNotice && (!silent || !isSuccessStatus(result.status))) {
+        showNotice(t("设置保存"), result.message, result.status);
+      }
     }
     return !!result && isSuccessStatus(result.status);
   };
@@ -2948,7 +2954,11 @@ type Actions = {
   checkUpdate: () => Promise<void>;
   performUpdate: () => Promise<void>;
   saveSettings: () => Promise<void>;
-  saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<boolean>;
+  saveSettingsValue: (
+    settings: BackendSettings,
+    silent?: boolean,
+    suppressNotice?: boolean,
+  ) => Promise<boolean>;
   exportFullConfig: () => Promise<void>;
   importFullConfig: () => Promise<void>;
   refreshSettings: (silent?: boolean) => Promise<BackendSettings | null>;
@@ -3171,12 +3181,10 @@ function RemoteControlScreen({
               </Button>
             ) : (
               <>
-                {signedIn ? (
-                  <Button disabled={busy} onClick={() => void actions.logoutChatGpt()} variant="outline">
-                    <LogOut className="h-4 w-4" />
-                    {t("退出登录")}
-                  </Button>
-                ) : null}
+                <Button disabled={busy} onClick={() => void actions.logoutChatGpt()} variant="outline">
+                  <LogOut className="h-4 w-4" />
+                  {t("退出登录")}
+                </Button>
                 <Button disabled={busy} onClick={() => void actions.startChatGptDeviceLogin()}>
                   <KeyRound className="h-4 w-4" />
                   {signedIn ? t("设备码重新登录") : t("设备码登录")}
@@ -3631,6 +3639,14 @@ function ReasoningEffortScreen({
     });
     onFormChange({ ...normalized, relayProfiles });
   };
+  const saveReasoningEfforts = async () => {
+    const saved = await actions.saveSettingsValue(normalized, true, true);
+    await actions.showMessage(
+      t("思考等级保存"),
+      saved ? t("思考等级保存成功。") : t("思考等级保存失败，请检查错误后重试。"),
+      saved ? "ok" : "failed",
+    );
+  };
 
   return (
     <Panel fill>
@@ -3686,7 +3702,7 @@ function ReasoningEffortScreen({
           <div className="empty">{t("供应商模型列表为空，请先在供应商配置中添加模型。")}</div>
         )}
         <Toolbar>
-          <Button onClick={() => void actions.saveSettingsValue(normalized, false)}>
+          <Button onClick={() => void saveReasoningEfforts()}>
             <Save className="h-4 w-4" />
             {t("保存思考等级")}
           </Button>

@@ -49,6 +49,10 @@ export const EN_PLAIN: Record<string, string> = {
   "退出 ChatGPT 账号？官方手机远控将断开，纯 API Key 配置会保留。":
     "Sign out of ChatGPT? Official mobile remote control will disconnect, while pure API key settings will be preserved.",
   "ChatGPT 账号已退出。": "Signed out of ChatGPT.",
+  "思考等级保存": "Reasoning effort save",
+  "思考等级保存成功。": "Reasoning effort settings saved.",
+  "思考等级保存失败，请检查错误后重试。":
+    "Failed to save reasoning effort settings. Check the error and try again.",
   "取消连接": "Cancel connection",
   "设备码重新登录": "Sign in again with device code",
   "设备码登录": "Device-code sign-in",

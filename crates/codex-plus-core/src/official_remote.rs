@@ -534,6 +534,20 @@ pub fn clear_chatgpt_login_after_logout(
             .context("清理供应商中的 ChatGPT 登录副本失败")?;
     }
 
+    // The live file can contain an auth_mode-only session that was never copied
+    // into a saved profile. Clear it independently before reapplying the provider.
+    let live_auth_path = home.join("auth.json");
+    let live_auth = std::fs::read_to_string(&live_auth_path).unwrap_or_default();
+    if auth_contents_has_chatgpt_login(&live_auth) {
+        let active_api_key = relay_profile_api_key(&settings.active_relay_profile());
+        let replacement = api_key_auth_contents(&active_api_key)?;
+        restore_optional_file(
+            &live_auth_path,
+            (!replacement.is_empty()).then_some(replacement.as_bytes()),
+        )
+        .context("清理本地 ChatGPT 登录态失败")?;
+    }
+
     if settings.relay_profiles_enabled {
         let active = settings.active_relay_profile();
         let common_config = [
@@ -1117,6 +1131,25 @@ mod tests {
         let live_auth = std::fs::read_to_string(home.join("auth.json")).unwrap();
         assert!(live_auth.contains("OPENAI_API_KEY"));
         assert!(!live_auth.contains("account-token"));
+    }
+
+    #[test]
+    fn logout_clears_auth_mode_only_live_session_when_profiles_are_disabled() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        let store = SettingsStore::new(temp.path().join("settings.json"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("auth.json"), r#"{"auth_mode":"chatgpt"}"#).unwrap();
+        store
+            .save(&BackendSettings {
+                relay_profiles_enabled: false,
+                ..BackendSettings::default()
+            })
+            .unwrap();
+
+        clear_chatgpt_login_after_logout(&store, &home).unwrap();
+
+        assert!(!home.join("auth.json").exists());
     }
 
     #[test]

@@ -51,12 +51,23 @@ describe("model-windows helpers", () => {
   it("供应商详情只在持久化或原子切换成功后关闭", () => {
     const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 
-    assert.match(source, /const saveSettingsValue = async[^\n]+Promise<boolean>/);
+    assert.match(source, /const saveSettingsValue = async[\s\S]+?Promise<boolean>/);
     assert.match(source, /const saved = isActive && form\.relayProfilesEnabled/);
     assert.match(source, /await actions\.switchRelayProfile\(next, form\.activeRelayId\)/);
     assert.match(source, /if \(!saved\) return;/);
     assert.match(source, /供应商配置已保存。/);
     assert.doesNotMatch(source, /await actions\.saveRelayFile\(\s*"config"/);
+  });
+
+  it("退出登录始终可见且思考等级保存显示专用结果", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /<Button disabled=\{busy\} onClick=\{\(\) => void actions\.logoutChatGpt\(\)\}/);
+    assert.doesNotMatch(source, /\{signedIn \? \(\s*<Button[^>]+logoutChatGpt/);
+    assert.match(source, /const saveReasoningEfforts = async \(\) =>/);
+    assert.match(source, /saveSettingsValue\(normalized, true, true\)/);
+    assert.match(source, /思考等级保存成功。/);
+    assert.match(source, /思考等级保存失败，请检查错误后重试。/);
   });
 
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {
