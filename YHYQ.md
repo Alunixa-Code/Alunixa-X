@@ -307,3 +307,5 @@
 - 用户要求修复 Codex 会把图片 Base64 在 `.codex/sessions` 会话 JSONL 的上下文压缩与子代理历史中反复复制、导致磁盘空间异常膨胀的问题。
 - 用户反馈退出登录按钮仍未显示，要求继续修复。
 - 已读取项目历史记录并确认工作树起始状态干净，随后创建修改前检查点提交 `12aec9a`，提交作者为 `Alunixa Bot`。
+- 用户进一步澄清：移除 Max 只是规避方案；若能修复 Codex 原生控件不显示 Max，则应继续保留 Light、Medium、High、Extra High、Max、Ultra 六档，并确保 Max/Ultra 真实请求生效。
+- 用户再次要求一并完成思考等级保存成功提示、ChatGPT 退出登录按钮和 rollout 图片 Base64 重复膨胀修复。
