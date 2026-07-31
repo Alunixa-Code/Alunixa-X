@@ -300,3 +300,10 @@
 - `v1.2.55` Release 工作流 `30385959925` 已成功完成，六项资产全部上传并通过校验：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP。
 - 主分支工作流 `30385928788` 重跑后已成功完成，Windows artifacts、macOS DMG x64 和 macOS DMG arm64 全部通过；Windows job 的前端测试、TypeScript、Rust 测试和打包均成功。
 - 已将自动生成的 Release 简略正文更新为完整 v1.2.55 中文发布说明，明确记录功能、修复、仓库迁移、作者身份、构建资产和验证结果。
+
+## 2026-07-31
+
+- 用户要求修复“思考等级”页面保存后没有成功提示的问题，并从所有思考等级设置中移除 Max、保留 Ultra。
+- 用户要求修复 Codex 会把图片 Base64 在 `.codex/sessions` 会话 JSONL 的上下文压缩与子代理历史中反复复制、导致磁盘空间异常膨胀的问题。
+- 用户反馈退出登录按钮仍未显示，要求继续修复。
+- 已读取项目历史记录并确认工作树起始状态干净，随后创建修改前检查点提交 `12aec9a`，提交作者为 `Alunixa Bot`。
