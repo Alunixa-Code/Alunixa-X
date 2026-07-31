@@ -2858,8 +2858,7 @@
       try {
         const nextStatus = JSON.parse(String(event.data || ""));
         if (nextStatus?.status) {
-          codexPlusBackendStatus = nextStatus;
-          renderBackendStatus();
+          void connectBackendStatusViaBridge();
         }
       } catch {
       }
@@ -5058,23 +5057,70 @@
     document.addEventListener("visibilitychange", window.__codexThreadScrollVisibilityHandler, true);
   }
 
-  async function postJson(path, payload) {
-    if (!window.__codexSessionDeleteBridge) {
-      if (path === "/backend/status") {
-        try {
-          const response = await fetch(`${helperBase}${path}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload || {}),
-          });
-          return await response.json();
-        } catch (error) {
-          return { status: "failed", message: "未连接" };
-        }
-      }
-      sendCodexPlusDiagnostic("bridge_missing_for_route", { path });
-      return { status: "failed", message: "桥接不可用，请重启启动器" };
+  function reconcileBackendStatuses(bridgeStatus, helperStatus) {
+    if (bridgeStatus?.status !== "ok") {
+      return {
+        status: "failed",
+        message: bridgeStatus?.timeout ? "注入桥接检查超时" : "注入桥接未连接",
+        version: helperStatus?.version || bridgeStatus?.version || "",
+        transport: "verification",
+      };
     }
+    if (helperStatus?.status !== "ok") {
+      return {
+        status: "failed",
+        message: "本地 Helper 未连接",
+        version: bridgeStatus.version || "",
+        transport: "verification",
+      };
+    }
+    const bridgeProcessId = Number(bridgeStatus.processId);
+    const helperProcessId = Number(helperStatus.processId);
+    if (!Number.isSafeInteger(bridgeProcessId) || bridgeProcessId <= 0 ||
+        !Number.isSafeInteger(helperProcessId) || helperProcessId <= 0) {
+      return {
+        status: "failed",
+        message: "后端状态缺少进程标识，请重启 Codex",
+        version: bridgeStatus.version || helperStatus.version || "",
+        transport: "verification",
+      };
+    }
+    if (!bridgeStatus.version || bridgeStatus.version !== helperStatus.version) {
+      return {
+        status: "failed",
+        message: "后端版本不一致，请重启 Codex",
+        version: bridgeStatus.version || helperStatus.version || "",
+        transport: "verification",
+      };
+    }
+    if (bridgeProcessId !== helperProcessId) {
+      return {
+        status: "failed",
+        message: "后端进程不一致，请重启 Codex",
+        version: bridgeStatus.version,
+        transport: "verification",
+      };
+    }
+    if (bridgeStatus.transport !== "cdp-bridge" || helperStatus.transport !== "http-helper") {
+      return {
+        status: "failed",
+        message: "后端连接类型异常，请重启 Codex",
+        version: bridgeStatus.version,
+        transport: "verification",
+      };
+    }
+    return {
+      status: "ok",
+      message: "后端已连接",
+      version: bridgeStatus.version,
+      processId: bridgeProcessId,
+      transport: "verified",
+      bridgeTransport: bridgeStatus.transport,
+      helperTransport: helperStatus.transport,
+    };
+  }
+
+  async function postJson(path, payload) {
     function bridgeWithBackendTimeout(path, payload) {
       return Promise.race([
         window.__codexSessionDeleteBridge(path, payload),
@@ -5088,31 +5134,39 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload || {}),
         });
+        if (!response.ok) return { status: "failed", message: `Helper HTTP ${response.status}` };
         return await response.json();
       } catch (error) {
         return { status: "failed", message: "未连接" };
       }
     }
+    if (!window.__codexSessionDeleteBridge) {
+      if (path === "/backend/status") {
+        return reconcileBackendStatuses(null, await fetchBackendStatusFromHelper(path, payload));
+      }
+      sendCodexPlusDiagnostic("bridge_missing_for_route", { path });
+      return { status: "failed", message: "桥接不可用，请重启启动器" };
+    }
     try {
       if (path === "/backend/status") {
-        const result = await bridgeWithBackendTimeout(path, payload);
-        if (result?.status === "ok") return result;
-        if (result?.timeout) sendCodexPlusDiagnostic("backend_bridge_timeout", { path });
-        const fallback = await fetchBackendStatusFromHelper(path, payload);
-        if (fallback?.status === "ok") {
-          sendCodexPlusDiagnostic("backend_status_bridge_failed_http_fallback_ok", {
+        const [bridgeStatus, helperStatus] = await Promise.all([
+          bridgeWithBackendTimeout(path, payload),
+          fetchBackendStatusFromHelper(path, payload),
+        ]);
+        const verified = reconcileBackendStatuses(bridgeStatus, helperStatus);
+        if (verified.status !== "ok") {
+          sendCodexPlusDiagnostic("backend_status_verification_failed", {
             path,
-            httpStatus: 200,
-            responseStatus: fallback.status || "",
+            message: verified.message || "",
+            bridgeStatus: bridgeStatus?.status || "",
+            helperStatus: helperStatus?.status || "",
+            bridgeProcessId: bridgeStatus?.processId || null,
+            helperProcessId: helperStatus?.processId || null,
+            bridgeVersion: bridgeStatus?.version || "",
+            helperVersion: helperStatus?.version || "",
           });
-          return fallback;
         }
-        sendCodexPlusDiagnostic("backend_status_bridge_and_http_failed", {
-          path,
-          errorName: "",
-          errorMessage: "",
-        });
-        return fallback;
+        return verified;
       }
       return await window.__codexSessionDeleteBridge(path, payload);
     } catch (error) {
@@ -5122,21 +5176,17 @@
         errorMessage: error?.message || String(error),
       });
       if (path === "/backend/status") {
-        const fallback = await fetchBackendStatusFromHelper(path, payload);
-        if (fallback?.status === "ok") {
-          sendCodexPlusDiagnostic("backend_status_bridge_failed_http_fallback_ok", {
-            path,
-            httpStatus: 200,
-            responseStatus: fallback.status || "",
-          });
-          return fallback;
-        }
-        sendCodexPlusDiagnostic("backend_status_bridge_and_http_failed", {
+        const helperStatus = await fetchBackendStatusFromHelper(path, payload);
+        const verified = reconcileBackendStatuses(null, helperStatus);
+        sendCodexPlusDiagnostic("backend_status_verification_failed", {
           path,
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
+          bridgeStatus: "failed",
+          helperStatus: helperStatus?.status || "",
+          helperProcessId: helperStatus?.processId || null,
         });
-        return fallback;
+        return verified;
       }
       throw error;
     }

@@ -327,3 +327,9 @@
 - 已读取本文件、当前提交和工作树；基线为 `631c215`，六个模型相关文件仅因 Windows 换行/索引状态显示修改，文件内容与 HEAD 完全一致，后续保留且不回滚。
 - 已复核历史供应商切换约束：自定义/聚合供应商不能从本地代理 facade 反向重建，保存与切换必须保留结构化模型、密钥、URL、排序及当前配置，并将状态判定与同一 helper/Codex 进程绑定。
 - 下一阶段先统一 bridge/helper 状态契约并记录脱敏 502 首因，再修复供应商保存事务，随后实现只处理已关闭 rollout 的事务化图片去重并完成真实 Codex 运行验证。
+- 已定位后端状态误判的直接根因：bridge `/backend/status` 固定返回成功，HTTP helper fallback 也可由旧 helper 单独返回成功，WebSocket 消息还会未经交叉验证直接把右上角状态改绿。
+- 已统一 bridge 与 helper 状态载荷，均返回版本、transport 和当前 launcher `processId`；注入前端现在并行探测两条链路，只有 bridge/helper 都成功且版本、进程 ID、transport 完全一致时才显示绿色。
+- WebSocket 现在只作为重新验证触发信号，不再直接改变健康状态；缺 bridge、缺 helper、旧进程占端口、版本不一致或错误 transport 均显示明确红色原因。
+- 已读取真实诊断日志并确认间歇性 502 发生在自定义模型 Responses 请求建立阶段：一次约 494 KB 的请求在 4.4 秒后失败，但前后其他请求仍返回 200，证明不是 helper 整体离线；旧日志只记录笼统 502，无法看到 reqwest 首因。
+- 已在 Responses、Chat Completions、Models 与 Audio 四类请求建立失败分支补充诊断记录，包含脱敏后的底层错误、供应商、请求模型、协议及目标 scheme/host，不记录 API Key 或完整敏感 URL。
+- 状态与代理诊断定向验证通过：bridge routes 26 项、CDP 注入 80 项、helper/launcher 13 项、JavaScript 语法与 Rust 格式全部零失败。

@@ -688,9 +688,13 @@ impl BridgeRuntimeService for LauncherRuntimeService {
     }
 
     async fn backend_status(&self) -> anyhow::Result<Value> {
-        Ok(
-            json!({"status": "ok", "message": "后端已连接", "version": codex_plus_core::version::VERSION}),
-        )
+        Ok(json!({
+            "status": "ok",
+            "message": "后端已连接",
+            "version": codex_plus_core::version::VERSION,
+            "transport": "cdp-bridge",
+            "processId": std::process::id()
+        }))
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {

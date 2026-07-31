@@ -190,14 +190,18 @@ fn injection_script_prefers_embedded_local_ads() {
 }
 
 #[test]
-fn injection_script_times_out_backend_bridge_calls_and_falls_back_to_helper() {
+fn injection_script_requires_matching_bridge_and_helper_status() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("bridgeWithBackendTimeout"));
-    assert!(script.contains("backend_bridge_timeout"));
+    assert!(script.contains("reconcileBackendStatuses"));
+    assert!(script.contains("bridgeProcessId !== helperProcessId"));
+    assert!(script.contains("bridgeStatus.version !== helperStatus.version"));
+    assert!(script.contains("bridgeStatus.transport !== \"cdp-bridge\""));
+    assert!(script.contains("helperStatus.transport !== \"http-helper\""));
     assert!(!script.contains("/backend/repair"));
-    assert!(script.contains("backend_status_bridge_failed_http_fallback_ok"));
-    assert!(script.contains("backend_status_bridge_and_http_failed"));
+    assert!(script.contains("backend_status_verification_failed"));
+    assert!(!script.contains("backend_status_bridge_failed_http_fallback_ok"));
 }
 
 #[test]
@@ -1459,7 +1463,8 @@ fn injection_script_uses_backend_websocket_instead_of_periodic_heartbeat() {
     assert!(script.contains("connectBackendStatusStream"));
     assert!(script.contains("backendWebSocketAllowedByDocumentCsp"));
     assert!(script.contains("connectBackendStatusViaBridge"));
-    assert!(script.contains("transport: nextStatus.transport || \"cdp-bridge\""));
+    assert!(script.contains("void connectBackendStatusViaBridge();"));
+    assert!(!script.contains("codexPlusBackendStatus = nextStatus;"));
     assert!(!script.contains("__codexPlusBackendHeartbeat"));
     assert!(!script.contains("scheduleBackendHeartbeat"));
 }

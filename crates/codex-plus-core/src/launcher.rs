@@ -1304,7 +1304,8 @@ fn backend_status_payload(transport: &str) -> Value {
         "status": "ok",
         "message": "后端已连接",
         "version": crate::version::VERSION,
-        "transport": transport
+        "transport": transport,
+        "processId": std::process::id()
     })
 }
 
@@ -1481,6 +1482,14 @@ async fn handle_models_proxy_connection(
     {
         Ok(upstream) => upstream,
         Err(error) => {
+            log_proxy_open_failure(
+                "helper.models_proxy_open_failed",
+                method,
+                path,
+                remote_addr_text.as_deref(),
+                None,
+                &error,
+            );
             let body = serde_json::to_vec(
                 &serde_json::json!({                 "status": "failed",                 "message": error.to_string()             }),
             )?;
@@ -1553,6 +1562,17 @@ async fn handle_protocol_proxy_connection(
     {
         Ok(upstream) => upstream,
         Err(error) => {
+            log_proxy_open_failure(
+                "helper.protocol_proxy_open_failed",
+                method,
+                path,
+                remote_addr_text.as_deref(),
+                request_json
+                    .as_ref()
+                    .and_then(|request| request.get("model"))
+                    .and_then(serde_json::Value::as_str),
+                &error,
+            );
             let body = serde_json::to_vec(
                 &serde_json::json!({                     "status": "failed",                     "message": error.to_string()                 }),
             )?;
@@ -1774,6 +1794,14 @@ async fn handle_audio_transcriptions_proxy_connection(
     {
         Ok(upstream) => upstream,
         Err(error) => {
+            log_proxy_open_failure(
+                "helper.audio_transcriptions_proxy_open_failed",
+                method,
+                path,
+                remote_addr_text.as_deref(),
+                None,
+                &error,
+            );
             let body = serde_json::to_vec(&serde_json::json!({
                 "status": "failed",
                 "message": error.to_string()
@@ -1828,6 +1856,7 @@ async fn handle_chat_completions_proxy_connection(
     path: &str,
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
+    let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
     let upstream = match crate::protocol_proxy::open_chat_completions_proxy_request(
         request_body,
         request_user_agent,
@@ -1836,6 +1865,17 @@ async fn handle_chat_completions_proxy_connection(
     {
         Ok(upstream) => upstream,
         Err(error) => {
+            log_proxy_open_failure(
+                "helper.chat_completions_proxy_open_failed",
+                method,
+                path,
+                remote_addr_text.as_deref(),
+                request_json
+                    .as_ref()
+                    .and_then(|request| request.get("model"))
+                    .and_then(serde_json::Value::as_str),
+                &error,
+            );
             let body = serde_json::to_vec(
                 &serde_json::json!({                 "status": "failed",                 "message": error.to_string()             }),
             )?;
@@ -1938,6 +1978,61 @@ fn log_helper_response(
             "path": path,
             "status": status,
             "remote_addr": remote_addr_text
+        }),
+    );
+}
+
+fn log_proxy_open_failure(
+    event: &str,
+    method: &str,
+    path: &str,
+    remote_addr: Option<&str>,
+    request_model: Option<&str>,
+    error: &anyhow::Error,
+) {
+    let settings = crate::settings::SettingsStore::default()
+        .load()
+        .unwrap_or_default();
+    let relay = settings.active_relay_profile();
+    let custom_model = request_model.and_then(|model| {
+        relay
+            .custom_models
+            .iter()
+            .find(|candidate| candidate.model.eq_ignore_ascii_case(model))
+    });
+    let (base_url, protocol) = custom_model
+        .map(|model| (model.base_url.as_str(), model.protocol))
+        .unwrap_or((relay.base_url.as_str(), relay.protocol));
+    let parsed_url = reqwest::Url::parse(base_url).ok();
+    let mut error_message = error.to_string();
+    let mut secrets = relay
+        .custom_models
+        .iter()
+        .map(|model| model.api_key.as_str())
+        .chain(std::iter::once(relay.api_key.as_str()))
+        .filter(|secret| !secret.trim().is_empty())
+        .collect::<Vec<_>>();
+    secrets.sort_unstable_by_key(|secret| std::cmp::Reverse(secret.len()));
+    for secret in secrets {
+        error_message = error_message.replace(secret, "[REDACTED]");
+    }
+    if error_message.len() > 2048 {
+        error_message.truncate(2048);
+        error_message.push_str("...");
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        event,
+        serde_json::json!({
+            "method": method,
+            "path": path,
+            "remote_addr": remote_addr,
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "requestModel": request_model,
+            "protocol": protocol,
+            "targetScheme": parsed_url.as_ref().map(reqwest::Url::scheme),
+            "targetHost": parsed_url.as_ref().and_then(reqwest::Url::host_str),
+            "error": error_message
         }),
     );
 }

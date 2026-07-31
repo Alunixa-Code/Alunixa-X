@@ -501,7 +501,13 @@ impl BridgeRuntimeService for CoreRuntimeService {
 
     async fn backend_status(&self) -> anyhow::Result<Value> {
         let _ = self.status_store.load_latest();
-        Ok(json!({"status": "ok", "message": "后端已连接", "version": crate::version::VERSION}))
+        Ok(json!({
+            "status": "ok",
+            "message": "后端已连接",
+            "version": crate::version::VERSION,
+            "transport": "cdp-bridge",
+            "processId": std::process::id()
+        }))
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {

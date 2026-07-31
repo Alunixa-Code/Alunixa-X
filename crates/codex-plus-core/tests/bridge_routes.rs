@@ -395,7 +395,13 @@ async fn runtime_status_devtools_repair_and_ads_routes_are_dispatched() {
     );
     assert_eq!(
         handle_bridge_request(ctx.clone(), "/backend/status", json!({})).await,
-        json!({"status": "ok", "message": "后端已连接", "version": codex_plus_core::version::VERSION})
+        json!({
+            "status": "ok",
+            "message": "后端已连接",
+            "version": codex_plus_core::version::VERSION,
+            "transport": "cdp-bridge",
+            "processId": std::process::id()
+        })
     );
     assert_eq!(
         handle_bridge_request(ctx.clone(), "/ads", json!({})).await,
@@ -739,7 +745,13 @@ async fn core_runtime_reload_evaluates_enabled_user_bundle_and_status_is_ok() {
 
     assert_eq!(
         status,
-        json!({"status": "ok", "message": "后端已连接", "version": codex_plus_core::version::VERSION})
+        json!({
+            "status": "ok",
+            "message": "后端已连接",
+            "version": codex_plus_core::version::VERSION,
+            "transport": "cdp-bridge",
+            "processId": std::process::id()
+        })
     );
     assert_eq!(reloaded["scripts"][0]["key"], "builtin:demo.js");
     let evaluated = evaluated.lock().unwrap();
@@ -1179,9 +1191,13 @@ impl BridgeRuntimeService for FakeRuntime {
     }
 
     async fn backend_status(&self) -> anyhow::Result<Value> {
-        Ok(
-            json!({"status": "ok", "message": "后端已连接", "version": codex_plus_core::version::VERSION}),
-        )
+        Ok(json!({
+            "status": "ok",
+            "message": "后端已连接",
+            "version": codex_plus_core::version::VERSION,
+            "transport": "cdp-bridge",
+            "processId": std::process::id()
+        }))
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
