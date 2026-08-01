@@ -100,3 +100,10 @@ fn manager_exposes_persisted_disable_wss_switch() {
     assert!(source.contains("禁用 WSS"));
     assert!(source.contains("setPersistedEnhanceFlag(\"codexAppDisableWss\", value)"));
 }
+
+#[test]
+fn launcher_only_applies_disable_wss_when_codex_config_exists() {
+    let source = include_str!("../src/launcher.rs");
+    assert!(source.contains("settings.codex_app_disable_wss"));
+    assert!(source.contains("home.join(\"config.toml\").is_file()"));
+}
