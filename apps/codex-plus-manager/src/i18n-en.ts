@@ -280,6 +280,7 @@ export const EN_PLAIN: Record<string, string> = {
   "关于 Codex++": "About Codex++",
   "关闭": "Off",
   "关闭 Codex 自动更新": "Disable Codex automatic updates",
+  "禁用 WSS": "Disable WSS",
   "关闭后会停用删除、导出、项目移动、插件相关和菜单位置增强。":
     "When off, disables deletion, export, project move, plugin-related and menu placement enhancements.",
   "关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。":

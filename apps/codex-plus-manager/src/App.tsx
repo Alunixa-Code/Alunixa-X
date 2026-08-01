@@ -161,6 +161,7 @@ type BackendSettings = {
   codexAppForceChineseLocale: boolean;
   codexAppFastStartup: boolean;
   codexAppDisableAutoUpdate: boolean;
+  codexAppDisableWss: boolean;
   codexAppAiShell: CodexAiShell;
   codexAppPerformanceProtection: boolean;
   codexAppProjectMove: boolean;
@@ -864,6 +865,7 @@ const defaultSettings: BackendSettings = {
   codexAppForceChineseLocale: true,
   codexAppFastStartup: false,
   codexAppDisableAutoUpdate: false,
+  codexAppDisableWss: false,
   codexAppAiShell: "pwsh",
   codexAppPerformanceProtection: true,
   codexAppProjectMove: true,
@@ -3981,6 +3983,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
               <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Codex++ 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
+              <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={form.codexAppDisableWss} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableWss", value)} />
               <FeatureToggle title={t("性能保护")} detail={t("减少后台 CDP、日志和页面扫描，在大对话切换时降低渲染压力，并清理会触发全盘 Git 探测的过宽历史工作区。")} checked={form.codexAppPerformanceProtection} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPerformanceProtection", value)} />
               <FeatureToggle title={t("原生菜单栏位置")} detail={t("把 Codex++ 菜单插入 Codex 顶部原生菜单栏。")} checked={form.codexAppNativeMenuPlacement} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuPlacement", value)} />
               <FeatureToggle title={t("原生菜单汉化")} detail={t("启动时通过本地主进程调试端口汉化 Codex 原生菜单；不修改安装包。需重启 Codex 才生效。")} checked={form.codexAppNativeMenuLocalization} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuLocalization", value)} />

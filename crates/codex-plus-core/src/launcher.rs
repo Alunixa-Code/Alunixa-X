@@ -310,6 +310,9 @@ where
         {
             hooks.apply_active_relay_profile(&settings).await?;
         }
+        if settings.relay_profiles_enabled && settings.codex_app_disable_wss {
+            crate::relay_config::apply_wss_policy_to_home(&home, true)?;
+        }
         if settings.relay_profiles_enabled {
             crate::relay_config::apply_preferred_model_to_home(
                 &home,

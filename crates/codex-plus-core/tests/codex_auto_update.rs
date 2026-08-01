@@ -79,3 +79,24 @@ fn launcher_applies_the_codex_update_policy_before_starting_any_codex_variant() 
         "macOS open and portable/direct launches should both receive the updater environment"
     );
 }
+
+#[test]
+fn disable_wss_setting_defaults_and_round_trips() {
+    let settings = BackendSettings::default();
+    assert!(!settings.codex_app_disable_wss);
+
+    let mut enabled = settings.clone();
+    enabled.codex_app_disable_wss = true;
+    let json = serde_json::to_value(&enabled).expect("serialize settings");
+    assert_eq!(json["codexAppDisableWss"], true);
+    let parsed: BackendSettings = serde_json::from_value(json).expect("deserialize settings");
+    assert!(parsed.codex_app_disable_wss);
+}
+
+#[test]
+fn manager_exposes_persisted_disable_wss_switch() {
+    let source = include_str!("../../../apps/codex-plus-manager/src/App.tsx");
+    assert!(source.contains("codexAppDisableWss: boolean"));
+    assert!(source.contains("禁用 WSS"));
+    assert!(source.contains("setPersistedEnhanceFlag(\"codexAppDisableWss\", value)"));
+}

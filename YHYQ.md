@@ -402,3 +402,8 @@
 - `v1.2.57` Release 已正式发布并核验六项 uploaded 资产：Windows x64 setup/ZIP、macOS x64 DMG/ZIP、macOS arm64 DMG/ZIP；Release 正文已更新为完整中文修复与验证说明喵~
 - 发布地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.57` 喵~
 - 已删除 `target`、前端 `node_modules`、`dist` 以及本轮 CDP/Playwright/Release notes 临时文件和临时 Vite 服务，不保留构建垃圾喵~
+- 用户新增需求：在“Codex增强”中加入“禁用 WSS”选项，并将当前 provider 配置为 `wire_api = "responses"`、`supports_websockets = false` 的 HTTP-only 模式喵~
+- 已新增持久化设置 `codexAppDisableWss`，默认关闭；开启后启动器会在活动 provider 配置中写入 `name = "OpenAI HTTP only"`、`wire_api = "responses"` 和 `supports_websockets = false`，保留原有 API URL 与其他配置喵~
+- 已补充管理器中英文选项、Rust settings/relay_config 回归测试；定向 8 项设置测试和 WSS 配置写入测试全部通过喵~
+- 已确认禁用 WSS 会复制当前活动 provider 的 base_url、API 与其他字段到 `openai_http`，再切换 `model_provider`；关闭选项时不修改配置，避免覆盖用户原有自定义供应商喵~
+- 已通过 launcher 77 项、relay_config 4 项、前端 14 项、TypeScript 和 Rust 格式检查；本次 npm 审计仅记录现有依赖风险，未扩大升级范围喵~

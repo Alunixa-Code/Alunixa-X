@@ -535,6 +535,41 @@ pub fn apply_relay_config_file_to_home_with_computer_use_guard(
     })
 }
 
+/// Forces the active provider to use HTTP Responses instead of WebSocket transport.
+pub fn apply_wss_policy_to_home(home: &Path, disable_wss: bool) -> anyhow::Result<()> {
+    let config_path = home.join("config.toml");
+    let contents = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("读取 {} 失败", config_path.display()))?;
+    let mut document = contents.parse::<toml_edit::DocumentMut>()?;
+    let provider = "openai_http";
+    if disable_wss {
+        // Clone the active provider first so custom base URLs and auth settings survive the switch.
+        let source_provider = root_key_string(&contents, "model_provider");
+        let source_table = source_provider
+            .as_deref()
+            .and_then(|_| document.get("model_providers").and_then(Item::as_table))
+            .and_then(|providers| source_provider.as_deref().and_then(|id| providers.get(id)))
+            .and_then(Item::as_table_like)
+            .map(|table| {
+                table
+                    .iter()
+                    .map(|(key, item)| (key.to_string(), item.clone()))
+                    .collect::<Vec<_>>()
+            });
+        document["model_provider"] = toml_edit::value(provider);
+        let table = ensure_provider_table(&mut document, provider)?;
+        if let Some(entries) = source_table {
+            for (key, item) in entries {
+                table.insert(&key, item);
+            }
+        }
+        table["name"] = toml_edit::value("OpenAI HTTP only");
+        table["wire_api"] = toml_edit::value("responses");
+        table["supports_websockets"] = toml_edit::value(false);
+    }
+    crate::settings::atomic_write(&config_path, document.to_string().as_bytes())
+}
+
 pub fn apply_pure_api_config_to_home_with_protocol(
     home: &Path,
     base_url: &str,
@@ -3099,6 +3134,24 @@ mod tests {
         assert!(written.contains("model = \"new\""));
         assert!(written.contains("[hooks.state.\"user:PreToolUse:command:0:0\"]"));
         assert!(written.contains("trusted_hash = \"sha256:abc\""));
+    }
+
+    #[test]
+    fn disable_wss_writes_http_only_provider_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model_provider = \"custom\"\n\n[model_providers.custom]\nname = \"Custom\"\nwire_api = \"responses\"\nsupports_websockets = true\nbase_url = \"https://example.com/v1\"\n",
+        )
+        .unwrap();
+
+        apply_wss_policy_to_home(temp.path(), true).unwrap();
+        let written = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(written.contains("model_provider = \"openai_http\""));
+        assert!(written.contains("name = \"OpenAI HTTP only\""));
+        assert!(written.contains("wire_api = \"responses\""));
+        assert!(written.contains("supports_websockets = false"));
+        assert!(written.contains("base_url = \"https://example.com/v1\""));
     }
 }
 
