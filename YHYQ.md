@@ -407,3 +407,5 @@
 - 已补充管理器中英文选项、Rust settings/relay_config 回归测试；定向 8 项设置测试和 WSS 配置写入测试全部通过喵~
 - 已确认禁用 WSS 会复制当前活动 provider 的 base_url、API 与其他字段到 `openai_http`，再切换 `model_provider`；关闭选项时不修改配置，避免覆盖用户原有自定义供应商喵~
 - 已通过 launcher 77 项、relay_config 4 项、前端 14 项、TypeScript 和 Rust 格式检查；本次 npm 审计仅记录现有依赖风险，未扩大升级范围喵~
+- 已增加配置文件存在性保护：仅当 `config.toml` 已存在时启动器才应用禁用 WSS，避免用户未配置供应商时启动失败；相关 9 项设置与配置测试全部通过喵~
+- 已清理本轮测试生成的 `target` 和前端依赖目录，保留既有未提交换行状态噪声文件不变喵~
