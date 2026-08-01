@@ -28,12 +28,9 @@ fn cdp_listening_returns_true_for_bound_ipv6_loopback_port() {
 
 #[test]
 fn cdp_listening_returns_false_for_closed_port() {
-    let port = {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        listener.local_addr().unwrap().port()
-    };
-
-    assert!(!cdp_listening(port));
+    // Port zero is never a connectable endpoint and avoids racing an unrelated
+    // process that may claim an ephemeral port after the test listener closes.
+    assert!(!cdp_listening(0));
 }
 
 #[test]
