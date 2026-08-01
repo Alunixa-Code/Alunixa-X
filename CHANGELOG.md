@@ -1,3 +1,7 @@
+## 1.2.58 - 2026-08-01
+
+- Codex增强新增“禁用 WSS”选项；启用后自动生成 `openai_http` provider，使用 `wire_api = "responses"` 与 `supports_websockets = false`，强制 HTTP-only 请求并保留现有供应商配置。
+- 启动器仅在配置文件存在时应用策略，避免首次启动或未配置供应商时失败；新增设置、配置写入、前端和启动器回归测试。
 # 更新日志
 
 ## 1.2.57 - 2026-07-31

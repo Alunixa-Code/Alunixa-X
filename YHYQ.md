@@ -412,3 +412,4 @@
 - 用户反馈编译失败后要求继续处理，已从失败 Actions 日志定位为 watcher 测试对随机端口的竞态，而非 WSS 代码编译错误喵~
 - 已将关闭端口测试改为探测端口 0，消除 Windows runner 上被其他进程抢占临时端口导致的偶发误失败喵~
 - 修复提交 def9f50 的 GitHub Actions 30689072255 已完成，Windows、macOS x64 与 macOS arm64 全部成功；失败原因已闭环为 watcher 临时端口竞态喵~
+- 用户要求确认构建完成并正式发布发行版后再停止；现开始将禁用 WSS 功能整理为 1.2.58 发布并等待 Release Actions 完成喵~
