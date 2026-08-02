@@ -441,3 +441,4 @@
 - 已将 `main` 与注释标签 `v1.2.59` 推送到 `Alunixa-Code/CodexPlusPlusPlus`；主分支 Actions `30740691572` 的 Windows、macOS x64、macOS arm64 全部成功，Windows 包含前端测试、TypeScript、完整 Rust 测试、release 二进制、ZIP 与安装包构建喵~
 - 正式 Release Actions `30740698749` 已通过版本/品牌校验、Windows x64、macOS x64、macOS arm64 构建、包结构与六项资产完整性校验，并成功发布 GitHub Release 喵~
 - `v1.2.59` Release 已更新为详细中文说明，完整记录根因、兼容策略、新版 4675 导出审计、自动化与真实页面验证、Actions 结果以及六项资产 SHA-256；Release 已核验为非草稿、非预发布的 latest 版本，地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.59` 喵~
+- 发布后清理完成：已删除 Rust `target`、前端 `node_modules` 与 `dist`，并删除本轮全部 CDP 验证脚本/载荷和 Release notes/JSON 临时文件；清理后逐项确认均不存在喵~
