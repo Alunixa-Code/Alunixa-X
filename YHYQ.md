@@ -460,3 +460,5 @@
 - 已按 `package-lock.json` 安装前端依赖并完成验证：前端 14 项测试、TypeScript、Vite 生产构建、i18n plain 726/726 与 template 64/64、CDP 注入 82 项、bridge routes 26 项、共享终端定向测试、launcher/manager Rust 检查、JS 语法与 Rust 格式全部通过喵~
 - npm audit 仍报告仓库既有 1 个 low 与 2 个 high，未在本功能中扩大依赖升级范围；Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
 - 新增真实 helper HTTP 回归测试，确认 `/shared-terminal/submit` 会阻塞到同一实例 broker 完成，并逐字返回终端输出和退出码；共享终端路由同时限制为 loopback 来源，诊断只记录路径和键名而不记录命令正文喵~
+- 已接续共享终端交接，核对阶段提交、既有五个换行状态噪声和临时验收文件；确认先前 PID 17608 的 helper 已退出且 59137 端口已释放，将在并发修复后重建真实验收现场喵~
+- 已建立收口计划：先限制同一页面一次只领取一条共享终端命令，再完成真实 Codex 后台等待、人工介入、输出回传、活动续期和两分钟自动关闭验收，随后全量测试并发布 1.2.60 喵~
