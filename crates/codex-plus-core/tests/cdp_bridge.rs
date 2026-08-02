@@ -1067,7 +1067,8 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert!(script.contains("installCodexProjectlessNewTaskButtons"));
     assert!(script.contains("codexProjectlessMainWindowVersion = \"5\""));
     assert!(script.contains("generic-new-task-button"));
-    assert!(script.contains("loadCodexAppModule(\"projectless-thread-\")"));
+    assert!(script.contains("[\"projectless-thread-\", \"app-initial-\"]"));
+    assert!(script.contains("codexProjectlessContextFactoryFromModule"));
     assert!(script.contains("projectless_thread_start_overridden"));
     assert!(script.contains("projectless_app_server_start_overridden"));
     assert!(script.contains("historyMode: \"paginated\""));
@@ -1084,6 +1085,8 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["explicitProject"], "project");
     assert_eq!(cases["projectRow"], "project");
     assert_eq!(cases["unrelated"], "");
+    assert_eq!(cases["legacyProjectlessFactoryFound"], true);
+    assert_eq!(cases["bundledProjectlessFactoryFound"], true);
     assert_eq!(cases["genericEnabled"], true);
     assert_eq!(cases["projectRequestNeedsOverride"], true);
     assert_eq!(cases["nativeProjectlessNeedsOverride"], false);
@@ -1198,6 +1201,21 @@ api.setEnabled(true);
 api.setIntent("generic", "test");
 const genericEnabled = api.shouldEnforce();
 const context = {{ cwd: "C:/generated/work", projectlessOutputDirectory: "C:/generated/outputs", workspaceRoots: ["C:/generated/work"] }};
+async function legacyProjectlessFactory() {{}}
+const legacyProjectlessFactoryFound = api.contextFactoryFromModule({{ n: legacyProjectlessFactory }}, true) === legacyProjectlessFactory;
+async function bundledProjectlessFactory(roots, options) {{
+  const result = await hostCall("projectless-thread-cwd", {{ params: {{ directoryName: options?.directoryName, prompt: options?.prompt ?? null }} }});
+  return {{
+    cwd: result.cwd,
+    projectlessOutputDirectory: result.outputDirectory,
+    workspaceRoots: [result.workspaceRoot],
+  }};
+}}
+async function unrelatedFactory() {{ return {{ workspaceRoots: [] }}; }}
+const bundledProjectlessFactoryFound = api.contextFactoryFromModule({{
+  unrelatedFactory,
+  bundledProjectlessFactory,
+}}) === bundledProjectlessFactory;
 const projectRequest = {{
   type: "start-conversation",
   cwd: "C:/recent-project",
@@ -1266,6 +1284,7 @@ api.setIntent("generic", "test");
 const disabledIsNoop = api.shouldEnforce();
 process.stdout.write(JSON.stringify({{
   englishNewTask, chineseNewTask, compactChineseNewTask, quickChat, explicitProject, projectRow, unrelated,
+  legacyProjectlessFactoryFound, bundledProjectlessFactoryFound,
   genericEnabled, projectRequestNeedsOverride, nativeProjectlessNeedsOverride,
   patchedWorkspaceKind: patchedRequest.workspaceKind,
   patchedCwd: patchedRequest.cwd,

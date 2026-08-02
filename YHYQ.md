@@ -415,3 +415,13 @@
 - 用户要求确认构建完成并正式发布发行版后再停止；现开始将禁用 WSS 功能整理为 1.2.58 发布并等待 Release Actions 完成喵~
 - GitHub Release workflow 30690960867 已成功完成 verify-version、Windows x64、macOS x64、macOS arm64 构建及发布步骤；v1.2.58 已正式发布并包含六项发行资产喵~
 - 发布后文档提交触发的附加主分支构建 30691358267 长时间停留在 Windows Rust tests，已取消该非发布验证工作流；正式发行工作流 30690960867 已成功且 Release 资产完整喵~
+
+## 2026-08-02
+
+- 用户反馈当前持续出现“无项目会话准备失败”，要求定位并修复该 Bug 喵~
+- 已读取项目历史、工作树与最近提交，确认五个模型文件仍是内容与 HEAD 一致的 Windows 换行状态噪声，并创建修改前检查点提交 `8caad54` 喵~
+- 开始从无项目任务注入链路、实际 Codex 日志和当前前端协议三方面定位失败根因喵~
+- 已从真实诊断日志确认直接根因：Codex `26.727.6591.0` 已将 `projectless-thread-*` 独立资源合并进 `app-initial-cpPdPura.js`，旧注入仍只加载已不存在的资源，导致预热与正式 `thread/start` 每次都抛出“未找到 Codex App asset: projectless-thread-”并显示失败提示喵~
+- 已新增结构化无项目上下文工厂发现器，优先兼容旧独立分包，并在新版 `app-initial-*` 中按 `projectless-thread-cwd`、`projectlessOutputDirectory` 与 `workspaceRoots` 契约识别真实生成函数，避免绑定压缩导出名或资源哈希喵~
+- 已扩展无项目主窗口合约测试，覆盖旧 `module.n` 与新版单体模块两种导出结构；JavaScript 语法检查和定向 Rust 合约测试通过喵~
+- 已在当前真实 Codex `26.727.6591.0` 页面按新发现逻辑找到合并后的上下文工厂并实际生成有效 cwd、输出目录和 workspaceRoots，确认新版运行时兼容链路恢复喵~

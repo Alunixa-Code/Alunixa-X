@@ -1866,6 +1866,33 @@
     }) || null;
   }
 
+  function codexProjectlessContextFactoryFromModule(module, allowLegacyExports = false) {
+    if (!module || typeof module !== "object") return null;
+    if (allowLegacyExports && typeof module.n === "function") return module.n;
+    return Object.values(module).find((candidate) => {
+      const source = codexModuleFunctionSource(candidate).replace(/\s+/g, "");
+      return source.startsWith("asyncfunction")
+        && source.includes("projectless-thread-cwd")
+        && source.includes("projectlessOutputDirectory")
+        && source.includes("workspaceRoots");
+    }) || null;
+  }
+
+  async function codexProjectlessContextFactory() {
+    const errors = [];
+    for (const assetPrefix of ["projectless-thread-", "app-initial-"]) {
+      try {
+        const module = await loadCodexAppModule(assetPrefix);
+        const factory = codexProjectlessContextFactoryFromModule(module, assetPrefix !== "app-initial-");
+        if (factory) return { factory, assetPrefix };
+        errors.push(`${assetPrefix}: projectless context factory unavailable`);
+      } catch (error) {
+        errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
+      }
+    }
+    throw new Error(`Codex projectless-thread 生成器不可用 (${errors.join("; ")})`);
+  }
+
   async function codexSettingStorageModule() {
     const errors = [];
     for (const assetPrefix of ["setting-storage-", "app-initial-"]) {
@@ -5187,11 +5214,11 @@
       return await codexProjectlessMainWindowState.contextPromise;
     }
     const contextPromise = Promise.resolve().then(async () => {
-      const module = await loadCodexAppModule("projectless-thread-");
-      if (typeof module.n !== "function") throw new Error("Codex projectless-thread 生成器不可用");
+      const { factory, assetPrefix } = await codexProjectlessContextFactory();
       const options = String(prompt || "").trim() ? { prompt: String(prompt).trim() } : {};
-      const context = await module.n(["~"], options);
+      const context = await factory(["~"], options);
       if (!codexProjectlessContextValid(context)) throw new Error("Codex projectless-thread 返回了无效目录");
+      sendCodexPlusDiagnostic("projectless_context_factory_resolved", { assetPrefix });
       return {
         cwd: context.cwd,
         projectlessOutputDirectory: context.projectlessOutputDirectory,
@@ -5527,6 +5554,7 @@
       appServerRequestNeedsOverride: codexProjectlessAppServerRequestNeedsOverride,
       applyAppServerRequestOverride: applyCodexProjectlessAppServerRequestOverride,
       patchAppServerClient: patchAppServerModelRequestClient,
+      contextFactoryFromModule: codexProjectlessContextFactoryFromModule,
       contextValid: codexProjectlessContextValid,
       setDraftContext: (context) => {
         codexProjectlessMainWindowState.contextRevision = codexProjectlessMainWindowState.revision;
