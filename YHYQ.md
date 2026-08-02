@@ -479,3 +479,6 @@
 - 全部验证均为独立自动化测试，未连接、替换或操作当前 Codex 实例、当前任务会话、9229 CDP 或当前 helper 喵~
 - 发布前本地清理已完成：删除 Rust `target`、前端 `node_modules` 与 `dist`，没有保留下载、编译或验收临时文件；五个既有 Windows 换行状态噪声继续保持未提交且不纳入发布喵~
 - `main` 已推送至 `Alunixa-Code/CodexPlusPlusPlus`，主分支 GitHub Actions `30752842424` 全部成功：Windows 完成品牌、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装包；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
+- 正式 Release Actions `30753459263` 已全部成功：verify-version、Windows x64、macOS x64、macOS arm64、六项资产校验与 Publish GitHub Release 均完成喵~
+- `v1.2.60` Release 已更新为详细中文说明，记录功能架构、兼容与稳定性修复、默认行为、自动化验证、主分支/Release Actions 链接以及六项资产 SHA-256；已核验为非草稿、非预发布、latest，六项资产全部为 uploaded 状态喵~
+- 正式发行地址：`https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.60` 喵~
