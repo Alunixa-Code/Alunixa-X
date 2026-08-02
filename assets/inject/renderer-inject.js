@@ -2677,7 +2677,7 @@
     void patch();
   }
 
-  const codexSharedTerminalRuntimeVersion = "1";
+  const codexSharedTerminalRuntimeVersion = "2";
   const codexSharedTerminalRetentionMs = 2 * 60 * 1000;
   const codexSharedTerminalRecordKey = "codexPlus.sharedTerminal.records.v1";
 

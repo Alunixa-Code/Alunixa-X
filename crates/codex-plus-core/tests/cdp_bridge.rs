@@ -1142,6 +1142,7 @@ fn injection_script_uses_structural_shared_terminal_contract() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("codexTerminalManagerFromModule"));
+    assert!(script.contains("codexSharedTerminalRuntimeVersion = \"2\""));
     assert!(script.contains("runHeadlessAction"));
     assert!(script.contains("subscribeToSessionSnapshot"));
     assert!(script.contains("closeSessionForConversation"));
