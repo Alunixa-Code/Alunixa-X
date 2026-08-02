@@ -434,3 +434,5 @@
 - 新增回归测试禁止再次引入项目移动刷新资源哈希，并完成 JavaScript 语法检查、Rust 格式检查和 CDP 注入 81 项测试喵~
 - 已接续兼容性审计与发布工作，停止 PID 27032 的临时 debug helper，并确认本地端口 57402 已释放；下一步统一准备 1.2.59 版本与详细变更记录喵~
 - 正式兼容修复版本确定为 `1.2.59`，已统一 Rust workspace、Cargo.lock、管理器 package/package-lock 与 Tauri 配置版本，并在 CHANGELOG 详细记录无项目单体模块兼容、项目移动刷新去哈希、插件资源兼容降级、新版导出审计和真实运行验证喵~
+- 首轮完整 Rust workspace 测试在 Tauri `generate_context!()` 阶段因清理后不存在前端 `dist` 目录而停止，并非源码编译或测试失败；先按 lockfile 完成前端生产构建后再重跑完整 Rust 测试喵~
+- 前端 14 项测试、TypeScript、Vite 生产构建和品牌保护通过；i18n 精确校验发现上一版“禁用 WSS”说明缺少英文词条，已补齐后纳入再次验证喵~

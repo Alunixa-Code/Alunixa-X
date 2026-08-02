@@ -281,6 +281,8 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭": "Off",
   "关闭 Codex 自动更新": "Disable Codex automatic updates",
   "禁用 WSS": "Disable WSS",
+  "强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。":
+    "Force Codex to use HTTP Responses instead of WebSocket/WSS by setting the current provider's supports_websockets to false. Restart Codex to apply.",
   "关闭后会停用删除、导出、项目移动、插件相关和菜单位置增强。":
     "When off, disables deletion, export, project move, plugin-related and menu placement enhancements.",
   "关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。":
