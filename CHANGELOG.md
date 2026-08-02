@@ -1,3 +1,15 @@
+## 1.2.60 - 2026-08-02
+
+- “Codex增强”新增默认关闭的“AI 共享终端”开关：启用后，模型通过官方 `PreToolUse` Hook 发起的终端命令不再进入不可见的独立 shell，而是进入 Codex 右上角终端按钮所管理的同一个官方 ConPTY session。
+- 终端面板未打开时继续使用官方 `runHeadlessAction` 在后台执行，页面布局、焦点和普通任务界面保持不变；用户随时打开右上角终端即可查看当前命令和实时输出，并通过官方 `write` 通道输入密码、`yes/no`、回车或 `Ctrl+C`。
+- 新增实例级共享终端 broker 与阻塞代理协议，覆盖提交、租约领取、启动确认、心跳、完成回执和断线恢复；命令的 stdout、错误信息与真实退出码会原样返回给模型，诊断日志不记录命令正文、密码或终端输出。
+- 页面按 `create`、`attach`、`write`、`runHeadlessAction`、snapshot 与 conversation-session 方法集合结构化发现官方终端管理器，不依赖 Codex 新版或旧版的资源哈希、独立分包、`Aht` 等压缩导出名。
+- 输出捕获透明观察官方 `handleHostEvent` 的完整 `data` / `init-log` 流，避免 16 KB snapshot 环形缓冲截断；同时保留 snapshot 订阅用于活动检测、页面重注入和 bridge 重连后的同 session 接管，不抢占官方 xterm UI 的唯一 `register` listener。
+- 同一页面一次只领取并运行一条 AI 共享终端命令，并在异步模块加载前同步占用执行槽，保证用户打开右上角终端时看到的就是当前等待人工介入的命令，不会被后续并发命令切换 active session。
+- 命令结束后保留对应 AI 终端两分钟，用户输入或后续终端输出都会刷新空闲时间；到期只关闭该 thread 下对应的 AI session，不影响用户创建的其他终端，避免长期运行后终端标签堆积。
+- 共享终端 runtime 升级到 v2，并加入显式销毁旧轮询、心跳、计时器和订阅的生命周期；升级时不关闭正在运行的官方 ConPTY，broker 租约到期后可由新 runtime 按原 session ID 恢复。
+- 新增 broker、真实 helper HTTP 阻塞回归、Hook 路由、代理参数、官方终端结构发现、ANSI 清理、snapshot 增量、PowerShell 编码包装、串行领取、runtime 升级与两分钟保留合约测试。
+
 ## 1.2.59 - 2026-08-02
 
 - 修复 Codex `26.727.6591.0` 中持续出现“无项目会话准备失败”的问题：新版已删除 `projectless-thread-*` 独立资源并将上下文工厂合并到 `app-initial-*`，注入器现在同时兼容旧分包和新版单体模块。
