@@ -437,3 +437,4 @@
 - 首轮完整 Rust workspace 测试在 Tauri `generate_context!()` 阶段因清理后不存在前端 `dist` 目录而停止，并非源码编译或测试失败；先按 lockfile 完成前端生产构建后再重跑完整 Rust 测试喵~
 - 前端 14 项测试、TypeScript、Vite 生产构建和品牌保护通过；i18n 精确校验发现上一版“禁用 WSS”说明缺少英文词条，已补齐后纳入再次验证喵~
 - 补齐词条后 i18n 达到 plain 724/724、template 64/64 精确一致；JavaScript 语法、Rust 格式和完整 `cargo test --workspace -- --test-threads=1` 全部通过，包含 CDP 注入 81 项及全部 workspace、集成和文档测试喵~
+- 已将当前 `1.2.59` 脚本重注入真实 Codex `26.727.6591.0` 页面：runtimeId 更新为 3，`app-initial-cpPdPura.js` 的 4675 个导出中识别上下文工厂 `XX` 和 dispatcher `$mt`，成功生成 cwd、projectlessOutputDirectory 与 workspaceRoots；bridge 返回后端已连接，页面没有精确“无项目会话准备失败”提示，项目刷新失败数组为空且思考等级同步正常喵~
