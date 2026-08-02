@@ -438,3 +438,6 @@
 - 前端 14 项测试、TypeScript、Vite 生产构建和品牌保护通过；i18n 精确校验发现上一版“禁用 WSS”说明缺少英文词条，已补齐后纳入再次验证喵~
 - 补齐词条后 i18n 达到 plain 724/724、template 64/64 精确一致；JavaScript 语法、Rust 格式和完整 `cargo test --workspace -- --test-threads=1` 全部通过，包含 CDP 注入 81 项及全部 workspace、集成和文档测试喵~
 - 已将当前 `1.2.59` 脚本重注入真实 Codex `26.727.6591.0` 页面：runtimeId 更新为 3，`app-initial-cpPdPura.js` 的 4675 个导出中识别上下文工厂 `XX` 和 dispatcher `$mt`，成功生成 cwd、projectlessOutputDirectory 与 workspaceRoots；bridge 返回后端已连接，页面没有精确“无项目会话准备失败”提示，项目刷新失败数组为空且思考等级同步正常喵~
+- 已将 `main` 与注释标签 `v1.2.59` 推送到 `Alunixa-Code/CodexPlusPlusPlus`；主分支 Actions `30740691572` 的 Windows、macOS x64、macOS arm64 全部成功，Windows 包含前端测试、TypeScript、完整 Rust 测试、release 二进制、ZIP 与安装包构建喵~
+- 正式 Release Actions `30740698749` 已通过版本/品牌校验、Windows x64、macOS x64、macOS arm64 构建、包结构与六项资产完整性校验，并成功发布 GitHub Release 喵~
+- `v1.2.59` Release 已更新为详细中文说明，完整记录根因、兼容策略、新版 4675 导出审计、自动化与真实页面验证、Actions 结果以及六项资产 SHA-256；Release 已核验为非草稿、非预发布的 latest 版本，地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.59` 喵~
