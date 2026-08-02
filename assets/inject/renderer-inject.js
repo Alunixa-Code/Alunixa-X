@@ -2694,6 +2694,7 @@
       "subscribeToSessionSnapshot",
       "addSessionForConversation",
       "setActiveSessionForConversation",
+      "handleHostEvent",
     ];
     return Object.values(module || {}).find((candidate) =>
       candidate && typeof candidate === "object" && methods.every((method) => typeof candidate[method] === "function")
@@ -2796,10 +2797,16 @@
       state.manager = terminalManager;
       if (!terminalManager.__codexPlusSharedTerminalOriginalWrite) {
         terminalManager.__codexPlusSharedTerminalActivityListeners = new Set();
+        terminalManager.__codexPlusSharedTerminalEventListeners = new Set();
         terminalManager.__codexPlusSharedTerminalOriginalWrite = terminalManager.write.bind(terminalManager);
+        terminalManager.__codexPlusSharedTerminalOriginalHandleHostEvent = terminalManager.handleHostEvent.bind(terminalManager);
         terminalManager.write = (sessionId, data) => {
           terminalManager.__codexPlusSharedTerminalActivityListeners.forEach((listener) => listener(sessionId, data));
           return terminalManager.__codexPlusSharedTerminalOriginalWrite(sessionId, data);
+        };
+        terminalManager.handleHostEvent = (event) => {
+          terminalManager.__codexPlusSharedTerminalEventListeners.forEach((listener) => listener(event));
+          return terminalManager.__codexPlusSharedTerminalOriginalHandleHostEvent(event);
         };
       }
       terminalManager.__codexPlusSharedTerminalActivityListeners.add((sessionId, data) => {
@@ -2832,7 +2839,7 @@
         } catch {
         }
         record.closed = true;
-        record.unsubscribe?.();
+        unsubscribeRecord(record);
         state.records.delete(record.sessionId);
         persistCompletedRecords();
       }, delay);
@@ -2883,6 +2890,13 @@
       record.lastBuffer = current;
       if (!delta) return;
       record.lastActivityAt = Date.now();
+      if (record.rawEvents) {
+        if (record.completed) {
+          persistCompletedRecords();
+          scheduleClose(record);
+        }
+        return;
+      }
       if (!record.busy) {
         if (record.completed) {
           persistCompletedRecords();
@@ -2900,9 +2914,40 @@
     };
 
     const subscribeRecord = (terminalManager, record) => {
-      record.unsubscribe?.();
+      unsubscribeRecord(record);
       record.unsubscribe = terminalManager.subscribeToSessionSnapshot(record.sessionId, () => handleSnapshot(record));
+      record.rawEvents = typeof terminalManager.__codexPlusSharedTerminalEventListeners?.add === "function";
+      if (record.rawEvents) {
+        record.rawEventListener = (event) => {
+          if (!event || event.sessionId !== record.sessionId) return;
+          record.lastActivityAt = Date.now();
+          if (event.type === "data" || event.type === "init-log") {
+            if (record.busy) {
+              const data = String(event.type === "data" ? event.data || "" : event.log || "");
+              record.collected = `${record.collected}${data}`.slice(-4 * 1024 * 1024);
+              const clean = stripCodexTerminalControls(record.collected);
+              const markerAt = clean.indexOf(record.doneMarker);
+              const codeText = markerAt < 0 ? null : clean.slice(markerAt + record.doneMarker.length).match(/^-?\d+/)?.[0];
+              if (codeText != null) void finish(record, Number.parseInt(codeText, 10));
+            } else if (record.completed) {
+              persistCompletedRecords();
+              scheduleClose(record);
+            }
+            return;
+          }
+          if (record.busy && event.type === "exit") void finish(record, Number(event.code) || 1, "共享终端会话已退出");
+          if (record.busy && event.type === "error") void finish(record, 1, event.message || "共享终端会话失败");
+        };
+        terminalManager.__codexPlusSharedTerminalEventListeners.add(record.rawEventListener);
+      }
       handleSnapshot(record);
+    };
+
+    const unsubscribeRecord = (record) => {
+      record.unsubscribe?.();
+      record.unsubscribe = null;
+      if (record.rawEventListener) state.manager?.__codexPlusSharedTerminalEventListeners?.delete(record.rawEventListener);
+      record.rawEventListener = null;
     };
 
     const waitForShell = async (terminalManager, sessionId, timeoutMs = 8000) => {
@@ -2965,7 +3010,7 @@
           );
           const sessionId = reusable?.sessionId || terminalManager.addSessionForConversation(work.threadId);
           if (reusable) {
-            reusable.unsubscribe?.();
+            unsubscribeRecord(reusable);
             clearTimeout(reusable.closeTimer);
             state.records.delete(reusable.sessionId);
           } else {

@@ -1176,7 +1176,7 @@ globalThis.navigator = {{ userAgent: 'Windows node-test' }};
 globalThis.performance = {{ getEntriesByType: () => [] }};
 require(scriptPath);
 const api = window.__codexPlusSharedTerminalTest;
-const manager = {{ create() {{}}, attach() {{}}, write() {{}}, runHeadlessAction() {{}}, register() {{}}, getSnapshot() {{}}, getConversationSnapshot() {{}}, closeSessionForConversation() {{}}, subscribeToSessionSnapshot() {{}}, addSessionForConversation() {{}}, setActiveSessionForConversation() {{}} }};
+const manager = {{ create() {{}}, attach() {{}}, write() {{}}, runHeadlessAction() {{}}, register() {{}}, getSnapshot() {{}}, getConversationSnapshot() {{}}, closeSessionForConversation() {{}}, subscribeToSessionSnapshot() {{}}, addSessionForConversation() {{}}, setActiveSessionForConversation() {{}}, handleHostEvent() {{}} }};
 const detected = api.terminalManagerFromModule({{ random: {{}}, compressedExport: manager }}) === manager;
 const delta = api.bufferDelta('prefix-old-tail', 'old-tail-next');
 const stripped = api.stripControls('\u001b[31mhello\u001b[0m\r\nworld');

@@ -455,3 +455,5 @@
 - 已在“Codex增强”加入默认关闭的持久化“AI 共享终端”开关和中英文说明；关闭时保留原 `pwsh`/Windows PowerShell 独立执行行为，开启时共享终端优先喵~
 - 定向验证通过：共享 broker、代理参数、Hook 路由三项 Rust 测试，官方终端结构发现、ANSI 清理、环形快照增量与命令封装 JavaScript 合约测试，以及 launcher Rust 编译、JS 语法、Rust 格式和差异检查喵~
 - 管理器 Rust 编译首次仅因按清理要求不存在前端 `dist` 而停在 Tauri `generate_context!()`，不是本次代码错误；将在按 lockfile 安装前端依赖和生产构建后继续全量验证喵~
+- 进一步强化输出捕获：对官方终端管理器的 `handleHostEvent` 做最小透明观察，直接收集未经 16 KB snapshot 截断的 data/init-log 流，同时继续用 `subscribeToSessionSnapshot` 维护活动时间和重注入恢复，不占用官方 UI 的唯一 listener 喵~
+- 页面重注入或 CDP bridge 重连后，如 broker 已确认 session 但任务尚未完成，会先按官方 `attach` 契约恢复对既有 ConPTY 的跟踪再继续解析完成标记，避免创建第二个终端或丢失长命令结果喵~
