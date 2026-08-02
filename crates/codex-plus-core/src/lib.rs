@@ -39,6 +39,7 @@ pub mod relay_switch;
 pub mod routes;
 pub mod script_market;
 pub mod settings;
+pub mod shared_terminal;
 pub mod status;
 pub mod stepwise;
 pub mod update;

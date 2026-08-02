@@ -23,12 +23,15 @@ struct LauncherHooks {
 
 impl Default for LauncherHooks {
     fn default() -> Self {
+        let core = Arc::new(DefaultLaunchHooks::default());
+        let shared_terminal = core.shared_terminal_broker();
         Self {
-            core: Arc::new(DefaultLaunchHooks::default()),
+            core,
             data: Arc::new(LauncherDataService::default()),
             runtime: Arc::new(LauncherRuntimeService::new(
                 9229,
                 default_user_script_manager(),
+                shared_terminal,
             )),
             bridge_context: Arc::new(Mutex::new(None)),
         }
@@ -40,6 +43,9 @@ async fn main() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--codex-plus-hook") {
         return codex_plus_core::codex_hooks::run_hook_from_stdio().await;
+    }
+    if args.iter().any(|arg| arg == "--codex-plus-shared-terminal") {
+        return run_shared_terminal_proxy(args).await;
     }
     let helper_only = args.iter().any(|arg| arg == "--helper-only");
     let options = parse_launch_options(args.iter());
@@ -65,6 +71,31 @@ async fn main() -> Result<()> {
     let handle = launch_and_inject_with_hooks(options, &hooks).await?;
     handle.wait_for_codex_exit().await?;
     Ok(())
+}
+
+async fn run_shared_terminal_proxy(args: Vec<String>) -> Result<()> {
+    use std::io::Write;
+
+    let request = codex_plus_core::shared_terminal::parse_proxy_request(args.iter())?;
+    match codex_plus_core::shared_terminal::run_proxy(request).await {
+        Ok(result) => {
+            let mut stdout = std::io::stdout().lock();
+            stdout.write_all(result.output.as_bytes())?;
+            if !result.error.is_empty() {
+                let mut stderr = std::io::stderr().lock();
+                stderr.write_all(result.error.as_bytes())?;
+                if !result.error.ends_with('\n') {
+                    stderr.write_all(b"\n")?;
+                }
+            }
+            stdout.flush()?;
+            std::process::exit(result.exit_code.clamp(0, 255));
+        }
+        Err(error) => {
+            eprintln!("Codex++ shared terminal failed: {error:#}");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn spawn_rollout_image_cleanup_nonfatal() {
@@ -664,15 +695,21 @@ struct LauncherRuntimeService {
     helper_port: Mutex<Option<u16>>,
     websocket_url: Mutex<Option<String>>,
     user_scripts: UserScriptManager,
+    shared_terminal: Arc<codex_plus_core::shared_terminal::SharedTerminalBroker>,
 }
 
 impl LauncherRuntimeService {
-    fn new(debug_port: u16, user_scripts: UserScriptManager) -> Self {
+    fn new(
+        debug_port: u16,
+        user_scripts: UserScriptManager,
+        shared_terminal: Arc<codex_plus_core::shared_terminal::SharedTerminalBroker>,
+    ) -> Self {
         Self {
             debug_port: Mutex::new(debug_port),
             helper_port: Mutex::new(None),
             websocket_url: Mutex::new(None),
             user_scripts,
+            shared_terminal,
         }
     }
 
@@ -824,6 +861,47 @@ impl BridgeRuntimeService for LauncherRuntimeService {
             &payload,
         ))
     }
+
+    async fn shared_terminal_next(&self) -> anyhow::Result<Value> {
+        Ok(match self.shared_terminal.next().await {
+            Some(work) => serde_json::to_value(work)?,
+            None => json!({ "status": "idle" }),
+        })
+    }
+
+    async fn shared_terminal_started(&self, payload: Value) -> anyhow::Result<Value> {
+        let request_id = required_payload_string(&payload, "requestId")?;
+        let terminal_session_id = required_payload_string(&payload, "terminalSessionId")?;
+        self.shared_terminal
+            .started(request_id, terminal_session_id)
+            .await?;
+        Ok(json!({ "status": "ok" }))
+    }
+
+    async fn shared_terminal_heartbeat(&self, payload: Value) -> anyhow::Result<Value> {
+        let request_id = required_payload_string(&payload, "requestId")?;
+        self.shared_terminal.heartbeat(request_id).await?;
+        Ok(json!({ "status": "ok" }))
+    }
+
+    async fn shared_terminal_complete(&self, payload: Value) -> anyhow::Result<Value> {
+        let result =
+            serde_json::from_value::<codex_plus_core::shared_terminal::SharedTerminalResult>(
+                payload,
+            )
+            .context("共享终端完成载荷无效")?;
+        self.shared_terminal.complete(result).await?;
+        Ok(json!({ "status": "ok" }))
+    }
+}
+
+fn required_payload_string<'a>(payload: &'a Value, key: &str) -> anyhow::Result<&'a str> {
+    payload
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("共享终端载荷缺少 {key}"))
 }
 
 fn backend_status_failed(message: &str) -> Value {

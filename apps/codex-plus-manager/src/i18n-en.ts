@@ -134,6 +134,9 @@ export const EN_PLAIN: Record<string, string> = {
   "AI 调用终端": "AI command shell",
   "选择 Codex AI 执行命令时使用的 PowerShell；所选终端不可用时自动回退。":
     "Choose the PowerShell used for Codex AI commands. It falls back automatically if the selected shell is unavailable.",
+  "AI 共享终端": "AI shared terminal",
+  "让 AI 命令在右上角可打开的同一终端中运行，可实时查看输出并手动输入密码或 yes/no；命令结束并空闲 2 分钟后自动关闭 AI 终端。需重启 Codex 才生效。":
+    "Run AI commands in the same terminal opened from the top-right button, so you can watch output and enter passwords or yes/no manually. The AI terminal closes after the command finishes and remains idle for 2 minutes. Restart Codex to apply.",
   "记忆检索": "Memory retrieval",
   "从本地 Codex 记忆中检索与当前提示相关的片段。":
     "Retrieve local Codex memory fragments relevant to the current prompt.",

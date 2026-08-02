@@ -211,8 +211,9 @@ pub async fn run_hook_from_stdio() -> anyhow::Result<()> {
         .context("读取 Hook 输入失败")?;
     let input = serde_json::from_str::<Value>(&input_text).context("解析 Hook 输入失败");
     let settings = SettingsStore::default().load().unwrap_or_default();
+    let launcher_path = std::env::current_exe().context("读取 Codex++ launcher 路径失败")?;
     let output = match input {
-        Ok(input) => match dispatch_hook(&settings, &input).await {
+        Ok(input) => match dispatch_hook(&settings, &input, &launcher_path).await {
             Ok(output) => output,
             Err(error) => {
                 log_hook_error(&input, &error);
@@ -234,15 +235,19 @@ pub async fn run_hook_from_stdio() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn dispatch_hook(settings: &BackendSettings, input: &Value) -> anyhow::Result<Value> {
+async fn dispatch_hook(
+    settings: &BackendSettings,
+    input: &Value,
+    launcher_path: &Path,
+) -> anyhow::Result<Value> {
     match input.get("hook_event_name").and_then(Value::as_str) {
-        Some("PreToolUse") => Ok(ai_shell_hook_output(settings, input)),
+        Some("PreToolUse") => Ok(ai_shell_hook_output(settings, input, launcher_path)),
         Some("UserPromptSubmit") => memory_hook_output(settings, input).await,
         _ => Ok(json!({})),
     }
 }
 
-fn ai_shell_hook_output(settings: &BackendSettings, input: &Value) -> Value {
+fn ai_shell_hook_output(settings: &BackendSettings, input: &Value, launcher_path: &Path) -> Value {
     #[cfg(not(windows))]
     {
         let _ = settings;
@@ -261,8 +266,13 @@ fn ai_shell_hook_output(settings: &BackendSettings, input: &Value) -> Value {
         let Some(command) = tool_input.get("command") else {
             return json!({});
         };
-        let selected_shell = available_ai_shell(settings.codex_app_ai_shell);
-        let Some(wrapped) = wrap_command_value(command, selected_shell) else {
+        let wrapped = if settings.codex_app_shared_terminal {
+            shared_terminal_command_value(input, command, launcher_path)
+        } else {
+            let selected_shell = available_ai_shell(settings.codex_app_ai_shell);
+            wrap_command_value(command, selected_shell)
+        };
+        let Some(wrapped) = wrapped else {
             return json!({});
         };
         let mut updated_input = Value::Object(tool_input.clone());
@@ -273,6 +283,50 @@ fn ai_shell_hook_output(settings: &BackendSettings, input: &Value) -> Value {
                 "updatedInput": updated_input
             }
         })
+    }
+}
+
+#[cfg(windows)]
+fn shared_terminal_command_value(
+    input: &Value,
+    command: &Value,
+    launcher_path: &Path,
+) -> Option<Value> {
+    let thread_id = input
+        .get("session_id")
+        .or_else(|| input.get("sessionId"))
+        .and_then(Value::as_str)?
+        .trim();
+    let cwd = input
+        .get("cwd")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            input
+                .get("tool_input")
+                .and_then(|value| value.get("cwd"))
+                .and_then(Value::as_str)
+        })?
+        .trim();
+    if thread_id.is_empty() || cwd.is_empty() {
+        return None;
+    }
+    let wrap = |command: &str| {
+        crate::shared_terminal::proxy_command(
+            launcher_path,
+            &uuid::Uuid::new_v4().to_string(),
+            thread_id,
+            cwd,
+            command,
+        )
+    };
+    match command {
+        Value::String(command) => wrap(command).map(Value::String),
+        Value::Array(commands) => commands
+            .iter()
+            .map(|command| command.as_str().and_then(&wrap).map(Value::String))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array),
+        _ => None,
     }
 }
 
@@ -1248,6 +1302,35 @@ mod tests {
 
         assert_eq!(String::from_utf16(&utf16).unwrap(), command);
         assert!(wrapped.starts_with("pwsh.exe "));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shared_terminal_hook_routes_bash_command_through_launcher() {
+        let settings = BackendSettings {
+            codex_app_shared_terminal: true,
+            ..BackendSettings::default()
+        };
+        let input = json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "session_id": "thread-1",
+            "cwd": r"D:\work dir",
+            "tool_input": { "command": "Write-Output 'hello'" }
+        });
+
+        let output = ai_shell_hook_output(
+            &settings,
+            &input,
+            Path::new(r"C:\Program Files\Codex++\codex-plus-plus.exe"),
+        );
+        let command = output["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+
+        assert!(command.contains("--codex-plus-shared-terminal"));
+        assert!(!command.contains("Write-Output 'hello'"));
+        assert!(!command.contains("-NonInteractive"));
     }
 
     fn memory_chunk(path: &str, text: &str) -> MemoryChunk {

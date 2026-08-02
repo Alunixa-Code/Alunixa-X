@@ -162,6 +162,7 @@ type BackendSettings = {
   codexAppFastStartup: boolean;
   codexAppDisableAutoUpdate: boolean;
   codexAppDisableWss: boolean;
+  codexAppSharedTerminal: boolean;
   codexAppAiShell: CodexAiShell;
   codexAppPerformanceProtection: boolean;
   codexAppProjectMove: boolean;
@@ -866,6 +867,7 @@ const defaultSettings: BackendSettings = {
   codexAppFastStartup: false,
   codexAppDisableAutoUpdate: false,
   codexAppDisableWss: false,
+  codexAppSharedTerminal: false,
   codexAppAiShell: "pwsh",
   codexAppPerformanceProtection: true,
   codexAppProjectMove: true,
@@ -3979,6 +3981,7 @@ function EnhanceScreen({
                   </div>
                 </div>
               ) : null}
+              {isWindowsPlatform ? <FeatureToggle title={t("AI 共享终端")} detail={t("让 AI 命令在右上角可打开的同一终端中运行，可实时查看输出并手动输入密码或 yes/no；命令结束并空闲 2 分钟后自动关闭 AI 终端。需重启 Codex 才生效。")} checked={form.codexAppSharedTerminal} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppSharedTerminal", value)} /> : null}
               {isWindowsPlatform ? <FeatureToggle title={t("桌宠跟随真实鼠标")} detail={t("仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。")} checked={form.codexAppPetRealMouseLook} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppPetRealMouseLook", value)} /> : null}
               <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />

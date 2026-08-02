@@ -1692,7 +1692,7 @@
     refreshCodexServiceTierControls();
   }
 
-  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads };
+  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads, codexAppSharedTerminal: false };
   let codexPlusBackendSettingsSeq = 0;
   const codexPluginLegacyEntryUnlockBeforeVersion = "26.601.2237";
   const codexPluginBridgeRequestUnlockFromVersion = "26.616.0";
@@ -2677,6 +2677,398 @@
     void patch();
   }
 
+  const codexSharedTerminalRuntimeVersion = "1";
+  const codexSharedTerminalRetentionMs = 2 * 60 * 1000;
+  const codexSharedTerminalRecordKey = "codexPlus.sharedTerminal.records.v1";
+
+  function codexTerminalManagerFromModule(module) {
+    const methods = [
+      "create",
+      "attach",
+      "write",
+      "runHeadlessAction",
+      "register",
+      "getSnapshot",
+      "getConversationSnapshot",
+      "closeSessionForConversation",
+      "subscribeToSessionSnapshot",
+      "addSessionForConversation",
+      "setActiveSessionForConversation",
+    ];
+    return Object.values(module || {}).find((candidate) =>
+      candidate && typeof candidate === "object" && methods.every((method) => typeof candidate[method] === "function")
+    ) || null;
+  }
+
+  function stripCodexTerminalControls(value) {
+    return String(value || "")
+      .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
+      .replace(/\x1B(?:\[[0-?]*[ -/]*[@-~]|[@-_])/g, "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n");
+  }
+
+  function codexTerminalBufferDelta(previous, current) {
+    if (!previous) return current || "";
+    if ((current || "").startsWith(previous)) return current.slice(previous.length);
+    const maximum = Math.min(previous.length, (current || "").length);
+    for (let length = maximum; length > 0; length -= 1) {
+      if (previous.slice(-length) === current.slice(0, length)) return current.slice(length);
+    }
+    return current || "";
+  }
+
+  function codexPowerShellEncodedCommand(command) {
+    const bytes = new Uint8Array(command.length * 2);
+    for (let index = 0; index < command.length; index += 1) {
+      const code = command.charCodeAt(index);
+      bytes[index * 2] = code & 0xff;
+      bytes[index * 2 + 1] = code >> 8;
+    }
+    let binary = "";
+    bytes.forEach((byte) => { binary += String.fromCharCode(byte); });
+    return btoa(binary);
+  }
+
+  function codexSharedTerminalWrappedCommand(command, shell, startMarker, doneMarker) {
+    const shellName = String(shell || "").toLowerCase();
+    if (!codexPlusIsWindowsPlatform && !shellName.includes("powershell") && !shellName.includes("pwsh")) {
+      const script = `printf '%s\\n' '${startMarker}'; ${command}; __codex_plus_exit=$?; printf '\\n%s%s\\n' '${doneMarker}' "$__codex_plus_exit"`;
+      const encoded = btoa(unescape(encodeURIComponent(script)));
+      return `eval "$(printf '%s' '${encoded}' | base64 -d)"`;
+    }
+    const child = shellName.includes("pwsh") ? "pwsh.exe" : "powershell.exe";
+    const original = codexPowerShellEncodedCommand(command);
+    const orchestrator = [
+      "$global:LASTEXITCODE = 0",
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      `Write-Output '${startMarker}'`,
+      `& '${child}' -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '${original}'`,
+      "$__codexPlusExit = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE }",
+      `Write-Output ([Environment]::NewLine + '${doneMarker}' + $__codexPlusExit)`,
+      "exit 0",
+    ].join("; ");
+    return `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${codexPowerShellEncodedCommand(orchestrator)}`;
+  }
+
+  function installCodexSharedTerminalRuntime() {
+    const enabled = codexPlusBackendSettings.enhancementsEnabled !== false && codexPlusBackendSettings.codexAppSharedTerminal === true;
+    const existing = window.__codexPlusSharedTerminalRuntime;
+    if (existing?.version === codexSharedTerminalRuntimeVersion) {
+      existing.setEnabled(enabled);
+      return;
+    }
+    const state = {
+      enabled,
+      manager: null,
+      modulePromise: null,
+      records: new Map(),
+      activeRequests: new Map(),
+      pollTimer: null,
+      polling: false,
+    };
+
+    const persistedRecords = () => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(codexSharedTerminalRecordKey) || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+
+    const persistCompletedRecords = () => {
+      try {
+        const records = Array.from(state.records.values())
+          .filter((record) => record.completed && !record.closed)
+          .map((record) => ({ threadId: record.threadId, sessionId: record.sessionId, lastActivityAt: record.lastActivityAt }));
+        localStorage.setItem(codexSharedTerminalRecordKey, JSON.stringify(records));
+      } catch {
+      }
+    };
+
+    const manager = async () => {
+      if (state.manager) return state.manager;
+      state.modulePromise = state.modulePromise || loadCodexAppModule("app-initial-");
+      const module = await state.modulePromise;
+      const terminalManager = codexTerminalManagerFromModule(module);
+      if (!terminalManager) throw new Error("Codex terminal manager unavailable");
+      state.manager = terminalManager;
+      if (!terminalManager.__codexPlusSharedTerminalOriginalWrite) {
+        terminalManager.__codexPlusSharedTerminalActivityListeners = new Set();
+        terminalManager.__codexPlusSharedTerminalOriginalWrite = terminalManager.write.bind(terminalManager);
+        terminalManager.write = (sessionId, data) => {
+          terminalManager.__codexPlusSharedTerminalActivityListeners.forEach((listener) => listener(sessionId, data));
+          return terminalManager.__codexPlusSharedTerminalOriginalWrite(sessionId, data);
+        };
+      }
+      terminalManager.__codexPlusSharedTerminalActivityListeners.add((sessionId, data) => {
+        const record = state.records.get(sessionId);
+        if (!record) return;
+        record.lastActivityAt = Date.now();
+        if (record.completed) persistCompletedRecords();
+        if (record.busy && String(data || "").includes("\x03")) {
+          setTimeout(() => {
+            if (record.busy) void finish(record, 130, "共享终端命令已由用户中断");
+          }, 1500);
+        }
+      });
+      return terminalManager;
+    };
+
+    const scheduleClose = (record) => {
+      clearTimeout(record.closeTimer);
+      if (!record.completed || record.closed) return;
+      const delay = Math.max(250, record.lastActivityAt + codexSharedTerminalRetentionMs - Date.now());
+      record.closeTimer = setTimeout(async () => {
+        if (record.busy || record.closed) return;
+        if (Date.now() - record.lastActivityAt < codexSharedTerminalRetentionMs) {
+          scheduleClose(record);
+          return;
+        }
+        try {
+          const terminalManager = await manager();
+          terminalManager.closeSessionForConversation(record.threadId, record.sessionId);
+        } catch {
+        }
+        record.closed = true;
+        record.unsubscribe?.();
+        state.records.delete(record.sessionId);
+        persistCompletedRecords();
+      }, delay);
+    };
+
+    const completeBrokerRequest = async (record, exitCode, output, error) => {
+      while (!record.closed) {
+        try {
+          const result = await postJson("/shared-terminal/complete", {
+            requestId: record.requestId,
+            exitCode,
+            output: output.slice(-4 * 1024 * 1024),
+            error: String(error || "").slice(0, 64 * 1024),
+          });
+          if (result?.status === "ok") return;
+        } catch {
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    };
+
+    const finish = async (record, exitCode, error = "") => {
+      if (!record.busy) return;
+      record.busy = false;
+      record.completed = true;
+      clearInterval(record.heartbeatTimer);
+      const clean = stripCodexTerminalControls(record.collected);
+      const startLine = `${record.startMarker}\n`;
+      const startAt = clean.indexOf(startLine);
+      const outputStart = startAt >= 0 ? startAt + startLine.length : 0;
+      const markerAt = clean.indexOf(record.doneMarker, outputStart);
+      const output = (markerAt >= 0 ? clean.slice(outputStart, markerAt) : clean.slice(outputStart)).replace(/^\n+|\n+$/g, "");
+      record.lastActivityAt = Date.now();
+      persistCompletedRecords();
+      scheduleClose(record);
+      await completeBrokerRequest(record, Number.isInteger(exitCode) ? exitCode : 1, output, error);
+      state.activeRequests.delete(record.requestId);
+    };
+
+    const handleSnapshot = (record) => {
+      const snapshot = state.manager?.getSnapshot(record.sessionId) || null;
+      if (!snapshot) {
+        if (record.busy) void finish(record, 1, "共享终端会话已关闭");
+        return;
+      }
+      const current = String(snapshot.buffer || "");
+      const delta = codexTerminalBufferDelta(record.lastBuffer, current);
+      record.lastBuffer = current;
+      if (!delta) return;
+      record.lastActivityAt = Date.now();
+      if (!record.busy) {
+        if (record.completed) {
+          persistCompletedRecords();
+          scheduleClose(record);
+        }
+        return;
+      }
+      record.collected = `${record.collected}${delta}`.slice(-4 * 1024 * 1024);
+      const clean = stripCodexTerminalControls(record.collected);
+      const markerAt = clean.indexOf(record.doneMarker);
+      if (markerAt < 0) return;
+      const codeText = clean.slice(markerAt + record.doneMarker.length).match(/^-?\d+/)?.[0];
+      if (codeText == null) return;
+      void finish(record, Number.parseInt(codeText, 10));
+    };
+
+    const subscribeRecord = (terminalManager, record) => {
+      record.unsubscribe?.();
+      record.unsubscribe = terminalManager.subscribeToSessionSnapshot(record.sessionId, () => handleSnapshot(record));
+      handleSnapshot(record);
+    };
+
+    const waitForShell = async (terminalManager, sessionId, timeoutMs = 8000) => {
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < timeoutMs) {
+        const snapshot = terminalManager.getSnapshot(sessionId);
+        if (snapshot && snapshot.shell && snapshot.shell !== "unknown") return snapshot;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      throw new Error("Codex terminal did not attach");
+    };
+
+    const createRecord = (work, terminalManager, sessionId) => {
+      const token = String(work.requestId).replace(/[^a-zA-Z0-9]/g, "");
+      const record = {
+        requestId: work.requestId,
+        threadId: work.threadId,
+        sessionId,
+        busy: true,
+        completed: false,
+        closed: false,
+        collected: "",
+        lastBuffer: "",
+        lastActivityAt: Date.now(),
+        startMarker: `__CODEX_PLUS_SHARED_START_${token}__`,
+        doneMarker: `__CODEX_PLUS_SHARED_DONE_${token}__:`,
+        heartbeatTimer: null,
+        closeTimer: null,
+        unsubscribe: null,
+      };
+      state.records.set(sessionId, record);
+      state.activeRequests.set(work.requestId, record);
+      subscribeRecord(terminalManager, record);
+      return record;
+    };
+
+    const execute = async (work) => {
+      if (!work?.requestId || state.activeRequests.has(work.requestId)) return;
+      let record = null;
+      try {
+        const terminalManager = await manager();
+        if (work.started && work.terminalSessionId) {
+          if (!terminalManager.getSnapshot(work.terminalSessionId)) {
+            terminalManager.attach({
+              conversationId: work.threadId,
+              hostId: "local",
+              cwd: work.cwd,
+              preserveOnOwnerDestroy: true,
+              sessionId: work.terminalSessionId,
+              workspaceRoot: work.cwd,
+            });
+          }
+          record = createRecord(work, terminalManager, work.terminalSessionId);
+          await waitForShell(terminalManager, record.sessionId);
+          handleSnapshot(record);
+          if (!record.busy) return;
+        } else {
+          const reusable = Array.from(state.records.values()).find((candidate) =>
+            candidate.threadId === work.threadId && candidate.completed && !candidate.closed && !candidate.busy && terminalManager.getSnapshot(candidate.sessionId)
+          );
+          const sessionId = reusable?.sessionId || terminalManager.addSessionForConversation(work.threadId);
+          if (reusable) {
+            reusable.unsubscribe?.();
+            clearTimeout(reusable.closeTimer);
+            state.records.delete(reusable.sessionId);
+          } else {
+            terminalManager.create({
+              conversationId: work.threadId,
+              conversationTitle: "AI shared terminal",
+              hostId: "local",
+              cwd: work.cwd,
+              preserveOnOwnerDestroy: true,
+              sessionId,
+              workspaceRoot: work.cwd,
+            });
+          }
+          terminalManager.setActiveSessionForConversation(work.threadId, sessionId);
+          record = createRecord(work, terminalManager, sessionId);
+          const snapshot = await waitForShell(terminalManager, sessionId);
+          record.lastBuffer = String(snapshot.buffer || "");
+          await postJson("/shared-terminal/started", { requestId: work.requestId, terminalSessionId: sessionId });
+          const wrapped = codexSharedTerminalWrappedCommand(work.command, snapshot.shell, record.startMarker, record.doneMarker);
+          terminalManager.runHeadlessAction(sessionId, { command: wrapped, cwd: work.cwd });
+          if (typeof terminalManager.setTitle === "function") terminalManager.setTitle(sessionId, work.command);
+        }
+        record.heartbeatTimer = setInterval(() => {
+          if (record.busy) void postJson("/shared-terminal/heartbeat", { requestId: record.requestId }).catch(() => {});
+        }, 5000);
+      } catch (error) {
+        if (record) {
+          void finish(record, 1, error?.message || String(error));
+        } else {
+          void postJson("/shared-terminal/complete", { requestId: work.requestId, exitCode: 1, output: "", error: error?.message || String(error) }).catch(() => {});
+        }
+      }
+    };
+
+    const poll = async () => {
+      if (state.polling) return;
+      state.polling = true;
+      try {
+        if (state.enabled) {
+          const work = await postJson("/shared-terminal/next", {});
+          if (work?.requestId) void execute(work);
+        }
+      } catch {
+      } finally {
+        state.polling = false;
+        clearTimeout(state.pollTimer);
+        state.pollTimer = setTimeout(poll, state.enabled ? 400 : 2000);
+      }
+    };
+
+    const restoreCompletedRecords = async () => {
+      try {
+        const terminalManager = await manager();
+        persistedRecords().forEach((saved) => {
+          const snapshot = saved?.sessionId ? terminalManager.getSnapshot(saved.sessionId) : null;
+          if (!saved?.threadId || !snapshot) return;
+          const record = {
+            requestId: "",
+            threadId: saved.threadId,
+            sessionId: saved.sessionId,
+            busy: false,
+            completed: true,
+            closed: false,
+            collected: "",
+            lastBuffer: String(snapshot.buffer || ""),
+            lastActivityAt: Number(saved.lastActivityAt) || Date.now(),
+            startMarker: "",
+            doneMarker: "",
+            heartbeatTimer: null,
+            closeTimer: null,
+            unsubscribe: null,
+          };
+          state.records.set(record.sessionId, record);
+          subscribeRecord(terminalManager, record);
+          scheduleClose(record);
+        });
+        persistCompletedRecords();
+      } catch {
+      }
+    };
+
+    window.__codexPlusSharedTerminalRuntime = {
+      version: codexSharedTerminalRuntimeVersion,
+      setEnabled(value) {
+        state.enabled = value === true;
+        clearTimeout(state.pollTimer);
+        state.pollTimer = setTimeout(poll, 0);
+      },
+      state: () => ({ enabled: state.enabled, activeRequests: state.activeRequests.size, sessions: state.records.size }),
+    };
+    void restoreCompletedRecords();
+    void poll();
+  }
+
+  if (window.__CODEX_PLUS_TEST_SHARED_TERMINAL__) {
+    window.__codexPlusSharedTerminalTest = {
+      terminalManagerFromModule: codexTerminalManagerFromModule,
+      stripControls: stripCodexTerminalControls,
+      bufferDelta: codexTerminalBufferDelta,
+      wrappedCommand: codexSharedTerminalWrappedCommand,
+    };
+  }
+
   async function loadBackendSettings() {
     const seq = codexPlusBackendSettingsSeq;
     try {
@@ -2690,6 +3082,7 @@
       codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
       codexPlusBackendSettingsLoaded = true;
       refreshCodexPlusBackendToggles();
+      installCodexSharedTerminalRuntime();
       return true;
     } catch (_) {
       refreshCodexPlusBackendToggles();
@@ -2714,6 +3107,7 @@
     codexPlusBackendSettings = { ...codexPlusBackendSettings, [key]: value };
     codexPlusBackendSettingsLoaded = true;
     refreshCodexPlusBackendToggles();
+    installCodexSharedTerminalRuntime();
     try {
       const settings = await postJson("/settings/set", { [key]: value });
       if (seq === codexPlusBackendSettingsSeq) {
@@ -2721,6 +3115,7 @@
       }
     } finally {
       refreshCodexPlusBackendToggles();
+      installCodexSharedTerminalRuntime();
     }
   }
 

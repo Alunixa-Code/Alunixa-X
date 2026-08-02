@@ -1137,6 +1137,82 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["disabledIsNoop"], false);
 }
 
+#[test]
+fn injection_script_uses_structural_shared_terminal_contract() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("codexTerminalManagerFromModule"));
+    assert!(script.contains("runHeadlessAction"));
+    assert!(script.contains("subscribeToSessionSnapshot"));
+    assert!(script.contains("closeSessionForConversation"));
+    assert!(script.contains("codexSharedTerminalRetentionMs = 2 * 60 * 1000"));
+    assert!(!script.contains("module.Aht"));
+
+    let temp = tempfile::tempdir().unwrap();
+    let script_path = temp.path().join("renderer-inject.js");
+    let harness_path = temp.path().join("shared-terminal-harness.cjs");
+    std::fs::write(&script_path, script).unwrap();
+    std::fs::write(
+        &harness_path,
+        format!(
+            r#"
+const scriptPath = {};
+function node() {{ return {{ appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}}, addEventListener() {{}}, querySelector() {{ return null; }}, querySelectorAll() {{ return []; }}, closest() {{ return null; }}, classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }}, dataset: {{}}, style: {{}}, children: [], isConnected: true, textContent: '', innerHTML: '' }}; }}
+globalThis.window = globalThis;
+window.__CODEX_PLUS_TEST_SHARED_TERMINAL__ = true;
+window.addEventListener = () => {{}};
+window.removeEventListener = () => {{}};
+globalThis.Element = class Element {{}};
+globalThis.HTMLElement = class HTMLElement extends Element {{}};
+globalThis.HTMLAnchorElement = class HTMLAnchorElement extends HTMLElement {{}};
+globalThis.MutationObserver = class MutationObserver {{ observe() {{}} disconnect() {{}} }};
+globalThis.ResizeObserver = class ResizeObserver {{ observe() {{}} disconnect() {{}} }};
+globalThis.requestAnimationFrame = () => 0;
+globalThis.cancelAnimationFrame = () => {{}};
+globalThis.document = {{ scripts: [], documentElement: node(), body: node(), createElement: () => node(), getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener() {{}}, removeEventListener() {{}} }};
+globalThis.localStorage = {{ getItem: () => null, setItem() {{}}, removeItem() {{}} }};
+globalThis.location = {{ href: 'https://codex.test/thread/thread-1', pathname: '/thread/thread-1', search: '', hash: '' }};
+globalThis.navigator = {{ userAgent: 'Windows node-test' }};
+globalThis.performance = {{ getEntriesByType: () => [] }};
+require(scriptPath);
+const api = window.__codexPlusSharedTerminalTest;
+const manager = {{ create() {{}}, attach() {{}}, write() {{}}, runHeadlessAction() {{}}, register() {{}}, getSnapshot() {{}}, getConversationSnapshot() {{}}, closeSessionForConversation() {{}}, subscribeToSessionSnapshot() {{}}, addSessionForConversation() {{}}, setActiveSessionForConversation() {{}} }};
+const detected = api.terminalManagerFromModule({{ random: {{}}, compressedExport: manager }}) === manager;
+const delta = api.bufferDelta('prefix-old-tail', 'old-tail-next');
+const stripped = api.stripControls('\u001b[31mhello\u001b[0m\r\nworld');
+const wrapped = api.wrappedCommand('Read-Host yes', 'C:/Program Files/PowerShell/7/pwsh.exe', '__START__', '__DONE__:');
+process.stdout.write(JSON.stringify({{ detected, delta, stripped, wrapped }}));
+process.exit(0);
+"#,
+            serde_json::to_string(&script_path.to_string_lossy().to_string()).unwrap()
+        ),
+    )
+    .unwrap();
+    let output = Command::new("node").arg(&harness_path).output().unwrap();
+    assert!(
+        output.status.success(),
+        "node harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["detected"], true);
+    assert_eq!(result["delta"], "-next");
+    assert_eq!(result["stripped"], "hello\nworld");
+    assert!(
+        result["wrapped"]
+            .as_str()
+            .unwrap()
+            .contains("EncodedCommand")
+    );
+    assert!(
+        !result["wrapped"]
+            .as_str()
+            .unwrap()
+            .contains("Read-Host yes")
+    );
+}
+
 fn run_projectless_main_window_contract_harness() -> serde_json::Value {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let script_path = temp.path().join("renderer-inject.js");

@@ -447,3 +447,11 @@
 - 已读取项目记录、当前工作树与既有 AI 终端 Hook，并创建修改前检查点提交 `4344cac`；开始从真实 Codex 工具调用、内置终端会话协议和右上角按钮行为定位可复用的 PTY 链路喵~
 - 已接续共享终端实现任务，复核当前 `main`、最近检查点和既有五个模型文件换行状态噪声，确认功能代码尚未修改且不会回滚或纳入这些既有工作树差异喵~
 - 已采用“Rust broker + launcher 阻塞代理 + CDP bridge + 官方终端管理器”的闭环方案，并建立后端、页面、设置、真实验收和发布六阶段执行清单喵~
+- 已建立实例级 `SharedTerminalBroker` 并显式注入 helper 与 CDP runtime，提供提交、租约领取、启动确认、心跳和完成回执，避免多启动器实例或测试之间共享全局状态喵~
+- 已加入 launcher 共享终端代理子命令，Hook 开关启用后使用 Base64URL 安全传递 thread、cwd 和命令，代理从当前 latest status 定位 Helper 并阻塞返回真实输出和退出码；日志与诊断不记录命令、密码或终端输出正文喵~
+- 页面端已按方法集合结构识别新版官方终端管理器，不依赖 `Aht`、资源哈希或压缩导出名；使用 `runHeadlessAction` 在面板关闭时后台运行，并用 `subscribeToSessionSnapshot` 订阅输出而不抢占官方终端 UI 的 `register` 监听器喵~
+- AI 命令会绑定 Hook 的 thread ID 和 cwd 到官方同一 ConPTY session；用户之后点击右上角终端会复用 active session，并可通过官方 `write` 路径输入密码、yes/no 或 Ctrl+C，AI 与用户共享实时输出喵~
+- 已用唯一开始/完成标记从长驻 shell 中解析输出与退出码，命令结束后保留两分钟；期间用户输入或新终端输出会刷新计时，空闲到期后调用 `closeSessionForConversation` 自动清理官方终端标签喵~
+- 已在“Codex增强”加入默认关闭的持久化“AI 共享终端”开关和中英文说明；关闭时保留原 `pwsh`/Windows PowerShell 独立执行行为，开启时共享终端优先喵~
+- 定向验证通过：共享 broker、代理参数、Hook 路由三项 Rust 测试，官方终端结构发现、ANSI 清理、环形快照增量与命令封装 JavaScript 合约测试，以及 launcher Rust 编译、JS 语法、Rust 格式和差异检查喵~
+- 管理器 Rust 编译首次仅因按清理要求不存在前端 `dist` 而停在 Tauri `generate_context!()`，不是本次代码错误；将在按 lockfile 安装前端依赖和生产构建后继续全量验证喵~

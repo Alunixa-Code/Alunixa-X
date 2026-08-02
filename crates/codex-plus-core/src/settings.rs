@@ -368,6 +368,8 @@ pub struct BackendSettings {
     pub codex_app_disable_auto_update: bool,
     #[serde(rename = "codexAppDisableWss", default)]
     pub codex_app_disable_wss: bool,
+    #[serde(rename = "codexAppSharedTerminal", default)]
+    pub codex_app_shared_terminal: bool,
     #[serde(
         rename = "codexAppAiShell",
         default,
@@ -522,6 +524,7 @@ impl Default for BackendSettings {
             codex_app_fast_startup: false,
             codex_app_disable_auto_update: false,
             codex_app_disable_wss: false,
+            codex_app_shared_terminal: false,
             codex_app_ai_shell: CodexAiShell::Pwsh,
             codex_app_performance_protection: true,
             codex_app_project_move: true,
@@ -1227,6 +1230,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppFastStartup");
     merge_bool_setting(target, source, "codexAppDisableAutoUpdate");
     merge_bool_setting(target, source, "codexAppDisableWss");
+    merge_bool_setting(target, source, "codexAppSharedTerminal");
     merge_bool_setting(target, source, "codexAppPerformanceProtection");
     merge_bool_setting(target, source, "codexAppProjectMove");
     merge_bool_setting(target, source, "codexAppThreadIdBadge");
@@ -2707,6 +2711,7 @@ experimental_bearer_token = "sk-existing""#
             serde_json::from_str(r#"{"enhancementsEnabled":true}"#).unwrap();
 
         assert_eq!(settings.codex_app_ai_shell, CodexAiShell::Pwsh);
+        assert!(!settings.codex_app_shared_terminal);
         assert!(!settings.codex_app_memory_embedding_enabled);
         assert!(settings.codex_app_memory_embedding_base_url.is_empty());
         assert!(settings.codex_app_memory_embedding_api_key.is_empty());

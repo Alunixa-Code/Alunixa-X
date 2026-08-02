@@ -94,6 +94,18 @@ pub trait BridgeRuntimeService: Send + Sync {
     async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value>;
     async fn upstream_worktree_prepare(&self, payload: Value) -> anyhow::Result<Value>;
     async fn upstream_worktree_create(&self, payload: Value) -> anyhow::Result<Value>;
+    async fn shared_terminal_next(&self) -> anyhow::Result<Value> {
+        Ok(json!({ "status": "idle" }))
+    }
+    async fn shared_terminal_started(&self, _payload: Value) -> anyhow::Result<Value> {
+        anyhow::bail!("共享终端未连接")
+    }
+    async fn shared_terminal_heartbeat(&self, _payload: Value) -> anyhow::Result<Value> {
+        anyhow::bail!("共享终端未连接")
+    }
+    async fn shared_terminal_complete(&self, _payload: Value) -> anyhow::Result<Value> {
+        anyhow::bail!("共享终端未连接")
+    }
 }
 
 #[async_trait]
@@ -121,7 +133,15 @@ pub async fn handle_bridge_request(
     payload: Value,
 ) -> serde_json::Value {
     let started = Instant::now();
-    let quiet_request = matches!(path, "/backend/status" | "/model-selection/set");
+    let quiet_request = matches!(
+        path,
+        "/backend/status"
+            | "/model-selection/set"
+            | "/shared-terminal/next"
+            | "/shared-terminal/started"
+            | "/shared-terminal/heartbeat"
+            | "/shared-terminal/complete"
+    );
     if !quiet_request {
         let _ = crate::diagnostic_log::append_diagnostic_log(
             "bridge.request",
@@ -203,6 +223,12 @@ pub async fn handle_bridge_request(
             ctx.runtime.upstream_worktree_prepare(payload.clone()).await
         }
         "/upstream-worktree/create" => ctx.runtime.upstream_worktree_create(payload.clone()).await,
+        "/shared-terminal/next" => ctx.runtime.shared_terminal_next().await,
+        "/shared-terminal/started" => ctx.runtime.shared_terminal_started(payload.clone()).await,
+        "/shared-terminal/heartbeat" => {
+            ctx.runtime.shared_terminal_heartbeat(payload.clone()).await
+        }
+        "/shared-terminal/complete" => ctx.runtime.shared_terminal_complete(payload.clone()).await,
         "/stepwise/settings" => stepwise_settings_value(ctx.settings.get_settings().await),
         "/stepwise/generate" => {
             stepwise_generate_value(ctx.settings.get_settings().await, payload.clone()).await

@@ -218,6 +218,7 @@ pub trait LaunchHooks: Send + Sync {
 pub struct DefaultLaunchHooks {
     child: Mutex<Option<Child>>,
     helper: Mutex<Option<HelperRuntime>>,
+    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
     bridge_disconnect: Mutex<Option<crate::bridge::BridgeDisconnect>>,
     bridge_watchdog: Mutex<Option<BridgeWatchdogRuntime>>,
     computer_use_guard_watchdog: Mutex<Option<ComputerUseGuardWatchdogRuntime>>,
@@ -545,6 +546,10 @@ impl DefaultLaunchHooks {
         *self.bridge_disconnect.lock().await = Some(disconnect);
     }
 
+    pub fn shared_terminal_broker(&self) -> Arc<crate::shared_terminal::SharedTerminalBroker> {
+        self.shared_terminal.clone()
+    }
+
     pub async fn start_bridge_connection_watchdog(
         &self,
         debug_port: u16,
@@ -796,6 +801,7 @@ impl LaunchHooks for DefaultLaunchHooks {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let (connection_shutdown, _) = tokio::sync::broadcast::channel(1);
         let accepted_connection_shutdown = connection_shutdown.clone();
+        let shared_terminal = self.shared_terminal.clone();
         let task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -803,8 +809,15 @@ impl LaunchHooks for DefaultLaunchHooks {
                     accepted = listener.accept() => {
                         if let Ok((stream, addr)) = accepted {
                             let connection_shutdown = accepted_connection_shutdown.subscribe();
+                            let shared_terminal = shared_terminal.clone();
                             tokio::spawn(async move {
-                                let _ = handle_helper_connection(stream, Some(addr), connection_shutdown).await;
+                                let _ = handle_helper_connection(
+                                    stream,
+                                    Some(addr),
+                                    connection_shutdown,
+                                    shared_terminal,
+                                )
+                                .await;
                             });
                         }
                     }
@@ -1121,6 +1134,7 @@ async fn handle_helper_connection(
     mut stream: tokio::net::TcpStream,
     remote_addr: Option<SocketAddr>,
     mut connection_shutdown: tokio::sync::broadcast::Receiver<()>,
+    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
 ) -> anyhow::Result<()> {
     let request = match read_http_request(&mut stream).await {
         Ok(request) => request,
@@ -1150,7 +1164,16 @@ async fn handle_helper_connection(
     let request_content_type = header_value_from_headers(&request_headers, "content-type");
     let remote_addr_text = remote_addr.map(|addr| addr.to_string());
 
-    let quiet_status_request = matches!(path, "/backend/status" | "/backend/events");
+    let quiet_status_request = matches!(
+        path,
+        "/backend/status"
+            | "/backend/events"
+            | "/shared-terminal/submit"
+            | "/shared-terminal/next"
+            | "/shared-terminal/started"
+            | "/shared-terminal/heartbeat"
+            | "/shared-terminal/complete"
+    );
     if !quiet_status_request {
         let _ = crate::diagnostic_log::append_diagnostic_log(
             "helper.request",
@@ -1186,6 +1209,39 @@ async fn handle_helper_connection(
         .await;
     }
     let request_body = String::from_utf8_lossy(&request.body);
+    if path.starts_with("/shared-terminal/")
+        && !remote_addr.is_some_and(|address| address.ip().is_loopback())
+    {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "status": "failed",
+            "message": "共享终端仅允许本机访问"
+        }))?;
+        write_http_response(
+            &mut stream,
+            "403 Forbidden",
+            "application/json; charset=utf-8",
+            &body,
+        )
+        .await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
+    if path == "/shared-terminal/submit" && method == "POST" {
+        let request =
+            serde_json::from_slice::<crate::shared_terminal::SharedTerminalRequest>(&request.body)
+                .context("共享终端提交请求无效")?;
+        let response = shared_terminal.submit(request).await?;
+        let body = serde_json::to_vec(&response)?;
+        write_http_response(
+            &mut stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            &body,
+        )
+        .await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
     if crate::protocol_proxy::is_responses_proxy_path(path) && method == "POST" {
         return handle_protocol_proxy_connection(
             &mut stream,
@@ -3360,9 +3416,14 @@ mod tests {
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = listener.accept().await.unwrap();
             let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
-            handle_helper_connection(stream, Some(remote_addr), connection_shutdown)
-                .await
-                .unwrap();
+            handle_helper_connection(
+                stream,
+                Some(remote_addr),
+                connection_shutdown,
+                crate::shared_terminal::SharedTerminalBroker::shared(),
+            )
+            .await
+            .unwrap();
         });
         let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
         client.write_all(request).await.unwrap();
@@ -3447,9 +3508,14 @@ mod tests {
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = helper_listener.accept().await.unwrap();
             let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
-            handle_helper_connection(stream, Some(remote_addr), connection_shutdown)
-                .await
-                .unwrap();
+            handle_helper_connection(
+                stream,
+                Some(remote_addr),
+                connection_shutdown,
+                crate::shared_terminal::SharedTerminalBroker::shared(),
+            )
+            .await
+            .unwrap();
         });
         let mut client = tokio::net::TcpStream::connect(helper_addr).await.unwrap();
         let headers = format!(
