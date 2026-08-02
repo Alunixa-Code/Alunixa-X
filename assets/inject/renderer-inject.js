@@ -2986,6 +2986,9 @@
 
     const execute = async (work) => {
       if (!work?.requestId || state.activeRequests.has(work.requestId)) return;
+      // Reserve the single execution slot before loading the Codex module so a slow
+      // first attach cannot claim another command and change the visible terminal.
+      state.activeRequests.set(work.requestId, null);
       let record = null;
       try {
         const terminalManager = await manager();
@@ -3040,7 +3043,11 @@
         if (record) {
           void finish(record, 1, error?.message || String(error));
         } else {
-          void postJson("/shared-terminal/complete", { requestId: work.requestId, exitCode: 1, output: "", error: error?.message || String(error) }).catch(() => {});
+          try {
+            await postJson("/shared-terminal/complete", { requestId: work.requestId, exitCode: 1, output: "", error: error?.message || String(error) });
+          } catch {
+          }
+          state.activeRequests.delete(work.requestId);
         }
       }
     };
@@ -3049,7 +3056,7 @@
       if (state.polling) return;
       state.polling = true;
       try {
-        if (state.enabled) {
+        if (state.enabled && state.activeRequests.size === 0) {
           const work = await postJson("/shared-terminal/next", {});
           if (work?.requestId) void execute(work);
         }
