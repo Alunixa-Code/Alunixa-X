@@ -1149,6 +1149,8 @@ fn injection_script_uses_structural_shared_terminal_contract() {
     assert!(script.contains("codexSharedTerminalRetentionMs = 2 * 60 * 1000"));
     assert!(script.contains("state.activeRequests.set(work.requestId, null)"));
     assert!(script.contains("state.enabled && state.activeRequests.size === 0"));
+    assert!(script.contains("if (typeof existing?.dispose === \"function\") existing.dispose()"));
+    assert!(script.contains("dispose()"));
     assert!(!script.contains("module.Aht"));
 
     let temp = tempfile::tempdir().unwrap();

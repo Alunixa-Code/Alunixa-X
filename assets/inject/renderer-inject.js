@@ -2759,8 +2759,11 @@
       existing.setEnabled(enabled);
       return;
     }
+    if (typeof existing?.dispose === "function") existing.dispose();
+    else existing?.setEnabled?.(false);
     const state = {
       enabled,
+      disposed: false,
       manager: null,
       modulePromise: null,
       records: new Map(),
@@ -2809,7 +2812,11 @@
           return terminalManager.__codexPlusSharedTerminalOriginalHandleHostEvent(event);
         };
       }
-      terminalManager.__codexPlusSharedTerminalActivityListeners.add((sessionId, data) => {
+      terminalManager.__codexPlusSharedTerminalActivityListeners.add(activityListener);
+      return terminalManager;
+    };
+
+    const activityListener = (sessionId, data) => {
         const record = state.records.get(sessionId);
         if (!record) return;
         record.lastActivityAt = Date.now();
@@ -2819,9 +2826,7 @@
             if (record.busy) void finish(record, 130, "共享终端命令已由用户中断");
           }, 1500);
         }
-      });
-      return terminalManager;
-    };
+      };
 
     const scheduleClose = (record) => {
       clearTimeout(record.closeTimer);
@@ -3053,7 +3058,7 @@
     };
 
     const poll = async () => {
-      if (state.polling) return;
+      if (state.disposed || state.polling) return;
       state.polling = true;
       try {
         if (state.enabled && state.activeRequests.size === 0) {
@@ -3064,7 +3069,7 @@
       } finally {
         state.polling = false;
         clearTimeout(state.pollTimer);
-        state.pollTimer = setTimeout(poll, state.enabled ? 400 : 2000);
+        if (!state.disposed) state.pollTimer = setTimeout(poll, state.enabled ? 400 : 2000);
       }
     };
 
@@ -3102,9 +3107,22 @@
     window.__codexPlusSharedTerminalRuntime = {
       version: codexSharedTerminalRuntimeVersion,
       setEnabled(value) {
+        if (state.disposed) return;
         state.enabled = value === true;
         clearTimeout(state.pollTimer);
         state.pollTimer = setTimeout(poll, 0);
+      },
+      dispose() {
+        if (state.disposed) return;
+        state.disposed = true;
+        state.enabled = false;
+        clearTimeout(state.pollTimer);
+        state.records.forEach((record) => {
+          clearInterval(record.heartbeatTimer);
+          clearTimeout(record.closeTimer);
+          unsubscribeRecord(record);
+        });
+        state.manager?.__codexPlusSharedTerminalActivityListeners?.delete(activityListener);
       },
       state: () => ({ enabled: state.enabled, activeRequests: state.activeRequests.size, sessions: state.records.size }),
     };
