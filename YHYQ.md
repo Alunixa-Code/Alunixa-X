@@ -470,3 +470,5 @@
 - 已加入升级销毁合约测试，JavaScript 语法、定向 CDP 测试和差异检查通过喵~
 - 用户要求继续完成共享终端收口、构建与发行喵~
 - 已确认正式架构中 helper HTTP 仅承接模型侧阻塞 submit，页面的 next/started/heartbeat/complete 必须由同一 launcher 的 CDP bridge 回到同一 broker；此前临时 fetch 覆盖无法代表正式架构，因此停止旧临时 helper 与提交进程，并临时停止已安装的 1.2.59 launcher，保留 Codex 与管理器运行，准备由当前调试 launcher 同实例接管验收喵~
+- 用户指出临时替换当前 Codex 实例 launcher 会使本任务自身断线，并明确要求不得再用当前实例自身做任何测试喵~
+- 已立即停止调试 launcher PID 33224，使用验收前备份逐字恢复 `settings.json`，并确认已安装的 `D:\CodexPlusPlus\codex-plus-plus.exe` launcher PID 13552 已恢复运行；后续禁止使用当前 Codex 实例或当前任务进行运行验收，只允许独立进程测试、自动化测试与 GitHub Actions 喵~
