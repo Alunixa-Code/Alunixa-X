@@ -443,3 +443,5 @@
 - `v1.2.59` Release 已更新为详细中文说明，完整记录根因、兼容策略、新版 4675 导出审计、自动化与真实页面验证、Actions 结果以及六项资产 SHA-256；Release 已核验为非草稿、非预发布的 latest 版本，地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.59` 喵~
 - 发布后清理完成：已删除 Rust `target`、前端 `node_modules` 与 `dist`，并删除本轮全部 CDP 验证脚本/载荷和 Release notes/JSON 临时文件；清理后逐项确认均不存在喵~
 - 发布与清理记录推送后触发的最终主分支 Actions `30741361361` 也已完成，Windows、macOS x64、macOS arm64 三项全部成功；至此远端 `main`、正式 `v1.2.59` Release 与发布后验证均已闭环喵~
+- 用户要求在 Codex增强中增加“AI 共享终端”：模型执行命令必须进入 Codex 右上角可打开的同一终端，用户可实时查看输出并在密码、yes/no 等交互处手动介入，未打开时界面保持原样，命令结束两分钟后自动关闭对应终端以避免标签堆积喵~
+- 已读取项目记录、当前工作树与既有 AI 终端 Hook，并创建修改前检查点提交 `4344cac`；开始从真实 Codex 工具调用、内置终端会话协议和右上角按钮行为定位可复用的 PTY 链路喵~
