@@ -1,3 +1,12 @@
+## 1.2.59 - 2026-08-02
+
+- 修复 Codex `26.727.6591.0` 中持续出现“无项目会话准备失败”的问题：新版已删除 `projectless-thread-*` 独立资源并将上下文工厂合并到 `app-initial-*`，注入器现在同时兼容旧分包和新版单体模块。
+- 无项目上下文工厂改为依据 `projectless-thread-cwd`、`projectlessOutputDirectory` 和 `workspaceRoots` 运行时契约发现，不再依赖构建哈希或压缩导出名；预热和正式 `thread/start` 都能生成有效 cwd、输出目录和 workspace root。
+- 修复项目移动完成后侧栏会话列表可能不刷新的问题：移除对旧 `app-server-manager-signals-C1h8B-R-.js` 与压缩导出 `rn` 的硬编码，改由结构化发现的 dispatcher 发送 `refresh-recent-conversations-for-host`。
+- 插件市场客户端补丁对新版已移除的 `app-server-manager-signals-*` 采用可选加载和兼容降级，避免资源拆包变化反复产生异常；现有 bridge 请求/响应扩展继续生效。
+- 全面审计新版 Codex 的 `4675` 个 `app-initial-*` 运行时导出，确认设置读写、Host RPC、dispatcher 与无项目上下文工厂均已迁入单体模块；对闭包内不可可靠替换的 app-server 请求函数不做伪补丁，模型解锁继续由 dispatcher、Statsig、React 状态和响应 JSON 多层链路保障。
+- 新增旧分包/新版单体无项目工厂、项目移动刷新去哈希和可选资源加载回归保护；在真实 Codex 页面验证上下文生成、注入重复执行、dispatcher、思考等级同步和模型兼容状态。
+
 ## 1.2.58 - 2026-08-01
 
 - Codex增强新增“禁用 WSS”选项；启用后自动生成 `openai_http` provider，使用 `wire_api = "responses"` 与 `supports_websockets = false`，强制 HTTP-only 请求并保留现有供应商配置。
