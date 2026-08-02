@@ -474,3 +474,6 @@
 - 已立即停止调试 launcher PID 33224，使用验收前备份逐字恢复 `settings.json`，并确认已安装的 `D:\CodexPlusPlus\codex-plus-plus.exe` launcher PID 13552 已恢复运行；后续禁止使用当前 Codex 实例或当前任务进行运行验收，只允许独立进程测试、自动化测试与 GitHub Actions 喵~
 - 正式版本确定为 `1.2.60`，已统一 Rust workspace/Cargo.lock、管理器 package/package-lock 与 Tauri 版本，并在 CHANGELOG 详细记录共享官方 ConPTY、后台无感运行、人工输入、输出与退出码回传、结构化兼容、断线恢复、串行可见性、runtime v2 和两分钟自动关闭喵~
 - 版本更新后的 `cargo check -p codex-plus-core` 与差异检查通过，Cargo.lock 已同步四个 workspace 包版本为 1.2.60 喵~
+- 发布级独立自动化验证完成：前端 14 项 Node 测试、TypeScript、Vite 生产构建、i18n plain 726/726 与 template 64/64、品牌保护、JavaScript 语法、Rust 格式和完整 `cargo test --workspace -- --test-threads=1` 全部通过，完整 Rust 总耗时约 8 分 41 秒且零失败喵~
+- npm audit 仍报告仓库既有 1 个 low 与 2 个 high，Vite 仍只有既有单 chunk 超过 500 KB 提醒；共享终端没有新增前端依赖，也没有扩大依赖升级范围喵~
+- 全部验证均为独立自动化测试，未连接、替换或操作当前 Codex 实例、当前任务会话、9229 CDP 或当前 helper 喵~
