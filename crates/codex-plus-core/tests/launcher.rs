@@ -887,6 +887,61 @@ async fn default_helper_serves_backend_status_over_http() {
 }
 
 #[tokio::test]
+async fn default_helper_shared_terminal_submit_round_trips_through_owned_broker() {
+    let hooks = DefaultLaunchHooks::default();
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+
+    hooks.start_helper(port).await.unwrap();
+    let broker = hooks.shared_terminal_broker();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let submit = tokio::spawn(async move {
+        client
+            .post(format!("http://127.0.0.1:{port}/shared-terminal/submit"))
+            .json(&serde_json::json!({
+                "requestId": "helper-request-1",
+                "threadId": "thread-1",
+                "cwd": "C:/work",
+                "command": "secret command body"
+            }))
+            .send()
+            .await
+            .unwrap()
+            .json::<serde_json::Value>()
+            .await
+            .unwrap()
+    });
+
+    let work = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if let Some(work) = broker.next().await {
+                break work;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(work.request.thread_id, "thread-1");
+    assert_eq!(work.request.command, "secret command body");
+    broker
+        .complete(codex_plus_core::shared_terminal::SharedTerminalResult {
+            request_id: "helper-request-1".to_string(),
+            exit_code: 9,
+            output: "terminal output".to_string(),
+            error: String::new(),
+        })
+        .await
+        .unwrap();
+
+    let response = submit.await.unwrap();
+    assert_eq!(response["exitCode"], 9);
+    assert_eq!(response["output"], "terminal output");
+    hooks.shutdown_helper(port).await;
+}
+
+#[tokio::test]
 async fn default_helper_streams_backend_status_over_websocket_and_closes_on_shutdown() {
     let hooks = DefaultLaunchHooks::default();
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();

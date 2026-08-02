@@ -457,3 +457,6 @@
 - 管理器 Rust 编译首次仅因按清理要求不存在前端 `dist` 而停在 Tauri `generate_context!()`，不是本次代码错误；将在按 lockfile 安装前端依赖和生产构建后继续全量验证喵~
 - 进一步强化输出捕获：对官方终端管理器的 `handleHostEvent` 做最小透明观察，直接收集未经 16 KB snapshot 截断的 data/init-log 流，同时继续用 `subscribeToSessionSnapshot` 维护活动时间和重注入恢复，不占用官方 UI 的唯一 listener 喵~
 - 页面重注入或 CDP bridge 重连后，如 broker 已确认 session 但任务尚未完成，会先按官方 `attach` 契约恢复对既有 ConPTY 的跟踪再继续解析完成标记，避免创建第二个终端或丢失长命令结果喵~
+- 已按 `package-lock.json` 安装前端依赖并完成验证：前端 14 项测试、TypeScript、Vite 生产构建、i18n plain 726/726 与 template 64/64、CDP 注入 82 项、bridge routes 26 项、共享终端定向测试、launcher/manager Rust 检查、JS 语法与 Rust 格式全部通过喵~
+- npm audit 仍报告仓库既有 1 个 low 与 2 个 high，未在本功能中扩大依赖升级范围；Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
+- 新增真实 helper HTTP 回归测试，确认 `/shared-terminal/submit` 会阻塞到同一实例 broker 完成，并逐字返回终端输出和退出码；共享终端路由同时限制为 loopback 来源，诊断只记录路径和键名而不记录命令正文喵~
