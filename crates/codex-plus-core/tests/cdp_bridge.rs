@@ -808,6 +808,18 @@ fn injection_script_clears_project_state_when_moving_to_projectless() {
 }
 
 #[test]
+fn injection_script_refreshes_project_moves_without_hardcoded_asset_hash() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("refresh-recent-conversations-for-host"));
+    assert!(script.contains("const { dispatcher } = await loadCodexDispatcher()"));
+    assert!(
+        script.contains("dispatcher.dispatchMessage(\"refresh-recent-conversations-for-host\"")
+    );
+    assert!(!script.contains("app-server-manager-signals-C1h8B-R-.js"));
+}
+
+#[test]
 fn injection_script_applies_fast_service_tier_contract() {
     let cases = run_service_tier_contract_harness();
 

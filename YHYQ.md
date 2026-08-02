@@ -427,3 +427,8 @@
 - 已在当前真实 Codex `26.727.6591.0` 页面按新发现逻辑找到合并后的上下文工厂并实际生成有效 cwd、输出目录和 workspaceRoots，确认新版运行时兼容链路恢复喵~
 - 用户要求继续全面审计新版 Codex 导致的其他失效点，一并修复后推送 GitHub，通过 GitHub Actions 构建并发布带详细说明的发行版喵~
 - 已创建本轮兼容性审计与发布执行清单，将以当前 `26.727.6591.0` 的真实 `app.asar`、运行页面模块导出和诊断日志为依据逐项核对所有动态资源加载与压缩导出假设喵~
+- 已枚举新版 `app.asar` 与运行页面的 `4675` 个 `app-initial-*` 导出，确认设置读写、Host RPC、dispatcher 和无项目上下文工厂均已合并进单体模块，旧 `setting-storage-*`、`vscode-api-*`、`projectless-thread-*`、`use-host-config-*` 与 `app-server-manager-signals-*` 文件均不存在喵~
+- 审计发现项目移动后的侧栏刷新仍硬编码旧资源 `app-server-manager-signals-C1h8B-R-.js` 和压缩导出 `rn`，新版中必然静默失败；已改为复用结构化发现的 dispatcher 调用 `refresh-recent-conversations-for-host`，不再依赖资源哈希和压缩导出名喵~
+- 插件市场客户端补丁过去会把新版已删除的 `app-server-manager-signals-*` 当成异常；已改为可选加载与空模块兼容，保留当前已实测生效的 bridge 请求/响应补丁，不再因新版拆包变化重复报错喵~
+- 已确认新版 model app-server 独立客户端资源确实不存在，当前模型解锁由已实测成功的 dispatcher、Statsig、React 状态和响应 JSON 多层机制承担；未对闭包内不可替换的请求函数做不可靠伪补丁喵~
+- 新增回归测试禁止再次引入项目移动刷新资源哈希，并完成 JavaScript 语法检查、Rust 格式检查和 CDP 注入 81 项测试喵~

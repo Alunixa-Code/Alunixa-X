@@ -4122,8 +4122,13 @@
     if (!codexPlusSettings().pluginMarketplaceUnlock) return;
     const patch = async () => {
       try {
-        const module = await loadCodexAppModule("app-server-manager-signals-");
-        const candidates = Object.values(module).filter((value) => value && typeof value === "object");
+        const modules = [];
+        for (const assetPrefix of ["app-server-manager-signals-"]) {
+          const module = await loadOptionalCodexAppModule(assetPrefix);
+          if (module) modules.push({ assetPrefix, module });
+        }
+        const candidates = modules.flatMap(({ module }) => Object.values(module)
+          .filter((value) => value && typeof value === "object"));
         let patchedCount = 0;
         for (const candidate of candidates) {
           if (patchPluginMarketplaceRequestClient(candidate)) patchedCount += 1;
@@ -4139,10 +4144,11 @@
           sendCodexPlusDiagnostic("plugin_marketplace_request_patch_installed", {
             candidateCount: candidates.length,
             patchedCount,
+            assets: modules.map((entry) => entry.assetPrefix),
           });
         } else {
           sendCodexPlusDiagnostic("plugin_marketplace_request_patch_not_found", {
-            exportCount: Object.keys(module || {}).length,
+            exportCount: modules.reduce((count, entry) => count + Object.keys(entry.module || {}).length, 0),
             candidateCount: candidates.length,
           });
         }
@@ -7017,8 +7023,14 @@
 
   async function refreshRecentConversationsForHost() {
     try {
-      const signals = await import("./assets/app-server-manager-signals-C1h8B-R-.js");
-      if (typeof signals.rn === "function") await signals.rn("refresh-recent-conversations-for-host", { hostId: "local", sortKey: "updated_at" });
+      const { dispatcher } = await loadCodexDispatcher();
+      if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") {
+        throw new Error("Codex dispatcher unavailable");
+      }
+      dispatcher.dispatchMessage("refresh-recent-conversations-for-host", {
+        hostId: "local",
+        sortKey: "updated_at",
+      });
     } catch (error) {
       window.__codexProjectMoveRefreshFailures = window.__codexProjectMoveRefreshFailures || [];
       window.__codexProjectMoveRefreshFailures.push(String(error?.stack || error));
