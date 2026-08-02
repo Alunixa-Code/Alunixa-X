@@ -468,3 +468,5 @@
 - 已加入 runtime 版本合约断言，JavaScript 语法和定向 CDP 测试通过喵~
 - 真实重注入审计发现 runtime 协议升级时旧对象只会被关闭开关但其旧定时轮询仍长期存活，可能与 v2 同时竞争 broker；已新增显式 dispose 生命周期，在升级时停止旧轮询、心跳、关闭计时器与输出订阅，但不销毁官方 ConPTY，使租约超时后 v2 可按同一 session ID 安全恢复喵~
 - 已加入升级销毁合约测试，JavaScript 语法、定向 CDP 测试和差异检查通过喵~
+- 用户要求继续完成共享终端收口、构建与发行喵~
+- 已确认正式架构中 helper HTTP 仅承接模型侧阻塞 submit，页面的 next/started/heartbeat/complete 必须由同一 launcher 的 CDP bridge 回到同一 broker；此前临时 fetch 覆盖无法代表正式架构，因此停止旧临时 helper 与提交进程，并临时停止已安装的 1.2.59 launcher，保留 Codex 与管理器运行，准备由当前调试 launcher 同实例接管验收喵~
