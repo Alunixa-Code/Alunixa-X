@@ -478,3 +478,4 @@
 - npm audit 仍报告仓库既有 1 个 low 与 2 个 high，Vite 仍只有既有单 chunk 超过 500 KB 提醒；共享终端没有新增前端依赖，也没有扩大依赖升级范围喵~
 - 全部验证均为独立自动化测试，未连接、替换或操作当前 Codex 实例、当前任务会话、9229 CDP 或当前 helper 喵~
 - 发布前本地清理已完成：删除 Rust `target`、前端 `node_modules` 与 `dist`，没有保留下载、编译或验收临时文件；五个既有 Windows 换行状态噪声继续保持未提交且不纳入发布喵~
+- `main` 已推送至 `Alunixa-Code/CodexPlusPlusPlus`，主分支 GitHub Actions `30752842424` 全部成功：Windows 完成品牌、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装包；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
