@@ -505,3 +505,6 @@
 - 已按 lockfile 临时安装 101 个前端包；前端 15 项测试、TypeScript、Vite 生产构建和品牌保护全部通过，Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
 - i18n 精确校验通过，plain `730/730`、template `65/65`；npm audit 仍报告仓库既有 1 个 low 与 2 个 high，本功能没有新增依赖或扩大依赖升级范围喵~
 - 完整 `cargo test --workspace -- --test-threads=1` 在约 7 分 25 秒内全部通过，所有 workspace 单元、集成和文档测试零失败；全程未连接或操作当前 Codex 页面、当前任务、9229 CDP 与当前 helper 喵~
+- 本地清理已完成：删除 Rust `target`、前端 `node_modules`、前端 `dist` 以及两个 Codex `26.727.6591.0` 静态审计临时目录，没有保留下载、编译或审计垃圾喵~
+- 五个模型相关文件再次以 `git diff --exit-code` 确认内容与 HEAD 完全一致，仅保留既有 Windows 换行状态噪声，不纳入本次发布提交喵~
+- 已确认目标远端为 `origin = Alunixa-Code/CodexPlusPlusPlus`；GitHub CLI 默认仓库受 upstream 远端影响，后续 Actions、Release 和资产核验均显式指定目标仓库喵~
