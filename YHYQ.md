@@ -487,4 +487,8 @@
 - 本次只修改设置、界面、注入运行时、测试与文档，不操作当前 Codex 实例进行测试喵~
 - 用户补充确认三个问题必须一并修复：共享终端释放时间改为立即或 1 至 5 分钟滑块；当前 AI 命令实际仍走独立终端而未融合到右上角官方终端；编辑刚发送的消息会提示 `Failed to edit message` 喵~
 - 已复核中断前的部分设置改动、YHYQ.md 与工作树；继续严格避开当前 Codex 实例、当前任务、9229 CDP 和当前 helper 的运行测试，只使用静态诊断、独立自动化测试与 GitHub Actions 喵~
-- 已将中断前新增的 retention 设置字段和默认值作为恢复检查点单独提交，随后再定位共享终端 Hook 未命中与新版消息编辑协议失效的根因喵~
+- 已将中断前新增的 retention 设置字段和默认值作为恢复检查点单独提交，随后再定位共享终端 Hook 未命中与新版消息编辑协议失效的根因喵~- 静态核查当前 hooks.json 与新版 rollout 后确认共享终端未融合的直接根因：安装器仍只为 `PreToolUse` 注册旧 matcher `Bash`，而 Codex `0.146.0-alpha.9.2` 的实际命令工具为 `shell_command`，所以命令重写从未命中代理链路喵~
+- 同时确认当前本机设置中的共享终端开关为关闭；新版将保留显式开关语义，但为 `Bash` 与 `shell_command` 分别安装 Hook，并让 Hook 处理两种工具名，避免新版工具重命名后静默回退独立终端喵~
+- 已从 Codex Desktop 日志取得编辑失败原始堆栈：`Editing messages is not available for threads using paginated history yet.`；根因是 Codex++ v1.2.56 起对 `thread/start` 强制写入 `historyMode: paginated`，而当前 Codex 官方编辑函数在执行 `thread/rollback` 前明确拒绝 paginated 会话喵~
+- 已审计 Codex `26.727.6591.0` 的独立 app.asar 源码，确认官方编辑流程在 legacy 模式下仍使用 `thread/rollback` 后重发修改后的最后一条用户输入；将停止强制 paginated，并对 start/resume 统一写入 legacy，使新任务和升级后重新恢复的既有任务都可编辑喵~
+- 本轮只读取既有配置、日志、rollout 和 app.asar 静态内容，没有连接、替换或操作当前 Codex 页面、当前 helper 与 9229 CDP 进行测试喵~
