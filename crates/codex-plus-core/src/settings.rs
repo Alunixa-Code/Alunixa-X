@@ -1196,7 +1196,7 @@ impl SettingsStore {
         let mut settings = normalize_settings_config_sections(settings.clone());
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
         let bytes = serde_json::to_vec_pretty(&settings)?;
-        atomic_write(&self.path, &bytes)
+        atomic_write_unique(&self.path, &bytes)
     }
 
     pub fn update(&self, payload: Value) -> anyhow::Result<BackendSettings> {
@@ -1234,7 +1234,7 @@ impl SettingsStore {
             Value::String(settings.relay_context_config_contents.clone()),
         );
         let bytes = serde_json::to_vec_pretty(&Value::Object(raw))?;
-        atomic_write(&self.path, &bytes)?;
+        atomic_write_unique(&self.path, &bytes)?;
         Ok(settings)
     }
 
@@ -1811,12 +1811,19 @@ fn normalize_text_config(contents: String) -> String {
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    atomic_write_with_temp(path, bytes, temp_path_for(path))
+}
+
+fn atomic_write_unique(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    atomic_write_with_temp(path, bytes, unique_temp_path_for(path))
+}
+
+fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;
     }
 
-    let temp_path = temp_path_for(path);
     fs::write(&temp_path, bytes)
         .with_context(|| format!("failed to write temp file {}", temp_path.display()))?;
     if let Err(error) = replace_file(&temp_path, path) {
@@ -1867,6 +1874,16 @@ fn replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
+    let mut temp_path = path.to_path_buf();
+    let extension = path.extension().and_then(|value| value.to_str());
+    temp_path.set_extension(match extension {
+        Some(extension) => format!("{extension}.tmp"),
+        None => "tmp".to_string(),
+    });
+    temp_path
+}
+
+fn unique_temp_path_for(path: &Path) -> PathBuf {
     static ATOMIC_WRITE_SEQUENCE: std::sync::atomic::AtomicU64 =
         std::sync::atomic::AtomicU64::new(0);
     let mut temp_path = path.to_path_buf();
@@ -1911,6 +1928,7 @@ mod tests {
         atomic_write(&path, b"new").unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert!(!dir.join("settings.json.tmp").exists());
         assert!(std::fs::read_dir(&dir).unwrap().all(|entry| {
             !entry
                 .unwrap()
