@@ -371,6 +371,12 @@ pub struct BackendSettings {
     #[serde(rename = "codexAppSharedTerminal", default)]
     pub codex_app_shared_terminal: bool,
     #[serde(
+        rename = "codexAppSharedTerminalRetentionMinutes",
+        default = "default_codex_shared_terminal_retention_minutes",
+        deserialize_with = "deserialize_codex_shared_terminal_retention_minutes"
+    )]
+    pub codex_app_shared_terminal_retention_minutes: u8,
+    #[serde(
         rename = "codexAppAiShell",
         default,
         deserialize_with = "deserialize_codex_ai_shell"
@@ -525,6 +531,8 @@ impl Default for BackendSettings {
             codex_app_disable_auto_update: false,
             codex_app_disable_wss: false,
             codex_app_shared_terminal: false,
+            codex_app_shared_terminal_retention_minutes:
+                default_codex_shared_terminal_retention_minutes(),
             codex_app_ai_shell: CodexAiShell::Pwsh,
             codex_app_performance_protection: true,
             codex_app_project_move: true,
