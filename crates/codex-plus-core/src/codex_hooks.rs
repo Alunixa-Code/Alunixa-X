@@ -1213,11 +1213,19 @@ mod tests {
 
         assert!(written["custom"].as_bool().unwrap());
         assert!(text.contains("user-memory-tool"));
-        assert_eq!(written["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
-        assert!(text.contains("shell_command"));
-        assert!(text.contains("Bash"));
+        #[cfg(windows)]
+        {
+            assert_eq!(written["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+            assert!(text.contains("shell_command"));
+            assert!(text.contains("Bash"));
+            assert_eq!(result.installed, 3);
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(written["hooks"].get("PreToolUse").is_none());
+            assert_eq!(result.installed, 1);
+        }
         assert_eq!(text.matches(OWNED_HOOK_MARKER).count(), result.installed);
-        assert_eq!(result.installed, 3);
         assert_eq!(result.removed, 1);
     }
 

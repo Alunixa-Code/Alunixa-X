@@ -1,3 +1,12 @@
+## 1.2.61 - 2026-08-03
+
+- 修复新版 Codex 将终端工具从 `Bash` 更名为 `shell_command` 后共享终端 Hook 静默失效的问题；Windows 现在同时安装并处理两个 matcher，并兼容 `conversation_id`、`thread_id`、`session_id`、`cwd` 和 `workdir` 字段，命令会重新进入 Codex 右上角官方终端的同一 ConPTY 会话喵~
+- 共享终端继续保持未打开面板时的官方无感后台执行；模型输出、错误和退出码先回传后再释放会话，避免“立即释放”让模型永远等不到完成回执，用户可随时打开右上角终端输入密码、`yes/no`、回车或 `Ctrl+C` 喵~
+- “Codex增强”新增 AI 终端释放时间滑块，范围为 `0` 到 `5` 分钟，默认 `2`；`0` 表示命令结果回传后立即关闭，`1` 至 `5` 表示最后一次输入/输出后的空闲保留时间，修改会立即保存并在运行时动态重新调度喵~
+- 修复发送后编辑消息显示 `Failed to edit message`：新版注入器不再强制 `paginated` 历史模式，而是让 `thread/start`、`thread/resume` 及预热链路使用官方可回滚的 `legacy` 模式，恢复会话仍保留同一 thread 上下文喵~
+- 保留并覆盖新版 `app-initial-*` 与旧分包的 dispatcher、app-server 请求和无项目会话补丁，避免历史模式修复回退“无项目会话准备失败”的兼容处理喵~
+- 新增跨平台 Hook 安装断言、共享终端 `0/1/5/9/invalid` 换算断言、滑块 UI 源码契约和 legacy 编辑请求契约测试喵~
+
 ## 1.2.60 - 2026-08-02
 
 - “Codex增强”新增默认关闭的“AI 共享终端”开关：启用后，模型通过官方 `PreToolUse` Hook 发起的终端命令不再进入不可见的独立 shell，而是进入 Codex 右上角终端按钮所管理的同一个官方 ConPTY session。

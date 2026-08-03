@@ -80,6 +80,20 @@ describe("model-windows helpers", () => {
     assert.match(source, /思考等级保存失败，请检查错误后重试。/);
   });
 
+  it("共享终端释放时间使用 0 到 5 分钟的持久化滑块", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /codexAppSharedTerminalRetentionMinutes: 2/);
+    assert.match(source, /type="range"/);
+    assert.match(source, /min=\{0\}/);
+    assert.match(source, /max=\{5\}/);
+    assert.match(source, /step=\{1\}/);
+    assert.match(source, /form\.codexAppSharedTerminalRetentionMinutes === 0/);
+    assert.match(source, /t\("立即释放"\)/);
+    assert.match(source, /setPersistedSharedTerminalRetention/);
+    assert.match(source, /saveSettingsValue\(next, true\)/);
+  });
+
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {
     assert.strictEqual(
       modelWindowsMapToText("a\nb\nc", '{"a":"1M","c":"200K"}'),
