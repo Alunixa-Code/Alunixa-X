@@ -508,3 +508,4 @@
 - 本地清理已完成：删除 Rust `target`、前端 `node_modules`、前端 `dist` 以及两个 Codex `26.727.6591.0` 静态审计临时目录，没有保留下载、编译或审计垃圾喵~
 - 五个模型相关文件再次以 `git diff --exit-code` 确认内容与 HEAD 完全一致，仅保留既有 Windows 换行状态噪声，不纳入本次发布提交喵~
 - 已确认目标远端为 `origin = Alunixa-Code/CodexPlusPlusPlus`；GitHub CLI 默认仓库受 upstream 远端影响，后续 Actions、Release 和资产核验均显式指定目标仓库喵~
+- 已将 `main` 推送到 `Alunixa-Code/CodexPlusPlusPlus`，主分支 Actions `30815264491` 全部成功：Windows 完成品牌、前端测试、TypeScript、完整 Rust tests、release 二进制、安装包和 artifact；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验和 artifact 上传喵~
