@@ -512,3 +512,4 @@
 - 已创建并推送注释 tag `v1.2.61`，正式 Release Actions `30816791086` 全部成功：版本校验、Windows x64、macOS x64、macOS arm64、六项资产校验与 Publish GitHub Release 均完成喵~
 - 已将自动生成的简略正文更新为 3630 字符的详细中文发布说明，明确记录 `shell_command` matcher 根因、官方 ConPTY 融合链路、`0..5` 滑块与立即释放顺序、paginated 编辑限制、legacy 兼容、代码文件、验证结果、Actions 链接和六项资产 SHA-256 喵~
 - `v1.2.61` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产全部为 uploaded 状态；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.61` 喵~
+- 发布记录提交后的最终主分支 GitHub Actions `30818213316` 已完成，Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项全部成功；远端 main、v1.2.61 正式 Release、详细说明、六项资产与发布后构建至此全部闭环喵~
