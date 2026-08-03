@@ -498,3 +498,5 @@
 - 已修正共享终端 Hook 合约测试的跨平台断言：Windows 期望 `Bash` 与 `shell_command` 两个 `PreToolUse` matcher，非 Windows 仅验证通用记忆 Hook，不再误读不存在的 Windows 节点喵~
 - 已新增前端滑块源码契约，锁定默认 `2`、范围 `0..5`、步长 `1`、立即释放文案和即时持久化调用喵~
 - 已将 Rust workspace、Cargo.lock、管理器 package/package-lock、Tauri 配置和 CHANGELOG 统一升级到 `1.2.61`，准备进入独立验证与发布阶段喵~
+- 首轮独立前端测试 15 项全部通过，新增的共享终端滑块契约已验证默认值、范围、步长、立即释放文案和持久化调用喵~
+- Rust formatter 检查仅发现 retention 设置合并逻辑的一处换行格式差异，已按 formatter 输出收口；首次 JS 语法命令因工作目录导致路径错误，未触碰当前 Codex 实例并将用绝对路径重跑喵~

@@ -1256,8 +1256,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
             "codexAppSharedTerminalRetentionMinutes".to_string(),
             Value::Number(serde_json::Number::from(
                 clamp_codex_shared_terminal_retention_minutes(
-                    u8::try_from(value)
-                        .unwrap_or(CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES),
+                    u8::try_from(value).unwrap_or(CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES),
                 ),
             )),
         );
