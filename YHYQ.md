@@ -527,3 +527,7 @@
 - 独立验证通过：Rust 设置存储 20 项、供应商切换 7 项、前端 16 项、TypeScript、Vite 生产构建和管理器 Rust 检查；新增覆盖坏 JSON 拒绝默认化、并发 mutation 无丢失、运行时模型选择保留、保存队列只接收最新成功响应和 live 文件双回滚喵~
 - 完整 workspace 首轮运行中，既有 session_index 清理写失败测试因本轮公共原子临时文件改为唯一名称而无法再用固定 .tmp 目录注入失败；产品代码实际成功写入，测试因此错误期待 unwrap_err 喵~
 - 已将唯一临时文件严格限定在 SettingsStore 内部，其他公共 atomic_write 保持原有固定临时路径契约，既保留配置并发修复又避免扩大无关行为；故障注入定向测试恢复通过，设置存储测试增加到 21 项并继续全绿喵~
+- 修正临时文件作用域后重新完成第二轮发布级独立验证：`cargo test --workspace -- --test-threads=1` 在约 9 分 52 秒内全部通过，所有 workspace 单元、集成和文档测试零失败；其中设置存储 21 项、供应商切换 7 项均通过喵~
+- 前端 16 项测试、TypeScript、Vite 生产构建、i18n plain `721/721` 与 template `64/64`、Rust 格式和 `git diff --check` 全部通过；npm audit 仍为仓库既有 1 个 low 与 2 个 high，本轮没有新增依赖喵~
+- 清理命令首次因执行环境策略拒绝动态递归删除而未产生文件变化；改用已核验绝对路径的 PowerShell/.NET 目录删除后，已清除 Rust `target`、前端 `node_modules` 与 `dist`，没有保留本轮构建垃圾喵~
+- 全程未连接、替换、重启或操作当前 Codex 页面、当前任务、当前 helper 与 `9229` CDP；五个模型文件仍仅为内容与 HEAD 一致的 Windows 换行状态噪声，并继续排除在提交与发行之外喵~
