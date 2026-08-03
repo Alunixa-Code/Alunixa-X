@@ -509,3 +509,6 @@
 - 五个模型相关文件再次以 `git diff --exit-code` 确认内容与 HEAD 完全一致，仅保留既有 Windows 换行状态噪声，不纳入本次发布提交喵~
 - 已确认目标远端为 `origin = Alunixa-Code/CodexPlusPlusPlus`；GitHub CLI 默认仓库受 upstream 远端影响，后续 Actions、Release 和资产核验均显式指定目标仓库喵~
 - 已将 `main` 推送到 `Alunixa-Code/CodexPlusPlusPlus`，主分支 Actions `30815264491` 全部成功：Windows 完成品牌、前端测试、TypeScript、完整 Rust tests、release 二进制、安装包和 artifact；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验和 artifact 上传喵~
+- 已创建并推送注释 tag `v1.2.61`，正式 Release Actions `30816791086` 全部成功：版本校验、Windows x64、macOS x64、macOS arm64、六项资产校验与 Publish GitHub Release 均完成喵~
+- 已将自动生成的简略正文更新为 3630 字符的详细中文发布说明，明确记录 `shell_command` matcher 根因、官方 ConPTY 融合链路、`0..5` 滑块与立即释放顺序、paginated 编辑限制、legacy 兼容、代码文件、验证结果、Actions 链接和六项资产 SHA-256 喵~
+- `v1.2.61` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产全部为 uploaded 状态；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.61` 喵~
