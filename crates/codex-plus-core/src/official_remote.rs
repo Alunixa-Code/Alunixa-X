@@ -264,7 +264,7 @@ impl OfficialRemoteRuntime {
             login_id: Some(login_id.to_string()),
             state: "canceled".to_string(),
             message: "ChatGPT 登录已取消，原配置已恢复。".to_string(),
-            settings: Some(store.load().unwrap_or_default()),
+            settings: Some(store.load().context("重新读取已恢复的供应商设置失败")?),
         })
     }
 

@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use fs2::FileExt;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use toml_edit::{DocumentMut, Item};
@@ -1137,6 +1139,10 @@ impl SettingsStore {
     }
 
     pub fn load(&self) -> anyhow::Result<BackendSettings> {
+        self.with_lock(false, || self.load_unlocked())
+    }
+
+    fn load_unlocked(&self) -> anyhow::Result<BackendSettings> {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1148,12 +1154,45 @@ impl SettingsStore {
             }
         };
 
-        Ok(normalize_settings_config_sections(
-            serde_json::from_str(&contents).unwrap_or_default(),
-        ))
+        let value = serde_json::from_str::<Value>(&contents).with_context(|| {
+            format!(
+                "failed to parse settings JSON {}; refusing to replace it with defaults",
+                self.path.display()
+            )
+        })?;
+        let object = value.as_object().ok_or_else(|| {
+            anyhow::anyhow!(
+                "settings JSON {} must be an object; refusing to replace it with defaults",
+                self.path.display()
+            )
+        })?;
+        let settings = serde_json::from_value::<BackendSettings>(Value::Object(object.clone()))
+            .with_context(|| {
+                format!(
+                    "failed to decode settings JSON {}; refusing to replace it with defaults",
+                    self.path.display()
+                )
+            })?;
+        Ok(normalize_settings_config_sections(settings))
     }
 
     pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
+        self.with_lock(true, || self.save_unlocked(settings))
+    }
+
+    pub fn save_preserving_runtime_model_selection(
+        &self,
+        settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        self.with_lock(true, || {
+            let mut settings = settings.clone();
+            let current = self.load_unlocked()?;
+            preserve_runtime_model_selection(&mut settings, &current);
+            self.save_unlocked(&settings)
+        })
+    }
+
+    fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         let mut settings = normalize_settings_config_sections(settings.clone());
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
         let bytes = serde_json::to_vec_pretty(&settings)?;
@@ -1161,8 +1200,24 @@ impl SettingsStore {
     }
 
     pub fn update(&self, payload: Value) -> anyhow::Result<BackendSettings> {
+        self.with_lock(true, || self.update_unlocked(payload))
+    }
+
+    pub fn mutate<F>(&self, mutator: F) -> anyhow::Result<BackendSettings>
+    where
+        F: FnOnce(&mut BackendSettings),
+    {
+        self.with_lock(true, || {
+            let mut settings = self.load_unlocked()?;
+            mutator(&mut settings);
+            self.save_unlocked(&settings)?;
+            Ok(settings)
+        })
+    }
+
+    fn update_unlocked(&self, payload: Value) -> anyhow::Result<BackendSettings> {
         let Value::Object(payload) = payload else {
-            return self.load();
+            return self.load_unlocked();
         };
 
         let mut raw = self.load_raw_object()?;
@@ -1183,6 +1238,47 @@ impl SettingsStore {
         Ok(settings)
     }
 
+    fn with_lock<T, F>(&self, exclusive: bool, operation: F) -> anyhow::Result<T>
+    where
+        F: FnOnce() -> anyhow::Result<T>,
+    {
+        let lock_path = settings_lock_path(&self.path);
+        if let Some(parent) = lock_path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        }
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("failed to open settings lock {}", lock_path.display()))?;
+        if exclusive {
+            lock.lock_exclusive().with_context(|| {
+                format!(
+                    "failed to lock settings exclusively {}",
+                    lock_path.display()
+                )
+            })?;
+        } else {
+            lock.lock_shared().with_context(|| {
+                format!(
+                    "failed to lock settings for reading {}",
+                    lock_path.display()
+                )
+            })?;
+        }
+        let result = operation();
+        let unlock_result = lock.unlock();
+        if let Err(error) = unlock_result {
+            if result.is_ok() {
+                return Err(error)
+                    .with_context(|| format!("failed to unlock settings {}", lock_path.display()));
+            }
+        }
+        result
+    }
+
     fn load_raw_object(&self) -> anyhow::Result<Map<String, Value>> {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
@@ -1195,9 +1291,45 @@ impl SettingsStore {
             }
         };
 
-        match serde_json::from_str::<Value>(&contents) {
-            Ok(Value::Object(map)) => Ok(map),
-            Ok(_) | Err(_) => Ok(settings_to_object(&BackendSettings::default())),
+        match serde_json::from_str::<Value>(&contents)? {
+            Value::Object(map) => Ok(map),
+            _ => anyhow::bail!(
+                "settings JSON {} must be an object; refusing to replace it with defaults",
+                self.path.display()
+            ),
+        }
+    }
+}
+
+fn settings_lock_path(path: &Path) -> PathBuf {
+    let mut lock_path = path.to_path_buf();
+    let extension = path.extension().and_then(|value| value.to_str());
+    lock_path.set_extension(match extension {
+        Some(extension) => format!("{extension}.lock"),
+        None => "lock".to_string(),
+    });
+    lock_path
+}
+
+fn preserve_runtime_model_selection(settings: &mut BackendSettings, current: &BackendSettings) {
+    for profile in &mut settings.relay_profiles {
+        let Some(current_profile) = current
+            .relay_profiles
+            .iter()
+            .find(|candidate| candidate.id == profile.id)
+        else {
+            continue;
+        };
+        let selected = current_profile.last_used_model.trim();
+        if selected.is_empty() {
+            continue;
+        }
+        if profile
+            .ordered_model_names()
+            .iter()
+            .any(|model| model.eq_ignore_ascii_case(selected))
+        {
+            let _ = profile.record_last_used_model(selected);
         }
     }
 }
@@ -1735,11 +1867,19 @@ fn replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
+    static ATOMIC_WRITE_SEQUENCE: std::sync::atomic::AtomicU64 =
+        std::sync::atomic::AtomicU64::new(0);
     let mut temp_path = path.to_path_buf();
     let extension = path.extension().and_then(|value| value.to_str());
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let pid = std::process::id();
+    let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     temp_path.set_extension(match extension {
-        Some(extension) => format!("{extension}.tmp"),
-        None => "tmp".to_string(),
+        Some(extension) => format!("{extension}.tmp-{pid}-{nonce}-{sequence}"),
+        None => format!("tmp-{pid}-{nonce}-{sequence}"),
     });
     temp_path
 }
@@ -1771,7 +1911,13 @@ mod tests {
         atomic_write(&path, b"new").unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
-        assert!(!dir.join("settings.json.tmp").exists());
+        assert!(std::fs::read_dir(&dir).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.json.tmp-")
+        }));
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -2274,13 +2420,14 @@ experimental_bearer_token = "sk-existing""#
     }
 
     #[test]
-    fn settings_store_load_bad_json_returns_default() {
+    fn settings_store_load_bad_json_returns_error_without_defaulting() {
         let dir = temp_dir();
         let path = dir.join("settings.json");
         std::fs::write(&path, "{bad json").unwrap();
         let store = SettingsStore::new(path);
 
-        assert_eq!(store.load().unwrap(), BackendSettings::default());
+        let error = store.load().unwrap_err().to_string();
+        assert!(error.contains("refusing to replace it with defaults"));
     }
 
     #[test]
@@ -2296,6 +2443,81 @@ experimental_bearer_token = "sk-existing""#
         store.save(&settings).unwrap();
 
         assert_eq!(store.load().unwrap(), settings);
+    }
+
+    #[test]
+    fn settings_store_manager_save_preserves_runtime_model_selection() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        let mut current = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "custom".to_string(),
+                relay_mode: RelayMode::CustomModels,
+                custom_models: vec![
+                    CustomRelayModel {
+                        id: "a".to_string(),
+                        model: "model-a".to_string(),
+                        base_url: "https://example.test/a".to_string(),
+                        api_key: "key-a".to_string(),
+                        ..CustomRelayModel::default()
+                    },
+                    CustomRelayModel {
+                        id: "b".to_string(),
+                        model: "model-b".to_string(),
+                        base_url: "https://example.test/b".to_string(),
+                        api_key: "key-b".to_string(),
+                        ..CustomRelayModel::default()
+                    },
+                ],
+                ..RelayProfile::default()
+            }],
+            active_relay_id: "custom".to_string(),
+            ..BackendSettings::default()
+        };
+        current.relay_profiles[0].record_last_used_model("model-b");
+        store.save(&current).unwrap();
+
+        let mut manager_snapshot = current.clone();
+        manager_snapshot.relay_profiles[0].last_used_model = "model-a".to_string();
+        manager_snapshot.relay_profiles[0].model = "model-a".to_string();
+        manager_snapshot.relay_profiles[0].name = "edited".to_string();
+        store
+            .save_preserving_runtime_model_selection(&manager_snapshot)
+            .unwrap();
+
+        let saved = store.load().unwrap();
+        assert_eq!(saved.relay_profiles[0].name, "edited");
+        assert_eq!(saved.relay_profiles[0].last_used_model, "model-b");
+        assert_eq!(saved.relay_profiles[0].model, "model-b");
+        assert_eq!(saved.relay_profiles[0].default_custom_model_id, "b");
+    }
+
+    #[test]
+    fn settings_store_serializes_concurrent_mutations_without_lost_updates() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+        store.save(&BackendSettings::default()).unwrap();
+
+        let threads = (0..16)
+            .map(|index| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    store
+                        .mutate(|settings| {
+                            settings
+                                .provider_sync_manual_providers
+                                .push(format!("provider-{index}"));
+                        })
+                        .unwrap();
+                })
+            })
+            .collect::<Vec<_>>();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+
+        let settings = store.load().unwrap();
+        assert_eq!(settings.provider_sync_manual_providers.len(), 16);
     }
 
     #[test]

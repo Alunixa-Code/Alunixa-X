@@ -55,6 +55,7 @@ describe("model-windows helpers", () => {
     assert.match(source, /const saved = isActive && form\.relayProfilesEnabled/);
     assert.match(source, /await actions\.switchRelayProfile\(next, form\.activeRelayId\)/);
     assert.match(source, /if \(!saved\) return;/);
+    assert.match(source, /重启 Codex 也不会应用；请返回列表开启总开关后再次保存。/);
     assert.match(source, /供应商配置已保存。/);
     assert.doesNotMatch(source, /await actions\.saveRelayFile\(\s*"config"/);
   });
@@ -78,6 +79,20 @@ describe("model-windows helpers", () => {
     assert.match(source, /saveSettingsValue\(normalized, true, true\)/);
     assert.match(source, /思考等级保存成功。/);
     assert.match(source, /思考等级保存失败，请检查错误后重试。/);
+  });
+
+  it("设置保存按顺序执行且失败响应不会覆盖当前编辑快照", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /const settingsSaveQueueRef = useRef\(Promise\.resolve\(\)\)/);
+    assert.match(source, /const settingsSaveRequestRef = useRef\(0\)/);
+    assert.match(source, /const requestId = \+\+settingsSaveRequestRef\.current/);
+    assert.match(
+      source,
+      /isSuccessStatus\(result\.status\) && requestId === settingsSaveRequestRef\.current/,
+    );
+    assert.match(source, /if \(result && isSuccessStatus\(result\.status\)\)/);
+    assert.match(source, /if \(result && !silent\) showResultNotice\(t\("设置已加载"\), result\)/);
   });
 
   it("共享终端释放时间使用 0 到 5 分钟的持久化滑块", () => {

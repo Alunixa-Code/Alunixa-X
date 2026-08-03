@@ -513,3 +513,15 @@
 - 已将自动生成的简略正文更新为 3630 字符的详细中文发布说明，明确记录 `shell_command` matcher 根因、官方 ConPTY 融合链路、`0..5` 滑块与立即释放顺序、paginated 编辑限制、legacy 兼容、代码文件、验证结果、Actions 链接和六项资产 SHA-256 喵~
 - `v1.2.61` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产全部为 uploaded 状态；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.61` 喵~
 - 发布记录提交后的最终主分支 GitHub Actions `30818213316` 已完成，Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项全部成功；远端 main、v1.2.61 正式 Release、详细说明、六项资产与发布后构建至此全部闭环喵~
+
+## 2026-08-04
+
+- 用户反馈管理器修改配置并保存后，重启 Codex 配置不生效、模型选择消失并恢复默认；偶尔重启两次仍无效，目前已持续不生效，要求定位并修复喵~
+- 本轮先建立修改前检查点 `7df5271`；保留五个既有模型文件 Windows 换行状态噪声，不回滚、不修改、不纳入提交喵~
+- 已确认配置丢失由四个可叠加问题造成：settings.json 解析失败会静默返回完整默认设置、所有进程共用固定 settings.json.tmp 导致并发写互相覆盖、管理器完整旧快照会覆盖 Codex 页面刚记录的模型选择、前端并发保存的旧响应会反向覆盖较新的表单状态喵~
+- 已为 SettingsStore 加入跨进程共享/独占文件锁、唯一临时文件名、严格 JSON 错误传播与原子 mutate；损坏或暂时不可读的设置不再被当成默认配置继续保存喵~
+- 管理器完整保存会合并磁盘上的最新有效模型选择，只要该模型仍存在于新模型列表就保留 lastUsedModel、model 与自定义模型默认项；Codex 模型选择回写也改为单次加锁的原子读改写喵~
+- 管理器所有 save_settings 入口已统一进入串行队列，只有最新且成功的保存响应可以更新界面；设置读取或供应商切换失败时不再用失败 payload 的默认设置覆盖当前表单，而是重新读取已回滚的持久化状态喵~
+- 供应商切换失败现在同时恢复管理器 settings 与原 live config.toml/auth.json；第三方供应商导入、cc-switch 导入、Provider 同步选择和图片设置重置均停止使用“读取失败后默认配置继续写入”的危险路径喵~
+- 当前本机设置还显示 relayProfilesEnabled = false，这会按设计禁止启动器应用供应商和模型配置；已在保存活动供应商时增加明确阻断提示，说明总开关关闭时即使重启 Codex 也不会生效，避免继续显示误导性的纯成功提示喵~
+- 独立验证通过：Rust 设置存储 20 项、供应商切换 7 项、前端 16 项、TypeScript、Vite 生产构建和管理器 Rust 检查；新增覆盖坏 JSON 拒绝默认化、并发 mutation 无丢失、运行时模型选择保留、保存队列只接收最新成功响应和 live 文件双回滚喵~

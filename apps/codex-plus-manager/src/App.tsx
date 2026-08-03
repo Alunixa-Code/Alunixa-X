@@ -1001,6 +1001,8 @@ export function App() {
   });
   const prevLaunchStatusRef = useRef<string | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackendSettings>({ ...defaultSettings });
+  const settingsSaveQueueRef = useRef(Promise.resolve());
+  const settingsSaveRequestRef = useRef(0);
   const [providerSyncProgress, setProviderSyncProgress] = useState<ProviderSyncProgress>({
     active: false,
     percent: 0,
@@ -1055,7 +1057,7 @@ export function App() {
 
   const refreshSettings = async (silent = false) => {
     const result = await run(() => call<SettingsResult>("load_settings"));
-    if (result) {
+    if (result && isSuccessStatus(result.status)) {
       setSettings(result);
       const normalized = normalizeSettings(result.settings);
       setSettingsForm(normalized);
@@ -1066,6 +1068,7 @@ export function App() {
       if (!silent) showResultNotice(t("设置已加载"), result, { silentSuccess: true });
       return normalized;
     }
+    if (result && !silent) showResultNotice(t("设置已加载"), result);
     return null;
   };
 
@@ -1722,12 +1725,7 @@ export function App() {
 
   const saveSettings = async () => {
     const next = normalizeSettings(settingsForm);
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
-    if (result) {
-      setSettings(result);
-      setSettingsForm(normalizeSettings(result.settings));
-      showNotice(t("设置保存"), result.message, result.status);
-    }
+    await saveSettingsValue(next, false);
   };
 
   const saveSettingsValue = async (
@@ -1737,14 +1735,24 @@ export function App() {
   ): Promise<boolean> => {
     const normalized = normalizeSettings(next);
     setSettingsForm(normalized);
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
-    if (result) {
-      setSettings(result);
-      setSettingsForm(normalizeSettings(result.settings));
-      if (!suppressNotice && (!silent || !isSuccessStatus(result.status))) {
+    const requestId = ++settingsSaveRequestRef.current;
+    const persist = async () => {
+      const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
+      if (result && isSuccessStatus(result.status) && requestId === settingsSaveRequestRef.current) {
+        setSettings(result);
+        setSettingsForm(normalizeSettings(result.settings));
+      }
+      if (result && !suppressNotice && (!silent || !isSuccessStatus(result.status))) {
         showNotice(t("设置保存"), result.message, result.status);
       }
-    }
+      return result;
+    };
+    const queued = settingsSaveQueueRef.current.then(persist, persist);
+    settingsSaveQueueRef.current = queued.then(
+      () => undefined,
+      () => undefined,
+    );
+    const result = await queued;
     return !!result && isSuccessStatus(result.status);
   };
 
@@ -1938,17 +1946,7 @@ export function App() {
   };
 
   const applyRelayInjection = async (silent = false) => {
-    const settingsResult = await run(() => call<SettingsResult>("save_settings", { settings: settingsForm }));
-    if (settingsResult) {
-      setSettings(settingsResult);
-      setSettingsForm(normalizeSettings(settingsResult.settings));
-      if (!isSuccessStatus(settingsResult.status)) {
-        showNotice(t("设置保存"), settingsResult.message, settingsResult.status);
-        return false;
-      }
-    } else {
-      return false;
-    }
+    if (!await saveSettingsValue(settingsForm, true, true)) return false;
     const result = await run(() => call<RelayResult>("apply_relay_injection"));
     if (result) {
       setRelay(result);
@@ -1960,28 +1958,11 @@ export function App() {
 
   const saveLaunchMode = async (launchMode: LaunchMode, silent = false, baseSettings: BackendSettings = settingsForm) => {
     const next = { ...baseSettings, launchMode };
-    setSettingsForm(next);
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
-    if (result) {
-      setSettings(result);
-      setSettingsForm(normalizeSettings(result.settings));
-      if (!silent) showNotice(t("Codex增强模式"), result.message, result.status);
-    }
-    return result;
+    return await saveSettingsValue(next, silent, false);
   };
 
   const applyPureApiInjection = async (silent = false) => {
-    const settingsResult = await run(() => call<SettingsResult>("save_settings", { settings: settingsForm }));
-    if (settingsResult) {
-      setSettings(settingsResult);
-      setSettingsForm(normalizeSettings(settingsResult.settings));
-      if (!isSuccessStatus(settingsResult.status)) {
-        showNotice(t("设置保存"), settingsResult.message, settingsResult.status);
-        return false;
-      }
-    } else {
-      return false;
-    }
+    if (!await saveSettingsValue(settingsForm, true, true)) return false;
     const result = await run(() => call<RelayResult>("apply_pure_api_injection"));
     if (result) {
       setRelay(result);
@@ -2021,10 +2002,8 @@ export function App() {
     );
     if (!result) return null;
     let normalized = normalizeSettings(result.settings);
-    const saveResult = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
-    if (saveResult) {
-      setSettings(saveResult);
-      normalized = normalizeSettings(saveResult.settings);
+    if (await saveSettingsValue(normalized, true, true)) {
+      normalized = normalizeSettings(normalized);
     }
     setSettingsForm(normalized);
     if (!isSuccessStatus(result.status)) showResultNotice(t("工具与插件"), result);
@@ -2039,10 +2018,8 @@ export function App() {
     );
     if (!result) return null;
     let normalized = normalizeSettings(result.settings);
-    const saveResult = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
-    if (saveResult) {
-      setSettings(saveResult);
-      normalized = normalizeSettings(saveResult.settings);
+    if (await saveSettingsValue(normalized, true, true)) {
+      normalized = normalizeSettings(normalized);
     }
     setSettingsForm(normalized);
     if (!isSuccessStatus(result.status)) showResultNotice(t("工具与插件"), result);
@@ -2089,14 +2066,14 @@ export function App() {
     const switched = await clearRelayInjection(true);
     if (!switched) return;
     const result = await saveLaunchMode("relay", true);
-    if (result) showNotice(t("官方登录模式"), t("已切回官方登录；Codex增强已设为兼容增强。"), result.status);
+    if (result) showNotice(t("官方登录模式"), t("已切回官方登录；Codex增强已设为兼容增强。"), "ok");
   };
 
   const switchPureApiMode = async () => {
     const switched = await applyPureApiInjection(true);
     if (!switched) return;
     const result = await saveLaunchMode("patch", true);
-    if (result) showNotice(t("纯 API 模式"), t("已切换到纯 API；Codex增强已设为完整增强。"), result.status);
+    if (result) showNotice(t("纯 API 模式"), t("已切换到纯 API；Codex增强已设为完整增强。"), "ok");
   };
 
   const switchRelayProfile = async (next: BackendSettings, previousActiveRelayId = settingsForm.activeRelayId): Promise<boolean> => {
@@ -2158,14 +2135,6 @@ export function App() {
         return false;
       }
       const selectedSettings = normalizeSettings(result.settings);
-      setSettings({
-        status: result.status,
-        message: result.message,
-        settings: selectedSettings,
-        settings_path: result.settingsPath,
-        user_scripts: result.user_scripts as UserScriptInventory,
-      });
-      setSettingsForm(selectedSettings);
       setRelay({
         status: result.status,
         message: result.message,
@@ -2180,8 +2149,17 @@ export function App() {
           activeRelayId: selectedSettings.activeRelayId,
         });
         showNotice(t("供应商切换"), result.message, result.status);
+        await refreshSettings(true);
         return false;
       }
+      setSettings({
+        status: result.status,
+        message: result.message,
+        settings: selectedSettings,
+        settings_path: result.settingsPath,
+        user_scripts: result.user_scripts as UserScriptInventory,
+      });
+      setSettingsForm(selectedSettings);
       const currentSelected = activeRelayProfile(selectedSettings);
       logDiagnostic("switchRelayProfile.ok", {
         targetRelayId: currentSelected.id,
@@ -2546,15 +2524,13 @@ export function App() {
 
   const saveCodexAppPath = async (appPath: string) => {
     const next = { ...settingsForm, codexAppPath: appPath };
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
-    if (result) {
-      setSettings(result);
-      const normalized = normalizeSettings(result.settings);
-      setSettingsForm(normalized);
+    const saved = await saveSettingsValue(next, true, true);
+    if (saved) {
+      const normalized = normalizeSettings(next);
       setLaunchForm((current) => ({ ...current, appPath: normalized.codexAppPath }));
       await refreshOverview(true);
     }
-    return result;
+    return saved;
   };
 
   const actions = useMemo(
@@ -2600,18 +2576,16 @@ export function App() {
         if (typeof selected === "string" && selected.trim()) {
           const result = await saveCodexAppPath(selected.trim());
           if (result) {
-            showNotice(t("Codex 应用路径"), t("应用路径已保存，之后启动会自动复用。"), result.status);
+            showNotice(t("Codex 应用路径"), t("应用路径已保存，之后启动会自动复用。"), "ok");
           }
         }
       },
       clearCodexAppPath: async () => {
         const next = { ...settingsForm, codexAppPath: "" };
-        const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
-        if (result) {
-          setSettings(result);
-          setSettingsForm(normalizeSettings(result.settings));
+        const saved = await saveSettingsValue(next, true, true);
+        if (saved) {
           setLaunchForm((current) => ({ ...current, appPath: "" }));
-          showNotice(t("Codex 应用路径"), t("已清除保存路径，后续启动会回到自动探测。"), result.status);
+          showNotice(t("Codex 应用路径"), t("已清除保存路径，后续启动会回到自动探测。"), "ok");
           await refreshOverview(true);
         }
       },
@@ -2645,7 +2619,7 @@ export function App() {
         }
         const result = await saveCodexAppPath(appPath);
         if (result) {
-          showNotice(t("Codex 应用路径"), t("应用路径已保存，之后启动会自动复用。"), result.status);
+          showNotice(t("Codex 应用路径"), t("应用路径已保存，之后启动会自动复用。"), "ok");
         }
       },
       syncProvidersNow,
@@ -5422,6 +5396,14 @@ function RelayProfileDetail({
       ? await actions.switchRelayProfile(next, form.activeRelayId)
       : await onFormChange(next);
     if (!saved) return;
+    if (isActive && !form.relayProfilesEnabled) {
+      await actions.showMessage(
+        t("供应商配置"),
+        t("配置已保存，但供应商配置总开关已关闭，重启 Codex 也不会应用；请返回列表开启总开关后再次保存。"),
+        "failed",
+      );
+      return;
+    }
     await actions.showMessage(t("供应商配置"), t("供应商配置已保存。"), "ok");
     onSaved?.();
   };

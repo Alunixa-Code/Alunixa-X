@@ -541,7 +541,7 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
     let settings = normalize_settings_before_save(settings);
     let save_result = SettingsStore::default()
-        .save(&settings)
+        .save_preserving_runtime_model_selection(&settings)
         .and_then(|_| {
             codex_plus_core::relay_config::set_codex_sub_agent_max_threads_in_home(
                 &codex_plus_core::relay_config::default_codex_home_dir(),
@@ -697,7 +697,15 @@ pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
     };
 
     let store = SettingsStore::default();
-    let mut settings = store.load().unwrap_or_default();
+    let mut settings = match store.load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("读取现有设置失败，已停止导入以避免覆盖配置：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     let mut existing_keys: Vec<String> = settings
         .relay_profiles
         .iter()
@@ -1506,20 +1514,27 @@ fn persist_provider_sync_selection(provider: &str) {
         return;
     }
     let store = SettingsStore::default();
-    let mut settings = store.load().unwrap_or_default();
-    settings.provider_sync_last_selected_provider = trimmed.to_string();
-    if !settings
-        .provider_sync_saved_providers
-        .iter()
-        .any(|item| item == trimmed)
-    {
-        settings
+    let result = store.mutate(|settings| {
+        settings.provider_sync_last_selected_provider = trimmed.to_string();
+        if !settings
             .provider_sync_saved_providers
-            .push(trimmed.to_string());
+            .iter()
+            .any(|item| item == trimmed)
+        {
+            settings
+                .provider_sync_saved_providers
+                .push(trimmed.to_string());
+        }
+        settings.provider_sync_saved_providers = normalize_provider_sync_provider_list(
+            std::mem::take(&mut settings.provider_sync_saved_providers),
+        );
+    });
+    if let Err(error) = result {
+        log_manager_event(
+            "manager.persist_provider_sync_selection.failed",
+            json!({ "error": error.to_string() }),
+        );
     }
-    settings.provider_sync_saved_providers =
-        normalize_provider_sync_provider_list(settings.provider_sync_saved_providers);
-    let _ = store.save(&settings);
 }
 
 #[tauri::command]
@@ -2068,7 +2083,15 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
 #[tauri::command]
 pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
     let store = SettingsStore::default();
-    let mut settings = store.load().unwrap_or_default();
+    let mut settings = match store.load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("读取现有设置失败，已停止重置以避免覆盖配置：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     let defaults = BackendSettings::default();
     settings.codex_app_image_overlay_enabled = defaults.codex_app_image_overlay_enabled;
     settings.codex_app_image_overlay_path = defaults.codex_app_image_overlay_path;
@@ -3171,7 +3194,16 @@ fn provider_doctor_recommendation(checks: &[ProviderDoctorCheck]) -> String {
 #[tauri::command]
 pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     let home = codex_plus_core::relay_config::default_codex_home_dir();
-    let settings = SettingsStore::default().load().unwrap_or_default();
+    let settings = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+            return failed(
+                &format!("读取供应商设置失败，已停止写入 live 配置：{error}"),
+                relay_payload(status, None),
+            );
+        }
+    };
     if !settings.relay_profiles_enabled {
         let status = codex_plus_core::relay_config::relay_status_from_home(&home);
         return failed(
@@ -3322,7 +3354,16 @@ fn apply_aggregate_relay_injection_to_home(home: &Path) -> CommandResult<RelayPa
 #[tauri::command]
 pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
     let home = codex_plus_core::relay_config::default_codex_home_dir();
-    let settings = SettingsStore::default().load().unwrap_or_default();
+    let settings = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+            return failed(
+                &format!("读取供应商设置失败，已停止写入 live 配置：{error}"),
+                relay_payload(status, None),
+            );
+        }
+    };
     if !settings.relay_profiles_enabled {
         let status = codex_plus_core::relay_config::relay_status_from_home(&home);
         return failed(
@@ -3435,7 +3476,16 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
 #[tauri::command]
 pub fn clear_relay_injection() -> CommandResult<RelayPayload> {
     let home = codex_plus_core::relay_config::default_codex_home_dir();
-    let settings = SettingsStore::default().load().unwrap_or_default();
+    let settings = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+            return failed(
+                &format!("读取供应商设置失败，已停止清理 live 配置：{error}"),
+                relay_payload(status, None),
+            );
+        }
+    };
     let relay = settings.active_relay_profile();
     log_manager_event("manager.clear_relay_injection.start", json!({}));
     prepare_codex_app_state_before_provider_switch(&home, "manager.clear_relay_injection.before");

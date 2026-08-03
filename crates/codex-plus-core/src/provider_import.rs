@@ -113,7 +113,9 @@ pub fn import_provider_with_store(
     store: SettingsStore,
 ) -> anyhow::Result<ProviderImportResult> {
     let request = normalize_request(request)?;
-    let mut settings = store.load().unwrap_or_default();
+    let mut settings = store
+        .load()
+        .context("读取现有设置失败，已停止导入以避免覆盖配置")?;
     let identity = provider_identity(&request.name, &request.base_url);
     if let Some(existing) = settings
         .relay_profiles

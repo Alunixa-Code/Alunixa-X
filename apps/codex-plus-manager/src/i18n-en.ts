@@ -261,6 +261,8 @@ export const EN_PLAIN: Record<string, string> = {
   "供应商配置总开关已关闭": "The provider configuration master switch is off",
   "供应商配置总开关已关闭；当前只保存配置，不写入 Codex live 文件":
     "The provider configuration master switch is off; changes are only saved, not written to Codex live files",
+  "配置已保存，但供应商配置总开关已关闭，重启 Codex 也不会应用；请返回列表开启总开关后再次保存。":
+    "The configuration was saved, but the provider configuration master switch is off, so restarting Codex will not apply it. Return to the list, enable the master switch, and save again.",
   "供应商预设列表": "Provider preset list",
   "保存": "Save",
   "保存为默认路径": "Save as default path",

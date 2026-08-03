@@ -352,26 +352,25 @@ impl BridgeSettingsService for CoreSettingsService {
     }
 
     async fn record_model_selection(&self, model: String) -> anyhow::Result<bool> {
-        let mut settings = self.store.load()?;
-        let active_id = settings.active_relay_id.clone();
-        let Some(profile) = settings
-            .relay_profiles
-            .iter_mut()
-            .find(|profile| profile.id == active_id)
-        else {
-            return Ok(false);
-        };
-        let known = profile
-            .ordered_model_names()
-            .iter()
-            .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()));
-        if !known {
-            return Ok(false);
-        }
-        if profile.record_last_used_model(&model) {
-            self.store.save(&settings)?;
-        }
-        Ok(true)
+        let mut known = false;
+        self.store.mutate(|settings| {
+            let active_id = settings.active_relay_id.clone();
+            let Some(profile) = settings
+                .relay_profiles
+                .iter_mut()
+                .find(|profile| profile.id == active_id)
+            else {
+                return;
+            };
+            known = profile
+                .ordered_model_names()
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(model.trim()));
+            if known {
+                profile.record_last_used_model(&model);
+            }
+        })?;
+        Ok(known)
     }
 
     async fn codex_app_version(&self) -> anyhow::Result<String> {

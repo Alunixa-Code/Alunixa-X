@@ -53,6 +53,11 @@ base_url = "https://a.example/v1"
 
     assert!(error.to_string().contains("auth.json"));
     assert_eq!(store.load().unwrap().active_relay_id, "a");
+    let live_config =
+        std::fs::read_to_string(temp.path().join("codex").join("config.toml")).unwrap();
+    let live_auth = std::fs::read_to_string(temp.path().join("codex").join("auth.json")).unwrap();
+    assert!(live_config.contains("https://a.example/v1"));
+    assert_eq!(live_auth, r#"{"OPENAI_API_KEY":"sk-a"}"#);
 }
 
 #[test]
