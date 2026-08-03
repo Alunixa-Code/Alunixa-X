@@ -502,3 +502,6 @@
 - Rust formatter 检查仅发现 retention 设置合并逻辑的一处换行格式差异，已按 formatter 输出收口；首次 JS 语法命令因工作目录导致路径错误，未触碰当前 Codex 实例并将用绝对路径重跑喵~
 - 使用正确绝对路径完成 `renderer-inject.js` 语法检查；`codex-plus-core` 226 项单元测试全部通过，覆盖新版 `shell_command`、旧 `Bash`、retention 默认/边界和 broker 回传喵~
 - CDP 注入 82 项测试全部通过，覆盖 dispatcher 与 app-server 的 legacy 新建/恢复/预热请求、无项目会话兼容、共享官方终端 runtime v3 以及 `0/1/5/9/invalid` 换算喵~
+- 已按 lockfile 临时安装 101 个前端包；前端 15 项测试、TypeScript、Vite 生产构建和品牌保护全部通过，Vite 仅保留既有单 chunk 超过 500 KB 提醒喵~
+- i18n 精确校验通过，plain `730/730`、template `65/65`；npm audit 仍报告仓库既有 1 个 low 与 2 个 high，本功能没有新增依赖或扩大依赖升级范围喵~
+- 完整 `cargo test --workspace -- --test-threads=1` 在约 7 分 25 秒内全部通过，所有 workspace 单元、集成和文档测试零失败；全程未连接或操作当前 Codex 页面、当前任务、9229 CDP 与当前 helper 喵~
