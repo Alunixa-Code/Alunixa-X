@@ -2362,6 +2362,53 @@ body {
   padding: 7px 10px;
 }
 
+.shared-terminal-retention-control {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+.shared-terminal-retention-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.shared-terminal-retention-head strong {
+  color: hsl(var(--foreground));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.shared-terminal-retention-control input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: hsl(var(--primary));
+}
+
+.shared-terminal-retention-ticks {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  color: hsl(var(--muted-foreground));
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: center;
+}
+
+.shared-terminal-retention-ticks span:first-child {
+  text-align: left;
+}
+
+.shared-terminal-retention-ticks span:last-child {
+  text-align: right;
+}
+
 .memory-embedding-fields {
   grid-column: 1 / -1;
   display: grid;

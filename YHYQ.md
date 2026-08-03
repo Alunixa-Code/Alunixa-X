@@ -492,3 +492,6 @@
 - 已从 Codex Desktop 日志取得编辑失败原始堆栈：`Editing messages is not available for threads using paginated history yet.`；根因是 Codex++ v1.2.56 起对 `thread/start` 强制写入 `historyMode: paginated`，而当前 Codex 官方编辑函数在执行 `thread/rollback` 前明确拒绝 paginated 会话喵~
 - 已审计 Codex `26.727.6591.0` 的独立 app.asar 源码，确认官方编辑流程在 legacy 模式下仍使用 `thread/rollback` 后重发修改后的最后一条用户输入；将停止强制 paginated，并对 start/resume 统一写入 legacy，使新任务和升级后重新恢复的既有任务都可编辑喵~
 - 本轮只读取既有配置、日志、rollout 和 app.asar 静态内容，没有连接、替换或操作当前 Codex 页面、当前 helper 与 9229 CDP 进行测试喵~
+- 用户再次要求继续完成三项修复，并重申共享终端必须真正复用右上角官方终端、释放延迟必须支持立即或 1 至 5 分钟、已发送消息必须可编辑喵~
+- 已读取交接摘要、项目记录、记忆索引、当前工作树和最近提交，确认七个功能文件包含未提交实现，五个模型相关文件仍只是既有 Windows 换行状态噪声并继续排除在提交之外喵~
+- 已确认后续验收边界：不连接或操作当前 Codex 实例、当前任务、9229 CDP 与当前 helper，只执行静态审计、独立自动化测试和 GitHub Actions 构建喵~

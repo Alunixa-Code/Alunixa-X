@@ -135,8 +135,13 @@ export const EN_PLAIN: Record<string, string> = {
   "选择 Codex AI 执行命令时使用的 PowerShell；所选终端不可用时自动回退。":
     "Choose the PowerShell used for Codex AI commands. It falls back automatically if the selected shell is unavailable.",
   "AI 共享终端": "AI shared terminal",
-  "让 AI 命令在右上角可打开的同一终端中运行，可实时查看输出并手动输入密码或 yes/no；命令结束并空闲 2 分钟后自动关闭 AI 终端。需重启 Codex 才生效。":
-    "Run AI commands in the same terminal opened from the top-right button, so you can watch output and enter passwords or yes/no manually. The AI terminal closes after the command finishes and remains idle for 2 minutes. Restart Codex to apply.",
+  "让 AI 命令在右上角可打开的同一终端中运行，可实时查看输出并手动输入密码或 yes/no。需重启 Codex 才生效。":
+    "Run AI commands in the same terminal opened from the top-right button, so you can watch output and enter passwords or yes/no manually. Restart Codex to apply.",
+  "AI 终端释放时间": "AI terminal release time",
+  "命令结果返回后立即释放，或在最后一次输入/输出后保留 1 到 5 分钟。":
+    "Release the terminal as soon as the command result is returned, or keep it for 1 to 5 minutes after the last input or output.",
+  "释放时间": "Release time",
+  "立即释放": "Release immediately",
   "记忆检索": "Memory retrieval",
   "从本地 Codex 记忆中检索与当前提示相关的片段。":
     "Retrieve local Codex memory fragments relevant to the current prompt.",
@@ -814,6 +819,7 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "{0} 分钟": "{0} minute(s)",
   "撤销设备“{0}”？该设备之后需要重新配对。":
     "Revoke “{0}”? This device will need to be paired again.",
   "ChatGPT 套餐：{0}": "ChatGPT plan: {0}",

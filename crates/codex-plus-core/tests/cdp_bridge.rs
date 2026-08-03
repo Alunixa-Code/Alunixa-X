@@ -1083,7 +1083,8 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert!(script.contains("codexProjectlessContextFactoryFromModule"));
     assert!(script.contains("projectless_thread_start_overridden"));
     assert!(script.contains("projectless_app_server_start_overridden"));
-    assert!(script.contains("historyMode: \"paginated\""));
+    assert!(script.contains("historyMode: \"legacy\""));
+    assert!(!script.contains("historyMode: \"paginated\""));
     assert!(script.contains("projectless_main_window_home_route_cleared"));
     assert!(script.contains("dispatcher.dispatchHostMessage"));
     assert!(script.contains("[\"use-host-config-\", \"app-server-manager-signals-\"]"));
@@ -1117,7 +1118,7 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["dispatchedType"], "start-conversation");
     assert_eq!(cases["dispatchedWorkspaceKind"], "projectless");
     assert_eq!(cases["dispatchedCwd"], "C:/generated/work");
-    assert_eq!(cases["dispatchedHistoryMode"], "paginated");
+    assert_eq!(cases["dispatchedHistoryMode"], "legacy");
     assert_eq!(cases["appServerRequestNeedsOverride"], true);
     assert_eq!(cases["appServerPatchedWorkspaceKind"], "projectless");
     assert_eq!(cases["appServerPatchedCwd"], "C:/generated/work");
@@ -1128,9 +1129,9 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert_eq!(cases["appServerSentMethod"], "start-conversation");
     assert_eq!(cases["appServerSentWorkspaceKind"], "projectless");
     assert_eq!(cases["appServerSentCwd"], "C:/generated/work");
-    assert_eq!(cases["appServerSentHistoryMode"], "paginated");
-    assert_eq!(cases["directStartHistoryMode"], "paginated");
-    assert_eq!(cases["prewarmHistoryMode"], "paginated");
+    assert_eq!(cases["appServerSentHistoryMode"], "legacy");
+    assert_eq!(cases["directStartHistoryMode"], "legacy");
+    assert_eq!(cases["prewarmHistoryMode"], "legacy");
     assert_eq!(cases["resumeHistoryMode"], "legacy");
     assert_eq!(cases["explicitProjectWins"], false);
     assert_eq!(cases["explicitProjectRequestIsUntouched"], false);
@@ -1142,11 +1143,13 @@ fn injection_script_uses_structural_shared_terminal_contract() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("codexTerminalManagerFromModule"));
-    assert!(script.contains("codexSharedTerminalRuntimeVersion = \"2\""));
+    assert!(script.contains("codexSharedTerminalRuntimeVersion = \"3\""));
     assert!(script.contains("runHeadlessAction"));
     assert!(script.contains("subscribeToSessionSnapshot"));
     assert!(script.contains("closeSessionForConversation"));
-    assert!(script.contains("codexSharedTerminalRetentionMs = 2 * 60 * 1000"));
+    assert!(script.contains("codexAppSharedTerminalRetentionMinutes: 2"));
+    assert!(script.contains("state.retentionMs === 0"));
+    assert!(script.contains("setRetentionMinutes(value)"));
     assert!(script.contains("state.activeRequests.set(work.requestId, null)"));
     assert!(script.contains("state.enabled && state.activeRequests.size === 0"));
     assert!(script.contains("if (typeof existing?.dispose === \"function\") existing.dispose()"));
@@ -1186,7 +1189,8 @@ const detected = api.terminalManagerFromModule({{ random: {{}}, compressedExport
 const delta = api.bufferDelta('prefix-old-tail', 'old-tail-next');
 const stripped = api.stripControls('\u001b[31mhello\u001b[0m\r\nworld');
 const wrapped = api.wrappedCommand('Read-Host yes', 'C:/Program Files/PowerShell/7/pwsh.exe', '__START__', '__DONE__:');
-process.stdout.write(JSON.stringify({{ detected, delta, stripped, wrapped }}));
+const retention = [undefined, 0, 1, 5, 9, 'invalid'].map((value) => api.retentionMs(value));
+process.stdout.write(JSON.stringify({{ detected, delta, stripped, wrapped, retention }}));
 process.exit(0);
 "#,
             serde_json::to_string(&script_path.to_string_lossy().to_string()).unwrap()
@@ -1204,6 +1208,10 @@ process.exit(0);
     assert_eq!(result["detected"], true);
     assert_eq!(result["delta"], "-next");
     assert_eq!(result["stripped"], "hello\nworld");
+    assert_eq!(
+        result["retention"],
+        json!([120_000, 0, 60_000, 300_000, 300_000, 120_000])
+    );
     assert!(
         result["wrapped"]
             .as_str()
@@ -1322,19 +1330,19 @@ const projectRequest = {{
 }};
 const projectRequestNeedsOverride = api.requestNeedsOverride(projectRequest);
 const patchedRequest = api.applyRequestOverride(projectRequest, context);
-const directStart = api.applyPaginatedHistoryOverride({{
+const directStart = api.applyEditableHistoryOverride({{
   type: "send-cli-request-for-host",
   method: "thread/start",
-  params: {{ historyMode: "legacy" }},
+  params: {{ historyMode: "paginated" }},
 }});
-const prewarmStart = api.applyPaginatedHistoryOverride({{
+const prewarmStart = api.applyEditableHistoryOverride({{
   type: "thread-prewarm-start",
   request: {{ method: "thread/start", params: {{}} }},
 }});
-const resumed = api.applyPaginatedHistoryOverride({{
+const resumed = api.applyEditableHistoryOverride({{
   type: "send-cli-request-for-host",
   method: "thread/resume",
-  params: {{ historyMode: "legacy" }},
+  params: {{ historyMode: "paginated" }},
 }});
 const nativeProjectlessNeedsOverride = api.requestNeedsOverride({{
   type: "start-conversation",

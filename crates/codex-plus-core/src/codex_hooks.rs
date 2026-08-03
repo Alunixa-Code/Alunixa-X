@@ -109,18 +109,20 @@ pub fn apply_codex_plus_hooks_in_home(
 
         #[cfg(windows)]
         {
-            append_hook(
-                hooks,
-                "PreToolUse",
-                "Bash",
-                json!({
-                    "type": "command",
-                    "command": hook_command(launcher_path),
-                    "timeout": 10,
-                    "statusMessage": "Codex++ AI shell selection"
-                }),
-            )?;
-            installed += 1;
+            for matcher in ["Bash", "shell_command"] {
+                append_hook(
+                    hooks,
+                    "PreToolUse",
+                    matcher,
+                    json!({
+                        "type": "command",
+                        "command": hook_command(launcher_path),
+                        "timeout": 10,
+                        "statusMessage": "Codex++ AI shell selection"
+                    }),
+                )?;
+                installed += 1;
+            }
         }
     }
 
@@ -257,7 +259,10 @@ fn ai_shell_hook_output(settings: &BackendSettings, input: &Value, launcher_path
 
     #[cfg(windows)]
     {
-        if input.get("tool_name").and_then(Value::as_str) != Some("Bash") {
+        if !matches!(
+            input.get("tool_name").and_then(Value::as_str),
+            Some("Bash" | "shell_command")
+        ) {
             return json!({});
         }
         let Some(tool_input) = input.get("tool_input").and_then(Value::as_object) else {
@@ -295,6 +300,10 @@ fn shared_terminal_command_value(
     let thread_id = input
         .get("session_id")
         .or_else(|| input.get("sessionId"))
+        .or_else(|| input.get("thread_id"))
+        .or_else(|| input.get("threadId"))
+        .or_else(|| input.get("conversation_id"))
+        .or_else(|| input.get("conversationId"))
         .and_then(Value::as_str)?
         .trim();
     let cwd = input
@@ -303,7 +312,7 @@ fn shared_terminal_command_value(
         .or_else(|| {
             input
                 .get("tool_input")
-                .and_then(|value| value.get("cwd"))
+                .and_then(|value| value.get("cwd").or_else(|| value.get("workdir")))
                 .and_then(Value::as_str)
         })?
         .trim();
@@ -1204,7 +1213,11 @@ mod tests {
 
         assert!(written["custom"].as_bool().unwrap());
         assert!(text.contains("user-memory-tool"));
+        assert_eq!(written["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        assert!(text.contains("shell_command"));
+        assert!(text.contains("Bash"));
         assert_eq!(text.matches(OWNED_HOOK_MARKER).count(), result.installed);
+        assert_eq!(result.installed, 3);
         assert_eq!(result.removed, 1);
     }
 
@@ -1306,17 +1319,19 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn shared_terminal_hook_routes_bash_command_through_launcher() {
+    fn shared_terminal_hook_routes_current_shell_command_through_launcher() {
         let settings = BackendSettings {
             codex_app_shared_terminal: true,
             ..BackendSettings::default()
         };
         let input = json!({
             "hook_event_name": "PreToolUse",
-            "tool_name": "Bash",
-            "session_id": "thread-1",
-            "cwd": r"D:\work dir",
-            "tool_input": { "command": "Write-Output 'hello'" }
+            "tool_name": "shell_command",
+            "conversation_id": "thread-1",
+            "tool_input": {
+                "command": "Write-Output 'hello'",
+                "workdir": r"D:\work dir"
+            }
         });
 
         let output = ai_shell_hook_output(
@@ -1331,6 +1346,31 @@ mod tests {
         assert!(command.contains("--codex-plus-shared-terminal"));
         assert!(!command.contains("Write-Output 'hello'"));
         assert!(!command.contains("-NonInteractive"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shared_terminal_hook_keeps_legacy_bash_compatibility() {
+        let settings = BackendSettings {
+            codex_app_shared_terminal: true,
+            ..BackendSettings::default()
+        };
+        let input = json!({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "session_id": "thread-legacy",
+            "cwd": r"D:\legacy",
+            "tool_input": { "command": "Write-Output legacy" }
+        });
+
+        let output = ai_shell_hook_output(&settings, &input, Path::new("launcher.exe"));
+
+        assert!(
+            output["hookSpecificOutput"]["updatedInput"]["command"]
+                .as_str()
+                .unwrap()
+                .contains("--codex-plus-shared-terminal")
+        );
     }
 
     fn memory_chunk(path: &str, text: &str) -> MemoryChunk {

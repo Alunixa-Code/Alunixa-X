@@ -470,8 +470,8 @@
   const codexThreadServiceTierKey = "codexThreadServiceTierOverrides";
   const codexThreadServiceTierMaxEntries = 120;
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
-  const codexServiceTierRequestOverrideVersion = "5";
-  const codexAppServerModelRequestPatchVersion = "2";
+  const codexServiceTierRequestOverrideVersion = "6";
+  const codexAppServerModelRequestPatchVersion = "3";
   const codexPluginMarketplaceUnlockVersion = "12";
   const codexPluginAutoExpandVersion = "1";
   const codexPluginAutoExpandMaxClicks = 80;
@@ -1692,7 +1692,7 @@
     refreshCodexServiceTierControls();
   }
 
-  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads, codexAppSharedTerminal: false };
+  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads, codexAppSharedTerminal: false, codexAppSharedTerminalRetentionMinutes: 2 };
   let codexPlusBackendSettingsSeq = 0;
   const codexPluginLegacyEntryUnlockBeforeVersion = "26.601.2237";
   const codexPluginBridgeRequestUnlockFromVersion = "26.616.0";
@@ -2654,7 +2654,11 @@
       try {
         const { dispatcher, assetPrefix } = await loadCodexDispatcher();
         if (dispatcher.__codexServiceTierOriginalDispatchMessage) {
+          dispatcher.dispatchMessage = (type, payload) => {
+            return dispatchCodexPlusMessage(dispatcher, type, payload);
+          };
           window.__codexServiceTierRequestOverrideInstalled = codexServiceTierRequestOverrideVersion;
+          sendCodexPlusDiagnostic("service_tier_dispatcher_patch_upgraded", { assetPrefix });
           return;
         }
         dispatcher.__codexServiceTierOriginalDispatchMessage = dispatcher.dispatchMessage.bind(dispatcher);
@@ -2677,9 +2681,14 @@
     void patch();
   }
 
-  const codexSharedTerminalRuntimeVersion = "2";
-  const codexSharedTerminalRetentionMs = 2 * 60 * 1000;
+  const codexSharedTerminalRuntimeVersion = "3";
   const codexSharedTerminalRecordKey = "codexPlus.sharedTerminal.records.v1";
+
+  function codexSharedTerminalRetentionMs(value = codexPlusBackendSettings.codexAppSharedTerminalRetentionMinutes) {
+    const parsed = value == null ? Number.NaN : Number(value);
+    const minutes = Number.isFinite(parsed) ? Math.trunc(parsed) : 2;
+    return Math.max(0, Math.min(5, minutes)) * 60 * 1000;
+  }
 
   function codexTerminalManagerFromModule(module) {
     const methods = [
@@ -2754,9 +2763,11 @@
 
   function installCodexSharedTerminalRuntime() {
     const enabled = codexPlusBackendSettings.enhancementsEnabled !== false && codexPlusBackendSettings.codexAppSharedTerminal === true;
+    const retentionMinutes = codexPlusBackendSettings.codexAppSharedTerminalRetentionMinutes;
     const existing = window.__codexPlusSharedTerminalRuntime;
     if (existing?.version === codexSharedTerminalRuntimeVersion) {
       existing.setEnabled(enabled);
+      existing.setRetentionMinutes(retentionMinutes);
       return;
     }
     if (typeof existing?.dispose === "function") existing.dispose();
@@ -2770,6 +2781,7 @@
       activeRequests: new Map(),
       pollTimer: null,
       polling: false,
+      retentionMs: codexSharedTerminalRetentionMs(retentionMinutes),
     };
 
     const persistedRecords = () => {
@@ -2831,10 +2843,12 @@
     const scheduleClose = (record) => {
       clearTimeout(record.closeTimer);
       if (!record.completed || record.closed) return;
-      const delay = Math.max(250, record.lastActivityAt + codexSharedTerminalRetentionMs - Date.now());
+      const delay = state.retentionMs === 0
+        ? 0
+        : Math.max(250, record.lastActivityAt + state.retentionMs - Date.now());
       record.closeTimer = setTimeout(async () => {
         if (record.busy || record.closed) return;
-        if (Date.now() - record.lastActivityAt < codexSharedTerminalRetentionMs) {
+        if (state.retentionMs > 0 && Date.now() - record.lastActivityAt < state.retentionMs) {
           scheduleClose(record);
           return;
         }
@@ -2879,9 +2893,9 @@
       const output = (markerAt >= 0 ? clean.slice(outputStart, markerAt) : clean.slice(outputStart)).replace(/^\n+|\n+$/g, "");
       record.lastActivityAt = Date.now();
       persistCompletedRecords();
-      scheduleClose(record);
       await completeBrokerRequest(record, Number.isInteger(exitCode) ? exitCode : 1, output, error);
       state.activeRequests.delete(record.requestId);
+      scheduleClose(record);
     };
 
     const handleSnapshot = (record) => {
@@ -3112,6 +3126,11 @@
         clearTimeout(state.pollTimer);
         state.pollTimer = setTimeout(poll, 0);
       },
+      setRetentionMinutes(value) {
+        if (state.disposed) return;
+        state.retentionMs = codexSharedTerminalRetentionMs(value);
+        state.records.forEach((record) => scheduleClose(record));
+      },
       dispose() {
         if (state.disposed) return;
         state.disposed = true;
@@ -3136,6 +3155,7 @@
       stripControls: stripCodexTerminalControls,
       bufferDelta: codexTerminalBufferDelta,
       wrappedCommand: codexSharedTerminalWrappedCommand,
+      retentionMs: codexSharedTerminalRetentionMs,
     };
   }
 
@@ -5714,24 +5734,25 @@
 
   function codexProjectlessStartParams(message) {
     if (!message || typeof message !== "object") return null;
-    if (message.type === "send-cli-request-for-host" && message.method === "thread/start") return message.params;
+    if (message.type === "send-cli-request-for-host"
+        && (message.method === "thread/start" || message.method === "thread/resume")) return message.params;
     if ((message.type === "mcp-request" || message.type === "worker-request")
-        && message.request?.method === "thread/start") return message.request.params;
+        && (message.request?.method === "thread/start" || message.request?.method === "thread/resume")) return message.request.params;
     if (message.type === "thread-prewarm-start" && message.request?.params) return message.request.params;
     if (message.type === "prewarm-thread-start-for-host" && message.params) return message.params;
     if (message.type === "start-conversation" || message.type === "start-thread-for-host") return message;
     return null;
   }
 
-  function patchCodexPaginatedHistoryParams(params) {
-    if (!params || typeof params !== "object" || params.historyMode === "paginated") return params;
-    return { ...params, historyMode: "paginated" };
+  function patchCodexEditableHistoryParams(params) {
+    if (!params || typeof params !== "object" || params.historyMode === "legacy") return params;
+    return { ...params, historyMode: "legacy" };
   }
 
-  function applyCodexPaginatedHistoryRequestOverride(message) {
+  function applyCodexEditableHistoryRequestOverride(message) {
     const params = codexProjectlessStartParams(message);
     if (!params) return message;
-    const nextParams = patchCodexPaginatedHistoryParams(params);
+    const nextParams = patchCodexEditableHistoryParams(params);
     if (nextParams === params) return message;
     if (message.type === "send-cli-request-for-host") return { ...message, params: nextParams };
     if (message.type === "mcp-request" || message.type === "worker-request") {
@@ -5796,10 +5817,10 @@
     const originalMessage = { ...(payload || {}), type };
     const dispatch = (message) => {
       const serviceTierMessage = codexServiceTierRequestOverride(message);
-      const paginatedHistoryMessage = applyCodexPaginatedHistoryRequestOverride(serviceTierMessage);
-      recordCodexModelSelection(paginatedHistoryMessage);
-      const nextType = paginatedHistoryMessage?.type || type;
-      const { type: _type, ...nextPayload } = paginatedHistoryMessage || {};
+      const editableHistoryMessage = applyCodexEditableHistoryRequestOverride(serviceTierMessage);
+      recordCodexModelSelection(editableHistoryMessage);
+      const nextType = editableHistoryMessage?.type || type;
+      const { type: _type, ...nextPayload } = editableHistoryMessage || {};
       return dispatcher.__codexServiceTierOriginalDispatchMessage(nextType, nextPayload);
     };
     if (!codexProjectlessRequestNeedsOverride(originalMessage)) return dispatch(originalMessage);
@@ -6021,7 +6042,7 @@
       shouldEnforce: codexProjectlessMainWindowShouldEnforce,
       requestNeedsOverride: codexProjectlessRequestNeedsOverride,
       applyRequestOverride: applyCodexProjectlessRequestOverride,
-      applyPaginatedHistoryOverride: applyCodexPaginatedHistoryRequestOverride,
+      applyEditableHistoryOverride: applyCodexEditableHistoryRequestOverride,
       appServerRequestNeedsOverride: codexProjectlessAppServerRequestNeedsOverride,
       applyAppServerRequestOverride: applyCodexProjectlessAppServerRequestOverride,
       patchAppServerClient: patchAppServerModelRequestClient,
@@ -6632,7 +6653,7 @@
   function codexProjectlessAppServerStartRequest(method, params) {
     const requestMethod = String(method || "");
     if (requestMethod === "send-cli-request-for-host"
-        && params?.method === "thread/start"
+        && (params?.method === "thread/start" || params?.method === "thread/resume")
         && params.params
         && typeof params.params === "object") {
       return {
@@ -6651,7 +6672,8 @@
     if (requestMethod === "start-conversation"
         || requestMethod === "start-thread-for-host"
         || requestMethod === "prewarm-thread-start-for-host"
-        || requestMethod === "thread/start") {
+        || requestMethod === "thread/start"
+        || requestMethod === "thread/resume") {
       return params && typeof params === "object"
         ? { params, apply: (nextParams) => nextParams }
         : null;
@@ -6674,10 +6696,10 @@
     return request.apply(patchCodexProjectlessStartParams(request.params, context));
   }
 
-  function applyCodexPaginatedHistoryAppServerRequestOverride(method, params) {
+  function applyCodexEditableHistoryAppServerRequestOverride(method, params) {
     const request = codexProjectlessAppServerStartRequest(method, params);
     if (!request) return params;
-    return request.apply(patchCodexPaginatedHistoryParams(request.params));
+    return request.apply(patchCodexEditableHistoryParams(request.params));
   }
 
   function patchAppServerModelRequestClient(client) {
@@ -6710,7 +6732,7 @@
           throw error;
         }
       }
-      nextParams = applyCodexPaginatedHistoryAppServerRequestOverride(method, nextParams);
+      nextParams = applyCodexEditableHistoryAppServerRequestOverride(method, nextParams);
       const result = await originalSendRequest(method, nextParams, options);
       if (!codexPlusModelUnlockEnabled()) return result;
       if (!codexPlusModelNames().length) await loadCodexModelCatalog();

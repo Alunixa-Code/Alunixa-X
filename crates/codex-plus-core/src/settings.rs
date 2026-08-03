@@ -727,6 +727,15 @@ pub fn default_stepwise_api_key_env() -> String {
 
 pub const CODEX_SUB_AGENT_MIN_THREADS: u8 = 3;
 pub const CODEX_SUB_AGENT_MAX_THREADS: u8 = 50;
+pub const CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES: u8 = 5;
+
+pub fn default_codex_shared_terminal_retention_minutes() -> u8 {
+    2
+}
+
+pub fn clamp_codex_shared_terminal_retention_minutes(value: u8) -> u8 {
+    value.min(CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES)
+}
 
 pub fn default_codex_sub_agent_max_threads() -> u8 {
     CODEX_SUB_AGENT_MIN_THREADS
@@ -1239,6 +1248,20 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppDisableAutoUpdate");
     merge_bool_setting(target, source, "codexAppDisableWss");
     merge_bool_setting(target, source, "codexAppSharedTerminal");
+    if let Some(value) = source
+        .get("codexAppSharedTerminalRetentionMinutes")
+        .and_then(Value::as_u64)
+    {
+        target.insert(
+            "codexAppSharedTerminalRetentionMinutes".to_string(),
+            Value::Number(serde_json::Number::from(
+                clamp_codex_shared_terminal_retention_minutes(
+                    u8::try_from(value)
+                        .unwrap_or(CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES),
+                ),
+            )),
+        );
+    }
     merge_bool_setting(target, source, "codexAppPerformanceProtection");
     merge_bool_setting(target, source, "codexAppProjectMove");
     merge_bool_setting(target, source, "codexAppThreadIdBadge");
@@ -1569,6 +1592,10 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
         normalize_image_overlay_fit_mode(&settings.codex_app_image_overlay_fit_mode);
     settings.codex_app_sub_agent_max_threads =
         clamp_codex_sub_agent_max_threads(settings.codex_app_sub_agent_max_threads);
+    settings.codex_app_shared_terminal_retention_minutes =
+        clamp_codex_shared_terminal_retention_minutes(
+            settings.codex_app_shared_terminal_retention_minutes,
+        );
     settings.codex_app_stepwise_base_url = settings
         .codex_app_stepwise_base_url
         .trim()
@@ -1772,6 +1799,10 @@ mod tests {
         assert!(!settings.zed_remote_sync_to_zed_settings);
         assert!(settings.codex_app_native_menu_localization);
         assert_eq!(
+            settings.codex_app_shared_terminal_retention_minutes,
+            default_codex_shared_terminal_retention_minutes()
+        );
+        assert_eq!(
             settings.codex_app_sub_agent_max_threads,
             default_codex_sub_agent_max_threads()
         );
@@ -1810,6 +1841,20 @@ mod tests {
         assert_eq!(
             above.codex_app_sub_agent_max_threads,
             CODEX_SUB_AGENT_MAX_THREADS
+        );
+    }
+
+    #[test]
+    fn shared_terminal_retention_deserializes_with_zero_to_five_bounds() {
+        let immediate: BackendSettings =
+            serde_json::from_str(r#"{"codexAppSharedTerminalRetentionMinutes":0}"#).unwrap();
+        let above: BackendSettings =
+            serde_json::from_str(r#"{"codexAppSharedTerminalRetentionMinutes":99}"#).unwrap();
+
+        assert_eq!(immediate.codex_app_shared_terminal_retention_minutes, 0);
+        assert_eq!(
+            above.codex_app_shared_terminal_retention_minutes,
+            CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES
         );
     }
 
@@ -2332,6 +2377,7 @@ experimental_bearer_token = "sk-existing""#
             "codexAppThreadIdBadge": true,
             "codexAppNativeMenuLocalization": false,
             "codexAppServiceTierControls": true,
+            "codexAppSharedTerminalRetentionMinutes": 4,
             "codexAppSubAgentMaxThreads": 7,
             "codexAppPetRealMouseLook": true,
             "codexGoalsEnabled": true,
@@ -2349,6 +2395,7 @@ experimental_bearer_token = "sk-existing""#
         assert!(updated.codex_app_conversation_view);
         assert!(updated.codex_app_thread_id_badge);
         assert!(!updated.codex_app_native_menu_localization);
+        assert_eq!(updated.codex_app_shared_terminal_retention_minutes, 4);
         assert_eq!(updated.codex_app_sub_agent_max_threads, 7);
         assert!(updated.codex_app_service_tier_controls);
         assert!(updated.codex_app_pet_real_mouse_look);
@@ -2363,6 +2410,25 @@ experimental_bearer_token = "sk-existing""#
             ]
         );
         assert_eq!(store.load().unwrap(), updated);
+    }
+
+    #[test]
+    fn settings_store_clamps_shared_terminal_retention_updates() {
+        let dir = temp_dir();
+        let store = SettingsStore::new(dir.join("settings.json"));
+
+        let maximum = store
+            .update(json!({"codexAppSharedTerminalRetentionMinutes": 9}))
+            .unwrap();
+        assert_eq!(
+            maximum.codex_app_shared_terminal_retention_minutes,
+            CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES
+        );
+
+        let immediate = store
+            .update(json!({"codexAppSharedTerminalRetentionMinutes": 0}))
+            .unwrap();
+        assert_eq!(immediate.codex_app_shared_terminal_retention_minutes, 0);
     }
 
     #[test]
@@ -2720,6 +2786,10 @@ experimental_bearer_token = "sk-existing""#
 
         assert_eq!(settings.codex_app_ai_shell, CodexAiShell::Pwsh);
         assert!(!settings.codex_app_shared_terminal);
+        assert_eq!(
+            settings.codex_app_shared_terminal_retention_minutes,
+            default_codex_shared_terminal_retention_minutes()
+        );
         assert!(!settings.codex_app_memory_embedding_enabled);
         assert!(settings.codex_app_memory_embedding_base_url.is_empty());
         assert!(settings.codex_app_memory_embedding_api_key.is_empty());
@@ -2761,6 +2831,19 @@ experimental_bearer_token = "sk-existing""#
         assert!(settings.provider_sync_enabled);
         assert_eq!(settings.codex_app_ai_shell, CodexAiShell::Pwsh);
     }
+}
+
+fn deserialize_codex_shared_terminal_retention_minutes<'de, D>(
+    deserializer: D,
+) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<u64>::deserialize(deserializer)?
+        .unwrap_or_else(|| u64::from(default_codex_shared_terminal_retention_minutes()));
+    Ok(clamp_codex_shared_terminal_retention_minutes(
+        u8::try_from(value).unwrap_or(CODEX_SHARED_TERMINAL_MAX_RETENTION_MINUTES),
+    ))
 }
 
 pub fn atomic_replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
