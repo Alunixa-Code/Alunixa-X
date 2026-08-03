@@ -531,3 +531,13 @@
 - 前端 16 项测试、TypeScript、Vite 生产构建、i18n plain `721/721` 与 template `64/64`、Rust 格式和 `git diff --check` 全部通过；npm audit 仍为仓库既有 1 个 low 与 2 个 high，本轮没有新增依赖喵~
 - 清理命令首次因执行环境策略拒绝动态递归删除而未产生文件变化；改用已核验绝对路径的 PowerShell/.NET 目录删除后，已清除 Rust `target`、前端 `node_modules` 与 `dist`，没有保留本轮构建垃圾喵~
 - 全程未连接、替换、重启或操作当前 Codex 页面、当前任务、当前 helper 与 `9229` CDP；五个模型文件仍仅为内容与 HEAD 一致的 Windows 换行状态噪声，并继续排除在提交与发行之外喵~
+- 发布前验证与清理记录已提交为 `7d272ce` 并推送到 `Alunixa-Code/CodexPlusPlusPlus` 的 `main`；首次 Actions 列表查询使用了当前 gh CLI 不支持的 `jobs` 字段，修正为先取 run 再查看 jobs 后继续跟踪，未触发额外构建喵~
+- 主分支 GitHub Actions `30849067954` 已全部成功：Windows 完成品牌检查、前端测试、TypeScript、生产构建、完整 Rust tests、release 二进制、ZIP 与安装程序构建上传；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
+- `gh run watch` 的本地等待命令数次到达观察超时，但远端作业始终继续运行；每次均用 `gh run view` 读取权威状态后继续等待，没有取消或重复触发构建喵~
+- 已创建并推送注释标签 `v1.2.62`，正式 Release Actions `30850220679` 已全部成功：版本校验、Windows x64、macOS x64、macOS arm64、六项资产汇总校验与 Publish GitHub Release 均完成喵~
+- 自动生成的单行 Release 正文已替换为 3837 字符的详细中文说明，完整记录四个叠加根因、跨进程锁与唯一临时文件、严格读取、模型合并、保存队列、双回滚、现场总开关阻断、升级操作、代码范围、验证结果和 Actions 链接喵~
+- `v1.2.62` 已核验为 latest、非草稿、非预发布，六项资产状态全部为 uploaded；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.62` 喵~
+- Windows setup SHA-256 为 `0593943590e711f8e459e8ba9eebf8122111cc55c38c0df3d841d622ff500693`，Windows ZIP 为 `46ef6c13b9b3ce12a6f92b82f8a09847326e387e801049fe6232aa9170893f57` 喵~
+- macOS x64 DMG SHA-256 为 `c96f800136d65b008d53035ceac17b88f5507c0516a28fa06eda6246197623f9`，macOS x64 ZIP 为 `90f3f2c51c644570be3266783727835ca43623b6e62a55d9728b770afa009c81` 喵~
+- macOS arm64 DMG SHA-256 为 `c1361dfd72211e83721a207436be586ad27acef2a7e4527a720c3c0a0dad455a`，macOS arm64 ZIP 为 `a9e0a9e956e21a14db76b63b4a7ef230dd9d6715b896707116098ebadfa0b512` 喵~
+- Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在，没有保留本轮下载、构建或发布临时文件喵~
