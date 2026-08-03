@@ -500,3 +500,5 @@
 - 已将 Rust workspace、Cargo.lock、管理器 package/package-lock、Tauri 配置和 CHANGELOG 统一升级到 `1.2.61`，准备进入独立验证与发布阶段喵~
 - 首轮独立前端测试 15 项全部通过，新增的共享终端滑块契约已验证默认值、范围、步长、立即释放文案和持久化调用喵~
 - Rust formatter 检查仅发现 retention 设置合并逻辑的一处换行格式差异，已按 formatter 输出收口；首次 JS 语法命令因工作目录导致路径错误，未触碰当前 Codex 实例并将用绝对路径重跑喵~
+- 使用正确绝对路径完成 `renderer-inject.js` 语法检查；`codex-plus-core` 226 项单元测试全部通过，覆盖新版 `shell_command`、旧 `Bash`、retention 默认/边界和 broker 回传喵~
+- CDP 注入 82 项测试全部通过，覆盖 dispatcher 与 app-server 的 legacy 新建/恢复/预热请求、无项目会话兼容、共享官方终端 runtime v3 以及 `0/1/5/9/invalid` 换算喵~
