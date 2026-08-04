@@ -994,7 +994,8 @@ async fn try_inject_with_context(
     let settings = codex_plus_core::settings::SettingsStore::default()
         .load()
         .unwrap_or_default();
-    let script = codex_plus_core::assets::injection_script_with_settings(helper_port, &settings);
+    let script =
+        codex_plus_core::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
     let user_bundle = runtime
         .user_scripts
         .build_enabled_bundle()

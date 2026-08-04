@@ -113,7 +113,6 @@ export const EN_PLAIN: Record<string, string> = {
   "配置导入": "Configuration import",
   "Codex++ 版本": "Codex++ version",
   "Codex增强": "Codex enhancements",
-  "Codex增强模式": "Codex enhancement mode",
   "Debug 端口": "Debug port",
   "Fast 按钮": "Fast button",
   "GitHub Release 更新": "GitHub Release update",
@@ -821,6 +820,7 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "已动态注入 {0} 个模型，当前模型：{1}": "Dynamically injected {0} model(s). Current model: {1}",
   "{0} 分钟": "{0} minute(s)",
   "撤销设备“{0}”？该设备之后需要重新配对。":
     "Revoke “{0}”? This device will need to be paired again.",

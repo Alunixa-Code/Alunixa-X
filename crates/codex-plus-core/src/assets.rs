@@ -145,6 +145,14 @@ pub fn injection_script(helper_port: u16) -> String {
 }
 
 pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettings) -> String {
+    injection_script_with_runtime(helper_port, 0, settings)
+}
+
+pub fn injection_script_with_runtime(
+    helper_port: u16,
+    debug_port: u16,
+    settings: &BackendSettings,
+) -> String {
     let helper_url = format!("http://127.0.0.1:{helper_port}");
     let sponsor_images = sponsor_image_data_uris();
     let image_overlay = image_overlay_config(helper_port, settings);
@@ -155,8 +163,9 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let performance_protection = performance_protection_config(settings);
     let local_ads = crate::ads::local_ad_list();
     format!(
-        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_LOCAL_ADS__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\nwindow.__CODEX_PLUS_PERFORMANCE_PROTECTION__ = {};\n{}\n{}",
+        "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_LOCAL_ADS__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\nwindow.__CODEX_PLUS_PERFORMANCE_PROTECTION__ = {};\n{}\n{}",
         serde_json::to_string(&helper_url).expect("helper URL should serialize"),
+        serde_json::to_string(&debug_port).expect("debug port should serialize"),
         serde_json::to_string(&sponsor_images).expect("sponsor images should serialize"),
         serde_json::to_string(&local_ads).expect("local ads should serialize"),
         serde_json::to_string(crate::version::VERSION).expect("version should serialize"),

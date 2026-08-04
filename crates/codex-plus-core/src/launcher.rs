@@ -2665,7 +2665,7 @@ async fn try_inject(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("selected CDP target has no websocket URL"))?;
     let settings = SettingsStore::default().load().unwrap_or_default();
-    let script = crate::assets::injection_script_with_settings(helper_port, &settings);
+    let script = crate::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
     let ctx = crate::routes::BridgeContext::core(Arc::new(crate::routes::CoreRuntimeService::new(
         debug_port,
         StatusStore::default(),

@@ -347,6 +347,40 @@ experimental_bearer_token = "codex-plus-custom"
 }
 
 #[test]
+fn explicit_default_model_selection_wins_over_older_runtime_selection() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    std::fs::create_dir(&home).unwrap();
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let mut original_profile = custom_models_profile("custom");
+    original_profile.record_last_used_model("grok-4.5");
+    let original = BackendSettings {
+        active_relay_id: "custom".to_string(),
+        relay_profiles: vec![original_profile],
+        ..BackendSettings::default()
+    };
+    store.save(&original).unwrap();
+
+    let mut selected_profile = custom_models_profile("custom");
+    selected_profile.record_last_used_model("gpt-5.6-sol");
+    let next = BackendSettings {
+        active_relay_id: "custom".to_string(),
+        relay_profiles: vec![selected_profile],
+        ..BackendSettings::default()
+    };
+
+    switch_relay_profile_in_home(&store, &home, next, "custom").unwrap();
+
+    let stored = store.load().unwrap();
+    let selected = stored.active_relay_profile();
+    assert_eq!(selected.last_used_model, "gpt-5.6-sol");
+    assert_eq!(selected.model, "gpt-5.6-sol");
+    assert_eq!(selected.default_custom_model_id, "sol");
+    let live = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(live.contains(r#"model = "gpt-5.6-sol""#));
+}
+
+#[test]
 fn switch_captures_safe_app_state_before_writing_provider_config() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("codex");

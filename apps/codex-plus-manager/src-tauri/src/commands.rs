@@ -182,6 +182,7 @@ pub struct RelaySwitchPayload {
     pub relay: RelayPayload,
     pub settings_path: String,
     pub user_scripts: Value,
+    pub runtime_apply: Option<codex_plus_core::codex_config_reload::RuntimeModelApplyResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -538,7 +539,7 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
-pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
+pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
     let settings = normalize_settings_before_save(settings);
     let save_result = SettingsStore::default()
         .save_preserving_runtime_model_selection(&settings)
@@ -560,16 +561,32 @@ pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload
         Ok(()) => {
             let max_threads = settings.codex_app_sub_agent_max_threads;
             let codex_app_path = settings.codex_app_path.clone();
-            tauri::async_runtime::spawn(async move {
-                let _ =
-                    codex_plus_core::codex_config_reload::reload_user_config_with_sub_agent_limit(
-                        9229,
-                        max_threads,
-                    )
-                    .await;
-                trust_codex_hooks_and_log(codex_app_path).await;
-            });
-            settings_payload("设置已保存。", "设置保存后重新读取失败")
+            let trust = tauri::async_runtime::spawn(trust_codex_hooks_and_log(codex_app_path));
+            let runtime_apply =
+                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
+                    max_threads,
+                )
+                .await;
+            let _ = trust.await;
+            match runtime_apply {
+                Ok(Some(result)) => settings_payload(
+                    &format!(
+                        "设置已保存并动态注入 Codex：{} 个模型，当前模型 {}。",
+                        result.model_count, result.selected_model
+                    ),
+                    "设置保存后重新读取失败",
+                ),
+                Ok(None) => settings_payload(
+                    "设置已保存；Codex 当前未运行，将在下次启动时应用。",
+                    "设置保存后重新读取失败",
+                ),
+                Err(error) => failed(
+                    &format!(
+                        "设置已保存，但当前 Codex 动态注入失败：{error}。请修复运行连接后重新保存。"
+                    ),
+                    settings_payload_value().unwrap_or_else(|(_, payload)| payload),
+                ),
+            }
         }
         Err(error) => failed(
             &format!("保存设置失败：{error}"),
@@ -2498,20 +2515,9 @@ pub struct RelayProfileSwitchRequest {
 }
 
 #[tauri::command]
-pub fn switch_relay_profile(
+pub async fn switch_relay_profile(
     request: RelayProfileSwitchRequest,
 ) -> CommandResult<RelaySwitchPayload> {
-    let Ok(_guard) = relay_switch_mutex().lock() else {
-        let status = codex_plus_core::relay_config::default_relay_status();
-        return failed(
-            "供应商切换锁已损坏，请重启管理器后再试。",
-            relay_switch_payload(
-                SettingsStore::default().load().unwrap_or_default(),
-                status,
-                None,
-            ),
-        );
-    };
     let home = codex_plus_core::relay_config::default_codex_home_dir();
     let store = SettingsStore::default();
     let previous_active_relay_id = request.previous_active_relay_id;
@@ -2523,45 +2529,68 @@ pub fn switch_relay_profile(
             "targetRelayId": settings.active_relay_id
         }),
     );
-    match codex_plus_core::relay_switch::switch_relay_profile_in_home(
-        &store,
-        &home,
-        settings,
-        &previous_active_relay_id,
-    ) {
+    let switch_result = {
+        let Ok(_guard) = relay_switch_mutex().lock() else {
+            let status = codex_plus_core::relay_config::default_relay_status();
+            return failed(
+                "供应商切换锁已损坏，请重启管理器后再试。",
+                relay_switch_payload(
+                    SettingsStore::default().load().unwrap_or_default(),
+                    status,
+                    None,
+                    None,
+                ),
+            );
+        };
+        codex_plus_core::relay_switch::switch_relay_profile_in_home(
+            &store,
+            &home,
+            settings,
+            &previous_active_relay_id,
+        )
+    };
+    match switch_result {
         Ok(result) => {
             let max_threads = result.settings.codex_app_sub_agent_max_threads;
-            tauri::async_runtime::spawn(async move {
-                let reload =
-                    codex_plus_core::codex_config_reload::reload_user_config_with_sub_agent_limit(
-                        9229,
-                        max_threads,
-                    )
-                    .await;
+            let runtime_apply =
+                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
+                    max_threads,
+                )
+                .await;
+            let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+            if let Err(error) = &runtime_apply {
                 log_manager_event(
-                    if reload.is_ok() {
-                        "manager.switch_relay_profile.hot_reload_ok"
-                    } else {
-                        "manager.switch_relay_profile.hot_reload_failed"
-                    },
+                    "manager.switch_relay_profile.dynamic_apply_failed",
                     json!({
-                        "maxThreads": max_threads,
-                        "error": reload.as_ref().err().map(ToString::to_string),
+                        "targetRelayId": result.settings.active_relay_id,
+                        "error": error.to_string()
                     }),
                 );
-            });
-            let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+                return failed(
+                    &format!(
+                        "供应商文件已保存，但当前 Codex 动态注入失败：{error}。请不要继续使用旧模型，修复连接后重新保存。"
+                    ),
+                    relay_switch_payload(result.settings, status, result.backup_path, None),
+                );
+            }
+            let runtime_apply = runtime_apply.ok().flatten();
             log_manager_event(
                 "manager.switch_relay_profile.ok",
                 json!({
                     "targetRelayId": result.settings.active_relay_id,
                     "configured": status.configured,
-                    "backupPath": result.backup_path.as_ref()
+                    "backupPath": result.backup_path.as_ref(),
+                    "runtimeApplied": runtime_apply.is_some(),
+                    "runtime": runtime_apply.as_ref()
                 }),
             );
             ok(
-                "供应商已切换。",
-                relay_switch_payload(result.settings, status, result.backup_path),
+                if runtime_apply.is_some() {
+                    "供应商、模型目录和当前模型已动态注入 Codex。"
+                } else {
+                    "供应商已保存；Codex 当前未运行，将在下次启动时应用。"
+                },
+                relay_switch_payload(result.settings, status, result.backup_path, runtime_apply),
             )
         }
         Err(error) => {
@@ -2577,7 +2606,7 @@ pub fn switch_relay_profile(
             );
             failed(
                 &format!("供应商切换失败：{error}"),
-                relay_switch_payload(settings, status, None),
+                relay_switch_payload(settings, status, None, None),
             )
         }
     }
@@ -3474,7 +3503,7 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
 }
 
 #[tauri::command]
-pub fn clear_relay_injection() -> CommandResult<RelayPayload> {
+pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
     let home = codex_plus_core::relay_config::default_codex_home_dir();
     let settings = match SettingsStore::default().load() {
         Ok(settings) => settings,
@@ -3501,11 +3530,32 @@ pub fn clear_relay_injection() -> CommandResult<RelayPayload> {
                 "manager.clear_relay_injection.after",
             );
             let status = codex_plus_core::relay_config::relay_status_from_home(&home);
+            let runtime_apply =
+                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
+                    settings.codex_app_sub_agent_max_threads,
+                )
+                .await;
+            if let Err(error) = &runtime_apply {
+                log_manager_event(
+                    "manager.clear_relay_injection.dynamic_apply_failed",
+                    json!({
+                        "configured": status.configured,
+                        "error": error.to_string()
+                    }),
+                );
+                return failed(
+                    &format!(
+                        "官方配置已恢复，但当前 Codex 动态清理旧供应商模型失败：{error}。请修复运行连接后重试。"
+                    ),
+                    relay_payload(status, result.backup_path),
+                );
+            }
             log_manager_event(
                 "manager.clear_relay_injection.ok",
                 json!({
                     "configured": status.configured,
-                    "backupPath": result.backup_path.as_ref()
+                    "backupPath": result.backup_path.as_ref(),
+                    "runtimeApplied": runtime_apply.ok().flatten().is_some()
                 }),
             );
             ok(
@@ -3637,6 +3687,7 @@ fn relay_switch_payload(
     settings: BackendSettings,
     status: codex_plus_core::relay_config::RelayStatus,
     backup_path: Option<String>,
+    runtime_apply: Option<codex_plus_core::codex_config_reload::RuntimeModelApplyResult>,
 ) -> RelaySwitchPayload {
     RelaySwitchPayload {
         settings,
@@ -3645,6 +3696,7 @@ fn relay_switch_payload(
             .to_string_lossy()
             .to_string(),
         user_scripts: user_script_inventory(),
+        runtime_apply,
     }
 }
 

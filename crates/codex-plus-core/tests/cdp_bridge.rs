@@ -154,6 +154,17 @@ fn injection_script_exposes_image_overlay_config() {
 }
 
 #[test]
+fn injection_script_embeds_explicit_runtime_ports() {
+    let settings = codex_plus_core::settings::BackendSettings::default();
+    let runtime_script = assets::injection_script_with_runtime(57321, 57351, &settings);
+    let compatibility_script = assets::injection_script_with_settings(57321, &settings);
+
+    assert!(runtime_script.contains("window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ = 57351;"));
+    assert!(runtime_script.contains("http://127.0.0.1:57321"));
+    assert!(compatibility_script.contains("window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ = 0;"));
+}
+
+#[test]
 fn injection_script_installs_image_overlay_from_data_uri() {
     let script = assets::injection_script(57321);
 
@@ -682,6 +693,34 @@ fn injection_script_unlocks_custom_model_catalog() {
     assert!(script.contains("modelWhitelistUnlock"));
     assert!(script.contains("isWorkspaceChromeNode"));
     assert!(script.contains("refreshCodexModelWhitelistFromScan"));
+    assert!(script.contains("__codexPlusDynamicModelRuntime"));
+    assert!(script.contains("refreshCodexDynamicModels"));
+    assert!(script.contains("applyPreferredModelToCatalog"));
+    assert!(script.contains("applyCodexDynamicModelRequestOverride"));
+    assert!(script.contains("codexDynamicModelRequestOverride"));
+    assert!(script.contains("list-models-for-host"));
+    assert!(script.contains("dynamic_model_runtime_refreshed"));
+    assert!(script.contains("codexDynamicModelRuntimeVersion = \"3\""));
+    assert!(script.contains("set-default-model-config-for-host"));
+    assert!(script.contains("clear-prewarmed-threads-for-host"));
+    assert!(script.contains("settingsResp?.relayProfilesEnabled !== false"));
+    assert!(script.contains("nativeCodexModelSelectionSucceeded"));
+    assert!(script.contains("missingNativeModels"));
+    assert!(script.contains("codexNativeModelRefreshProbeDepth"));
+    assert!(script.contains("refreshCodexModelQueryCache"));
+    assert!(script.contains("queryKey: [\"models\", \"list\"]"));
+    assert!(
+        script.contains("!codexPlusModelNames().length && !codexRetiredManagedModelNames.size")
+    );
+    assert!(script.contains("updateCodexManagedModelTracking"));
+    assert!(script.contains("codexPlusShouldRemoveRetiredModel"));
+    assert!(script.contains("dynamic_model_previous_runtime_refresh_failed"));
+    assert!(script.contains("__codexPlusDynamicModelPatchGeneration"));
+    assert!(script.contains("codexDynamicModelPatchInstance"));
+    assert!(
+        script.contains("client.__codexPlusModelRequestPatch = codexDynamicModelPatchInstance")
+    );
+    assert!(!script.contains("existing?.version === codexDynamicModelRuntimeVersion"));
     assert!(!script.contains("querySelectorAll(\"button, [role='menu']"));
 }
 
@@ -870,6 +909,29 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["dispatcherFromClass"], true);
     assert_eq!(cases["settingStorageFromBundle"], true);
     assert_eq!(cases["hostRpcFromBundle"], true);
+    assert_eq!(
+        cases["preferredCatalog"]["models"],
+        json!(["next-model", "other-model"])
+    );
+    assert_eq!(cases["preferredCatalog"]["model"], "next-model");
+    assert_eq!(cases["preferredCatalog"]["default_model"], "next-model");
+    assert_eq!(
+        cases["patchedObjectModels"],
+        json!(["next-model", "other-model", "official-model"])
+    );
+    assert_eq!(cases["patchedObjectDefault"], "next-model");
+    assert_eq!(
+        cases["patchedNameModels"],
+        json!(["next-model", "other-model", "official-model"])
+    );
+    assert_eq!(cases["validCurrentModel"], "other-model");
+    assert_eq!(cases["staleCurrentModel"], "next-model");
+    assert_eq!(cases["nativeSelectionOk"], true);
+    assert_eq!(cases["nativeSelectionOverridden"], true);
+    assert_eq!(cases["nativeSelectionMissingStatus"], false);
+    assert_eq!(cases["nativeSelectionFailed"], false);
+    assert_eq!(cases["disabledObjectModels"], json!(["official-model"]));
+    assert_eq!(cases["disabledNameModels"], json!(["official-model"]));
 }
 
 fn run_service_tier_contract_harness() -> serde_json::Value {
@@ -1036,6 +1098,43 @@ async function bundledSetSetting(setting, value) {{
 const settingStorage = api.settingStorageFromModule({{ getter: bundledGetSetting, setter: bundledSetSetting }});
 const settingStorageFromBundle = settingStorage?.n === bundledGetSetting && settingStorage?.s === bundledSetSetting;
 const hostRpcFromBundle = api.hostRpcFromModule({{ call: rpc }}) === rpc;
+const nativeSelectionOk = api.nativeSelectionSucceeded({{ status: "ok" }});
+const nativeSelectionOverridden = api.nativeSelectionSucceeded({{ status: "okOverridden" }});
+const nativeSelectionMissingStatus = api.nativeSelectionSucceeded({{}});
+const nativeSelectionFailed = api.nativeSelectionSucceeded({{ status: "failed" }});
+const preferredCatalog = api.applyPreferredModel({{
+  status: "ok",
+  model: "old-model",
+  default_model: "old-model",
+  models: ["other-model", "next-model"],
+}}, "next-model");
+api.setModelCatalog(preferredCatalog);
+api.setManagedModelTracking(["old-model"], ["official-model"]);
+const objectModels = [
+  {{ model: "official-model", hidden: false }},
+  {{ model: "old-model", hidden: false }},
+];
+api.patchModelArray(objectModels, true);
+const objectContainer = {{
+  models: objectModels,
+  defaultModel: {{ model: "old-model" }},
+  selectedModel: "old-model",
+}};
+api.patchModelContainer(objectContainer);
+const nameModels = ["official-model", "old-model"];
+api.patchModelNameArray(nameModels);
+const validCurrentModel = api.dynamicModelOverride("turn/start", {{ model: "other-model" }}).model;
+const staleCurrentModel = api.dynamicModelOverride("turn/start", {{ model: "old-model" }}).model;
+api.setModelCatalog({{ status: "disabled", model: "", default_model: "", models: [] }});
+api.setManagedModelTracking(["next-model", "old-model"], ["official-model"]);
+const disabledObjectModels = [
+  {{ model: "official-model", hidden: false }},
+  {{ model: "next-model", hidden: false }},
+  {{ model: "old-model", hidden: false }},
+];
+api.patchModelArray(disabledObjectModels, true);
+const disabledNameModels = ["official-model", "next-model", "old-model"];
+api.patchModelNameArray(disabledNameModels);
 
 process.stdout.write(JSON.stringify({{
   supportedFast,
@@ -1052,6 +1151,18 @@ process.stdout.write(JSON.stringify({{
   dispatcherFromClass,
   settingStorageFromBundle,
   hostRpcFromBundle,
+  nativeSelectionOk,
+  nativeSelectionOverridden,
+  nativeSelectionMissingStatus,
+  nativeSelectionFailed,
+  preferredCatalog,
+  patchedObjectModels: objectModels.map((item) => item.model),
+  patchedObjectDefault: objectContainer.defaultModel.model,
+  patchedNameModels: nameModels,
+  validCurrentModel,
+  staleCurrentModel,
+  disabledObjectModels: disabledObjectModels.map((item) => item.model),
+  disabledNameModels,
 }}));
 "#,
         script_path = serde_json::to_string(&script_path.to_string_lossy().to_string())

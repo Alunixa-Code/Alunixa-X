@@ -542,3 +542,30 @@
 - macOS arm64 DMG SHA-256 为 `c1361dfd72211e83721a207436be586ad27acef2a7e4527a720c3c0a0dad455a`，macOS arm64 ZIP 为 `a9e0a9e956e21a14db76b63b4a7ef230dd9d6715b896707116098ebadfa0b512` 喵~
 - Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在，没有保留本轮下载、构建或发布临时文件喵~
 - 发布记录提交 `8115938` 推送后触发的最终主分支 Actions `30851231355` 已全部成功，Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项均完成；至此远端 `main`、`v1.2.62` latest Release、详细说明、六项资产及发布后构建全部闭环喵~
+- 用户反馈 v1.2.62 后配置和模型仍不生效，要求不要继续只改磁盘配置，而是把供应商、模型目录、选中模型和界面显示动态注入到运行中的 Codex 喵~
+- 已读取项目历史、当前工作树和既有模型解锁链路，确认五个模型文件仍是内容与 HEAD 一致的 Windows 换行状态噪声；创建修改前检查点 `3ba34df`，继续禁止连接或操作当前 Codex 页面、当前任务、当前 helper 与 `9229` CDP 做测试喵~
+- 静态审计确认直接兼容断点：管理器保存/切换后的“热重载”仍只查找新版已经删除的 `vscode-api-*` 独立资源并硬编码旧压缩导出 `module.n`，因此在当前单体 `app-initial-*` Codex 中热重载必然失败，运行中的 app-server、模型目录与模型选择不会同步更新喵~
+- 确定新方案必须把磁盘事务与运行时事务合并：先安全写入 settings/live 文件，再结构化发现新版 State API 执行 `reloadUserConfig`，随后通知注入 runtime 强制重拉模型目录、重补 Statsig/响应/App Server/React 状态、同步默认与选中模型并立即刷新界面；任一关键步骤失败必须明确返回而非继续显示纯成功喵~
+
+- 已继续完成动态配置与模型注入实现：普通设置保存、供应商切换和首次打开供应商总开关都读取 `latest-status.json` 的真实 debug/helper 端口，不再向固定 `9229` 发送失效热重载请求喵~
+- 动态事务现会结构化发现旧 `vscode-api-*` 或新版 `app-initial-*` Host RPC，执行 `config/batchWrite` 的 `reloadUserConfig: true`，重注入当前 renderer runtime，再强制调用原生 `list-models-for-host`、`set-default-model-config-for-host` 与 `clear-prewarmed-threads-for-host` 喵~
+- renderer 动态模型 runtime 升级到 v3，并将 dispatcher、app-server、Response JSON、Statsig 和消息补丁改为可升级重绑定；旧页面重新注入后不会继续被旧闭包与旧供应商模型目录截留喵~
+- 已加入 Codex++ 托管模型集合跟踪：新供应商模型置顶，只移除 Codex++ 先前注入且不属于新供应商、也不在原生目录中的旧模型，保留官方模型并同步 default/selected/model、React 状态与 Statsig 更新事件喵~
+- 管理器现在验证动态返回端口、完整模型集合、选中模型、原生目录刷新和原生默认模型切换；失败时明确显示“磁盘已保存但运行时未应用”，不再伪报成功，活动供应商保存也不再重复弹两个成功提示喵~
+- 已补充独立 Node/Rust 合约覆盖：真实端口注入、旧模型清理、官方模型保留、首选模型置顶、有效当前模型不改写、失效旧模型改为新默认、普通保存动态应用、总开关首次开启应用和 async mutex await 边界喵~
+
+- 进一步补齐运行状态与总开关边界：动态应用同时接受 launcher 的 `running` 与 `running_degraded` 有端口状态；供应商总开关关闭时模型目录后端不再从已存档 profile 注入旧模型，并由 v3 runtime 清理其先前托管模型喵~
+- 首轮独立验证通过前端 19 项、CDP 注入 83 项、动态 reload 6 项、供应商切换 8 项、模型目录 5 项、TypeScript、Vite 与管理器 Rust check；单独 Node 命令首次缺少 strip-types 参数及首次 manager check 缺 dist 均已按正确项目流程重跑通过喵~
+- `npm ci` 仍报告仓库既有 1 个 low 与 2 个 high，本轮没有新增依赖；Vite 仍只有既有单 chunk 超过 500 KB 提醒喵~
+- 最终兼容审计进一步确认新版 `app-initial-*` Host RPC 与旧版 `vscode-api-*` 的调用参数不同：旧版请求包装为 `{ params: payload }`，新版必须直接传递 `payload`；动态事务现按发现到的 Host RPC 类型选择正确参数，并统一要求 `reloadUserConfig: true` 喵~
+- 为避免 Codex++ 自己补出的模型被误判为 Codex 原生刷新成功，验证 `model/list` 时新增 `codexNativeModelRefreshProbeDepth` 探针作用域，临时暂停 app-server、Response JSON 与 MCP 三条模型补丁；只有原生目录真实包含当前供应商全部期望模型才判定动态应用成功喵~
+- 新版 React Query 使用 `['models','list',...]` 五分钟缓存，现会通过 React fiber、DevTools root、QueryClient 与 client coordination 结构发现并主动失效模型查询；Rust 动态事务同时验证缓存刷新结果，避免后端已切换而界面继续显示旧模型喵~
+- `set-default-model-config-for-host` 现在只有明确返回 `ok` 或 `okOverridden` 才算成功；缺失状态或其他状态都会作为运行时应用失败返回，不再把未确认的默认模型切换伪报为成功喵~
+- 供应商关闭时后端返回明确的空托管目录 `status: disabled`，renderer 即使目录为空也会扫描并清理 retired 模型；`/settings/get` fallback 仅在总开关未关闭时才允许从 profile 重建目录喵~
+- 切回官方模式的 `clear_relay_injection` 已改为异步动态清理：先恢复官方 live 配置，再清理运行中的托管模型、旧闭包、缓存与选中状态；清理失败会明确提示，普通保存、供应商切换、首次开启和官方恢复均纳入同一动态事务喵~
+- 供应商和默认模型显式切换改用 `save` 语义，使用户的新选择优先于旧运行时快照；动态 runtime v3 的同版本重绑、旧托管模型追踪清理与官方模型保留均已加入回归覆盖喵~
+- 最终独立验证完成：前端测试 `20/20`、CDP 注入测试 `83/83`、动态配置重载测试 `6/6`、TypeScript、Vite 生产构建、管理器 `cargo check`、i18n plain `730/730` 与 template `66/66`、品牌检查、JavaScript 语法检查全部通过喵~
+- 最终 `cargo test --workspace -- --test-threads=1` 在约 504.8 秒内全部通过，所有 workspace 单元、集成与文档测试零失败；`npm audit` 仍为仓库既有 `1 low + 2 high`，Vite 仍只有既有单 chunk 超过 500 KB 提醒，本轮未新增依赖喵~
+- 本轮全部验证均为静态资源分析和独立 Node/Rust 自动化测试，没有连接、替换、重启或操作当前 Codex 页面、当前任务、当前 helper、当前动态 CDP 或旧 `9229` CDP 喵~
+- 追加上述最终验证记录时首次受当前工作区写权限边界拒绝，未造成文件变化；随后按授权路径重新执行喵~
+- 发布前本地清理完成：已删除 Rust `target`、前端 `node_modules` 与 `dist`，静态审计临时文件也不存在；清理后不再执行本地构建，后续仅使用 GitHub Actions 构建正式产物喵~

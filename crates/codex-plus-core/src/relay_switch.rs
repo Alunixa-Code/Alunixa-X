@@ -37,8 +37,11 @@ pub fn switch_relay_profile_in_home(
     let original_live_files =
         LiveRelayFiles::capture(home).context("读取原 Codex live 配置失败，已停止切换")?;
 
+    // This path represents an explicit provider/default-model selection from
+    // the manager, so the submitted selection must win over an older runtime
+    // model snapshot that may still be present on disk.
     store
-        .save_preserving_runtime_model_selection(&selected_settings)
+        .save(&selected_settings)
         .context("保存供应商设置失败")?;
     let apply_result = (|| {
         let selected_settings = store.load().context("读取供应商设置失败")?;

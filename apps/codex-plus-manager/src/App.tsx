@@ -528,6 +528,22 @@ type RelaySwitchResult = CommandResult<{
   settingsPath: string;
   user_scripts: unknown;
   relay: RelayPayload;
+  runtimeApply: {
+    debugPort: number;
+    helperPort: number;
+    selectedModel: string;
+    modelCount: number;
+    providerName: string;
+    nativeRefresh: boolean;
+    nativeSelection: boolean;
+    nativeSelectionStatus: string;
+    queryCacheRefresh: boolean;
+    queryClientCount: number;
+    reactStatePatched: boolean;
+    models: string[];
+    nativeModels: string[];
+    missingNativeModels: string[];
+  } | null;
 }>;
 
 type SettingsBackfillResult = CommandResult<{
@@ -2165,7 +2181,11 @@ export function App() {
         targetRelayId: currentSelected.id,
         launchMode: selectedSettings.launchMode,
         status: result.status,
+        runtimeApply: result.runtimeApply,
       });
+      showNotice(t("供应商切换"), result.runtimeApply
+        ? tf("已动态注入 {0} 个模型，当前模型：{1}", [result.runtimeApply.modelCount, result.runtimeApply.selectedModel])
+        : result.message, "ok");
       return true;
     } finally {
       setRelaySwitching(false);
@@ -3453,6 +3473,9 @@ function RelayScreen({
   const isNewProfile = !!newProfileDraft;
   const saveRelaySettings = async (next: BackendSettings): Promise<boolean> => {
     onFormChange(next);
+    if (!normalized.relayProfilesEnabled && next.relayProfilesEnabled) {
+      return await actions.switchRelayProfile(next, normalized.activeRelayId);
+    }
     return await actions.saveSettingsValue(next, true);
   };
   const createNewAggregateProfile = () => {
@@ -5404,7 +5427,9 @@ function RelayProfileDetail({
       );
       return;
     }
-    await actions.showMessage(t("供应商配置"), t("供应商配置已保存。"), "ok");
+    if (!isActive) {
+      await actions.showMessage(t("供应商配置"), t("供应商配置已保存。"), "ok");
+    }
     onSaved?.();
   };
   const switchDraft = () => {

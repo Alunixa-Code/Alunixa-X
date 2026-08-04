@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::settings::{RelayMode, RelayProfile, RelayProtocol, SettingsStore};
+use crate::settings::{BackendSettings, RelayMode, RelayProfile, RelayProtocol, SettingsStore};
 use serde_json::{Map, Value, json};
 
 const BASE_URL_ENV_KEYS: &[&str] = &[
@@ -38,21 +38,10 @@ pub async fn read_codex_model_catalog() -> Value {
     let home = codex_home_dir();
     let settings_path = crate::paths::default_settings_path();
     if settings_path.exists() {
-        if let Ok(settings) = SettingsStore::new(settings_path).load() {
-            let profile = settings.active_relay_profile();
-            let catalog = relay_profile_model_catalog_value(&home, &profile);
-            if catalog
-                .get("models")
-                .and_then(Value::as_array)
-                .map_or(false, |m| !m.is_empty())
-            {
-                return catalog;
-            }
-            // Custom multi-model profiles always own the catalog, even when the
-            // stored list is temporarily empty; fall back paths would hide them.
-            if profile.relay_mode == RelayMode::CustomModels {
-                return catalog;
-            }
+        if let Ok(settings) = SettingsStore::new(settings_path).load()
+            && let Some(catalog) = settings_relay_profile_model_catalog(&home, &settings)
+        {
+            return catalog;
         }
     }
     let env = std::env::vars().collect::<HashMap<_, _>>();
@@ -110,6 +99,23 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
                 "responses_api": responses_api_status("unknown", "", "")
             }
         ],
+        "responses_api": responses_api_status("unknown", "", "")
+    })
+}
+
+fn disabled_relay_profile_model_catalog_value(home: &Path) -> Value {
+    json!({
+        "status": "disabled",
+        "path": home.join("config.toml").to_string_lossy(),
+        "message": "Codex++ relay profiles are disabled",
+        "model": "",
+        "model_provider": "",
+        "provider_name": "",
+        "default_model": "",
+        "models": [],
+        "model_details": [],
+        "modelMetadata": {},
+        "sources": [],
         "responses_api": responses_api_status("unknown", "", "")
     })
 }
@@ -890,6 +896,28 @@ mod tests {
     }
 
     #[test]
+    fn disabled_relay_profiles_do_not_inject_archived_models() {
+        let profile = RelayProfile {
+            id: "archived-provider".to_string(),
+            model_list: "archived-model".to_string(),
+            ..RelayProfile::default()
+        };
+        let settings = BackendSettings {
+            relay_profiles_enabled: false,
+            active_relay_id: profile.id.clone(),
+            relay_profiles: vec![profile],
+            ..BackendSettings::default()
+        };
+
+        let catalog =
+            settings_relay_profile_model_catalog(Path::new("codex-home"), &settings).unwrap();
+        assert_eq!(catalog["status"], "disabled");
+        assert_eq!(catalog["model"], "");
+        assert!(catalog["models"].as_array().unwrap().is_empty());
+        assert!(catalog["sources"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn relay_model_metadata_honors_explicit_ultra_maximum() {
         let model = "gpt-5.6-sol".to_string();
         let profile = RelayProfile {
@@ -968,4 +996,23 @@ fn unquote_toml_string(value: &str) -> String {
         })
         .unwrap_or(value)
         .to_string()
+}
+
+fn settings_relay_profile_model_catalog(home: &Path, settings: &BackendSettings) -> Option<Value> {
+    if !settings.relay_profiles_enabled {
+        // Keep archived live config data out of the managed model catalog.
+        return Some(disabled_relay_profile_model_catalog_value(home));
+    }
+    let profile = settings.active_relay_profile();
+    let catalog = relay_profile_model_catalog_value(home, &profile);
+    if catalog
+        .get("models")
+        .and_then(Value::as_array)
+        .is_some_and(|models| !models.is_empty())
+        || profile.relay_mode == RelayMode::CustomModels
+    {
+        Some(catalog)
+    } else {
+        None
+    }
 }
