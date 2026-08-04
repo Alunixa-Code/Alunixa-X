@@ -578,3 +578,4 @@
 - macOS x64 DMG SHA-256 为 `58b6a3fe2103e3b87abe8306f81b0901fb275839a2ed0a2643bb07e70fa5891e`，macOS x64 ZIP 为 `a183b2c2e612922c4ff1e017e49b1192d5997ab7c0da60c0c1b034aec92799fc` 喵~
 - macOS arm64 DMG SHA-256 为 `1528bbafcc6b53e02c96b9726f0982f0d403e7be9ef616e04bd7352169ac8abf`，macOS arm64 ZIP 为 `1fe29714df49597d4f4aac2e7225adaedb7bf253997dc0202d975e8ba8fa3557` 喵~
 - Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程没有操作当前 Codex 实例做测试喵~
+- 发布记录提交后的最终主分支 GitHub Actions `30881513659` 已全部成功：Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项均完成；远端 main、v1.2.63 latest Release、详细说明、六项资产与发布后构建至此全部闭环喵~
