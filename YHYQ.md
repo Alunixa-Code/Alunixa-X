@@ -570,3 +570,4 @@
 - 追加上述最终验证记录时首次受当前工作区写权限边界拒绝，未造成文件变化；随后按授权路径重新执行喵~
 - 发布前本地清理完成：已删除 Rust `target`、前端 `node_modules` 与 `dist`，静态审计临时文件也不存在；清理后不再执行本地构建，后续仅使用 GitHub Actions 构建正式产物喵~
 - v1.2.63 动态配置与模型注入实现已提交为 `fb2e5de`（`fix: dynamically apply Codex provider and models`），共纳入 21 个真实文件；四个仅含 CRLF 状态噪声的模型兼容文件继续留在工作树且未纳入提交喵~
+- v1.2.63 修复已推送到目标仓库，主分支 GitHub Actions `30879758993` 全部成功：Windows 完成品牌检查、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装程序构建上传；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
