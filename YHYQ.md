@@ -571,3 +571,10 @@
 - 发布前本地清理完成：已删除 Rust `target`、前端 `node_modules` 与 `dist`，静态审计临时文件也不存在；清理后不再执行本地构建，后续仅使用 GitHub Actions 构建正式产物喵~
 - v1.2.63 动态配置与模型注入实现已提交为 `fb2e5de`（`fix: dynamically apply Codex provider and models`），共纳入 21 个真实文件；四个仅含 CRLF 状态噪声的模型兼容文件继续留在工作树且未纳入提交喵~
 - v1.2.63 修复已推送到目标仓库，主分支 GitHub Actions `30879758993` 全部成功：Windows 完成品牌检查、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装程序构建上传；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
+- 已创建并推送注释标签 `v1.2.63`；正式 Release Actions `30880695416` 全部成功：版本校验、Windows x64、macOS x64、macOS arm64、六项资产汇总校验与 Publish GitHub Release 均完成喵~
+- 自动生成的单行 Release 正文已替换为 4539 字符的详细中文说明，完整记录固定 `9229`、新版 `app-initial-*`、Host RPC 参数差异、动态供应商/模型/default selection、原生探针、React Query 缓存、旧闭包与旧托管模型清理、代码范围、验证结果和 Actions 链接喵~
+- `v1.2.63` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产状态全部为 uploaded；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.63` 喵~
+- Windows setup SHA-256 为 `8ed69af680128ff8b75a89facb54a0af6c6fee8d9592150e7f46041e7a71ea9a`，Windows ZIP 为 `62d36a58bd9563cd0c194973e84f6fe1bfd947e3dd52dd89004c7b170faebc29` 喵~
+- macOS x64 DMG SHA-256 为 `58b6a3fe2103e3b87abe8306f81b0901fb275839a2ed0a2643bb07e70fa5891e`，macOS x64 ZIP 为 `a183b2c2e612922c4ff1e017e49b1192d5997ab7c0da60c0c1b034aec92799fc` 喵~
+- macOS arm64 DMG SHA-256 为 `1528bbafcc6b53e02c96b9726f0982f0d403e7be9ef616e04bd7352169ac8abf`，macOS arm64 ZIP 为 `1fe29714df49597d4f4aac2e7225adaedb7bf253997dc0202d975e8ba8fa3557` 喵~
+- Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程没有操作当前 Codex 实例做测试喵~
