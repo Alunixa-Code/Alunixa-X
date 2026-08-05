@@ -303,17 +303,30 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     } else {
         false
     };
-    let (status, message) = if injection_ready {
+    let verification_error = if injection_ready {
+        hooks
+            .verify_startup_injection(
+                options.debug_port,
+                options.helper_port,
+                &settings,
+            )
+            .await
+            .err()
+            .map(|error| error.to_string())
+    } else {
+        None
+    };
+    let (status, message) = if injection_ready && verification_error.is_none() {
         hooks
             .start_bridge_watchdog(options.debug_port, options.helper_port)
             .await?;
         hooks.write_status("running").await;
         ("running", "Codex++ reconnected to the existing Codex app.")
     } else if settings.enhancements_enabled {
-        hooks.write_status("running_degraded").await;
+        hooks.write_status("failed").await;
         (
-            "running_degraded",
-            "Codex is running; Codex++ is still waiting for the injection bridge.",
+            "failed",
+            "Codex++ could not verify the injection bridge for the existing Codex app.",
         )
     } else if launch_result.is_ok() {
         hooks.write_status("running").await;
@@ -335,10 +348,17 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
             "process_ids": process_ids,
             "activated": activated,
             "injection_ready": injection_ready,
+            "verification_error": verification_error.as_deref(),
             "launch_ok": launch_result.is_ok(),
             "launch_error": launch_result.as_ref().err().map(|error| error.to_string())
         }),
     );
+    if settings.enhancements_enabled && status == "failed" {
+        anyhow::bail!(
+            "Codex++ could not verify the existing Codex injection bridge: {}",
+            verification_error.as_deref().unwrap_or("injection bridge unavailable")
+        );
+    }
     launch_result.map(|_| ())
 }
 
