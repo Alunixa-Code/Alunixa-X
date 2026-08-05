@@ -96,8 +96,7 @@ export const EN_PLAIN: Record<string, string> = {
   "关闭时不写自动压缩阈值。": "No auto-compaction threshold is written while disabled.",
   "开启自动压缩时必须提供有效上下文窗口。": "A valid context window is required when auto-compaction is enabled.",
   "自动压缩 Token 阈值必须是正整数。": "The auto-compaction token threshold must be a positive integer.",
-  "自动压缩 Token 阈值必须大于 0。": "The auto-compaction token threshold must be greater than 0.",
-  "自动压缩 Token 阈值 {0} 不能超过上下文窗口 {1}。": "The auto-compaction token threshold {0} cannot exceed the context window {1}.",
+  "未命名模型": "Unnamed model",
   "按模型独立配置 Base URL、Key 与协议": "Configure Base URL, key, and protocol per model",
   "测试此模型": "Test this model",
   "自定义模型路由": "Custom model routing",
@@ -300,8 +299,8 @@ export const EN_PLAIN: Record<string, string> = {
     "Force Codex to use HTTP Responses instead of WebSocket/WSS by setting the current provider's supports_websockets to false. Restart Codex to apply.",
   "关闭后会停用删除、导出、项目移动、插件相关和菜单位置增强。":
     "When off, disables deletion, export, project move, plugin-related and menu placement enhancements.",
-  "关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。":
-    "When disabled, Codex config is not changed manually. When enabled, the launcher only syncs config.toml for the active custom-model provider and preserves the existing auth.json.",
+  "关闭后启动器不会应用供应商配置；启用后将在下次通过 Codex++ 启动时完整写入当前供应商、模型目录和默认模型。":
+    "When disabled, the launcher does not apply provider settings. When enabled, the next Codex++ startup writes the active provider, model catalog, and default model in full.",
   "兼容增强": "Compatible enhancement",
   "本地内置推荐，断网也可完整显示": "Local recommendations work offline.",
   "内置": "Built-in",
@@ -825,14 +824,14 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
-  "已动态注入 {0} 个模型，当前模型：{1}": "Dynamically injected {0} model(s). Current model: {1}",
   "{0} 分钟": "{0} minute(s)",
   "撤销设备“{0}”？该设备之后需要重新配对。":
     "Revoke “{0}”? This device will need to be paired again.",
   "ChatGPT 套餐：{0}": "ChatGPT plan: {0}",
   "有效期至 {0}": "Valid until {0}",
   "{0} 台设备可访问此 Codex 主机": "{0} devices can access this Codex host",
-  "将按上下文窗口的 {0}% 写入压缩阈值{1}": "Writes a compaction threshold at {0}% of the context window{1}",
+  "模型「{0}」：{1}": "Model \"{0}\": {1}",
+  "自动压缩 Token 阈值 {0} 不能超过上下文窗口 {1}。": "The auto-compaction token threshold {0} cannot exceed the context window {1}.",
   "自定义供应商 {0}": "Custom provider {0}",
   "模型 {0}": "Model {0}",
   "，清理 {0} 条失效任务索引": ", pruned {0} stale task index entry/entries",
