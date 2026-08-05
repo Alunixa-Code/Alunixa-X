@@ -606,3 +606,11 @@
 - 已删除本地 Rust `target`、前端 `node_modules` 与 `dist` 构建产物并确认三个目录均不存在；四个既有 CRLF 状态噪声文件经 `git diff --exit-code` 确认内容与 HEAD 完全一致，发布提交继续排除它们喵~
 - 用户要求继续完成推送、GitHub Actions 构建和 `v1.2.64` 正式发行；已复核本地 `main` 比 `origin/main` 领先 17 个提交且远端无新增提交，准备推送目标仓库喵~
 - v1.2.64 发布候选代码已推送到目标仓库，主分支 GitHub Actions `30995855874` 全部成功：Windows 完成品牌检查、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装程序构建上传；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
+- 发布记录提交后的主分支 GitHub Actions `30997078082` 也已全部成功，Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项均完成；随后创建并推送注释标签 `v1.2.64` 喵~
+- 正式 Release Actions `30998037803` 全部成功：版本校验、Windows x64、macOS x64、macOS arm64、六项资产汇总校验与 Publish GitHub Release 均完成喵~
+- 自动生成的单行 Release 正文已替换为 4152 字符的详细中文说明，完整记录删除动态重载、启动前供应商与模型注入、启动握手与失败关闭、Token 阈值及旧百分比迁移、代码范围、验证结果、Actions 链接和六项资产 SHA-256 喵~
+- `v1.2.64` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产状态全部为 uploaded；正式发行地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.64` 喵~
+- Windows setup 为 16,305,190 bytes，SHA-256 `9cf9f82691f09253269a79ab0d06667ab74dcd50a885c0835ae10bce487822c1`；Windows ZIP 为 20,463,681 bytes，SHA-256 `f43b3a196e7a451b5e8fb45d805be1eaf26a8a5ca613cf24c9583a7efd96ac19` 喵~
+- macOS x64 DMG 为 23,960,049 bytes，SHA-256 `04e3903bc6c5d2c6c5be0925d69bec306d4d0fc8c12f184ea7b662f92046ee0c`；macOS x64 ZIP 为 20,512,892 bytes，SHA-256 `d1718cf0a138f06a230eadfdc31dcb8a150d7d4c65a403ad25d6dc1ac29009d1` 喵~
+- macOS arm64 DMG 为 22,967,223 bytes，SHA-256 `185082b026e23b7545cdf8cbfe2a3db387754f18939602a012ed72337a4cc7d6`；macOS arm64 ZIP 为 20,023,480 bytes，SHA-256 `94d5205da098023ea879e07221cca051aca530b9fee749d01a5b72e70341bc37` 喵~
+- Release notes 临时文件已删除，本地 Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程没有连接、替换、重启或操作当前 Codex 实例、当前任务、当前 helper 或 CDP 做测试喵~
