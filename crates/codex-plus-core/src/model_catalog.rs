@@ -858,7 +858,7 @@ mod tests {
                 model: "grok-4.5".to_string(),
                 context_window: "500000".to_string(),
                 auto_compact_enabled: true,
-                auto_compact_percent: 80,
+                auto_compact_limit: "400000".to_string(),
                 ..CustomRelayModel::default()
             }],
             default_custom_model_id: "grok".to_string(),
