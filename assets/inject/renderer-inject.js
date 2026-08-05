@@ -472,7 +472,6 @@
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
   const codexServiceTierRequestOverrideVersion = "7";
   const codexAppServerModelRequestPatchVersion = "5";
-  const codexDynamicModelRuntimeVersion = "3";
   const codexModelJsonResponsePatchVersion = "2";
   const codexModelMessagePatchVersion = "2";
   const codexStatsigModelPatchVersion = "2";
@@ -480,7 +479,6 @@
     Number(window.__codexPlusDynamicModelPatchGeneration || 0) + 1;
   const codexDynamicModelPatchInstance =
     [
-      codexDynamicModelRuntimeVersion,
       codexServiceTierRequestOverrideVersion,
       codexAppServerModelRequestPatchVersion,
       codexModelJsonResponsePatchVersion,
@@ -6108,7 +6106,6 @@
   let codexModelCatalogRequestSeq = 0;
   let codexModelWhitelistRefreshTimer = 0;
   let codexModelWhitelistRefreshUntil = 0;
-  let codexNativeModelRefreshProbeDepth = 0;
   const codexPlusModelListRequestIds = new Set();
   let codexNativeModelNames = new Set(
     uniqueValues(Array.isArray(window.__codexPlusNativeModelNames)
@@ -6610,7 +6607,6 @@
 
   async function patchModelJsonResponse(payload) {
     if (!codexPlusModelUnlockEnabled()) return payload;
-    if (codexNativeModelRefreshProbeDepth > 0) return payload;
     if (!codexPlusModelNames().length) await loadCodexModelCatalog();
     if (!payload || typeof payload !== "object") return payload;
     try {
@@ -6807,7 +6803,6 @@
   }
 
   function patchMcpModelResponseData(data) {
-    if (codexNativeModelRefreshProbeDepth > 0) return false;
     if (data?.type !== "mcp-response") return false;
     const message = data.message || data.response;
     const requestId = message?.id != null ? String(message.id) : "";
@@ -6934,9 +6929,6 @@
       if (!codexPlusModelUnlockEnabled()) return result;
       if (!codexPlusModelNames().length) await loadCodexModelCatalog();
       const requestMethod = appServerModelRequestMethod(String(method || ""), nextParams);
-      if (requestMethod === "list-models-for-host" && codexNativeModelRefreshProbeDepth > 0) {
-        return result;
-      }
       return patchAppServerModelResult(requestMethod, result);
     };
     client.__codexPlusModelRequestPatch = codexDynamicModelPatchInstance;
@@ -7068,327 +7060,9 @@
     tick();
   }
 
-  async function requestNativeCodexModelRefresh() {
-    try {
-      codexNativeModelRefreshProbeDepth += 1;
-      let result;
-      try {
-        result = await codexStateCall("list-models-for-host", {
-          hostId: "local",
-          includeHidden: true,
-          cursor: null,
-          limit: 100,
-          priority: "critical",
-        });
-      } finally {
-        codexNativeModelRefreshProbeDepth = Math.max(0, codexNativeModelRefreshProbeDepth - 1);
-      }
-      const nativeModels = collectCodexModelNames(result);
-      const nativeModelKeys = new Set(nativeModels.map(codexPlusModelNameKey));
-      const managedModelKeys = new Set([
-        ...codexPlusCurrentModelNameKeys(),
-        ...codexRetiredManagedModelNames,
-      ]);
-      codexNativeModelNames = new Set(
-        [...nativeModelKeys].filter((key) => !managedModelKeys.has(key)),
-      );
-      window.__codexPlusNativeModelNames = [...codexNativeModelNames];
-      const missingModels = codexPlusModelNames().filter((model) => !nativeModelKeys.has(codexPlusModelNameKey(model)));
-      patchAppServerModelResult("list-models-for-host", result);
-      return { ok: missingModels.length === 0, result, nativeModels, missingModels };
-    } catch (error) {
-      sendCodexPlusDiagnostic("dynamic_model_native_refresh_failed", {
-        errorName: error?.name || "",
-        errorMessage: error?.message || String(error),
-      });
-      return { ok: false, result: null, nativeModels: [], missingModels: [...codexPlusModelNames()] };
-    }
-  }
-
-  function collectCodexModelNames(value, visited = new WeakSet(), depth = 0) {
-    if (!value || typeof value !== "object" || visited.has(value) || depth > 5) return [];
-    visited.add(value);
-    const names = [];
-    if (typeof value.model === "string") names.push(value.model);
-    if (Array.isArray(value)) {
-      value.forEach((item) => names.push(...collectCodexModelNames(item, visited, depth + 1)));
-      return uniqueValues(names);
-    }
-    for (const key of ["data", "models", "result", "message", "pages"]) {
-      if (value[key] && typeof value[key] === "object") {
-        names.push(...collectCodexModelNames(value[key], visited, depth + 1));
-      }
-    }
-    return uniqueValues(names);
-  }
-
   function nativeCodexModelSelectionSucceeded(result) {
     const status = String(result?.status || "").trim().toLowerCase();
     return status === "ok" || status === "okoverridden";
-  }
-
-  async function applyNativeCodexPreferredModel(preferredModel) {
-    if (!preferredModel) return { ok: false, status: "not_requested" };
-    const descriptor = codexPlusModelDescriptor(preferredModel);
-    const result = await codexStateCall("set-default-model-config-for-host", {
-      hostId: "local",
-      model: preferredModel,
-      profile: null,
-      reasoningEffort: descriptor.defaultReasoningEffort || "medium",
-    });
-    await codexStateCall("clear-prewarmed-threads-for-host", { hostId: "local" });
-    return {
-      ok: nativeCodexModelSelectionSucceeded(result),
-      status: String(result?.status || "missing_status"),
-    };
-  }
-
-  function looksLikeCodexQueryClient(value) {
-    return !!value
-      && typeof value === "object"
-      && typeof value.invalidateQueries === "function"
-      && typeof value.getQueryCache === "function";
-  }
-
-  function looksLikeCodexClientCoordination(value) {
-    return !!value
-      && typeof value === "object"
-      && typeof value.invalidateQueryCache === "function";
-  }
-
-  function collectCodexQueryClients(value, clients, visited, depth = 0) {
-    if (!value || typeof value !== "object" || visited.has(value) || depth > 4) return;
-    visited.add(value);
-    if (looksLikeCodexQueryClient(value)) {
-      clients.add(value);
-      return;
-    }
-    for (const key of ["client", "value", "memoizedValue", "_currentValue", "_currentValue2", "dependencies", "firstContext"]) {
-      try {
-        collectCodexQueryClients(value[key], clients, visited, depth + 1);
-      } catch {
-      }
-    }
-  }
-
-  function collectCodexClientCoordinations(value, coordinations, visited, depth = 0) {
-    if (!value || typeof value !== "object" || visited.has(value) || depth > 5) return;
-    visited.add(value);
-    if (looksLikeCodexClientCoordination(value)) coordinations.add(value);
-    for (const key of ["clientCoordination", "services", "value", "memoizedValue", "_currentValue", "_currentValue2", "dependencies", "firstContext"]) {
-      try {
-        collectCodexClientCoordinations(value[key], coordinations, visited, depth + 1);
-      } catch {
-      }
-    }
-  }
-
-  function discoverCodexQueryClients() {
-    const clients = new Set();
-    const visited = new WeakSet();
-    const scanFiber = (start, includeChildren = false) => {
-      const pending = start ? [start] : [];
-      const seenFibers = new Set();
-      while (pending.length > 0 && seenFibers.size < 5000) {
-        const fiber = pending.pop();
-        if (!fiber || seenFibers.has(fiber)) continue;
-        seenFibers.add(fiber);
-        collectCodexQueryClients(fiber.memoizedProps, clients, visited);
-        collectCodexQueryClients(fiber.pendingProps, clients, visited);
-        collectCodexQueryClients(fiber.dependencies, clients, visited);
-        if (includeChildren) {
-          if (fiber.child) pending.push(fiber.child);
-          if (fiber.sibling) pending.push(fiber.sibling);
-        } else if (fiber.return) {
-          pending.push(fiber.return);
-        }
-      }
-    };
-    const nodes = Array.from(new Set([
-      document.querySelector("#root > *"),
-      document.querySelector("main"),
-      document.querySelector(".composer-footer"),
-      ...document.querySelectorAll("[role='menu'], [role='dialog'], [role='listbox']"),
-    ].filter(Boolean)));
-    for (const node of nodes.slice(0, 40)) {
-      for (const key of reactFiberKeys(node)) {
-        scanFiber(node[key]);
-      }
-    }
-    const devtools = window.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-    if (typeof devtools?.getFiberRoots === "function" && devtools?.renderers instanceof Map) {
-      for (const rendererId of devtools.renderers.keys()) {
-        try {
-          for (const root of devtools.getFiberRoots(rendererId) || []) {
-            scanFiber(root?.current, true);
-          }
-        } catch {
-        }
-      }
-    }
-    return [...clients];
-  }
-
-  async function refreshCodexModelQueryCache() {
-    let hostBroadcast = false;
-    const coordinations = new Set();
-    const coordinationVisited = new WeakSet();
-    try {
-      const appModule = await loadOptionalCodexAppModule("app-initial-");
-      for (const value of Object.values(appModule || {})) {
-        collectCodexClientCoordinations(value, coordinations, coordinationVisited);
-      }
-    } catch (error) {
-      sendCodexPlusDiagnostic("dynamic_model_host_query_cache_discovery_failed", {
-        errorName: error?.name || "",
-        errorMessage: error?.message || String(error),
-      });
-    }
-    for (const key of Object.keys(window)) {
-      if (!key.startsWith("__react")) continue;
-      try {
-        collectCodexClientCoordinations(window[key], coordinations, coordinationVisited);
-      } catch {
-      }
-    }
-    const nodes = [document.body, document.querySelector("#root > *"), document.querySelector("main")].filter(Boolean);
-    for (const node of nodes) {
-      for (const key of reactFiberKeys(node)) {
-        let fiber = node[key];
-        for (let depth = 0; fiber && depth < 100; depth += 1, fiber = fiber.return) {
-          collectCodexClientCoordinations(fiber.memoizedProps, coordinations, coordinationVisited);
-          collectCodexClientCoordinations(fiber.dependencies, coordinations, coordinationVisited);
-        }
-      }
-    }
-    for (const coordination of coordinations) {
-      try {
-        await coordination.invalidateQueryCache({ queryKey: ["models", "list"] });
-        hostBroadcast = true;
-      } catch (error) {
-        sendCodexPlusDiagnostic("dynamic_model_host_query_cache_refresh_failed", {
-          errorName: error?.name || "",
-          errorMessage: error?.message || String(error),
-        });
-      }
-    }
-    const clients = discoverCodexQueryClients();
-    let refreshed = 0;
-    for (const client of clients) {
-      try {
-        await client.invalidateQueries({
-          queryKey: ["models", "list"],
-          exact: false,
-          refetchType: "all",
-        });
-        refreshed += 1;
-      } catch (error) {
-        sendCodexPlusDiagnostic("dynamic_model_query_cache_refresh_failed", {
-          errorName: error?.name || "",
-          errorMessage: error?.message || String(error),
-        });
-      }
-    }
-    return { found: clients.length, refreshed, hostBroadcast };
-  }
-
-  async function refreshCodexDynamicModels(options = {}) {
-    const previousRefresh = window.__codexPlusDynamicModelPreviousRefresh;
-    window.__codexPlusDynamicModelPreviousRefresh = null;
-    if (typeof previousRefresh === "function" && options.skipPreviousRuntime !== true) {
-      try {
-        await previousRefresh({ ...options, skipPreviousRuntime: true });
-      } catch (error) {
-        sendCodexPlusDiagnostic("dynamic_model_previous_runtime_refresh_failed", {
-          errorName: error?.name || "",
-          errorMessage: error?.message || String(error),
-        });
-      }
-    }
-    const preferredModel = String(options.preferredModel || "").trim();
-    codexModelCatalogRequestSeq += 1;
-    codexModelCatalogPromise = null;
-    codexModelCatalogLoadedAt = 0;
-    const catalog = applyPreferredModelToCatalog(await loadCodexModelCatalog(true), preferredModel);
-    codexModelCatalog = catalog;
-    updateCodexManagedModelTracking(options.previousManagedModels);
-    ensureCodexModelWhitelistInstalls();
-    const nativeRefreshResult = await requestNativeCodexModelRefresh();
-    const nativeRefresh = nativeRefreshResult.ok;
-    let nativeSelection = false;
-    let nativeSelectionStatus = preferredModel ? "missing_status" : "not_requested";
-    try {
-      const selectionResult = await applyNativeCodexPreferredModel(codexServiceTierCurrentModelName());
-      nativeSelection = selectionResult.ok;
-      nativeSelectionStatus = selectionResult.status;
-    } catch (error) {
-      sendCodexPlusDiagnostic("dynamic_model_native_selection_failed", {
-        errorName: error?.name || "",
-        errorMessage: error?.message || String(error),
-      });
-    }
-    const queryCacheResult = await refreshCodexModelQueryCache();
-    patchStatsigModelWhitelist();
-    const reactStatePatched = patchReactModelState();
-    scheduleCodexModelWhitelistRefresh(5000);
-    renderCodexPlusMenu();
-    scan();
-    const selectedModel = codexServiceTierCurrentModelName();
-    if (selectedModel) {
-      void postJson("/model-selection/set", { model: selectedModel }).catch(() => {});
-    }
-    const result = {
-      status: "ok",
-      version: codexDynamicModelRuntimeVersion,
-      reason: String(options.reason || "runtime"),
-      debugPort: Number(options.debugPort || window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ || 0),
-      helperPort: Number(options.helperPort || helperPortFromBase()),
-      selectedModel,
-      modelCount: codexPlusModelNames().length,
-      providerName: String(codexModelCatalog.provider_name || codexModelCatalog.model_provider || ""),
-      nativeRefresh,
-      nativeSelection,
-      nativeSelectionStatus,
-      nativeModels: nativeRefreshResult.nativeModels,
-      missingNativeModels: nativeRefreshResult.missingModels,
-      queryCacheRefresh: queryCacheResult.hostBroadcast || queryCacheResult.refreshed > 0,
-      queryClientCount: queryCacheResult.found,
-      reactStatePatched,
-      models: [...codexPlusModelNames()],
-    };
-    window.__codexPlusManagedModelNames = [...result.models];
-    window.__codexPlusRetiredManagedModelNames = [...codexRetiredManagedModelNames];
-    sendCodexPlusDiagnostic("dynamic_model_runtime_refreshed", result);
-    return result;
-  }
-
-  function installCodexDynamicModelRuntime() {
-    const existing = window.__codexPlusDynamicModelRuntime;
-    if (typeof existing?.refresh === "function") {
-      try {
-        const previousModels = existing.catalog?.()?.models;
-        if (Array.isArray(previousModels)) {
-          window.__codexPlusManagedModelNames = uniqueValues([
-            ...(Array.isArray(window.__codexPlusManagedModelNames)
-              ? window.__codexPlusManagedModelNames
-              : []),
-            ...previousModels,
-          ]);
-        }
-      } catch {
-      }
-      window.__codexPlusDynamicModelPreviousRefresh =
-        existing.version === codexDynamicModelRuntimeVersion
-          ? null
-          : existing.refresh.bind(existing);
-    }
-    const runtime = {
-      version: codexDynamicModelRuntimeVersion,
-      refresh: refreshCodexDynamicModels,
-      catalog: () => ({ ...codexModelCatalog, models: [...codexPlusModelNames()] }),
-    };
-    window.__codexPlusDynamicModelRuntime = runtime;
-    return runtime;
   }
 
   function configuredProviderModelNames(settings) {
@@ -11128,7 +10802,6 @@
   }
 
   void syncCodexReasoningEffortSettings();
-  window.__codexPlusDynamicModelRuntime = undefined;
   window.__codexPlusStartupModelInjection = installCodexStartupModelInjection().catch((error) => {
     const result = {
       status: "failed",

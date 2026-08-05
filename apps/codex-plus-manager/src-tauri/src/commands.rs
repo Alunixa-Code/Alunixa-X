@@ -539,7 +539,15 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
-    let settings = normalize_settings_before_save(settings);
+    let settings = match normalize_settings_before_save(settings) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("配置校验失败，未保存任何修改：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     let save_result = SettingsStore::default()
         .save_preserving_runtime_model_selection(&settings)
         .and_then(|_| {
@@ -729,7 +737,15 @@ pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
         return settings_payload("没有新的 cc-switch 供应商配置需要导入。", "设置读取失败");
     }
 
-    settings = normalize_settings_before_save(settings);
+    settings = match normalize_settings_before_save(settings) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("导入供应商配置校验失败，未保存任何修改：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     match store.save(&settings) {
         Ok(()) => settings_payload(
             &format!("已从 cc-switch 导入供应商配置：{imported} 个。"),
@@ -1016,7 +1032,9 @@ fn local_session_adapter(db_path: &Path) -> codex_plus_data::SQLiteStorageAdapte
     )
 }
 
-fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSettings {
+fn normalize_settings_before_save(
+    mut settings: BackendSettings,
+) -> anyhow::Result<BackendSettings> {
     if let Some(path) =
         codex_plus_core::app_paths::normalize_codex_app_path(Path::new(&settings.codex_app_path))
     {
@@ -1047,6 +1065,15 @@ fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSetti
                     "error": error.to_string()
                 }),
             );
+            return Err(anyhow::anyhow!(
+                "供应商 {} 配置无效：{}",
+                if profile.name.trim().is_empty() {
+                    profile.id.as_str()
+                } else {
+                    profile.name.as_str()
+                },
+                error
+            ));
         }
     }
     let common_config = relay_combined_common_config(&settings);
@@ -1078,7 +1105,7 @@ fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSetti
         .provider_sync_last_selected_provider
         .trim()
         .to_string();
-    settings
+    Ok(settings)
 }
 
 fn normalize_provider_sync_provider_list(values: Vec<String>) -> Vec<String> {
@@ -2092,7 +2119,15 @@ pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
     settings.codex_app_image_overlay_path = defaults.codex_app_image_overlay_path;
     settings.codex_app_image_overlay_opacity = defaults.codex_app_image_overlay_opacity;
     settings.codex_app_image_overlay_fit_mode = defaults.codex_app_image_overlay_fit_mode;
-    let settings = normalize_settings_before_save(settings);
+    let settings = match normalize_settings_before_save(settings) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("图片覆盖层重置前配置校验失败，未保存任何修改：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     match store.save(&settings) {
         Ok(()) => settings_payload("图片覆盖层设置已重置。", "图片覆盖层重置后重新读取失败"),
         Err(error) => failed(
@@ -2499,7 +2534,20 @@ pub async fn switch_relay_profile(
     let home = codex_plus_core::relay_config::default_codex_home_dir();
     let store = SettingsStore::default();
     let previous_active_relay_id = request.previous_active_relay_id;
-    let settings = normalize_settings_before_save(request.settings);
+    let settings = match normalize_settings_before_save(request.settings) {
+        Ok(settings) => settings,
+        Err(error) => {
+            let status = codex_plus_core::relay_config::default_relay_status();
+            return failed(
+                &format!("供应商切换前配置校验失败，未切换任何配置：{error}"),
+                relay_switch_payload(
+                    store.load().unwrap_or_default(),
+                    status,
+                    None,
+                ),
+            );
+        }
+    };
     log_manager_event(
         "manager.switch_relay_profile.start",
         json!({
@@ -4696,7 +4744,7 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
 
         assert!(
             normalized.relay_profiles[0]
@@ -4733,7 +4781,7 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
 
         assert_eq!(
             normalized.launch_mode,
@@ -4795,7 +4843,7 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
 
         let auth_json: serde_json::Value =
             serde_json::from_str(&normalized.relay_profiles[0].auth_contents).unwrap();
@@ -4841,7 +4889,7 @@ enabled = true
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
         let config = &normalized.relay_profiles[0].config_contents;
 
         assert!(config.contains("model = \"gpt-5\""));
@@ -4876,7 +4924,7 @@ last_updated = "2026-05-25T11:52:46Z"
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
         let config = &normalized.relay_profiles[0].config_contents;
 
         assert!(config.contains("model = \"gpt-5\""));
@@ -4895,7 +4943,7 @@ model_reasoning_effort = "high"
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings);
+        let normalized = normalize_settings_before_save(settings).unwrap();
 
         assert!(
             !normalized
