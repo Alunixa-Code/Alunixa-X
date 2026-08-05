@@ -1013,7 +1013,7 @@ async fn default_helper_accepts_diagnostic_log_events_over_http() {
 }
 
 #[tokio::test]
-async fn launch_lifecycle_runs_enabled_maintenance_without_applying_relay_profile() {
+async fn launch_lifecycle_runs_enabled_maintenance_and_applies_reloaded_relay_profile() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1053,6 +1053,8 @@ async fn launch_lifecycle_runs_enabled_maintenance_without_applying_relay_profil
             "select-helper:57321",
             "load-settings",
             "provider-sync",
+            "load-settings",
+            "apply-relay",
             "computer-use-guard",
             "start-helper:57321",
             "launch:9229",
@@ -1064,7 +1066,7 @@ async fn launch_lifecycle_runs_enabled_maintenance_without_applying_relay_profil
         ]
     );
     let events = events.lock().unwrap().clone();
-    assert!(!events.contains(&"apply-relay".to_string()));
+    assert!(events.contains(&"apply-relay".to_string()));
     assert!(events.contains(&"provider-sync".to_string()));
     assert!(events.contains(&"computer-use-guard".to_string()));
     assert!(events.contains(&"computer-use-guard-watchdog".to_string()));
@@ -1177,6 +1179,7 @@ async fn launch_lifecycle_keeps_js_injection_in_relay_mode() {
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
@@ -1218,6 +1221,7 @@ async fn launch_lifecycle_skips_helper_and_injection_when_enhancements_disabled(
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "launch:9229",
             "status:running",
             "wait-codex",
@@ -1256,6 +1260,7 @@ async fn launch_lifecycle_runs_computer_use_guard_when_enabled() {
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "computer-use-guard",
             "start-helper:57321",
             "launch:9229",
@@ -1297,7 +1302,7 @@ async fn launch_lifecycle_skips_computer_use_guard_by_default() {
 }
 
 #[tokio::test]
-async fn launch_lifecycle_does_not_apply_relay_profile_before_launching_codex() {
+async fn launch_lifecycle_applies_regular_relay_profile_before_launching_codex() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1322,8 +1327,15 @@ async fn launch_lifecycle_does_not_apply_relay_profile_before_launching_codex() 
     handle.wait_for_codex_exit().await.unwrap();
 
     let events = events.lock().unwrap().clone();
-    assert!(!events.contains(&"apply-relay".to_string()));
-    assert!(events.contains(&"launch:9229".to_string()));
+    let apply_index = events
+        .iter()
+        .position(|event| event == "apply-relay")
+        .unwrap();
+    let launch_index = events
+        .iter()
+        .position(|event| event == "launch:9229")
+        .unwrap();
+    assert!(apply_index < launch_index);
 }
 
 #[tokio::test]
@@ -1401,7 +1413,7 @@ async fn launch_lifecycle_skips_active_relay_profile_when_supplier_config_disabl
 }
 
 #[tokio::test]
-async fn launch_lifecycle_tolerates_duplicate_context_parent_tables_without_applying_relay() {
+async fn launch_lifecycle_tolerates_duplicate_context_parent_tables_and_applies_relay() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1447,13 +1459,13 @@ experimental_bearer_token = "sk-test"
     handle.wait_for_codex_exit().await.unwrap();
 
     let events = events.lock().unwrap().clone();
-    assert!(!events.contains(&"apply-relay".to_string()));
+    assert!(events.contains(&"apply-relay".to_string()));
     assert!(!events.contains(&"computer-use-guard".to_string()));
     assert!(events.contains(&"launch:9229".to_string()));
 }
 
 #[tokio::test]
-async fn launch_lifecycle_enters_degraded_mode_and_retries_when_injection_fails() {
+async fn launch_lifecycle_fails_and_terminates_codex_when_injection_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1461,7 +1473,7 @@ async fn launch_lifecycle_enters_degraded_mode_and_retries_when_injection_fails(
     let events = Arc::new(Mutex::new(Vec::<String>::new()));
     let hooks = FakeHooks::new(events.clone()).with_inject_error("inject failed");
 
-    let handle = launch_and_inject_with_hooks(
+    let error = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -1471,29 +1483,74 @@ async fn launch_lifecycle_enters_degraded_mode_and_retries_when_injection_fails(
         &hooks,
     )
     .await
-    .unwrap();
+    .unwrap_err();
 
+    assert!(error.to_string().contains("startup injection failed"));
     assert_eq!(
         *events.lock().unwrap(),
         vec![
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
-            "status:running_degraded",
+            "shutdown-helper:57321",
+            "terminate-codex",
+            "status:failed",
         ]
     );
     let status = status_store.load_latest().unwrap().unwrap();
-    assert_eq!(status.status, "running_degraded");
-    assert!(status.message.contains("Codex launched"));
+    assert_eq!(status.status, "failed");
+    assert!(status.message.contains("startup injection failed"));
+}
 
-    handle.wait_for_codex_exit().await.unwrap();
-    let events = events.lock().unwrap().clone();
-    assert!(events.contains(&"wait-codex".to_string()));
-    assert!(events.contains(&"shutdown-helper:57321".to_string()));
-    assert!(!events.contains(&"terminate-codex".to_string()));
+#[tokio::test]
+async fn launch_lifecycle_fails_and_terminates_codex_when_startup_verification_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone()).with_verify_error("model unlock adapter missing");
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("startup injection verification failed")
+    );
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "start-helper:57321",
+            "launch:9229",
+            "inject:9229:57321",
+            "verify-injection",
+            "shutdown-helper:57321",
+            "terminate-codex",
+            "status:failed",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "failed");
+    assert!(status.message.contains("startup injection verification failed"));
 }
 
 #[tokio::test]
@@ -1524,6 +1581,7 @@ async fn launch_lifecycle_cleans_helper_when_launch_fails_after_helper_started()
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "start-helper:57321",
             "launch:9229",
             "shutdown-helper:57321",
@@ -1672,6 +1730,7 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
@@ -1683,7 +1742,7 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
 }
 
 #[tokio::test]
-async fn launch_lifecycle_keeps_packaged_process_id_running_and_retries_when_injection_fails() {
+async fn launch_lifecycle_terminates_packaged_process_when_injection_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1697,7 +1756,7 @@ async fn launch_lifecycle_keeps_packaged_process_id_running_and_retries_when_inj
         })
         .with_inject_error("inject failed");
 
-    let handle = launch_and_inject_with_hooks(
+    let error = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -1707,15 +1766,14 @@ async fn launch_lifecycle_keeps_packaged_process_id_running_and_retries_when_inj
         &hooks,
     )
     .await
-    .unwrap();
+    .unwrap_err();
 
-    assert!(
-        !events
-            .lock()
-            .unwrap()
-            .contains(&"terminate-packaged:4242".to_string())
-    );
-    handle.wait_for_codex_exit().await.unwrap();
+    assert!(error.to_string().contains("startup injection failed"));
+    let events = events.lock().unwrap().clone();
+    assert!(events.contains(&"shutdown-helper:57321".to_string()));
+    assert!(events.contains(&"terminate-packaged:4242".to_string()));
+    assert!(events.contains(&"status:failed".to_string()));
+    assert!(!events.contains(&"status:running_degraded".to_string()));
 }
 
 #[tokio::test]
@@ -1759,6 +1817,7 @@ async fn launch_continues_when_plugin_marketplace_config_fails() {
             "select-debug:9229",
             "select-helper:57321",
             "load-settings",
+            "apply-relay",
             "plugin-marketplace",
             "start-helper:57321",
             "launch:9229",
@@ -1812,6 +1871,7 @@ struct FakeHooks {
     launch_result: CodexLaunch,
     launch_error: Option<String>,
     inject_error: Option<String>,
+    verify_error: Option<String>,
     provider_sync_unsupported: bool,
     plugin_marketplace_error: Option<String>,
     status_parent_to_break: Option<PathBuf>,
@@ -1829,6 +1889,7 @@ impl FakeHooks {
             },
             launch_error: None,
             inject_error: None,
+            verify_error: None,
             provider_sync_unsupported: false,
             plugin_marketplace_error: None,
             status_parent_to_break: None,
@@ -1847,6 +1908,11 @@ impl FakeHooks {
 
     fn with_inject_error(mut self, message: &str) -> Self {
         self.inject_error = Some(message.to_string());
+        self
+    }
+
+    fn with_verify_error(mut self, message: &str) -> Self {
+        self.verify_error = Some(message.to_string());
         self
     }
 
@@ -1978,6 +2044,19 @@ impl LaunchHooks for FakeHooks {
             std::fs::write(path, "not a directory").unwrap();
         }
         self.inject_error.is_none()
+    }
+
+    async fn verify_startup_injection(
+        &self,
+        _debug_port: u16,
+        _helper_port: u16,
+        _settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        if let Some(message) = &self.verify_error {
+            self.event("verify-injection");
+            anyhow::bail!(message.clone());
+        }
+        Ok(())
     }
 
     async fn start_bridge_watchdog(
