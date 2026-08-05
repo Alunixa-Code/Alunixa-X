@@ -555,7 +555,7 @@ fn injection_script_omits_force_install_unlock_loop() {
 fn injection_script_loads_backend_settings_before_initial_scan() {
     let script = assets::injection_script(57321);
     let startup_call = script
-        .rfind("void loadBackendSettingsForStartup();")
+        .rfind("window.__codexPlusStartupModelInjection")
         .expect("script should load backend settings on startup");
     let footer = &script[startup_call..];
     let initial_scan = footer
@@ -567,6 +567,7 @@ fn injection_script_loads_backend_settings_before_initial_scan() {
 
     assert!(initial_scan < footer_marker);
     assert!(script.contains("if (attempt < 60)"));
+    assert!(script.contains("installCodexStartupModelInjection().catch"));
 }
 
 #[test]
