@@ -599,3 +599,7 @@
 - 自动压缩关闭时会主动删除 `model_auto_compact_token_limit`；专项测试确认 `1000000` 上下文与 `990000` 阈值在 config 和 catalog 中原样落盘，旧 `200000 + 80%` 只迁移一次为 `160000` Token 喵~
 - 启动器生命周期专项测试 `17/17` 通过，确认 Provider Sync 后重新读取设置、所有启用供应商启动前应用、注入或启动验证失败时关闭刚启动的 Codex 并写入 failed 状态喵~
 - renderer/CDP 注入契约测试 `83/83` 通过，launcher `cargo check` 通过；未操作当前 Codex 实例，管理器检查将在生成前端 dist 后继续喵~
+- 前端 `npm ci` 后 TypeScript 检查、Node `20/20` 测试和 Vite 生产构建通过，管理器与启动器 `cargo check`、i18n plain `734/734`、template `66/66`、品牌检查和 renderer JavaScript 语法检查全部通过喵~
+- 完整 `cargo test --workspace -- --test-threads=1` 最终全部通过，包含 core `229`、CDP `83`、relay `109`、launcher `79`、manager `33` 及其余集成测试和 doc-test；首轮发现的旧百分比模型目录断言与归一化修复顺序问题均已修正并重跑闭环喵~
+- 发布版本已统一提升到 `1.2.64`，CHANGELOG 已详细记录撤销动态重载、启动前完整注入与验证、失败关闭保护、Token 阈值语义和旧百分比一次迁移喵~
+- 最终 `cargo fmt --check`、`git diff --check`、版本核对均通过；后续将删除本地 `target`、前端 `node_modules` 与 `dist`，继续排除四个既有 CRLF 状态噪声文件喵~
