@@ -579,3 +579,11 @@
 - macOS arm64 DMG SHA-256 为 `1528bbafcc6b53e02c96b9726f0982f0d403e7be9ef616e04bd7352169ac8abf`，macOS arm64 ZIP 为 `1fe29714df49597d4f4aac2e7225adaedb7bf253997dc0202d975e8ba8fa3557` 喵~
 - Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程没有操作当前 Codex 实例做测试喵~
 - 发布记录提交后的最终主分支 GitHub Actions `30881513659` 已全部成功：Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项均完成；远端 main、v1.2.63 latest Release、详细说明、六项资产与发布后构建至此全部闭环喵~
+
+## 2026-08-05
+
+- 用户报告供应商切换后动态注入失败，真实异常为当前 Electron 主进程未实现 `batch-write-config-value`，要求修复而不是提示重启碰运气喵~
+- 用户要求把所有自动压缩设置从百分比改为直接输入 Token 阈值，例如上下文窗口 `1000000`、压缩 Token `990000` 时必须在 `990000` Token 触发压缩喵~
+- 已读取项目状态和历史记录，确认工作树仅有四个内容与 HEAD 一致的既有 CRLF 状态噪声文件；创建修改前检查点 `5457e9e`，后续继续排除这些噪声文件喵~
+- 已确认动态注入失败根因是 renderer 暴露了新版 Host RPC，但当前 Electron 主进程没有相应 handler；修复将为未实现 handler 增加 app-server/磁盘已落盘后的运行时刷新回退，不连接、重启或操作当前 Codex 实例做测试喵~
+- 已确认自动压缩当前同时存在供应商级、模型级百分比字段和旧 Token 兼容字段；将统一以 Token 阈值作为保存、界面、config.toml 和 model catalog 的权威值，并只保留旧百分比字段用于升级迁移喵~
