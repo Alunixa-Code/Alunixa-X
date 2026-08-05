@@ -604,3 +604,4 @@
 - 发布版本已统一提升到 `1.2.64`，CHANGELOG 已详细记录撤销动态重载、启动前完整注入与验证、失败关闭保护、Token 阈值语义和旧百分比一次迁移喵~
 - 最终 `cargo fmt --check`、`git diff --check`、版本核对均通过；后续将删除本地 `target`、前端 `node_modules` 与 `dist`，继续排除四个既有 CRLF 状态噪声文件喵~
 - 已删除本地 Rust `target`、前端 `node_modules` 与 `dist` 构建产物并确认三个目录均不存在；四个既有 CRLF 状态噪声文件经 `git diff --exit-code` 确认内容与 HEAD 完全一致，发布提交继续排除它们喵~
+- 用户要求继续完成推送、GitHub Actions 构建和 `v1.2.64` 正式发行；已复核本地 `main` 比 `origin/main` 领先 17 个提交且远端无新增提交，准备推送目标仓库喵~
