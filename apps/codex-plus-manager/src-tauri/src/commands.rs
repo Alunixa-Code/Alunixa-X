@@ -2540,11 +2540,7 @@ pub async fn switch_relay_profile(
             let status = codex_plus_core::relay_config::default_relay_status();
             return failed(
                 &format!("供应商切换前配置校验失败，未切换任何配置：{error}"),
-                relay_switch_payload(
-                    store.load().unwrap_or_default(),
-                    status,
-                    None,
-                ),
+                relay_switch_payload(store.load().unwrap_or_default(), status, None),
             );
         }
     };

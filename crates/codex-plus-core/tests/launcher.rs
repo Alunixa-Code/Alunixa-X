@@ -1550,7 +1550,11 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_startup_verification_f
     );
     let status = status_store.load_latest().unwrap().unwrap();
     assert_eq!(status.status, "failed");
-    assert!(status.message.contains("startup injection verification failed"));
+    assert!(
+        status
+            .message
+            .contains("startup injection verification failed")
+    );
 }
 
 #[tokio::test]

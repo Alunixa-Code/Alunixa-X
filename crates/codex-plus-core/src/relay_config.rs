@@ -1802,11 +1802,8 @@ fn apply_auto_compact_limits_to_catalog_json(
     if !profile.auto_compact_enabled {
         return Ok(catalog_json.to_string());
     }
-    let limit = parse_optional_positive_u64(
-        &profile.auto_compact_limit,
-        "自动压缩 Token 阈值",
-    )?
-    .context("开启自动压缩时必须填写 Token 阈值")?;
+    let limit = parse_optional_positive_u64(&profile.auto_compact_limit, "自动压缩 Token 阈值")?
+        .context("开启自动压缩时必须填写 Token 阈值")?;
     let mut catalog: Value = serde_json::from_str(catalog_json)?;
     let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) else {
         return Ok(catalog_json.to_string());
@@ -2532,11 +2529,9 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
     if profile.auto_compact_enabled {
         let window = crate::settings::parse_context_window_tokens(&profile.context_window)
             .context("开启自动压缩时必须提供有效上下文窗口")?;
-        let limit = parse_optional_positive_u64(
-            &profile.auto_compact_limit,
-            "自动压缩 Token 阈值",
-        )?
-        .context("开启自动压缩时必须填写 Token 阈值")?;
+        let limit =
+            parse_optional_positive_u64(&profile.auto_compact_limit, "自动压缩 Token 阈值")?
+                .context("开启自动压缩时必须填写 Token 阈值")?;
         if limit > window {
             anyhow::bail!(
                 "自动压缩 Token 阈值 {} 不能超过上下文窗口 {}",

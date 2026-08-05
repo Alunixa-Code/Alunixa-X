@@ -305,11 +305,7 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     };
     let verification_error = if injection_ready {
         hooks
-            .verify_startup_injection(
-                options.debug_port,
-                options.helper_port,
-                &settings,
-            )
+            .verify_startup_injection(options.debug_port, options.helper_port, &settings)
             .await
             .err()
             .map(|error| error.to_string())
@@ -356,7 +352,9 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     if settings.enhancements_enabled && status == "failed" {
         anyhow::bail!(
             "Codex++ could not verify the existing Codex injection bridge: {}",
-            verification_error.as_deref().unwrap_or("injection bridge unavailable")
+            verification_error
+                .as_deref()
+                .unwrap_or("injection bridge unavailable")
         );
     }
     launch_result.map(|_| ())
