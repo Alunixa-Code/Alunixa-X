@@ -1701,6 +1701,8 @@ fn apply_context_limits_to_config(
     }
     if let Some(value) = parse_optional_positive_u64(auto_compact_limit, "压缩上下文大小")? {
         doc["model_auto_compact_token_limit"] = toml_edit::value(value as i64);
+    } else {
+        doc.as_table_mut().remove("model_auto_compact_token_limit");
     }
     Ok(normalize_optional_toml(doc))
 }

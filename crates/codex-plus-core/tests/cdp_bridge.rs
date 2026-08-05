@@ -693,34 +693,31 @@ fn injection_script_unlocks_custom_model_catalog() {
     assert!(script.contains("modelWhitelistUnlock"));
     assert!(script.contains("isWorkspaceChromeNode"));
     assert!(script.contains("refreshCodexModelWhitelistFromScan"));
-    assert!(script.contains("__codexPlusDynamicModelRuntime"));
-    assert!(script.contains("refreshCodexDynamicModels"));
     assert!(script.contains("applyPreferredModelToCatalog"));
     assert!(script.contains("applyCodexDynamicModelRequestOverride"));
     assert!(script.contains("codexDynamicModelRequestOverride"));
     assert!(script.contains("list-models-for-host"));
-    assert!(script.contains("dynamic_model_runtime_refreshed"));
-    assert!(script.contains("codexDynamicModelRuntimeVersion = \"3\""));
-    assert!(script.contains("set-default-model-config-for-host"));
-    assert!(script.contains("clear-prewarmed-threads-for-host"));
     assert!(script.contains("settingsResp?.relayProfilesEnabled !== false"));
     assert!(script.contains("nativeCodexModelSelectionSucceeded"));
-    assert!(script.contains("missingNativeModels"));
-    assert!(script.contains("codexNativeModelRefreshProbeDepth"));
-    assert!(script.contains("refreshCodexModelQueryCache"));
-    assert!(script.contains("queryKey: [\"models\", \"list\"]"));
     assert!(
         script.contains("!codexPlusModelNames().length && !codexRetiredManagedModelNames.size")
     );
     assert!(script.contains("updateCodexManagedModelTracking"));
     assert!(script.contains("codexPlusShouldRemoveRetiredModel"));
-    assert!(script.contains("dynamic_model_previous_runtime_refresh_failed"));
     assert!(script.contains("__codexPlusDynamicModelPatchGeneration"));
     assert!(script.contains("codexDynamicModelPatchInstance"));
     assert!(
         script.contains("client.__codexPlusModelRequestPatch = codexDynamicModelPatchInstance")
     );
-    assert!(!script.contains("existing?.version === codexDynamicModelRuntimeVersion"));
+    assert!(script.contains("__codexPlusStartupModelInjection"));
+    assert!(script.contains("installCodexStartupModelInjection"));
+    assert!(script.contains("startup_model_injection_ready"));
+    assert!(script.contains("configuredProviderModelNames"));
+    assert!(script.contains("responsePatchInstalled"));
+    assert!(!script.contains("__codexPlusDynamicModelRuntime"));
+    assert!(!script.contains("refreshCodexDynamicModels"));
+    assert!(!script.contains("refreshCodexModelQueryCache"));
+    assert!(!script.contains("dynamic_model_runtime_refreshed"));
     assert!(!script.contains("querySelectorAll(\"button, [role='menu']"));
 }
 
