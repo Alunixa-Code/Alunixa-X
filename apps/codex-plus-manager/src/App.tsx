@@ -237,7 +237,7 @@ export type RelayProfile = {
   contextWindow: string;
   autoCompactLimit: string;
   autoCompactEnabled: boolean;
-  autoCompactPercent: number;
+  autoCompactPercent?: number;
   modelList: string;
   modelWindows: string;
   modelVlm: string;
@@ -260,7 +260,8 @@ type CustomRelayModel = {
   protocol: RelayProtocol;
   contextWindow: string;
   autoCompactEnabled: boolean;
-  autoCompactPercent: number;
+  autoCompactLimit: string;
+  autoCompactPercent?: number;
 };
 
 type RelayAggregateStrategy = "failover" | "conversationRoundRobin" | "requestRoundRobin" | "weightedRoundRobin";
@@ -528,23 +529,7 @@ type RelaySwitchResult = CommandResult<{
   settingsPath: string;
   user_scripts: unknown;
   relay: RelayPayload;
-  runtimeApply: {
-    debugPort: number;
-    helperPort: number;
-    selectedModel: string;
-    modelCount: number;
-    providerName: string;
-    nativeRefresh: boolean;
-    nativeSelection: boolean;
-    nativeSelectionStatus: string;
-    queryCacheRefresh: boolean;
-    queryClientCount: number;
-    reactStatePatched: boolean;
-    models: string[];
-    nativeModels: string[];
-    missingNativeModels: string[];
-  } | null;
-}>;
+}>; 
 
 type SettingsBackfillResult = CommandResult<{
   settings: BackendSettings;
@@ -945,7 +930,6 @@ const defaultSettings: BackendSettings = {
       contextWindow: "",
       autoCompactLimit: "",
       autoCompactEnabled: false,
-      autoCompactPercent: 80,
       modelList: "",
       modelWindows: "",
       modelVlm: "",
@@ -2181,11 +2165,8 @@ export function App() {
         targetRelayId: currentSelected.id,
         launchMode: selectedSettings.launchMode,
         status: result.status,
-        runtimeApply: result.runtimeApply,
       });
-      showNotice(t("供应商切换"), result.runtimeApply
-        ? tf("已动态注入 {0} 个模型，当前模型：{1}", [result.runtimeApply.modelCount, result.runtimeApply.selectedModel])
-        : result.message, "ok");
+      showNotice(t("供应商切换"), result.message, "ok");
       return true;
     } finally {
       setRelaySwitching(false);
@@ -3473,9 +3454,6 @@ function RelayScreen({
   const isNewProfile = !!newProfileDraft;
   const saveRelaySettings = async (next: BackendSettings): Promise<boolean> => {
     onFormChange(next);
-    if (!normalized.relayProfilesEnabled && next.relayProfilesEnabled) {
-      return await actions.switchRelayProfile(next, normalized.activeRelayId);
-    }
     return await actions.saveSettingsValue(next, true);
   };
   const createNewAggregateProfile = () => {
@@ -3549,7 +3527,7 @@ function RelayScreen({
             />
             <span>
               <strong>{t("启用供应商配置切换")}</strong>
-              <small>{t("关闭后不会手动写入 Codex 配置；启用时启动器只同步当前自定义模型供应商的 config.toml，并保留现有 auth.json。")}</small>
+              <small>{t("关闭后启动器不会应用供应商配置；启用后将在下次通过 Codex++ 启动时完整写入当前供应商、模型目录和默认模型。")}</small>
             </span>
             <ToggleVisual />
           </label>
@@ -5403,7 +5381,7 @@ function RelayProfileDetail({
     setDraft(nextDraft);
     setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm));
   }, [profile.id, profile.modelList, profile.modelWindows, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
-  const validationError = isAggregateRelayProfile(draft) ? aggregateRelayProfileValidation(draft) : null;
+  const validationError = relayProfileValidation(draft);
   const draftWithModelRows = () => {
     const serializedRows = serializeModelWindowRows(modelWindowRows);
     return { ...draft, modelList: serializedRows.modelList, modelWindows: serializedRows.modelWindows, modelVlm: serializedRows.modelVlm };
@@ -5571,13 +5549,8 @@ function RelayProfileEditor({
   const showApiFields = profile.relayMode !== "official" || profile.officialMixApiKey;
   const updateDraft = (patch: Partial<RelayProfile>) => {
     let nextPatch = { ...patch };
-    if ("autoCompactEnabled" in nextPatch || "autoCompactPercent" in nextPatch || "contextWindow" in nextPatch) {
-      const enabled = nextPatch.autoCompactEnabled ?? profile.autoCompactEnabled;
-      const percent = nextPatch.autoCompactPercent ?? profile.autoCompactPercent;
-      const contextWindow = nextPatch.contextWindow ?? profile.contextWindow;
-      if (enabled) {
-        nextPatch.autoCompactLimit = autoCompactLimitFromPercent(contextWindow, percent);
-      }
+    if (nextPatch.autoCompactEnabled === false) {
+      nextPatch.autoCompactLimit = "";
     }
     onProfileChange(applyRelayProfilePatchToFiles(profile, nextPatch, { allowGenerateFiles: isNew }));
   };
@@ -5707,11 +5680,14 @@ function RelayProfileEditor({
                 placeholder={t("留空不改写，例如 200000")}
               />
             </Field>
-            <Field className="relay-field-auto-compact" label={t("自动压缩百分比")}>
+            <Field className="relay-field-auto-compact" label={t("自动压缩 Token 阈值")}>
               <label className="inline-toggle">
                 <input
                   checked={profile.autoCompactEnabled}
-                  onChange={(event) => updateDraft({ autoCompactEnabled: event.currentTarget.checked })}
+                  onChange={(event) => updateDraft({
+                    autoCompactEnabled: event.currentTarget.checked,
+                    autoCompactLimit: event.currentTarget.checked ? profile.autoCompactLimit : "",
+                  })}
                   type="checkbox"
                 />
                 <span>{t("启用自动压缩")}</span>
@@ -5720,20 +5696,16 @@ function RelayProfileEditor({
               <Input
                 disabled={!profile.autoCompactEnabled}
                 inputMode="numeric"
-                max={100}
                 min={1}
                 type="number"
-                value={profile.autoCompactPercent || 80}
-                onChange={(event) => updateDraft({ autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
-                placeholder="80"
+                value={profile.autoCompactLimit}
+                onChange={(event) => updateDraft({ autoCompactLimit: event.currentTarget.value.replace(/[^\d]/g, "") })}
+                placeholder="例如 990000"
               />
               <p className="field-hint">
                 {profile.autoCompactEnabled
-                  ? tf("将按上下文窗口的 {0}% 写入压缩阈值{1}", [
-                      profile.autoCompactPercent || 80,
-                      profile.contextWindow ? `（约 ${autoCompactLimitFromPercent(profile.contextWindow, profile.autoCompactPercent || 80)} tokens）` : "",
-                    ])
-                  : t("关闭时不写自动压缩阈值；开启后需要有效上下文窗口。")}
+                  ? t("达到该 Token 数时自动压缩；阈值必须是正整数且不能超过上下文窗口。")
+                  : t("关闭时不写自动压缩阈值。")}
               </p>
             </Field>
           </div>
@@ -6232,11 +6204,14 @@ function SortableCustomModelBlock({
           <Field label={t("上下文窗口")}>
             <Input value={model.contextWindow} onChange={(event) => onChange(index, { contextWindow: event.currentTarget.value })} placeholder="200000 / 1M" />
           </Field>
-          <Field label={t("自动压缩百分比")}>
+          <Field label={t("自动压缩 Token 阈值")}>
             <label className="inline-toggle">
               <input
                 checked={model.autoCompactEnabled}
-                onChange={(event) => onChange(index, { autoCompactEnabled: event.currentTarget.checked })}
+                onChange={(event) => onChange(index, {
+                  autoCompactEnabled: event.currentTarget.checked,
+                  autoCompactLimit: event.currentTarget.checked ? model.autoCompactLimit : "",
+                })}
                 type="checkbox"
               />
               <span>{t("启用自动压缩")}</span>
@@ -6245,11 +6220,11 @@ function SortableCustomModelBlock({
             <Input
               disabled={!model.autoCompactEnabled}
               inputMode="numeric"
-              max={100}
               min={1}
               type="number"
-              value={model.autoCompactPercent || 80}
-              onChange={(event) => onChange(index, { autoCompactPercent: Math.min(100, Math.max(1, Number(event.currentTarget.value) || 80)) })}
+              value={model.autoCompactLimit}
+              onChange={(event) => onChange(index, { autoCompactLimit: event.currentTarget.value.replace(/[^\d]/g, "") })}
+              placeholder="例如 990000"
             />
           </Field>
         </div>
@@ -7993,7 +7968,6 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
             contextWindow: "",
             autoCompactLimit: "",
             autoCompactEnabled: false,
-            autoCompactPercent: 80,
             modelList: "",
             modelWindows: "",
             modelVlm: "",
@@ -8130,7 +8104,6 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         contextWindow: "",
         autoCompactLimit: "",
         autoCompactEnabled: false,
-        autoCompactPercent: 80,
         modelList: "",
         modelWindows: "",
         modelVlm: "",
@@ -8164,7 +8137,6 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     contextWindow: profile.contextWindow || "",
     autoCompactLimit: profile.autoCompactLimit || "",
     autoCompactEnabled: profile.autoCompactEnabled === true,
-    autoCompactPercent: typeof profile.autoCompactPercent === "number" ? Math.min(100, Math.max(1, Math.round(profile.autoCompactPercent))) : 80,
     modelList: profile.modelList || "",
     modelWindows: profile.modelWindows || "",
     modelVlm: profile.modelVlm || "",
@@ -8180,7 +8152,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
           protocol: normalizeRelayProtocol(model.protocol),
           contextWindow: model.contextWindow || "",
           autoCompactEnabled: model.autoCompactEnabled === true,
-          autoCompactPercent: typeof model.autoCompactPercent === "number" ? Math.min(100, Math.max(1, Math.round(model.autoCompactPercent))) : 80,
+          autoCompactLimit: model.autoCompactLimit || "",
         }))
       : [],
     defaultCustomModelId: profile.defaultCustomModelId || "",
@@ -8761,15 +8733,42 @@ function removeTomlSectionKey(contents: string, sectionName: string, key: string
 }
 
 function relayProfileSwitchValidation(profile: RelayProfile): string | null {
-  if (isAggregateRelayProfile(profile)) {
-    return aggregateRelayProfileValidation(profile);
-  }
+  const validation = relayProfileValidation(profile);
+  if (validation) return validation;
+  if (isAggregateRelayProfile(profile)) return null;
   if (profile.relayMode === "official" && !profile.officialMixApiKey) return null;
   if (!profile.configContents.trim()) {
     return tf("供应商「{0}」缺少独立 config.toml，已停止切换，避免继续显示上一套配置文件。请先在该供应商详情里保存 config.toml。", [profile.name || profile.id]);
   }
   if (profile.relayMode !== "official" || !authJsonHasOpenAiApiKey(profile.authContents)) return null;
   return t("官方混合 API 不应在 auth.json 中保存 OPENAI_API_KEY。请清理此供应商的 auth.json 后再切换。");
+}
+
+function relayProfileValidation(profile: RelayProfile): string | null {
+  if (isAggregateRelayProfile(profile)) {
+    return aggregateRelayProfileValidation(profile);
+  }
+  if (isCustomModelsRelayProfile(profile)) {
+    for (const model of profile.customModels) {
+      if (!model.autoCompactEnabled) continue;
+      const error = autoCompactTokenValidation(model.contextWindow, model.autoCompactLimit);
+      if (error) return tf("模型「{0}」：{1}", [model.model || t("未命名模型"), error]);
+    }
+    return null;
+  }
+  return profile.autoCompactEnabled
+    ? autoCompactTokenValidation(profile.contextWindow, profile.autoCompactLimit)
+    : null;
+}
+
+function autoCompactTokenValidation(contextWindow: string, limitValue: string): string | null {
+  const window = parseContextWindowTokens(contextWindow);
+  if (!window) return t("开启自动压缩时必须提供有效上下文窗口。");
+  if (!/^\d+$/.test(limitValue.trim())) return t("自动压缩 Token 阈值必须是正整数。");
+  const limit = Number(limitValue);
+  if (!Number.isSafeInteger(limit) || limit <= 0) return t("自动压缩 Token 阈值必须是正整数。");
+  if (limit > window) return tf("自动压缩 Token 阈值 {0} 不能超过上下文窗口 {1}。", [limit, window]);
+  return null;
 }
 
 function relayProfileUsesLiveFiles(profile: RelayProfile): boolean {
@@ -8868,7 +8867,6 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     contextWindow: "",
     autoCompactLimit: "",
     autoCompactEnabled: false,
-    autoCompactPercent: 80,
     modelList: "",
     modelWindows: "",
     modelVlm: "",
@@ -8908,7 +8906,6 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       contextWindow: "",
       autoCompactLimit: "",
       autoCompactEnabled: false,
-      autoCompactPercent: 80,
       modelList: "",
       modelWindows: "",
       modelVlm: "",
@@ -9088,7 +9085,7 @@ function createEmptyCustomModel(): CustomRelayModel {
     protocol: "responses",
     contextWindow: "",
     autoCompactEnabled: false,
-    autoCompactPercent: 80,
+    autoCompactLimit: "",
   };
 }
 
@@ -9115,7 +9112,6 @@ function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile
     contextWindow: "",
     autoCompactLimit: "",
     autoCompactEnabled: false,
-    autoCompactPercent: 80,
     modelList: "",
     modelWindows: "",
     modelVlm: "",
@@ -9131,7 +9127,7 @@ function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile
   };
 }
 
-function autoCompactLimitFromPercent(contextWindow: string, percent: number): string {
+function legacyAutoCompactLimitFromPercent(contextWindow: string, percent: number): string {
   const window = parseContextWindowTokens(contextWindow);
   if (!window) return "";
   const clamped = Math.min(100, Math.max(1, Math.round(percent || 80)));
@@ -9152,25 +9148,16 @@ function parseContextWindowTokens(value: string): number | null {
 }
 
 function migrateLegacyAutoCompact(profile: RelayProfile): RelayProfile {
-  if (profile.autoCompactEnabled) {
-    if (profile.contextWindow) {
-      return {
-        ...profile,
-        autoCompactLimit: autoCompactLimitFromPercent(profile.contextWindow, profile.autoCompactPercent || 80),
-      };
-    }
-    return profile;
+  const customModels = profile.customModels.map((model) => {
+    if (!model.autoCompactEnabled || model.autoCompactLimit.trim()) return model;
+    const limit = legacyAutoCompactLimitFromPercent(model.contextWindow, model.autoCompactPercent || 80);
+    return limit ? { ...model, autoCompactLimit: limit } : model;
+  });
+  if (!profile.autoCompactEnabled || profile.autoCompactLimit.trim()) {
+    return { ...profile, customModels };
   }
-  const window = parseContextWindowTokens(profile.contextWindow || "");
-  const limit = Number.parseInt(profile.autoCompactLimit || "", 10);
-  if (!window || !Number.isFinite(limit) || limit <= 0) return profile;
-  const percent = Math.round((limit * 100) / window);
-  if (percent < 1 || percent > 100) return profile;
-  return {
-    ...profile,
-    autoCompactEnabled: true,
-    autoCompactPercent: percent,
-  };
+  const limit = legacyAutoCompactLimitFromPercent(profile.contextWindow, profile.autoCompactPercent || 80);
+  return limit ? { ...profile, autoCompactLimit: limit, customModels } : { ...profile, customModels };
 }
 
 function clampAggregateWeight(value: number): number {

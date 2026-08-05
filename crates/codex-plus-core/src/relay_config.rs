@@ -2527,6 +2527,23 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         }
         return Ok(());
     }
+    if profile.auto_compact_enabled {
+        let window = crate::settings::parse_context_window_tokens(&profile.context_window)
+            .context("开启自动压缩时必须提供有效上下文窗口")?;
+        let limit = parse_optional_positive_u64(
+            &profile.auto_compact_limit,
+            "自动压缩 Token 阈值",
+        )?
+        .context("开启自动压缩时必须填写 Token 阈值")?;
+        if limit > window {
+            anyhow::bail!(
+                "自动压缩 Token 阈值 {} 不能超过上下文窗口 {}",
+                limit,
+                window
+            );
+        }
+        profile.auto_compact_limit = limit.to_string();
+    }
     if profile.relay_mode == crate::settings::RelayMode::Official && !profile.official_mix_api_key {
         let has_api_config = !profile.base_url.trim().is_empty()
             || !profile.api_key.trim().is_empty()

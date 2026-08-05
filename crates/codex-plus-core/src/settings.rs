@@ -984,18 +984,8 @@ impl RelayProfile {
             }
             return;
         }
-        if self.auto_compact_limit.trim().is_empty() {
-            return;
-        }
-        let Some(window) = parse_context_window_tokens(&self.context_window) else {
-            return;
-        };
-        let Ok(limit) = self.auto_compact_limit.trim().parse::<u64>() else {
-            return;
-        };
-        if let Some(percent) = percent_from_auto_compact_limit(window, limit) {
+        if !self.auto_compact_limit.trim().is_empty() {
             self.auto_compact_enabled = true;
-            self.auto_compact_percent = percent;
         }
     }
 

@@ -156,13 +156,14 @@ pub async fn install_bridge_with_disconnect(
             json!({ "source": bridge_script }),
         )
         .await?;
-    session
+    let bridge_response = session
         .send_command(
             5,
             "Runtime.evaluate",
             runtime_evaluate_params(&bridge_script),
         )
         .await?;
+    ensure_runtime_evaluate_succeeded(bridge_response)?;
 
     for script in new_document_scripts {
         let message_id = next_message_id();
@@ -174,13 +175,14 @@ pub async fn install_bridge_with_disconnect(
             )
             .await?;
         let message_id = next_message_id();
-        session
+        let script_response = session
             .send_command(
                 message_id,
                 "Runtime.evaluate",
                 runtime_evaluate_params(script),
             )
             .await?;
+        ensure_runtime_evaluate_succeeded(script_response)?;
     }
 
     session.drain_binding_queue().await?;

@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
-use crate::settings::{BackendSettings, RelayMode, SettingsStore, normalize_codex_extra_args};
+use crate::settings::{BackendSettings, SettingsStore, normalize_codex_extra_args};
 use crate::status::{LaunchStatus, StatusStore};
 
 #[cfg(windows)]
@@ -195,6 +195,14 @@ pub trait LaunchHooks: Send + Sync {
         }
         false
     }
+    async fn verify_startup_injection(
+        &self,
+        _debug_port: u16,
+        _helper_port: u16,
+        _settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn start_bridge_watchdog(
         &self,
         _debug_port: u16,
@@ -259,8 +267,8 @@ where
     let hooks = hooks.into_launch_hooks();
     let debug_port = hooks.select_debug_port(options.debug_port);
     let mut helper_port = hooks.select_helper_port(options.helper_port);
-    let settings = hooks.load_settings().await?;
-    let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
+    let mut settings = hooks.load_settings().await?;
+    let mut app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
     let status_store = options.status_store.clone();
     status_store.save_latest(&launch_status(
         "starting",
@@ -284,6 +292,11 @@ where
         if settings.provider_sync_enabled {
             crate::codex_app_state::capture_app_state_snapshot_nonfatal(&home, "launcher.before");
             hooks.run_provider_sync().await?;
+            settings = hooks
+                .load_settings()
+                .await
+                .context("failed to reload settings after provider sync")?;
+            app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
             crate::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
                 &home,
                 "launcher.after_provider_sync",
@@ -306,9 +319,7 @@ where
                 }
             }
         }
-        if settings.relay_profiles_enabled
-            && settings.active_relay_profile().relay_mode == RelayMode::CustomModels
-        {
+        if settings.relay_profiles_enabled {
             hooks.apply_active_relay_profile(&settings).await?;
         }
         if settings.relay_profiles_enabled
@@ -384,13 +395,16 @@ where
             hooks.start_computer_use_guard_watchdog(&settings).await?;
         }
 
-        let mut injection_degraded = false;
         if settings.enhancements_enabled {
             let injection_ready = hooks
                 .ensure_injection(debug_port, helper_port, &app_dir)
                 .await;
             if injection_ready {
                 keep_launched_on_error = false;
+                hooks
+                    .verify_startup_injection(debug_port, helper_port, &settings)
+                    .await
+                    .context("Codex++ startup injection verification failed")?;
                 // 注入成功后页面已加载，此时可以通过 CDP 清理 Electron Local Storage
                 // 中残留的带后缀模型名，避免模型选择器继续显示废弃项。
                 crate::codex_local_storage::sanitize_local_storage_model_suffixes_nonfatal(
@@ -399,30 +413,22 @@ where
                 .await;
                 hooks.start_bridge_watchdog(debug_port, helper_port).await?;
             } else {
-                let degraded = launch_status(
-                    "running_degraded",
-                    "Codex launched; Codex++ enhancements are still waiting for the page bridge.",
-                    debug_port,
-                    helper_port,
-                    &app_dir,
+                keep_launched_on_error = false;
+                anyhow::bail!(
+                    "Codex++ startup injection failed; Codex was closed to avoid running with stale provider or model state"
                 );
-                options.status_store.save_latest(&degraded)?;
-                hooks.write_status("running_degraded").await;
-                injection_degraded = true;
             }
         }
 
-        if !settings.enhancements_enabled || !injection_degraded {
-            let status = launch_status(
-                "running",
-                "Codex++ launcher ready",
-                debug_port,
-                helper_port,
-                &app_dir,
-            );
-            options.status_store.save_latest(&status)?;
-            hooks.write_status("running").await;
-        }
+        let status = launch_status(
+            "running",
+            "Codex++ launcher ready",
+            debug_port,
+            helper_port,
+            &app_dir,
+        );
+        options.status_store.save_latest(&status)?;
+        hooks.write_status("running").await;
 
         Ok(LaunchHandle {
             debug_port,
@@ -685,7 +691,9 @@ impl LaunchHooks for DefaultLaunchHooks {
         if !settings.relay_profiles_enabled {
             return Ok(());
         }
-        let profile = settings.active_relay_profile();
+        let mut profile = settings.active_relay_profile();
+        crate::relay_config::normalize_relay_profile_for_storage(&mut profile)
+            .context("failed to validate the active provider before Codex startup")?;
         let home = crate::relay_config::default_codex_home_dir();
         let common_config = crate::relay_config::normalize_config_text(
             &[
@@ -983,6 +991,15 @@ impl LaunchHooks for DefaultLaunchHooks {
         let disconnect = retry_injection(debug_port, helper_port).await?;
         self.set_bridge_disconnect(disconnect).await;
         Ok(())
+    }
+
+    async fn verify_startup_injection(
+        &self,
+        debug_port: u16,
+        helper_port: u16,
+        settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        verify_startup_model_injection(debug_port, helper_port, settings).await
     }
     async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         let reconnect: BridgeReconnectHandler = Arc::new(move || {
@@ -2645,6 +2662,102 @@ async fn retry_injection(
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Codex injection failed")))
 }
 
+async fn verify_startup_model_injection(
+    debug_port: u16,
+    helper_port: u16,
+    settings: &BackendSettings,
+) -> anyhow::Result<()> {
+    let targets = crate::cdp::list_targets(debug_port)
+        .await
+        .with_context(|| format!("failed to list Codex CDP targets on port {debug_port}"))?;
+    let target = crate::cdp::pick_injectable_codex_page_target(&targets)?;
+    let websocket_url = target
+        .web_socket_debugger_url
+        .as_deref()
+        .context("selected CDP target has no websocket URL")?;
+    let script = r#"(async () => {
+  const result = await window.__codexPlusStartupModelInjection;
+  return JSON.stringify(result || { status: "failed", message: "startup injection result missing" });
+})()"#;
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        crate::bridge::evaluate_script_with_await_promise(websocket_url, script, true),
+    )
+    .await
+    .context("Codex++ startup model injection verification timed out")??;
+    let value = response
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+        .context("Codex++ startup model injection returned no result")?;
+    let result: Value = serde_json::from_str(value)
+        .context("failed to parse Codex++ startup model injection result")?;
+    if result.get("status").and_then(Value::as_str) != Some("ok") {
+        anyhow::bail!(
+            "Codex++ startup model injection failed: {}",
+            result
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown error")
+        );
+    }
+    if result.get("debugPort").and_then(Value::as_u64) != Some(u64::from(debug_port))
+        || result.get("helperPort").and_then(Value::as_u64) != Some(u64::from(helper_port))
+    {
+        anyhow::bail!("Codex++ startup injection returned inconsistent runtime ports");
+    }
+    if settings.relay_profiles_enabled {
+        let profile = settings.active_relay_profile();
+        let expected_models = profile.ordered_model_names();
+        let actual_models = result
+            .get("models")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        let missing = expected_models
+            .iter()
+            .filter(|expected| {
+                !actual_models
+                    .iter()
+                    .any(|actual| actual.eq_ignore_ascii_case(expected))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            anyhow::bail!(
+                "Codex++ startup model injection is missing configured models: {}",
+                missing.join(", ")
+            );
+        }
+        let preferred_model = profile.preferred_model_name();
+        if !preferred_model.is_empty()
+            && !result
+                .get("selectedModel")
+                .and_then(Value::as_str)
+                .is_some_and(|selected| selected.eq_ignore_ascii_case(&preferred_model))
+        {
+            anyhow::bail!(
+                "Codex++ startup model selection is inconsistent; expected {preferred_model}"
+            );
+        }
+        if settings.codex_app_model_whitelist_unlock
+            && !expected_models.is_empty()
+            && (!result
+                .get("responsePatchInstalled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+                || !result
+                    .get("messagePatchInstalled")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false))
+        {
+            anyhow::bail!("Codex++ startup model unlock adapters were not installed");
+        }
+    }
+    Ok(())
+}
+
 fn runtime_evaluate_result_is_true(result: &Value) -> bool {
     result
         .get("result")
@@ -2664,7 +2777,9 @@ async fn try_inject(
         .web_socket_debugger_url
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("selected CDP target has no websocket URL"))?;
-    let settings = SettingsStore::default().load().unwrap_or_default();
+    let settings = SettingsStore::default()
+        .load()
+        .context("failed to load settings for Codex++ startup injection")?;
     let script = crate::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
     let ctx = crate::routes::BridgeContext::core(Arc::new(crate::routes::CoreRuntimeService::new(
         debug_port,

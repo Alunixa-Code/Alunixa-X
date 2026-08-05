@@ -1633,16 +1633,18 @@
       return;
     }
     try {
-      await codexConfigBatchWrite({
-        hostId: "local",
-        edits: [{
-          keyPath: "agents.max_threads",
-          value: normalized,
-          mergeStrategy: "upsert",
-        }],
-        filePath: null,
-        expectedVersion: null,
-        reloadUserConfig: true,
+      await codexStateCall("batch-write-config-value", {
+        params: {
+          hostId: "local",
+          edits: [{
+            keyPath: "agents.max_threads",
+            value: normalized,
+            mergeStrategy: "upsert",
+          }],
+          filePath: null,
+          expectedVersion: null,
+          reloadUserConfig: true,
+        },
       });
       subAgentRestartRequired = false;
       subAgentRestartMessage = "";
@@ -3214,16 +3216,15 @@
     }
   }
 
-  function loadBackendSettingsForStartup(attempt = 0) {
-    loadBackendSettings().then((loaded) => {
-      if (loaded) {
+  async function loadBackendSettingsForStartup() {
+    for (let attempt = 0; attempt <= 60; attempt += 1) {
+      if (await loadBackendSettings()) {
         scan();
-        return;
+        return true;
       }
-      if (attempt < 60) {
-        setTimeout(() => loadBackendSettingsForStartup(attempt + 1), 250);
-      }
-    });
+      if (attempt < 60) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return false;
   }
 
   async function setBackendSetting(key, value) {
@@ -5618,7 +5619,7 @@
           try {
             const module = await loadCodexAppModule(assetPrefix);
             const call = codexHostRpcFromModule(module, assetPrefix !== "app-initial-");
-            if (call) return { call, legacy: assetPrefix !== "app-initial-", assetPrefix };
+            if (call) return call;
             errors.push(`${assetPrefix}: host RPC export unavailable`);
           } catch (error) {
             errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
@@ -5634,30 +5635,8 @@
   }
 
   async function codexStateCall(method, params) {
-    const state = await codexStateApi();
-    return await state.call(method, params);
-  }
-
-  function codexElectronHandlerUnavailable(error) {
-    return String(error?.message || error || "").includes("not implemented in the current Electron process");
-  }
-
-  async function codexConfigBatchWrite(payload) {
-    const state = await codexStateApi();
-    const invoke = (method, params) => state.call(method, state.legacy ? { params } : params);
-    try {
-      return await invoke("batch-write-config-value", payload);
-    } catch (error) {
-      if (!codexElectronHandlerUnavailable(error)) throw error;
-      sendCodexPlusDiagnostic("config_batch_write_electron_handler_unavailable", {
-        assetPrefix: state.assetPrefix,
-      });
-      return await invoke("send-cli-request-for-host", {
-        hostId: "local",
-        method: "config/batchWrite",
-        params: payload,
-      });
-    }
+    const call = await codexStateApi();
+    return await call(method, params);
   }
 
   async function getCodexGlobalState(key) {
@@ -6329,15 +6308,15 @@
                       .map((item) => {
                         const modelName = String(item?.model || "").trim();
                         const contextWindow = Number.parseInt(String(item?.contextWindow || ""), 10);
-                        const compactPercent = Number.parseInt(String(item?.autoCompactPercent || ""), 10);
+                        const compactLimit = Number.parseInt(String(item?.autoCompactLimit || ""), 10);
                         return {
                           model: modelName,
                           slug: modelName,
                           context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
                           max_context_window: Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : null,
                           effective_context_window_percent: 100,
-                          auto_compact_token_limit: item?.autoCompactEnabled && Number.isFinite(contextWindow) && contextWindow > 0
-                            ? Math.max(1, Math.min(contextWindow, Math.floor(contextWindow * (Number.isFinite(compactPercent) ? compactPercent : 80) / 100)))
+                          auto_compact_token_limit: item?.autoCompactEnabled && Number.isFinite(compactLimit) && compactLimit > 0
+                            ? compactLimit
                             : null,
                         };
                       })
@@ -7410,6 +7389,61 @@
     };
     window.__codexPlusDynamicModelRuntime = runtime;
     return runtime;
+  }
+
+  function configuredProviderModelNames(settings) {
+    if (settings?.relayProfilesEnabled === false) return [];
+    const profiles = Array.isArray(settings?.relayProfiles) ? settings.relayProfiles : [];
+    const profile = profiles.find((item) => item?.id === settings?.activeRelayId) || profiles[0];
+    if (!profile) return [];
+    if (Array.isArray(profile.customModels) && profile.customModels.length > 0) {
+      return uniqueValues(profile.customModels.map((item) => String(item?.model || "").trim()));
+    }
+    const listed = typeof profile.modelList === "string"
+      ? profile.modelList.split(/[\r\n,]+/).map((item) => item.trim())
+      : [];
+    return uniqueValues([
+      String(profile.lastUsedModel || "").trim(),
+      String(profile.model || "").trim(),
+      ...listed,
+    ]);
+  }
+
+  async function installCodexStartupModelInjection() {
+    const settingsLoaded = await loadBackendSettingsForStartup();
+    if (!settingsLoaded) throw new Error("Codex++ startup settings could not be loaded");
+    const catalog = await loadCodexModelCatalog(true);
+    if (!catalog || catalog.status === "failed") {
+      throw new Error(String(catalog?.message || "Codex++ startup model catalog failed"));
+    }
+    const expectedModels = configuredProviderModelNames(codexPlusBackendSettings);
+    const actualModels = codexPlusModelNames();
+    const actualKeys = new Set(actualModels.map(codexPlusModelNameKey));
+    const missingModels = expectedModels.filter((model) => !actualKeys.has(codexPlusModelNameKey(model)));
+    if (missingModels.length > 0) {
+      throw new Error(`Codex++ startup model catalog is missing: ${missingModels.join(", ")}`);
+    }
+    if (codexPlusModelUnlockEnabled()) {
+      ensureCodexModelWhitelistInstalls();
+      patchStatsigModelWhitelist();
+      patchReactModelState();
+      scheduleCodexModelWhitelistRefresh(5000);
+    }
+    const result = {
+      status: "ok",
+      debugPort: Number(window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ || 0),
+      helperPort: helperPortFromBase(),
+      selectedModel: codexServiceTierCurrentModelName(),
+      providerName: String(catalog.provider_name || catalog.model_provider || ""),
+      models: actualModels,
+      expectedModels,
+      modelUnlockEnabled: codexPlusModelUnlockEnabled(),
+      responsePatchInstalled: window.__codexPlusModelJsonResponsePatchInstalled === codexDynamicModelPatchInstance,
+      messagePatchInstalled: window.__codexPlusModelMessagePatchInstalled === codexDynamicModelPatchInstance,
+    };
+    window.__codexPlusManagedModelNames = [...actualModels];
+    sendCodexPlusDiagnostic("startup_model_injection_ready", result);
+    return result;
   }
 
   function patchCodexModelWhitelist() {
@@ -11093,9 +11127,18 @@
     window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, switching ? 450 : 200);
   }
 
-  void loadBackendSettingsForStartup();
   void syncCodexReasoningEffortSettings();
-  installCodexDynamicModelRuntime();
+  window.__codexPlusDynamicModelRuntime = undefined;
+  window.__codexPlusStartupModelInjection = installCodexStartupModelInjection().catch((error) => {
+    const result = {
+      status: "failed",
+      message: String(error?.message || error),
+      models: [],
+      expectedModels: [],
+    };
+    sendCodexPlusDiagnostic("startup_model_injection_failed", result);
+    return result;
+  });
   installCodexProjectlessMainWindowProtection();
   if (!window.__CODEX_PLUS_TEST_PROJECTLESS__) void loadCodexProjectlessMainWindowSetting();
   installUpstreamBranchDropdownAdapter();

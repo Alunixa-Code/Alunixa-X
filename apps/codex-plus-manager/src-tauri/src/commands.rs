@@ -182,7 +182,6 @@ pub struct RelaySwitchPayload {
     pub relay: RelayPayload,
     pub settings_path: String,
     pub user_scripts: Value,
-    pub runtime_apply: Option<codex_plus_core::codex_config_reload::RuntimeModelApplyResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -559,34 +558,13 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
         .and_then(|_| apply_codex_hook_policy(&settings));
     match save_result {
         Ok(()) => {
-            let max_threads = settings.codex_app_sub_agent_max_threads;
             let codex_app_path = settings.codex_app_path.clone();
             let trust = tauri::async_runtime::spawn(trust_codex_hooks_and_log(codex_app_path));
-            let runtime_apply =
-                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
-                    max_threads,
-                )
-                .await;
             let _ = trust.await;
-            match runtime_apply {
-                Ok(Some(result)) => settings_payload(
-                    &format!(
-                        "设置已保存并动态注入 Codex：{} 个模型，当前模型 {}。",
-                        result.model_count, result.selected_model
-                    ),
-                    "设置保存后重新读取失败",
-                ),
-                Ok(None) => settings_payload(
-                    "设置已保存；Codex 当前未运行，将在下次启动时应用。",
-                    "设置保存后重新读取失败",
-                ),
-                Err(error) => failed(
-                    &format!(
-                        "设置已保存，但当前 Codex 动态注入失败：{error}。请修复运行连接后重新保存。"
-                    ),
-                    settings_payload_value().unwrap_or_else(|(_, payload)| payload),
-                ),
-            }
+            settings_payload(
+                "设置已保存；将在下次通过 Codex++ 启动器启动 Codex 时完整应用。",
+                "设置保存后重新读取失败",
+            )
         }
         Err(error) => failed(
             &format!("保存设置失败：{error}"),
@@ -2538,7 +2516,6 @@ pub async fn switch_relay_profile(
                     SettingsStore::default().load().unwrap_or_default(),
                     status,
                     None,
-                    None,
                 ),
             );
         };
@@ -2551,46 +2528,18 @@ pub async fn switch_relay_profile(
     };
     match switch_result {
         Ok(result) => {
-            let max_threads = result.settings.codex_app_sub_agent_max_threads;
-            let runtime_apply =
-                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
-                    max_threads,
-                )
-                .await;
             let status = codex_plus_core::relay_config::relay_status_from_home(&home);
-            if let Err(error) = &runtime_apply {
-                log_manager_event(
-                    "manager.switch_relay_profile.dynamic_apply_failed",
-                    json!({
-                        "targetRelayId": result.settings.active_relay_id,
-                        "error": error.to_string()
-                    }),
-                );
-                return failed(
-                    &format!(
-                        "供应商文件已保存，但当前 Codex 动态注入失败：{error}。请不要继续使用旧模型，修复连接后重新保存。"
-                    ),
-                    relay_switch_payload(result.settings, status, result.backup_path, None),
-                );
-            }
-            let runtime_apply = runtime_apply.ok().flatten();
             log_manager_event(
                 "manager.switch_relay_profile.ok",
                 json!({
                     "targetRelayId": result.settings.active_relay_id,
                     "configured": status.configured,
-                    "backupPath": result.backup_path.as_ref(),
-                    "runtimeApplied": runtime_apply.is_some(),
-                    "runtime": runtime_apply.as_ref()
+                    "backupPath": result.backup_path.as_ref()
                 }),
             );
             ok(
-                if runtime_apply.is_some() {
-                    "供应商、模型目录和当前模型已动态注入 Codex。"
-                } else {
-                    "供应商已保存；Codex 当前未运行，将在下次启动时应用。"
-                },
-                relay_switch_payload(result.settings, status, result.backup_path, runtime_apply),
+                "供应商已保存；将在下次通过 Codex++ 启动器启动 Codex 时完整应用配置、模型目录和默认模型。",
+                relay_switch_payload(result.settings, status, result.backup_path),
             )
         }
         Err(error) => {
@@ -2606,7 +2555,7 @@ pub async fn switch_relay_profile(
             );
             failed(
                 &format!("供应商切换失败：{error}"),
-                relay_switch_payload(settings, status, None, None),
+                relay_switch_payload(settings, status, None),
             )
         }
     }
@@ -3530,36 +3479,15 @@ pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
                 "manager.clear_relay_injection.after",
             );
             let status = codex_plus_core::relay_config::relay_status_from_home(&home);
-            let runtime_apply =
-                codex_plus_core::codex_config_reload::apply_current_runtime_config_and_models(
-                    settings.codex_app_sub_agent_max_threads,
-                )
-                .await;
-            if let Err(error) = &runtime_apply {
-                log_manager_event(
-                    "manager.clear_relay_injection.dynamic_apply_failed",
-                    json!({
-                        "configured": status.configured,
-                        "error": error.to_string()
-                    }),
-                );
-                return failed(
-                    &format!(
-                        "官方配置已恢复，但当前 Codex 动态清理旧供应商模型失败：{error}。请修复运行连接后重试。"
-                    ),
-                    relay_payload(status, result.backup_path),
-                );
-            }
             log_manager_event(
                 "manager.clear_relay_injection.ok",
                 json!({
                     "configured": status.configured,
-                    "backupPath": result.backup_path.as_ref(),
-                    "runtimeApplied": runtime_apply.ok().flatten().is_some()
+                    "backupPath": result.backup_path.as_ref()
                 }),
             );
             ok(
-                "已清除 custom 中转 API 模式，并切换到官方 ChatGPT 登录模式。",
+                "官方配置已恢复；将在下次通过 Codex++ 启动器启动 Codex 时完整应用。",
                 relay_payload(status, result.backup_path),
             )
         }
@@ -3687,7 +3615,6 @@ fn relay_switch_payload(
     settings: BackendSettings,
     status: codex_plus_core::relay_config::RelayStatus,
     backup_path: Option<String>,
-    runtime_apply: Option<codex_plus_core::codex_config_reload::RuntimeModelApplyResult>,
 ) -> RelaySwitchPayload {
     RelaySwitchPayload {
         settings,
@@ -3696,7 +3623,6 @@ fn relay_switch_payload(
             .to_string_lossy()
             .to_string(),
         user_scripts: user_script_inventory(),
-        runtime_apply,
     }
 }
 

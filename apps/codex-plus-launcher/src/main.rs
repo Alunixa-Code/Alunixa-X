@@ -526,6 +526,17 @@ impl LaunchHooks for LauncherHooks {
         self.core.inject(debug_port, helper_port).await
     }
 
+    async fn verify_startup_injection(
+        &self,
+        debug_port: u16,
+        helper_port: u16,
+        settings: &codex_plus_core::settings::BackendSettings,
+    ) -> anyhow::Result<()> {
+        self.core
+            .verify_startup_injection(debug_port, helper_port, settings)
+            .await
+    }
+
     async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         let bridge_context = self
             .bridge_context
@@ -993,7 +1004,7 @@ async fn try_inject_with_context(
     runtime.set_websocket_url(websocket_url);
     let settings = codex_plus_core::settings::SettingsStore::default()
         .load()
-        .unwrap_or_default();
+        .context("failed to load settings for Codex++ startup injection")?;
     let script =
         codex_plus_core::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
     let user_bundle = runtime

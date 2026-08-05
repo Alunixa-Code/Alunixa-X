@@ -7,7 +7,6 @@ pub mod ccs_import;
 pub mod cdp;
 pub mod codex_app_state;
 pub mod codex_auto_update;
-pub mod codex_config_reload;
 pub mod codex_home;
 pub mod codex_hooks;
 pub mod codex_instructions;
