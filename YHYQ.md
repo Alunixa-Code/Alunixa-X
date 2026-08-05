@@ -605,3 +605,4 @@
 - 最终 `cargo fmt --check`、`git diff --check`、版本核对均通过；后续将删除本地 `target`、前端 `node_modules` 与 `dist`，继续排除四个既有 CRLF 状态噪声文件喵~
 - 已删除本地 Rust `target`、前端 `node_modules` 与 `dist` 构建产物并确认三个目录均不存在；四个既有 CRLF 状态噪声文件经 `git diff --exit-code` 确认内容与 HEAD 完全一致，发布提交继续排除它们喵~
 - 用户要求继续完成推送、GitHub Actions 构建和 `v1.2.64` 正式发行；已复核本地 `main` 比 `origin/main` 领先 17 个提交且远端无新增提交，准备推送目标仓库喵~
+- v1.2.64 发布候选代码已推送到目标仓库，主分支 GitHub Actions `30995855874` 全部成功：Windows 完成品牌检查、前端测试、TypeScript、完整 Rust tests、release 二进制、ZIP 与安装程序构建上传；macOS x64/arm64 均完成 release 二进制、DMG、包结构校验与 artifact 上传喵~
