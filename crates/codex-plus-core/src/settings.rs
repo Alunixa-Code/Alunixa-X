@@ -137,7 +137,8 @@ pub struct RelayProfile {
     #[serde(
         rename = "autoCompactPercent",
         default = "default_auto_compact_percent",
-        deserialize_with = "deserialize_auto_compact_percent"
+        deserialize_with = "deserialize_auto_compact_percent",
+        skip_serializing
     )]
     pub auto_compact_percent: u8,
     #[serde(rename = "modelInsertMode", default)]
@@ -307,10 +308,13 @@ pub struct CustomRelayModel {
     pub context_window: String,
     #[serde(rename = "autoCompactEnabled", default)]
     pub auto_compact_enabled: bool,
+    #[serde(rename = "autoCompactLimit", default)]
+    pub auto_compact_limit: String,
     #[serde(
         rename = "autoCompactPercent",
         default = "default_auto_compact_percent",
-        deserialize_with = "deserialize_auto_compact_percent"
+        deserialize_with = "deserialize_auto_compact_percent",
+        skip_serializing
     )]
     pub auto_compact_percent: u8,
 }
@@ -325,6 +329,7 @@ impl Default for CustomRelayModel {
             protocol: RelayProtocol::Responses,
             context_window: String::new(),
             auto_compact_enabled: false,
+            auto_compact_limit: String::new(),
             auto_compact_percent: default_auto_compact_percent(),
         }
     }
@@ -967,8 +972,13 @@ impl RelayProfile {
     }
 
     pub fn migrate_legacy_auto_compact_fields(&mut self) {
+        for model in &mut self.custom_models {
+            model.migrate_legacy_auto_compact_fields();
+        }
         if self.auto_compact_enabled {
-            if let Some(window) = parse_context_window_tokens(&self.context_window) {
+            if self.auto_compact_limit.trim().is_empty()
+                && let Some(window) = parse_context_window_tokens(&self.context_window)
+            {
                 self.auto_compact_limit =
                     auto_compact_limit_from_percent(window, self.auto_compact_percent).to_string();
             }
@@ -990,13 +1000,27 @@ impl RelayProfile {
     }
 
     pub fn effective_auto_compact_limit(&self) -> String {
-        if self.auto_compact_enabled {
-            if let Some(window) = parse_context_window_tokens(&self.context_window) {
-                return auto_compact_limit_from_percent(window, self.auto_compact_percent)
-                    .to_string();
-            }
+        if !self.auto_compact_enabled {
+            return String::new();
         }
-        self.auto_compact_limit.clone()
+        self.auto_compact_limit.trim().to_string()
+    }
+}
+
+impl CustomRelayModel {
+    pub fn migrate_legacy_auto_compact_fields(&mut self) {
+        if self.auto_compact_enabled {
+            if self.auto_compact_limit.trim().is_empty()
+                && let Some(window) = parse_context_window_tokens(&self.context_window)
+            {
+                self.auto_compact_limit =
+                    auto_compact_limit_from_percent(window, self.auto_compact_percent).to_string();
+            }
+            return;
+        }
+        if !self.auto_compact_limit.trim().is_empty() {
+            self.auto_compact_enabled = true;
+        }
     }
 }
 

@@ -135,14 +135,10 @@ fn relay_profile_model_details(profile: &RelayProfile) -> Vec<Value> {
             }
             let context_window =
                 crate::settings::parse_context_window_tokens(&model.context_window);
-            let auto_compact_token_limit = context_window
-                .filter(|_| model.auto_compact_enabled)
-                .map(|window| {
-                    crate::settings::auto_compact_limit_from_percent(
-                        window,
-                        model.auto_compact_percent,
-                    )
-                });
+            let auto_compact_token_limit = model
+                .auto_compact_enabled
+                .then(|| model.auto_compact_limit.trim().parse::<u64>().ok())
+                .flatten();
             Some(json!({
                 "model": slug,
                 "slug": slug,

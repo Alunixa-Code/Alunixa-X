@@ -1633,18 +1633,16 @@
       return;
     }
     try {
-      await codexStateCall("batch-write-config-value", {
-        params: {
-          hostId: "local",
-          edits: [{
-            keyPath: "agents.max_threads",
-            value: normalized,
-            mergeStrategy: "upsert",
-          }],
-          filePath: null,
-          expectedVersion: null,
-          reloadUserConfig: true,
-        },
+      await codexConfigBatchWrite({
+        hostId: "local",
+        edits: [{
+          keyPath: "agents.max_threads",
+          value: normalized,
+          mergeStrategy: "upsert",
+        }],
+        filePath: null,
+        expectedVersion: null,
+        reloadUserConfig: true,
       });
       subAgentRestartRequired = false;
       subAgentRestartMessage = "";
@@ -5620,7 +5618,7 @@
           try {
             const module = await loadCodexAppModule(assetPrefix);
             const call = codexHostRpcFromModule(module, assetPrefix !== "app-initial-");
-            if (call) return call;
+            if (call) return { call, legacy: assetPrefix !== "app-initial-", assetPrefix };
             errors.push(`${assetPrefix}: host RPC export unavailable`);
           } catch (error) {
             errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
@@ -5636,8 +5634,30 @@
   }
 
   async function codexStateCall(method, params) {
-    const call = await codexStateApi();
-    return await call(method, params);
+    const state = await codexStateApi();
+    return await state.call(method, params);
+  }
+
+  function codexElectronHandlerUnavailable(error) {
+    return String(error?.message || error || "").includes("not implemented in the current Electron process");
+  }
+
+  async function codexConfigBatchWrite(payload) {
+    const state = await codexStateApi();
+    const invoke = (method, params) => state.call(method, state.legacy ? { params } : params);
+    try {
+      return await invoke("batch-write-config-value", payload);
+    } catch (error) {
+      if (!codexElectronHandlerUnavailable(error)) throw error;
+      sendCodexPlusDiagnostic("config_batch_write_electron_handler_unavailable", {
+        assetPrefix: state.assetPrefix,
+      });
+      return await invoke("send-cli-request-for-host", {
+        hostId: "local",
+        method: "config/batchWrite",
+        params: payload,
+      });
+    }
   }
 
   async function getCodexGlobalState(key) {

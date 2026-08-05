@@ -229,6 +229,8 @@ fn config_reload_script(max_threads: u8) -> String {
     }}) || null;
   }};
   const findAsset = (prefix) => urls.find((url) => url.includes(prefix)) || "";
+  const electronHandlerUnavailable = (error) => String(error?.message || error || "")
+    .includes("not implemented in the current Electron process");
   const errors = [];
   let call = null;
   let assetPrefix = "";
@@ -256,11 +258,24 @@ fn config_reload_script(max_threads: u8) -> String {
     expectedVersion: null,
     reloadUserConfig: true,
   }};
-  const result = await call(
-    "batch-write-config-value",
-    assetPrefix === "vscode-api-" ? {{ params: payload }} : payload,
+  const invokeHost = (method, params) => call(
+    method,
+    assetPrefix === "vscode-api-" ? {{ params }} : params,
   );
-  return JSON.stringify({{ status: "ok", assetPrefix, result: result ?? null }});
+  let result;
+  let transport = "electron-handler";
+  try {{
+    result = await invokeHost("batch-write-config-value", payload);
+  }} catch (error) {{
+    if (!electronHandlerUnavailable(error)) throw error;
+    transport = "current-app-server";
+    result = await invokeHost("send-cli-request-for-host", {{
+      hostId: "local",
+      method: "config/batchWrite",
+      params: payload,
+    }});
+  }}
+  return JSON.stringify({{ status: "ok", assetPrefix, transport, result: result ?? null }});
 }})()"#
     )
 }
@@ -339,7 +354,10 @@ mod tests {
         assert!(script.contains("rpcFromModule"));
         assert!(script.contains("reloadUserConfig: true"));
         assert!(script.contains("value: 12"));
-        assert!(script.contains("assetPrefix === \"vscode-api-\" ? { params: payload } : payload"));
+        assert!(script.contains("not implemented in the current Electron process"));
+        assert!(script.contains("method: \"config/batchWrite\""));
+        assert!(script.contains("transport = \"current-app-server\""));
+        assert!(script.contains("assetPrefix === \"vscode-api-\" ? { params } : params"));
         assert!(!script.contains("module.n(\"batch-write-config-value\""));
     }
 

@@ -1800,6 +1800,11 @@ fn apply_auto_compact_limits_to_catalog_json(
     if !profile.auto_compact_enabled {
         return Ok(catalog_json.to_string());
     }
+    let limit = parse_optional_positive_u64(
+        &profile.auto_compact_limit,
+        "自动压缩 Token 阈值",
+    )?
+    .context("开启自动压缩时必须填写 Token 阈值")?;
     let mut catalog: Value = serde_json::from_str(catalog_json)?;
     let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) else {
         return Ok(catalog_json.to_string());
@@ -1816,10 +1821,14 @@ fn apply_auto_compact_limits_to_catalog_json(
             .or(fallback_window)
             .or_else(|| model.get("context_window").and_then(Value::as_u64));
         if let Some(window) = window {
-            let limit = crate::settings::auto_compact_limit_from_percent(
-                window,
-                profile.auto_compact_percent,
-            );
+            if limit > window {
+                anyhow::bail!(
+                    "模型 {} 的自动压缩 Token 阈值 {} 不能超过上下文窗口 {}",
+                    slug,
+                    limit,
+                    window
+                );
+            }
             model["auto_compact_token_limit"] = json!(limit);
         }
     }
@@ -1844,15 +1853,22 @@ fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<St
             suffix_window: window,
         });
         if model.auto_compact_enabled {
-            if let Some(window) = window {
-                auto_limits.insert(
-                    slug.to_string(),
-                    crate::settings::auto_compact_limit_from_percent(
-                        window,
-                        model.auto_compact_percent,
-                    ),
+            let limit = parse_optional_positive_u64(
+                &model.auto_compact_limit,
+                &format!("模型 {slug} 的自动压缩 Token 阈值"),
+            )?
+            .context("开启自动压缩时必须填写 Token 阈值")?;
+            if let Some(window) = window
+                && limit > window
+            {
+                anyhow::bail!(
+                    "模型 {} 的自动压缩 Token 阈值 {} 不能超过上下文窗口 {}",
+                    slug,
+                    limit,
+                    window
                 );
             }
+            auto_limits.insert(slug.to_string(), limit);
         }
     }
     if entries.is_empty() {
@@ -2505,12 +2521,7 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
                 {
                     profile.context_window = window.to_string();
                     profile.auto_compact_enabled = true;
-                    profile.auto_compact_percent = default_model.auto_compact_percent;
-                    profile.auto_compact_limit = crate::settings::auto_compact_limit_from_percent(
-                        window,
-                        default_model.auto_compact_percent,
-                    )
-                    .to_string();
+                    profile.auto_compact_limit = default_model.auto_compact_limit;
                 }
             }
         }
@@ -2586,8 +2597,7 @@ fn normalize_custom_models_profile(profile: &mut RelayProfile) -> anyhow::Result
         model.base_url = model.base_url.trim().trim_end_matches('/').to_string();
         model.api_key = model.api_key.trim().to_string();
         model.context_window = model.context_window.trim().to_string();
-        model.auto_compact_percent =
-            crate::settings::clamp_auto_compact_percent(model.auto_compact_percent);
+        model.migrate_legacy_auto_compact_fields();
         if model.id.is_empty() {
             model.id = uuid::Uuid::new_v4().to_string();
         }
@@ -2612,6 +2622,24 @@ fn normalize_custom_models_profile(profile: &mut RelayProfile) -> anyhow::Result
             && crate::settings::parse_context_window_tokens(&model.context_window).is_none()
         {
             anyhow::bail!("模型 {} 开启自动压缩时必须提供有效上下文窗口", model.model);
+        }
+        if model.auto_compact_enabled {
+            let window = crate::settings::parse_context_window_tokens(&model.context_window)
+                .expect("validated model context window");
+            let limit = parse_optional_positive_u64(
+                &model.auto_compact_limit,
+                &format!("模型 {} 的自动压缩 Token 阈值", model.model),
+            )?
+            .context("开启自动压缩时必须填写 Token 阈值")?;
+            if limit > window {
+                anyhow::bail!(
+                    "模型 {} 的自动压缩 Token 阈值 {} 不能超过上下文窗口 {}",
+                    model.model,
+                    limit,
+                    window
+                );
+            }
+            model.auto_compact_limit = limit.to_string();
         }
     }
     if profile.last_used_model.trim().is_empty() {
