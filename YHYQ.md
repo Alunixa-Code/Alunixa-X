@@ -603,3 +603,4 @@
 - 完整 `cargo test --workspace -- --test-threads=1` 最终全部通过，包含 core `229`、CDP `83`、relay `109`、launcher `79`、manager `33` 及其余集成测试和 doc-test；首轮发现的旧百分比模型目录断言与归一化修复顺序问题均已修正并重跑闭环喵~
 - 发布版本已统一提升到 `1.2.64`，CHANGELOG 已详细记录撤销动态重载、启动前完整注入与验证、失败关闭保护、Token 阈值语义和旧百分比一次迁移喵~
 - 最终 `cargo fmt --check`、`git diff --check`、版本核对均通过；后续将删除本地 `target`、前端 `node_modules` 与 `dist`，继续排除四个既有 CRLF 状态噪声文件喵~
+- 已删除本地 Rust `target`、前端 `node_modules` 与 `dist` 构建产物并确认三个目录均不存在；四个既有 CRLF 状态噪声文件经 `git diff --exit-code` 确认内容与 HEAD 完全一致，发布提交继续排除它们喵~
