@@ -1191,6 +1191,7 @@ experimental_bearer_token = "sk-new"
         model_insert_mode: Default::default(),
         model_list: "deepseek-coder\nqwen3-coder".to_string(),
         context_window: "200000".to_string(),
+        auto_compact_enabled: true,
         auto_compact_limit: "160000".to_string(),
         ..RelayProfile::default()
     };
@@ -1207,6 +1208,85 @@ experimental_bearer_token = "sk-new"
             .join("relay-a.json")
             .exists()
     );
+}
+
+#[test]
+fn apply_relay_profile_preserves_exact_auto_compact_token_threshold() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "token-threshold".to_string(),
+        name: "Token Threshold".to_string(),
+        model: "gpt-5.6-sol".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "gpt-5.6-sol"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "gpt-5.6-sol".to_string(),
+        context_window: "1000000".to_string(),
+        auto_compact_enabled: true,
+        auto_compact_limit: "990000".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains("model_context_window = 1000000"));
+    assert!(config.contains("model_auto_compact_token_limit = 990000"));
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            temp.path()
+                .join("model-catalogs")
+                .join("token-threshold.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(catalog["models"][0]["context_window"], 1_000_000);
+    assert_eq!(catalog["models"][0]["auto_compact_token_limit"], 990_000);
+}
+
+#[test]
+fn disabling_auto_compact_removes_stale_token_threshold_from_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "disabled-threshold".to_string(),
+        model: "gpt-5.6-sol".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "gpt-5.6-sol"
+model_provider = "custom"
+model_context_window = 1000000
+model_auto_compact_token_limit = 990000
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        context_window: "1000000".to_string(),
+        auto_compact_enabled: false,
+        auto_compact_limit: String::new(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains("model_context_window = 1000000"));
+    assert!(!config.contains("model_auto_compact_token_limit"));
 }
 
 #[test]
@@ -1660,6 +1740,7 @@ experimental_bearer_token = "codex-plus-custom"
             api_key: "provider-key".to_string(),
             context_window: "500000".to_string(),
             auto_compact_enabled: true,
+            auto_compact_limit: "400000".to_string(),
             auto_compact_percent: 80,
             ..CustomRelayModel::default()
         }],
@@ -3338,6 +3419,7 @@ experimental_bearer_token = "codex-plus-custom"
                 api_key: "test-key".to_string(),
                 context_window: "250000".to_string(),
                 auto_compact_enabled: true,
+                auto_compact_limit: "200000".to_string(),
                 auto_compact_percent: 80,
                 ..CustomRelayModel::default()
             },
@@ -3348,6 +3430,7 @@ experimental_bearer_token = "codex-plus-custom"
                 api_key: "test-key".to_string(),
                 context_window: "353000".to_string(),
                 auto_compact_enabled: true,
+                auto_compact_limit: "282400".to_string(),
                 auto_compact_percent: 80,
                 ..CustomRelayModel::default()
             },
@@ -3427,6 +3510,34 @@ experimental_bearer_token = "codex-plus-custom"
     let auth: serde_json::Value = serde_json::from_str(&profile.auth_contents).unwrap();
     assert_eq!(auth["auth_mode"], "apikey");
     assert_eq!(auth["OPENAI_API_KEY"], "codex-plus-custom");
+}
+
+#[test]
+fn normalize_legacy_percent_migrates_once_to_token_threshold() {
+    let mut profile = RelayProfile {
+        id: "legacy-percent".to_string(),
+        relay_mode: RelayMode::CustomModels,
+        custom_models: vec![CustomRelayModel {
+            id: "legacy-model".to_string(),
+            model: "legacy-model".to_string(),
+            base_url: "https://example.test/v1".to_string(),
+            api_key: "test-key".to_string(),
+            context_window: "200000".to_string(),
+            auto_compact_enabled: true,
+            auto_compact_percent: 80,
+            ..CustomRelayModel::default()
+        }],
+        default_custom_model_id: "legacy-model".to_string(),
+        ..RelayProfile::default()
+    };
+
+    normalize_relay_profile_for_storage(&mut profile).unwrap();
+
+    assert_eq!(profile.custom_models[0].auto_compact_limit, "160000");
+    assert_eq!(profile.auto_compact_limit, "160000");
+    let serialized = serde_json::to_string(&profile).unwrap();
+    assert!(!serialized.contains("autoCompactPercent"));
+    assert!(serialized.contains("autoCompactLimit"));
 }
 
 #[test]

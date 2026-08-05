@@ -31,7 +31,6 @@ const _profileTypeCheck: RelayProfile = {
   contextWindow: "",
   autoCompactLimit: "",
   autoCompactEnabled: false,
-  autoCompactPercent: 80,
   modelList: "",
   modelWindows: "",
   modelVlm: "",
