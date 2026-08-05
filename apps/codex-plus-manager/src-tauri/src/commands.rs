@@ -1053,6 +1053,27 @@ fn normalize_settings_before_save(
         codex_plus_core::relay_config::sanitize_common_config_contents(
             &settings.relay_context_config_contents,
         );
+    let common_config = relay_combined_common_config(&settings);
+    if !common_config.trim().is_empty() {
+        for profile in &mut settings.relay_profiles {
+            if !profile.use_common_config || profile.config_contents.trim().is_empty() {
+                continue;
+            }
+            match codex_plus_core::relay_config::strip_common_config_from_config(
+                &profile.config_contents,
+                &common_config,
+            ) {
+                Ok(stripped) => {
+                    profile.config_contents =
+                        strip_common_config_text_fallback(&stripped, &common_config);
+                }
+                Err(_) => {
+                    profile.config_contents =
+                        strip_common_config_text_fallback(&profile.config_contents, &common_config);
+                }
+            }
+        }
+    }
     for profile in &mut settings.relay_profiles {
         if let Err(error) =
             codex_plus_core::relay_config::normalize_relay_profile_for_storage(profile)
@@ -1074,27 +1095,6 @@ fn normalize_settings_before_save(
                 },
                 error
             ));
-        }
-    }
-    let common_config = relay_combined_common_config(&settings);
-    if !common_config.trim().is_empty() {
-        for profile in &mut settings.relay_profiles {
-            if !profile.use_common_config || profile.config_contents.trim().is_empty() {
-                continue;
-            }
-            match codex_plus_core::relay_config::strip_common_config_from_config(
-                &profile.config_contents,
-                &common_config,
-            ) {
-                Ok(stripped) => {
-                    profile.config_contents =
-                        strip_common_config_text_fallback(&stripped, &common_config);
-                }
-                Err(_) => {
-                    profile.config_contents =
-                        strip_common_config_text_fallback(&profile.config_contents, &common_config);
-                }
-            }
         }
     }
     settings.provider_sync_saved_providers =
@@ -4926,6 +4926,29 @@ last_updated = "2026-05-25T11:52:46Z"
         assert!(config.contains("model = \"gpt-5\""));
         assert!(!config.contains("model_reasoning_effort"));
         assert!(!config.contains("[marketplaces.openai-bundled]"));
+    }
+
+    #[test]
+    fn normalize_settings_before_save_rejects_invalid_auto_compact_token_threshold() {
+        let settings = BackendSettings {
+            relay_profiles: vec![RelayProfile {
+                id: "invalid-token".to_string(),
+                name: "Invalid Token".to_string(),
+                relay_mode: codex_plus_core::settings::RelayMode::PureApi,
+                base_url: "https://relay.example/v1".to_string(),
+                api_key: "sk-test".to_string(),
+                context_window: "100000".to_string(),
+                auto_compact_enabled: true,
+                auto_compact_limit: "100001".to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let error = normalize_settings_before_save(settings).unwrap_err();
+
+        assert!(error.to_string().contains("Invalid Token"));
+        assert!(error.to_string().contains("不能超过上下文窗口"));
     }
 
     #[test]
