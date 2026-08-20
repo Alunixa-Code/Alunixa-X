@@ -697,3 +697,5 @@
 - 全工作区直接 `cargo check --all-targets` 首次被 Tauri `2.11.1` 的 asset protocol allowlist 拒绝，确认当前 `tauri.conf.json` 已启用 DreamSkin 本地资源协议但 Cargo feature 遗漏；已补回上游现有 `protocol-asset` feature，并将其可选依赖 `http-range 0.1.5` 纳入锁文件喵~
 - Tauri feature 修复后 `cargo test --workspace --no-run` 成功编译全部 core/data/launcher/manager 单元与集成测试目标；期间补齐一个完整 RelayProfile 测试初始化缺失的 `model_routes` 字段，没有其他结构传播错误喵~
 - TypeScript 与 i18n 再次通过，macOS 当前仅安装 Windows Rust target，macOS 条件编译和 DMG 将由 GitHub Actions 的真实 macOS x64/arm64 runner 做权威验证喵~
+- 完整 workspace 首轮进入 core `258` 项后通过 `257` 项，仅供应商安全导入测试仍错误期待 auth.json 只含 Key；产品设置规范化会按既有安全契约同时写入 `auth_mode = apikey`，已修正测试期望而不削弱认证结构喵~
+- 完整 workspace 第二轮已通过 core `258/258`、bridge `26/26`、CDP `91/91` 等前置套件，随后发现 DreamSkin 本地库测试仍在 Windows 期待旧人物主题名；当前安全社区市场已统一使用中性内置名 `Dream Skin`，已按实际默认配置修正陈旧断言喵~

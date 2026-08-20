@@ -466,7 +466,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&settings.relay_profiles[1].auth_contents)
                 .unwrap(),
-            serde_json::json!({ "OPENAI_API_KEY": "sk-test" })
+            serde_json::json!({
+                "auth_mode": "apikey",
+                "OPENAI_API_KEY": "sk-test"
+            })
         );
     }
 

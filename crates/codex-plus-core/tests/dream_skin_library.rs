@@ -50,14 +50,7 @@ fn library_always_lists_builtin_theme_first() {
     let library = list_dream_skin_themes(temp.path(), &settings).unwrap();
 
     assert_eq!(library.themes[0].kind, DreamSkinThemeKind::Builtin);
-    assert_eq!(
-        library.themes[0].name,
-        if cfg!(windows) {
-            "桥本有菜"
-        } else {
-            "Dream Skin"
-        }
-    );
+    assert_eq!(library.themes[0].name, "Dream Skin");
     assert!(library.themes[0].builtin);
 }
 
