@@ -709,3 +709,7 @@
 - 明确不合并上游网站、赞助、品牌、更新地址、发行元数据、整分支 UI 重构和正式 `v1.2.50` 标签之后的 Windows 权限行为改动；`origin` 仍为 `Alunixa-Code/CodexPlusPlusPlus`，用户仓库发布流程保持不变喵~
 - 已将 Cargo workspace、四个 Cargo.lock workspace 包、管理器 package/package-lock 与 Tauri 配置精确升级为 `1.2.65`，没有升级任何传递依赖；`CHANGELOG.md` 新增详细同步范围、根因、行为和取舍说明喵~
 - 版本一致性核验通过：`cargo metadata --no-deps` 显示 core、data、launcher、manager 均为 `1.2.65`，Node package、lock 与 Tauri 也一致；本地品牌保护通过，`origin` 和仓库链接仍指向 `Alunixa-Code/CodexPlusPlusPlus`，`.github` 无差异喵~
+- 最终前端发布验证通过：Node 合约 `41/41`、TypeScript、Vite 生产构建、i18n plain `816/816` 与 template `76/76`、renderer/Stepwise/主题 JavaScript 语法、本地品牌保护和 Rust formatter 全部成功；Vite 仅有既有单 chunk 超过 500 kB 提醒喵~
+- 完整 workspace 已通过 core `258/258`、bridge `26/26`、CDP `91/91`、DreamSkin、安装器、launcher `80/80`、protocol proxy `62/62`、relay config `116/116` 等套件，最后在上游主题字节测试发现当前资源与陈旧哈希常量不匹配喵~
+- 审计确认当前主题文件来自较早 companion 版本并带局部修改，而用户指定的正式上游 `888f2bdc` 已更新 Windows/macOS 新聊天主表面、Dock/companion 与基础 CSS；现已将 12 份主题 JS/CSS 精确同步到该正式提交，并按 Git 规范 LF 做跨平台哈希验证喵~
+- 主题资源与 `888f2bdc` 的精确差异检查无输出，五份主题 renderer JavaScript 语法通过，`upstream_theme_assets` 定向测试 `1/1` 通过；哈希测试同时兼容 Windows CRLF 工作树和 Git/CI LF 规范字节喵~
