@@ -115,7 +115,10 @@ impl std::fmt::Debug for LaunchHandle {
 
 impl LaunchHandle {
     pub async fn wait_for_codex_exit(&self) -> anyhow::Result<()> {
-        let result = self.hooks.wait_for_codex_exit(&self.launch).await;
+        let result = self
+            .hooks
+            .wait_for_codex_exit(&self.launch, self.debug_port)
+            .await;
         if self.helper_started {
             self.hooks.shutdown_helper(self.helper_port).await;
         }
@@ -226,7 +229,11 @@ pub trait LaunchHooks: Send + Sync {
         Ok(())
     }
     async fn write_status(&self, status: &str);
-    async fn wait_for_codex_exit(&self, launch: &CodexLaunch) -> anyhow::Result<()>;
+    async fn wait_for_codex_exit(
+        &self,
+        launch: &CodexLaunch,
+        debug_port: u16,
+    ) -> anyhow::Result<()>;
     async fn shutdown_helper(&self, helper_port: u16);
     async fn terminate_codex(&self, launch: &CodexLaunch);
 }
@@ -1086,7 +1093,11 @@ impl LaunchHooks for DefaultLaunchHooks {
 
     async fn write_status(&self, _status: &str) {}
 
-    async fn wait_for_codex_exit(&self, launch: &CodexLaunch) -> anyhow::Result<()> {
+    async fn wait_for_codex_exit(
+        &self,
+        launch: &CodexLaunch,
+        debug_port: u16,
+    ) -> anyhow::Result<()> {
         match launch {
             CodexLaunch::Process { .. } => {
                 if let Some(mut child) = self.child.lock().await.take() {
@@ -1101,7 +1112,10 @@ impl LaunchHooks for DefaultLaunchHooks {
         }
         let mut empty_streak = 0u32;
         loop {
-            if crate::watcher::find_codex_processes().is_empty() {
+            let has_codex_process = !crate::watcher::find_codex_processes().is_empty();
+            let cdp_available = should_probe_launcher_cdp(cfg!(windows), has_codex_process)
+                && crate::ports::is_existing_codex_cdp_port(debug_port);
+            if !launcher_target_alive(has_codex_process, cdp_available) {
                 empty_streak = empty_streak.saturating_add(1);
                 if empty_streak >= 3 {
                     break;
@@ -1163,6 +1177,14 @@ impl LaunchHooks for DefaultLaunchHooks {
             } => {}
         }
     }
+}
+
+fn launcher_target_alive(has_codex_process: bool, cdp_available: bool) -> bool {
+    has_codex_process || cdp_available
+}
+
+fn should_probe_launcher_cdp(is_windows: bool, has_codex_process: bool) -> bool {
+    is_windows && !has_codex_process
 }
 
 async fn handle_helper_connection(
@@ -3430,6 +3452,20 @@ fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launcher_stays_alive_while_an_existing_cdp_endpoint_is_available() {
+        assert!(launcher_target_alive(false, true));
+        assert!(launcher_target_alive(true, false));
+        assert!(!launcher_target_alive(false, false));
+    }
+
+    #[test]
+    fn launcher_only_probes_cdp_for_unrecognized_windows_processes() {
+        assert!(should_probe_launcher_cdp(true, false));
+        assert!(!should_probe_launcher_cdp(true, true));
+        assert!(!should_probe_launcher_cdp(false, false));
+    }
 
     #[test]
     fn http_body_framing_rejects_ambiguous_or_unsupported_headers() {

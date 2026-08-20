@@ -1635,6 +1635,7 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             user_agent: String::new(),
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
+            model_routes: Vec::new(),
         }],
         active_relay_id: "relay-chat".to_string(),
         ..BackendSettings::default()
@@ -2130,7 +2131,11 @@ impl LaunchHooks for FakeHooks {
         self.event(format!("status:{status}"));
     }
 
-    async fn wait_for_codex_exit(&self, _launch: &CodexLaunch) -> anyhow::Result<()> {
+    async fn wait_for_codex_exit(
+        &self,
+        _launch: &CodexLaunch,
+        _debug_port: u16,
+    ) -> anyhow::Result<()> {
         self.event("wait-codex");
         Ok(())
     }

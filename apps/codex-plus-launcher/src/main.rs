@@ -689,8 +689,9 @@ impl LaunchHooks for LauncherHooks {
     async fn wait_for_codex_exit(
         &self,
         launch: &codex_plus_core::launcher::CodexLaunch,
+        debug_port: u16,
     ) -> anyhow::Result<()> {
-        self.core.wait_for_codex_exit(launch).await
+        self.core.wait_for_codex_exit(launch, debug_port).await
     }
 
     async fn shutdown_helper(&self, helper_port: u16) {
@@ -1337,7 +1338,14 @@ mod tests {
         let source = include_str!("main.rs");
 
         assert!(source.contains("async fn start_bridge_watchdog"));
-        assert!(source.contains(".start_bridge_watchdog(debug_port, helper_port)"));
+        assert!(
+            source
+                .contains(".start_bridge_connection_watchdog(debug_port, helper_port, reconnect)")
+        );
+        assert!(
+            source
+                .contains("inject_with_context(debug_port, helper_port, bridge_context, runtime)")
+        );
         assert!(source.contains("async fn ensure_computer_use_config"));
         assert!(source.contains("self.core.ensure_computer_use_config(settings).await"));
         assert!(source.contains("async fn ensure_plugin_marketplace_config"));

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -424,7 +424,14 @@ pub fn stop_launcher_processes() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn stop_launcher_processes() {
+    for process_id in find_macos_launcher_processes() {
+        let _ = terminate_macos_process(process_id);
+    }
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn stop_launcher_processes() {}
 
 #[cfg(windows)]
@@ -463,7 +470,16 @@ pub fn stop_launcher_processes_and_wait() -> anyhow::Result<()> {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+pub fn stop_launcher_processes_and_wait() -> anyhow::Result<()> {
+    terminate_macos_processes_and_wait(
+        find_macos_launcher_processes(),
+        find_macos_launcher_processes,
+        "Codex++ 后台进程",
+    )
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 pub fn stop_launcher_processes_and_wait() -> anyhow::Result<()> {
     Ok(())
 }
@@ -531,6 +547,123 @@ pub fn stop_codex_processes_and_wait() -> anyhow::Result<()> {
 #[cfg(not(windows))]
 pub fn stop_codex_processes_and_wait() -> anyhow::Result<()> {
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn stop_codex_processes_for_debug_port_and_wait(debug_port: u16) -> anyhow::Result<()> {
+    terminate_macos_processes_and_wait(
+        find_macos_codex_processes_for_debug_port(debug_port),
+        || find_macos_codex_processes_for_debug_port(debug_port),
+        "Codex 桌面进程",
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn stop_codex_processes_for_debug_port_and_wait(_debug_port: u16) -> anyhow::Result<()> {
+    stop_codex_processes_and_wait()
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_macos_processes_and_wait<F>(
+    process_ids: Vec<u32>,
+    mut find_processes: F,
+    label: &str,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Vec<u32>,
+{
+    for process_id in &process_ids {
+        let _ = terminate_macos_process(*process_id);
+    }
+    if process_ids.is_empty() {
+        return Ok(());
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(RESTART_STOP_WAIT_TIMEOUT_MS);
+    loop {
+        let remaining = process_ids_still_running(&process_ids, find_processes());
+        if remaining.is_empty() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "watcher.macos_stop_timeout",
+                serde_json::json!({
+                    "remaining_process_ids": remaining,
+                    "timeout_ms": RESTART_STOP_WAIT_TIMEOUT_MS,
+                    "label": label,
+                }),
+            );
+            anyhow::bail!(
+                "{label}未能在 {} 毫秒内退出，剩余 PID：{}",
+                RESTART_STOP_WAIT_TIMEOUT_MS,
+                remaining
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        std::thread::sleep(Duration::from_millis(RESTART_STOP_WAIT_INTERVAL_MS));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn terminate_macos_process(process_id: u32) -> std::io::Result<()> {
+    Command::new("kill")
+        .arg(process_id.to_string())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|_| ())
+}
+
+#[cfg(target_os = "macos")]
+fn find_macos_launcher_processes() -> Vec<u32> {
+    Command::new("pgrep")
+        .args(["-x", crate::install::SILENT_BINARY])
+        .output()
+        .ok()
+        .into_iter()
+        .flat_map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|value| value.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+#[cfg(target_os = "macos")]
+fn find_macos_codex_processes_for_debug_port(debug_port: u16) -> Vec<u32> {
+    let Ok(output) = Command::new("ps").args(["-axo", "pid=,args="]).output() else {
+        return Vec::new();
+    };
+    macos_codex_process_ids_for_debug_port(
+        String::from_utf8_lossy(&output.stdout).lines(),
+        debug_port,
+    )
+}
+
+pub fn macos_codex_process_ids_for_debug_port<'a>(
+    process_lines: impl IntoIterator<Item = &'a str>,
+    debug_port: u16,
+) -> Vec<u32> {
+    let debug_flag = format!("remote-debugging-port={debug_port}");
+    let mut ids = process_lines
+        .into_iter()
+        .filter_map(|line| {
+            let trimmed = line.trim_start();
+            let (pid, args) = trimmed.split_once(char::is_whitespace)?;
+            let process_id = pid.parse::<u32>().ok()?;
+            let is_desktop_main = (args.contains(".app/Contents/MacOS/ChatGPT")
+                || args.contains(".app/Contents/MacOS/Codex"))
+                && !args.contains("/Helpers/");
+            (is_desktop_main && args.contains(&debug_flag)).then_some(process_id)
+        })
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 #[cfg(windows)]

@@ -689,3 +689,11 @@
 - TypeScript 首轮发现当前仓库没有上游 `AppSelect` 组件，已改用项目现有 `field-select` 原生选择控件；Rust 首轮发现先前 DreamSkin 默认 companion 配置使用 `json!` 但缺少宏导入，均已修复喵~
 - i18n 已合并新路由与供应商导入安全文案，精确校验 plain `816/816`、template `76/76`；误用旧 codemod 产生的两项临时键清单已立即恢复，再以结构化 JSON 合并实际新增键，没有遗留清单损坏喵~
 - 路由专项 Rust HTTP 测试 `5/5` 通过，验证完整请求字段与源 JSON 保持、目标 API Key、可选模型改写、`/v1/responses/compact` 路径、精确非匹配回落、目标缺失/协议错误/本地代理目标失败喵~
+- 后续逐项审计确认当前 renderer 已包含 app-server 结构化候选发现 `v5`、Fast tier `v7`、新版 `app-initial-*` State/Host RPC、data bridge 连接级完整上下文重连、长确认弹窗滚动、DreamSkin companion、CODEX_SQLITE_HOME 统一解析、ChatGPT-Desktop 包识别和多数据库删除撤销，无需重复移植旧实现喵~
+- 发现 macOS 管理器重启仍调用非 Windows 空实现，现改为仅终止命令行含当前 `remote-debugging-port` 的 `Codex.app/Contents/MacOS/Codex` 或 `ChatGPT.app/Contents/MacOS/ChatGPT` 主进程，明确排除 Helpers 与 Codex CLI；launcher/helper 停止和超时失败均有明确结果喵~
+- Windows 已有 Codex CDP 的端口复用原本已覆盖，但 launcher 仅按进程枚举判断存活；现将 debug port 传入等待接口，在未识别桌面进程时继续探测已验证的 Codex CDP，避免误关 helper 与 bridge 喵~
+- 已更新 launcher bridge watchdog 合约断言以匹配当前更强的 `start_bridge_connection_watchdog` 和完整 `inject_with_context` 重连，不回退到会丢失数据服务的基础注入喵~
+- 前端生产构建成功，生成 JS `582.13 kB`、gzip `178.04 kB`，仅保留项目既有单 chunk 超过 `500 kB` 提醒；Node 前端合约再次 `41/41` 通过喵~
+- 全工作区直接 `cargo check --all-targets` 首次被 Tauri `2.11.1` 的 asset protocol allowlist 拒绝，确认当前 `tauri.conf.json` 已启用 DreamSkin 本地资源协议但 Cargo feature 遗漏；已补回上游现有 `protocol-asset` feature，并将其可选依赖 `http-range 0.1.5` 纳入锁文件喵~
+- Tauri feature 修复后 `cargo test --workspace --no-run` 成功编译全部 core/data/launcher/manager 单元与集成测试目标；期间补齐一个完整 RelayProfile 测试初始化缺失的 `model_routes` 字段，没有其他结构传播错误喵~
+- TypeScript 与 i18n 再次通过，macOS 当前仅安装 Windows Rust target，macOS 条件编译和 DMG 将由 GitHub Actions 的真实 macOS x64/arm64 runner 做权威验证喵~

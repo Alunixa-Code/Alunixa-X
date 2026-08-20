@@ -507,7 +507,9 @@ pub fn restart_codex_plus(request: LaunchRequest) -> CommandResult<Value> {
             }),
         );
     }
-    if let Err(error) = codex_plus_core::watcher::stop_codex_processes_and_wait() {
+    if let Err(error) =
+        codex_plus_core::watcher::stop_codex_processes_for_debug_port_and_wait(request.debug_port)
+    {
         return failed(
             &format!("Codex 进程未能完全停止，已取消重启：{error}"),
             json!({

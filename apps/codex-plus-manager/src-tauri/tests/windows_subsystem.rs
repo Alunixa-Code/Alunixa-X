@@ -19,6 +19,10 @@ fn manager_release_binary_uses_embedded_frontend_assets() {
         cargo_toml.contains("custom-protocol"),
         "release manager binary should use Tauri custom protocol instead of devUrl localhost"
     );
+    assert!(
+        cargo_toml.contains("protocol-asset"),
+        "DreamSkin local assets require Tauri's asset protocol feature"
+    );
 }
 
 #[test]
@@ -242,7 +246,7 @@ fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
 
     assert!(app_tsx.contains("snapshotActiveRelayFilesBeforeSwitch"));
     assert!(app_tsx.contains("backfill_relay_profile_from_live"));
-    assert!(app_tsx.contains("relayProfileSwitchValidation(selectedBeforeSave)"));
+    assert!(app_tsx.contains("relayProfileSwitchValidation(selectedBeforeSave, switchSettings)"));
     assert!(app_tsx.contains("缺少独立 config.toml"));
     assert!(app_tsx.contains("const command = relayProfileSwitchCommand(selectedAfterSave)"));
     assert!(app_tsx.contains("function relayProfileSwitchCommand"));
