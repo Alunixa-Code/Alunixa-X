@@ -742,4 +742,4 @@
 - 已增加通用代理与图片工具回归：覆盖全部 /v1/** 路由、URL 前缀归一化、图片编辑 multipart/二进制/查询参数/认证与请求头、响应下载头、Responses image_generation 工具及其 SSE 事件完全保真，以及 MCP 配置只管理 Codex++ 自己的 server 表喵~
 - 本轮只运行 Rust 编译与独立测试目标，不启动、重启、连接或操作当前 Codex、当前 helper、CDP 和现有任务喵~- 为避免“所有端点”遗漏 Realtime，已补充 /v1/realtime 等 OpenAI API WebSocket 透明代理：本地与上游分别完成握手，保留查询参数、OpenAI-Beta 和子协议，替换供应商认证，并双向转发 Text/Binary/Ping/Pong/Close 帧喵~
 - Realtime WebSocket 使用单次连接且不重放，连接失败在本地握手前返回 502；成功时把上游选择的 Sec-WebSocket-Protocol 返回 Codex，避免只补 HTTP 端点却让 Realtime 继续失效喵~
-- 协议代理专项回归现为 67/67 全部通过，包含 HTTP 全端点、图片生成/编辑、Responses 托管生图事件和 Realtime WebSocket；大 body 落盘、分片 multipart、MCP schema 与 MCP 配置专项也全部通过喵~
+- 协议代理专项回归现为 67/67 全部通过，包含 HTTP 全端点、图片生成/编辑、Responses 托管生图事件和 Realtime WebSocket；大 body 落盘、分片 multipart、MCP schema 与 MCP 配置专项也全部通过喵~- 补充 launcher 契约断言，确保正式二进制保留 --codex-plus-imagegen-mcp stdio 入口并由生产 LaunchHooks 转发启动配置；空 body 的 GET/HEAD 不再人为附加 Content-Length: 0 喵~

@@ -1363,6 +1363,9 @@ mod tests {
         assert!(source.contains("self.core.ensure_computer_use_config(settings).await"));
         assert!(source.contains("async fn ensure_plugin_marketplace_config"));
         assert!(source.contains("self.core.ensure_plugin_marketplace_config(settings).await"));
+        assert!(source.contains("--codex-plus-imagegen-mcp"));
+        assert!(source.contains("async fn ensure_imagegen_mcp_config"));
+        assert!(source.contains(".ensure_imagegen_mcp_config(settings, helper_port)"));
         assert!(source.contains("async fn start_computer_use_guard_watchdog"));
         assert!(source.contains("self.core"));
         assert!(source.contains(".start_computer_use_guard_watchdog(settings)"));

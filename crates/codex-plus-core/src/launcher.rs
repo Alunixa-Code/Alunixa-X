@@ -1403,7 +1403,7 @@ async fn handle_helper_connection(
             raw_path,
             &forward_headers,
             request_body,
-            Some(request_body_len),
+            (request_body_len > 0).then_some(request_body_len),
             request_user_agent.as_deref(),
             remote_addr_text,
         )
