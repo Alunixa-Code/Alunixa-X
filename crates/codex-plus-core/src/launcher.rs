@@ -1291,6 +1291,23 @@ async fn handle_helper_connection(
         return handle_backend_events_websocket(stream, &request_headers, &mut connection_shutdown)
             .await;
     }
+    if crate::protocol_proxy::is_transparent_api_proxy_path(path)
+        && method == "GET"
+        && header_value_from_headers(&request_headers, "upgrade")
+            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
+    {
+        let forward_headers = header_pairs_from_headers(&request_headers);
+        return handle_transparent_api_websocket(
+            stream,
+            &request_headers,
+            raw_path,
+            &forward_headers,
+            request_user_agent.as_deref(),
+            remote_addr_text,
+            &mut connection_shutdown,
+        )
+        .await;
+    }
 
     let request_body_bytes = request.body.as_bytes();
     let request_body = request_body_bytes.map(String::from_utf8_lossy);
@@ -1550,6 +1567,115 @@ async fn handle_backend_events_websocket(
             _ => {}
         }
     }
+    Ok(())
+}
+
+async fn handle_transparent_api_websocket(
+    mut stream: tokio::net::TcpStream,
+    request: &str,
+    request_path: &str,
+    request_headers: &[(String, String)],
+    request_user_agent: Option<&str>,
+    remote_addr_text: Option<String>,
+    connection_shutdown: &mut tokio::sync::broadcast::Receiver<()>,
+) -> anyhow::Result<()> {
+    let key = header_value_from_headers(request, "sec-websocket-key")
+        .ok_or_else(|| anyhow::anyhow!("WebSocket upgrade is missing Sec-WebSocket-Key"))?;
+    let version = header_value_from_headers(request, "sec-websocket-version")
+        .unwrap_or_else(|| "13".to_string());
+    if version != "13" {
+        anyhow::bail!("unsupported WebSocket version {version}");
+    }
+    let (mut upstream, upstream_response) =
+        match crate::protocol_proxy::open_transparent_websocket_request(
+            request_path,
+            request_headers,
+            request_user_agent,
+        )
+        .await
+        {
+            Ok(connected) => connected,
+            Err(error) => {
+                log_proxy_open_failure(
+                    "helper.transparent_websocket_open_failed",
+                    "GET",
+                    request_path,
+                    remote_addr_text.as_deref(),
+                    None,
+                    &error,
+                );
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "error": {
+                        "type": "codex_plus_proxy_error",
+                        "message": error.to_string()
+                    }
+                }))?;
+                write_http_response(
+                    &mut stream,
+                    "502 Bad Gateway",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+                .await?;
+                stream.shutdown().await?;
+                return Ok(());
+            }
+        };
+    let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
+    let mut response = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {accept_key}\r\n"
+    );
+    if let Some(protocol) = upstream_response
+        .headers()
+        .get("sec-websocket-protocol")
+        .and_then(|value| value.to_str().ok())
+    {
+        response.push_str("Sec-WebSocket-Protocol: ");
+        response.push_str(protocol);
+        response.push_str("\r\n");
+    }
+    response.push_str("\r\n");
+    stream.write_all(response.as_bytes()).await?;
+    let mut downstream = tokio_tungstenite::WebSocketStream::from_raw_socket(
+        stream,
+        tokio_tungstenite::tungstenite::protocol::Role::Server,
+        None,
+    )
+    .await;
+    loop {
+        tokio::select! {
+            _ = connection_shutdown.recv() => {
+                let _ = downstream.close(None).await;
+                let _ = upstream.close(None).await;
+                break;
+            }
+            message = downstream.next() => {
+                let Some(message) = message else { break; };
+                let message = message?;
+                let close = matches!(message, tokio_tungstenite::tungstenite::Message::Close(_));
+                upstream.send(message).await?;
+                if close {
+                    break;
+                }
+            }
+            message = upstream.next() => {
+                let Some(message) = message else { break; };
+                let message = message?;
+                let close = matches!(message, tokio_tungstenite::tungstenite::Message::Close(_));
+                downstream.send(message).await?;
+                if close {
+                    break;
+                }
+            }
+        }
+    }
+    log_helper_response(
+        "helper.transparent_websocket_closed",
+        "GET",
+        request_path,
+        "101 Switching Protocols",
+        remote_addr_text,
+    );
     Ok(())
 }
 

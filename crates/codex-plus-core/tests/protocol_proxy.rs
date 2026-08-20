@@ -10,9 +10,9 @@ use codex_plus_core::protocol_proxy::{
     open_models_proxy_request, open_responses_proxy_request,
     open_responses_proxy_request_with_settings,
     open_responses_proxy_request_with_settings_for_path,
-    open_transparent_proxy_request_with_settings, responses_error_from_upstream,
-    responses_to_anthropic_messages, responses_to_chat_completions, responses_to_completions,
-    responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
+    open_transparent_proxy_request_with_settings, open_transparent_websocket_request_with_settings,
+    responses_error_from_upstream, responses_to_anthropic_messages, responses_to_chat_completions,
+    responses_to_completions, responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
     send_upstream_request_with_header_timeout, transparent_api_url, upstream_header_timeout,
     upstream_http_client, upstream_stream_header_timeout,
 };
@@ -20,6 +20,7 @@ use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
     RelayMode, RelayModelRoute, RelayProfile, RelayProtocol,
 };
+use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -2256,6 +2257,98 @@ async fn responses_image_generation_tool_and_sse_events_are_forwarded_without_co
     assert_eq!(captured_json["tools"], request["tools"]);
     assert_eq!(captured_json["model"], request["model"]);
     assert_eq!(captured_json["stream"], true);
+}
+
+#[tokio::test]
+async fn transparent_realtime_websocket_preserves_auth_query_headers_and_frames() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let (captured_tx, captured_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut captured_tx = Some(captured_tx);
+        let mut websocket = tokio_tungstenite::accept_hdr_async(
+            stream,
+            move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                  mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
+                let captured = (
+                    request.uri().to_string(),
+                    request
+                        .headers()
+                        .get("authorization")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string(),
+                    request
+                        .headers()
+                        .get("openai-beta")
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or_default()
+                        .to_string(),
+                );
+                if let Some(sender) = captured_tx.take() {
+                    let _ = sender.send(captured);
+                }
+                response.headers_mut().insert(
+                    "sec-websocket-protocol",
+                    tokio_tungstenite::tungstenite::http::HeaderValue::from_static("realtime"),
+                );
+                Ok(response)
+            },
+        )
+        .await
+        .unwrap();
+        let message = websocket.next().await.unwrap().unwrap();
+        assert_eq!(message.into_text().unwrap(), "hello realtime");
+        websocket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                "realtime ok".into(),
+            ))
+            .await
+            .unwrap();
+    });
+    let (mut websocket, response) = open_transparent_websocket_request_with_settings(
+        "/v1/realtime?model=gpt-realtime",
+        &[
+            ("OpenAI-Beta".to_string(), "realtime=v1".to_string()),
+            ("Sec-WebSocket-Protocol".to_string(), "realtime".to_string()),
+            (
+                "Authorization".to_string(),
+                "Bearer must-not-forward".to_string(),
+            ),
+        ],
+        Some("Codex-Realtime-Test/1.0"),
+        transparent_proxy_settings(format!("http://{address}/v1")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response.headers().get("sec-websocket-protocol").unwrap(),
+        "realtime"
+    );
+    websocket
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            "hello realtime".into(),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        websocket
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap(),
+        "realtime ok"
+    );
+    let (path, authorization, beta) = captured_rx.await.unwrap();
+    assert_eq!(path, "/v1/realtime?model=gpt-realtime");
+    assert_eq!(authorization, "Bearer sk-transparent");
+    assert_eq!(beta, "realtime=v1");
+    server.await.unwrap();
 }
 
 fn model_route_settings(

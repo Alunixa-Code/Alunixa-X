@@ -1615,6 +1615,121 @@ pub async fn open_transparent_proxy_request_with_settings(
     })
 }
 
+pub type TransparentUpstreamWebSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+pub async fn open_transparent_websocket_request(
+    request_path: &str,
+    request_headers: &[(String, String)],
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<(
+    TransparentUpstreamWebSocket,
+    tokio_tungstenite::tungstenite::http::Response<Option<Vec<u8>>>,
+)> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    open_transparent_websocket_request_with_settings(
+        request_path,
+        request_headers,
+        original_user_agent,
+        settings,
+    )
+    .await
+}
+
+pub async fn open_transparent_websocket_request_with_settings(
+    request_path: &str,
+    request_headers: &[(String, String)],
+    original_user_agent: Option<&str>,
+    settings: crate::settings::BackendSettings,
+) -> anyhow::Result<(
+    TransparentUpstreamWebSocket,
+    tokio_tungstenite::tungstenite::http::Response<Option<Vec<u8>>>,
+)> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
+
+    if !is_transparent_api_proxy_path(request_path) {
+        anyhow::bail!("不允许透明代理非 OpenAI API WebSocket 路径：{request_path}");
+    }
+    let relay = transparent_proxy_relay(&settings)?;
+    validate_upstream(&relay)?;
+    let endpoint = transparent_api_url(&relay.base_url, request_path);
+    let mut endpoint = reqwest::Url::parse(&endpoint).context("透明 WebSocket 上游 URL 无效")?;
+    let websocket_scheme = match endpoint.scheme() {
+        "http" => "ws",
+        "https" => "wss",
+        "ws" => "ws",
+        "wss" => "wss",
+        scheme => anyhow::bail!("透明 WebSocket 不支持 URL scheme：{scheme}"),
+    };
+    endpoint
+        .set_scheme(websocket_scheme)
+        .map_err(|_| anyhow::anyhow!("无法转换透明 WebSocket URL scheme"))?;
+    let mut request = endpoint.as_str().into_client_request()?;
+    for (name, value) in request_headers {
+        if !transparent_websocket_request_header_allowed(name) {
+            continue;
+        }
+        let Ok(name) =
+            tokio_tungstenite::tungstenite::http::HeaderName::from_bytes(name.as_bytes())
+        else {
+            continue;
+        };
+        let Ok(value) = tokio_tungstenite::tungstenite::http::HeaderValue::from_str(value) else {
+            continue;
+        };
+        request.headers_mut().insert(name, value);
+    }
+    let user_agent = effective_user_agent(&relay.user_agent, original_user_agent);
+    request.headers_mut().insert(
+        tokio_tungstenite::tungstenite::http::header::USER_AGENT,
+        tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&user_agent)?,
+    );
+    match relay.protocol {
+        RelayProtocol::AnthropicMessages => {
+            request.headers_mut().insert(
+                "x-api-key",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_str(relay.api_key.trim())?,
+            );
+            request.headers_mut().insert(
+                "anthropic-version",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_static("2023-06-01"),
+            );
+        }
+        RelayProtocol::GeminiGenerateContent => {
+            request.headers_mut().insert(
+                "x-goog-api-key",
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_str(relay.api_key.trim())?,
+            );
+        }
+        _ => {
+            request.headers_mut().insert(
+                tokio_tungstenite::tungstenite::http::header::AUTHORIZATION,
+                tokio_tungstenite::tungstenite::http::HeaderValue::from_str(&format!(
+                    "Bearer {}",
+                    relay.api_key.trim()
+                ))?,
+            );
+        }
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.transparent_websocket_request",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
+            "endpoint": sanitized_endpoint(endpoint.as_str())
+        }),
+    );
+    let connected = tokio::time::timeout(
+        TRANSPARENT_PROXY_HEADER_TIMEOUT,
+        tokio_tungstenite::connect_async(request),
+    )
+    .await
+    .context("透明 WebSocket 上游连接超时")?
+    .context("透明 WebSocket 上游连接失败")?;
+    Ok(connected)
+}
+
 fn transparent_proxy_relay(
     settings: &crate::settings::BackendSettings,
 ) -> anyhow::Result<crate::settings::RelayProfile> {
@@ -1651,6 +1766,17 @@ fn transparent_request_header_allowed(name: &str) -> bool {
             | "upgrade"
             | "user-agent"
     )
+}
+
+fn transparent_websocket_request_header_allowed(name: &str) -> bool {
+    transparent_request_header_allowed(name)
+        && !matches!(
+            name.trim().to_ascii_lowercase().as_str(),
+            "sec-websocket-accept"
+                | "sec-websocket-extensions"
+                | "sec-websocket-key"
+                | "sec-websocket-version"
+        )
 }
 
 pub async fn open_responses_proxy_request(
