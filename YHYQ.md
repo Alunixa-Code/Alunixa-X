@@ -751,3 +751,5 @@
 - 最终完整 workspace 验证已成功：core `263/263`、CDP `91/91`、launcher `80/80`、relay config `117/117`、manager `33/33`、发行契约 `23/23` 及其余集成测试和 doc tests全部通过喵~
 - 完整测试期间发现发行契约测试用全文件第一个 `if cfg!(windows)` 定位启动顺序，新增 companion 后会误命中；现将断言范围限定到 `DefaultLaunchHooks::launch_codex`，只修复陈旧测试定位，不改变产品运行行为喵~
 - 本轮仍未启动、重启、连接或操作当前 Codex、当前 helper、CDP 或当前任务，验证仅使用隔离 companion 进程和自动化测试喵~
+- 最终快速终检通过：`cargo fmt --all -- --check`、`git diff --check`、Cargo/Node/Tauri `1.2.66` 版本一致性及 `origin` 用户仓库保护均通过喵~
+- 已清理本地 Rust `target`、管理器 `node_modules`/`dist` 与 `.tmp/npm-ci.*.log`；删除前逐项验证绝对路径位于 `D:\Cursor\CodexPP` 内，清理后四个路径均不存在喵~
