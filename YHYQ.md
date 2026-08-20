@@ -731,3 +731,6 @@
 - macOS x64 DMG 为 `29,358,285` 字节，SHA-256 `e88318de4c72e97027018431bf3dddc28277a84a7a28910ec08e45d46c2a04bb`；x64 ZIP 为 `24,867,377` 字节，SHA-256 `694d20819431633818552e23a1ebb9e4241e9ad59cef012d263c498ba065b13d` 喵~
 - macOS arm64 DMG 为 `28,261,769` 字节，SHA-256 `567feaae73a65d2f4eb58b9a561fbf33840ec5e859ba2799be97ec8a681c2beb`；arm64 ZIP 为 `24,324,064` 字节，SHA-256 `6e0b101c3613923428eb06f52095b76820dc47548f75f00c3d088e42cbb2bcf4` 喵~
 - Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程未启动、重启、连接或操作当前 Codex、当前任务、helper、CDP 与现有服务做测试喵~
+- 用户报告 Codex++ 当前无法通过 `$imagegen` / `image_generation` 正常生成图片，且协议代理只覆盖少量 API 路径；要求补齐图片生成、编辑和所有其他 OpenAI 端点的可用转发喵~
+- 已读取项目历史、现有代理路由、imagegen 技能契约与 OpenAI 官方 API 文档；确认需要同时解决 Codex Responses 托管 `image_generation` 工具保真和 Image API/其余 HTTP 端点透明转发，不能只新增 `/images/generations` 一个路径喵~
+- 当前工作树仍只有三个与 HEAD 内容相同的 CRLF 状态噪声文件；已创建修改前空检查点 `efc201d6`，后续继续不启动、重启、连接或操作正在运行的 Codex、helper 与 CDP 做测试喵~
