@@ -184,8 +184,7 @@ pub fn set_codex_imagegen_mcp_in_home(
         server["tool_timeout_sec"] = toml_edit::value(900);
         server["enabled"] = toml_edit::value(true);
         let mut env = Table::new();
-        env["CODEX_PLUS_HELPER_URL"] =
-            toml_edit::value(format!("http://127.0.0.1:{helper_port}"));
+        env["CODEX_PLUS_HELPER_URL"] = toml_edit::value(format!("http://127.0.0.1:{helper_port}"));
         server["env"] = Item::Table(env);
         servers[CODEX_PLUS_IMAGEGEN_MCP_SERVER_ID] = Item::Table(server);
     } else if let Some(servers) = table_mut_if_exists(&mut doc, "mcp_servers") {

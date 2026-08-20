@@ -11,9 +11,9 @@ use codex_plus_core::relay_config::{
     extract_common_config_from_config, filter_common_config_for_selection,
     list_context_entries_from_common_config, normalize_relay_profile_for_storage,
     relay_config_status_from_home, sanitize_common_config_contents,
-    set_codex_goals_feature_in_home, set_codex_sub_agent_max_threads_in_home,
-    strip_common_config_from_config, sync_live_config_context_entries,
-    upsert_context_entry_in_common_config,
+    set_codex_goals_feature_in_home, set_codex_imagegen_mcp_in_home,
+    set_codex_sub_agent_max_threads_in_home, strip_common_config_from_config,
+    sync_live_config_context_entries, upsert_context_entry_in_common_config,
 };
 use codex_plus_core::settings::{
     CustomRelayModel, RelayContextSelection, RelayMode, RelayProfile, RelayProtocol,
@@ -1516,6 +1516,36 @@ other = true
     assert!(config.contains("[features]"));
     assert!(config.contains("other = true"));
     assert!(!config.contains("goals = true"));
+}
+
+#[test]
+fn imagegen_mcp_config_is_managed_without_touching_user_servers() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_path = temp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        "model = \"gpt-5\"\n\n[mcp_servers.user-server]\ncommand = \"user-mcp\"\n",
+    )
+    .unwrap();
+    let launcher = if cfg!(windows) {
+        std::path::PathBuf::from(r"C:\Program Files\Codex++\codex-plus-plus.exe")
+    } else {
+        std::path::PathBuf::from("/Applications/Codex++.app/Contents/MacOS/codex-plus-plus")
+    };
+
+    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &launcher, 57321, true).unwrap());
+    let enabled = std::fs::read_to_string(&config_path).unwrap();
+    assert!(enabled.contains("[mcp_servers.user-server]"));
+    assert!(enabled.contains("[mcp_servers.codex-plus-imagegen]"));
+    assert!(enabled.contains("--codex-plus-imagegen-mcp"));
+    assert!(enabled.contains("http://127.0.0.1:57321"));
+    assert!(enabled.contains("tool_timeout_sec = 900"));
+
+    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &launcher, 57321, false).unwrap());
+    let disabled = std::fs::read_to_string(&config_path).unwrap();
+    assert!(disabled.contains("[mcp_servers.user-server]"));
+    assert!(!disabled.contains("codex-plus-imagegen"));
+    assert!(disabled.contains("model = \"gpt-5\""));
 }
 
 #[test]

@@ -1566,29 +1566,27 @@ pub async fn open_transparent_proxy_request_with_settings(
             "headerTimeoutSeconds": TRANSPARENT_PROXY_HEADER_TIMEOUT.as_secs()
         }),
     );
-    let upstream = match send_upstream_request_with_header_timeout(
-        request,
-        TRANSPARENT_PROXY_HEADER_TIMEOUT,
-    )
-    .await
-    {
-        Ok(response) => response,
-        Err(error) => {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "protocol_proxy.transparent_request_failed",
-                json!({
-                    "relayId": relay.id,
-                    "relayName": relay.name,
-                    "method": method.as_str(),
-                    "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
-                    "endpoint": sanitized_endpoint(&endpoint),
-                    "bodyBytes": body_len,
-                    "error": sanitized_upstream_error(&error)
-                }),
-            );
-            return Err(error).context("透明 API 上游请求失败");
-        }
-    };
+    let upstream =
+        match send_upstream_request_with_header_timeout(request, TRANSPARENT_PROXY_HEADER_TIMEOUT)
+            .await
+        {
+            Ok(response) => response,
+            Err(error) => {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "protocol_proxy.transparent_request_failed",
+                    json!({
+                        "relayId": relay.id,
+                        "relayName": relay.name,
+                        "method": method.as_str(),
+                        "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
+                        "endpoint": sanitized_endpoint(&endpoint),
+                        "bodyBytes": body_len,
+                        "error": sanitized_upstream_error(&error)
+                    }),
+                );
+                return Err(error).context("透明 API 上游请求失败");
+            }
+        };
     let status_code = upstream.status().as_u16();
     let content_type = upstream
         .headers()
@@ -2620,9 +2618,7 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
             }
             UpstreamWireApi::Responses
             | UpstreamWireApi::AudioTranscriptions
-            | UpstreamWireApi::Transparent => {
-                upstream_body.to_vec()
-            }
+            | UpstreamWireApi::Transparent => upstream_body.to_vec(),
         };
         return Ok(ProxyHttpResponse {
             status: "200 OK".to_string(),

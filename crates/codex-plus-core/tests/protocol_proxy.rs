@@ -5,15 +5,16 @@ use codex_plus_core::protocol_proxy::{
     chat_sse_to_responses_sse_with_request, completions_url,
     gemini_generate_content_to_response_with_request, gemini_generate_content_url,
     is_audio_transcriptions_proxy_path, is_chat_completions_proxy_path, is_models_proxy_path,
-    is_responses_proxy_path, models_url, normalize_models_payload,
+    is_responses_proxy_path, is_transparent_api_proxy_path, models_url, normalize_models_payload,
     open_audio_transcriptions_proxy_request, open_chat_completions_proxy_request,
     open_models_proxy_request, open_responses_proxy_request,
     open_responses_proxy_request_with_settings,
-    open_responses_proxy_request_with_settings_for_path, responses_error_from_upstream,
+    open_responses_proxy_request_with_settings_for_path,
+    open_transparent_proxy_request_with_settings, responses_error_from_upstream,
     responses_to_anthropic_messages, responses_to_chat_completions, responses_to_completions,
     responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
-    send_upstream_request_with_header_timeout, upstream_header_timeout, upstream_http_client,
-    upstream_stream_header_timeout,
+    send_upstream_request_with_header_timeout, transparent_api_url, upstream_header_timeout,
+    upstream_http_client, upstream_stream_header_timeout,
 };
 use codex_plus_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
@@ -294,6 +295,59 @@ fn proxy_route_matchers_accept_ccswitch_codex_aliases() {
     ] {
         assert!(is_audio_transcriptions_proxy_path(path), "{path}");
     }
+}
+
+#[test]
+fn transparent_proxy_matches_all_versioned_api_paths_and_known_root_aliases() {
+    for path in [
+        "/v1/images/generations",
+        "/v1/images/edits",
+        "/v1/files/file_123/content",
+        "/v1/uploads/upload_123/parts?after=part_1",
+        "/v1/batches",
+        "/v1/vector_stores/vs_123/files",
+        "/v1/audio/speech",
+        "/v1/videos",
+        "/v1/v1/moderations",
+        "/codex/v1/embeddings",
+        "/images/generations",
+        "/fine_tuning/jobs",
+    ] {
+        assert!(is_transparent_api_proxy_path(path), "{path}");
+    }
+    for path in [
+        "/backend/status",
+        "/shared-terminal/submit",
+        "/overlay/image",
+    ] {
+        assert!(!is_transparent_api_proxy_path(path), "{path}");
+    }
+}
+
+#[test]
+fn transparent_api_url_preserves_custom_roots_queries_and_single_v1_prefix() {
+    assert_eq!(
+        transparent_api_url("https://api.example.test", "/v1/images/generations?trace=1"),
+        "https://api.example.test/v1/images/generations?trace=1"
+    );
+    assert_eq!(
+        transparent_api_url(
+            "https://api.example.test/v1/responses",
+            "/v1/v1/files/file_123/content"
+        ),
+        "https://api.example.test/v1/files/file_123/content"
+    );
+    assert_eq!(
+        transparent_api_url(
+            "https://api.example.test/openai/v1",
+            "/codex/v1/uploads/upload_123/complete"
+        ),
+        "https://api.example.test/openai/v1/uploads/upload_123/complete"
+    );
+    assert_eq!(
+        transparent_api_url("https://api.example.test/openai#", "/v1/images/edits"),
+        "https://api.example.test/openai/images/edits"
+    );
 }
 
 #[test]
@@ -2012,6 +2066,196 @@ async fn capture_json_request_once(
     );
     stream.write_all(response.as_bytes()).await.unwrap();
     (headers, body)
+}
+
+#[derive(Debug)]
+struct CapturedRawRequest {
+    headers: String,
+    body: Vec<u8>,
+}
+
+async fn capture_raw_request_once(
+    listener: tokio::net::TcpListener,
+    response: Vec<u8>,
+) -> CapturedRawRequest {
+    let (mut stream, _) = listener.accept().await.unwrap();
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let (body_start, content_length) = loop {
+        let read = stream.read(&mut chunk).await.unwrap();
+        assert!(read > 0, "request closed before headers completed");
+        request.extend_from_slice(&chunk[..read]);
+        let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+        break (header_end + 4, content_length);
+    };
+    while request.len() < body_start + content_length {
+        let read = stream.read(&mut chunk).await.unwrap();
+        assert!(read > 0, "request closed before body completed");
+        request.extend_from_slice(&chunk[..read]);
+    }
+    stream.write_all(&response).await.unwrap();
+    CapturedRawRequest {
+        headers: String::from_utf8_lossy(&request[..body_start - 4]).to_string(),
+        body: request[body_start..body_start + content_length].to_vec(),
+    }
+}
+
+fn transparent_proxy_settings(base_url: String) -> BackendSettings {
+    BackendSettings {
+        active_relay_id: "transparent".to_string(),
+        relay_profiles: vec![RelayProfile {
+            id: "transparent".to_string(),
+            name: "Transparent".to_string(),
+            base_url,
+            api_key: "sk-transparent".to_string(),
+            protocol: RelayProtocol::Responses,
+            relay_mode: RelayMode::PureApi,
+            ..RelayProfile::default()
+        }],
+        ..BackendSettings::default()
+    }
+}
+
+#[tokio::test]
+async fn transparent_proxy_preserves_method_query_binary_body_and_end_to_end_headers() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let response_body = vec![0x00, 0x80, 0xff, b'I', b'M', b'G'];
+    let mut response = format!(
+        "HTTP/1.1 201 Created\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename=generated.png\r\nETag: image-etag\r\nOpenAI-Request-ID: req_image_123\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response_body.len()
+    )
+    .into_bytes();
+    response.extend_from_slice(&response_body);
+    let server = tokio::spawn(capture_raw_request_once(listener, response));
+    let request_body = b"--boundary\r\nContent-Disposition: form-data; name=\"prompt\"\r\n\r\ncat\r\n--boundary--\r\n".to_vec();
+    let upstream = open_transparent_proxy_request_with_settings(
+        "POST",
+        "/v1/images/edits?trace=1",
+        &[
+            (
+                "Content-Type".to_string(),
+                "multipart/form-data; boundary=boundary".to_string(),
+            ),
+            ("Accept".to_string(), "image/png".to_string()),
+            ("OpenAI-Project".to_string(), "project_123".to_string()),
+            ("Idempotency-Key".to_string(), "idem_123".to_string()),
+            (
+                "Authorization".to_string(),
+                "Bearer must-not-forward".to_string(),
+            ),
+            ("Cookie".to_string(), "must-not-forward=yes".to_string()),
+        ],
+        reqwest::Body::from(request_body.clone()),
+        Some(request_body.len() as u64),
+        Some("Codex-Test/1.0"),
+        transparent_proxy_settings(format!("http://{address}/v1")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(upstream.status_code, 201);
+    assert_eq!(upstream.content_type, "image/png");
+    assert_eq!(
+        upstream
+            .response
+            .headers()
+            .get("content-disposition")
+            .unwrap(),
+        "attachment; filename=generated.png"
+    );
+    assert_eq!(
+        upstream
+            .response
+            .headers()
+            .get("openai-request-id")
+            .unwrap(),
+        "req_image_123"
+    );
+    assert_eq!(
+        upstream.response.bytes().await.unwrap().as_ref(),
+        response_body
+    );
+
+    let captured = server.await.unwrap();
+    assert!(
+        captured
+            .headers
+            .starts_with("POST /v1/images/edits?trace=1 HTTP/1.1")
+    );
+    assert!(
+        captured
+            .headers
+            .contains("authorization: Bearer sk-transparent")
+    );
+    assert!(captured.headers.contains("openai-project: project_123"));
+    assert!(captured.headers.contains("idempotency-key: idem_123"));
+    assert!(!captured.headers.contains("must-not-forward"));
+    assert_eq!(captured.body, request_body);
+}
+
+#[tokio::test]
+async fn responses_image_generation_tool_and_sse_events_are_forwarded_without_conversion() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let sse = concat!(
+        "event: response.image_generation_call.in_progress\n",
+        "data: {\"type\":\"response.image_generation_call.in_progress\",\"item_id\":\"img_1\"}\n\n",
+        "event: response.image_generation_call.completed\n",
+        "data: {\"type\":\"response.image_generation_call.completed\",\"item_id\":\"img_1\",\"result\":\"aW1hZ2U=\"}\n\n"
+    );
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        sse.len(),
+        sse
+    )
+    .into_bytes();
+    let server = tokio::spawn(capture_raw_request_once(listener, response));
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": "Generate a cat image",
+        "stream": true,
+        "tools": [{
+            "type": "image_generation",
+            "size": "1024x1024",
+            "quality": "high",
+            "background": "transparent"
+        }]
+    });
+    let upstream = open_responses_proxy_request_with_settings(
+        &serde_json::to_string(&request).unwrap(),
+        transparent_proxy_settings(format!("http://{address}/v1")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(upstream.status_code, 200);
+    assert!(upstream.is_stream);
+    assert_eq!(upstream.wire_api, UpstreamWireApi::Responses);
+    assert_eq!(
+        upstream.response.bytes().await.unwrap().as_ref(),
+        sse.as_bytes()
+    );
+
+    let captured = server.await.unwrap();
+    let captured_json: serde_json::Value = serde_json::from_slice(&captured.body).unwrap();
+    assert_eq!(captured_json["tools"], request["tools"]);
+    assert_eq!(captured_json["model"], request["model"]);
+    assert_eq!(captured_json["stream"], true);
 }
 
 fn model_route_settings(

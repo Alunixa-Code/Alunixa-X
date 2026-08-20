@@ -738,4 +738,6 @@
 - 通用代理不会对非幂等请求自动重试或聚合故障转移，响应状态、二进制/SSE body 与安全端到端响应头原样返回，图片、文件、上传、批处理、嵌入、审核、语音、视频、向量库等不再被 helper 的 404 白名单阻断喵~
 - HTTP 请求读取器已改为 64 MiB 内存加临时文件的混合 body，Content-Length 与 chunked 均增量落盘，最大支持 8 GiB，避免大图片编辑、Files 和 Uploads 请求把全部内容常驻内存喵~
 - 已新增 Codex++ image_gen MCP 服务基础实现：通过当前 helper 的 /v1/images/generations 与 /v1/images/edits 调用活动供应商，支持本地多图编辑、mask、尺寸、质量、背景、格式和多变体，并把输出保存到 CODEX_HOME/generated_images 后以 MCP image content 返回喵~
-- 启动流程将为增强已开启且供应商管理已启用的环境写入专用 codex-plus-imagegen MCP 配置，关闭对应能力时只移除 Codex++ 自己的表，不覆盖用户其他 MCP、Skills 或 Plugins 配置喵~
+- 启动流程将为增强已开启且供应商管理已启用的环境写入专用 codex-plus-imagegen MCP 配置，关闭对应能力时只移除 Codex++ 自己的表，不覆盖用户其他 MCP、Skills 或 Plugins 配置喵~- 第一次隔离 cargo check 在新增 MCP stdio 入口发现 Tokio 未启用 io-std，已只补齐所需 feature 后复查通过；当前唯一警告来自仅供单元测试使用的旧 ChunkedBody 类型，已改为测试条件编译喵~
+- 已增加通用代理与图片工具回归：覆盖全部 /v1/** 路由、URL 前缀归一化、图片编辑 multipart/二进制/查询参数/认证与请求头、响应下载头、Responses image_generation 工具及其 SSE 事件完全保真，以及 MCP 配置只管理 Codex++ 自己的 server 表喵~
+- 本轮只运行 Rust 编译与独立测试目标，不启动、重启、连接或操作当前 Codex、当前 helper、CDP 和现有任务喵~

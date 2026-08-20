@@ -54,7 +54,10 @@ pub async fn run_imagegen_mcp_from_stdio() -> anyhow::Result<()> {
                 "result": { "tools": [image_gen_tool_definition()] }
             }),
             "tools/call" => {
-                let name = request.pointer("/params/name").and_then(Value::as_str).unwrap_or("");
+                let name = request
+                    .pointer("/params/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 if name != "image_gen" {
                     json_rpc_error(id, -32602, format!("未知工具：{name}"))
                 } else {
@@ -145,17 +148,25 @@ async fn execute_image_gen(arguments: &Value) -> anyhow::Result<Value> {
         format!("{helper_url}/v1/images/edits")
     };
     let client = reqwest::Client::builder()
-        .user_agent(format!("CodexPlusPlus-ImageGen/{}", crate::version::VERSION))
+        .user_agent(format!(
+            "CodexPlusPlus-ImageGen/{}",
+            crate::version::VERSION
+        ))
         .timeout(std::time::Duration::from_secs(900))
         .build()?;
     let request = if image_paths.is_empty() {
-        client.post(&endpoint).json(&image_generation_payload(arguments, prompt))
+        client
+            .post(&endpoint)
+            .json(&image_generation_payload(arguments, prompt))
     } else {
         client
             .post(&endpoint)
             .multipart(image_edit_form(arguments, prompt, &image_paths).await?)
     };
-    let response = request.send().await.context("连接 Codex++ 全端点代理失败")?;
+    let response = request
+        .send()
+        .await
+        .context("连接 Codex++ 全端点代理失败")?;
     let status = response.status();
     let body = response.bytes().await.context("读取图片端点响应失败")?;
     if !status.is_success() {
@@ -196,7 +207,11 @@ async fn execute_image_gen(arguments: &Value) -> anyhow::Result<Value> {
         .filter_map(|item| item.get("revised_prompt").and_then(Value::as_str))
         .collect::<Vec<_>>();
     let summary = if revised_prompts.is_empty() {
-        format!("已生成并保存 {} 张图片：\n{}", saved_paths.len(), saved_paths.join("\n"))
+        format!(
+            "已生成并保存 {} 张图片：\n{}",
+            saved_paths.len(),
+            saved_paths.join("\n")
+        )
     } else {
         format!(
             "已生成并保存 {} 张图片：\n{}\n修订后的提示词：\n{}",
@@ -221,7 +236,11 @@ fn image_generation_payload(arguments: &Value, prompt: &str) -> Value {
     payload.insert("prompt".to_string(), Value::String(prompt.to_string()));
     payload.insert(
         "model".to_string(),
-        Value::String(string_argument(arguments, "model").unwrap_or(DEFAULT_IMAGE_MODEL).to_string()),
+        Value::String(
+            string_argument(arguments, "model")
+                .unwrap_or(DEFAULT_IMAGE_MODEL)
+                .to_string(),
+        ),
     );
     payload.insert(
         "n".to_string(),
@@ -347,7 +366,11 @@ async fn extract_image_outputs(
         if !matches!(parsed.scheme(), "http" | "https") {
             anyhow::bail!("图片响应 URL 仅支持 HTTP/HTTPS");
         }
-        let response = client.get(parsed).send().await.context("下载生成图片失败")?;
+        let response = client
+            .get(parsed)
+            .send()
+            .await
+            .context("下载生成图片失败")?;
         let response = response.error_for_status().context("下载生成图片失败")?;
         let content_type = response
             .headers()
@@ -365,8 +388,12 @@ async fn extract_image_outputs(
 }
 
 fn helper_url() -> anyhow::Result<String> {
-    let raw = std::env::var("CODEX_PLUS_HELPER_URL")
-        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT));
+    let raw = std::env::var("CODEX_PLUS_HELPER_URL").unwrap_or_else(|_| {
+        format!(
+            "http://127.0.0.1:{}",
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT
+        )
+    });
     let url = reqwest::Url::parse(raw.trim()).context("CODEX_PLUS_HELPER_URL 无效")?;
     let is_loopback = match url.host_str().unwrap_or_default() {
         "localhost" | "::1" => true,
@@ -399,7 +426,11 @@ fn unique_output_path(dir: &Path, stamp: u128, index: usize, extension: &str) ->
             return candidate;
         }
     }
-    dir.join(format!("codex-plus-{stamp}-{index}-{}.{}", std::process::id(), extension))
+    dir.join(format!(
+        "codex-plus-{stamp}-{index}-{}.{}",
+        std::process::id(),
+        extension
+    ))
 }
 
 fn string_argument<'a>(arguments: &'a Value, key: &str) -> Option<&'a str> {
@@ -467,7 +498,11 @@ mod tests {
         let tool = image_gen_tool_definition();
         assert_eq!(tool["name"], "image_gen");
         assert_eq!(tool["inputSchema"]["required"], json!(["prompt"]));
-        assert!(tool["inputSchema"]["properties"].get("image_paths").is_some());
+        assert!(
+            tool["inputSchema"]["properties"]
+                .get("image_paths")
+                .is_some()
+        );
         assert!(tool["inputSchema"]["properties"].get("mask_path").is_some());
     }
 

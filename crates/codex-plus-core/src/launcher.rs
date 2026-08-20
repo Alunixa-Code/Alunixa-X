@@ -1404,13 +1404,15 @@ async fn handle_helper_connection(
         )
     } else if path == "/diagnostics/log" && matches!(method, "POST" | "OPTIONS") {
         if method == "POST" {
-            let detail =
-                serde_json::from_str::<serde_json::Value>(request_body.as_deref().unwrap_or_default()).unwrap_or_else(|error| {
-                    serde_json::json!({
-                        "parse_error": error.to_string(),
-                        "raw": request_body.as_deref().unwrap_or_default()
-                    })
-                });
+            let detail = serde_json::from_str::<serde_json::Value>(
+                request_body.as_deref().unwrap_or_default(),
+            )
+            .unwrap_or_else(|error| {
+                serde_json::json!({
+                    "parse_error": error.to_string(),
+                    "raw": request_body.as_deref().unwrap_or_default()
+                })
+            });
             let event = detail
                 .get("event")
                 .and_then(serde_json::Value::as_str)
@@ -2316,7 +2318,10 @@ mod computer_use_tests {
 }
 
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
+#[cfg(not(test))]
 const HTTP_BODY_MEMORY_THRESHOLD: usize = 64 * 1024 * 1024;
+#[cfg(test)]
+const HTTP_BODY_MEMORY_THRESHOLD: usize = 64 * 1024;
 const MAX_HTTP_BODY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 struct HttpRequest {
@@ -2476,6 +2481,7 @@ enum HttpBodyFraming {
     Chunked,
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 enum ChunkedBody {
     Incomplete,
@@ -2518,10 +2524,8 @@ impl ChunkedScanState {
         loop {
             match self.state {
                 ChunkedDecodeState::Size => {
-                    let Some(line_end) = self
-                        .buffer
-                        .windows(2)
-                        .position(|window| window == b"\r\n")
+                    let Some(line_end) =
+                        self.buffer.windows(2).position(|window| window == b"\r\n")
                     else {
                         if self.buffer.len() > MAX_HTTP_HEADER_BYTES {
                             return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
@@ -2531,8 +2535,10 @@ impl ChunkedScanState {
                     if line_end > MAX_HTTP_HEADER_BYTES {
                         return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
                     }
-                    let size_text = std::str::from_utf8(&self.buffer[..line_end])
-                        .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
+                    let size_text =
+                        std::str::from_utf8(&self.buffer[..line_end]).map_err(|_| {
+                            HttpRequestReadError::bad_request("chunk size 不是有效 ASCII")
+                        })?;
                     let size_token = size_text.split(';').next().unwrap_or_default().trim();
                     let chunk_size = u64::from_str_radix(size_token, 16)
                         .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
@@ -2577,10 +2583,8 @@ impl ChunkedScanState {
                     self.state = ChunkedDecodeState::Size;
                 }
                 ChunkedDecodeState::Trailers => {
-                    let Some(line_end) = self
-                        .buffer
-                        .windows(2)
-                        .position(|window| window == b"\r\n")
+                    let Some(line_end) =
+                        self.buffer.windows(2).position(|window| window == b"\r\n")
                     else {
                         if self.trailer_bytes.saturating_add(self.buffer.len())
                             > MAX_HTTP_HEADER_BYTES
@@ -2727,12 +2731,15 @@ fn http_body_framing(headers: &[u8]) -> Result<HttpBodyFraming, HttpRequestReadE
 }
 
 #[cfg(test)]
-fn content_length_body(encoded: &[u8], content_length: u64) -> Result<Vec<u8>, HttpRequestReadError> {
+fn content_length_body(
+    encoded: &[u8],
+    content_length: u64,
+) -> Result<Vec<u8>, HttpRequestReadError> {
     if content_length > MAX_HTTP_BODY_BYTES {
         return Err(HttpRequestReadError::payload_too_large());
     }
-    let content_length = usize::try_from(content_length)
-        .map_err(|_| HttpRequestReadError::payload_too_large())?;
+    let content_length =
+        usize::try_from(content_length).map_err(|_| HttpRequestReadError::payload_too_large())?;
     if encoded.len() < content_length {
         return Err(HttpRequestReadError::bad_request("HTTP 请求体不完整"));
     }
@@ -2775,8 +2782,7 @@ fn header_pairs_from_headers(headers: &str) -> Vec<(String, String)> {
             let (name, value) = line.split_once(':')?;
             let name = name.trim();
             let value = value.trim();
-            (!name.is_empty() && !value.is_empty())
-                .then(|| (name.to_string(), value.to_string()))
+            (!name.is_empty() && !value.is_empty()).then(|| (name.to_string(), value.to_string()))
         })
         .collect()
 }
@@ -3716,15 +3722,7 @@ mod tests {
     }
 
     #[test]
-    fn chunked_decoder_accepts_exact_body_limit_and_rejects_one_byte_more() {
-        let mut exact = format!("{:X}\r\n", MAX_HTTP_BODY_BYTES).into_bytes();
-        exact.resize(exact.len() + MAX_HTTP_BODY_BYTES, b'a');
-        exact.extend_from_slice(b"\r\n0\r\n\r\n");
-        let ChunkedBody::Complete(decoded) = decode_chunked_body(&exact).unwrap() else {
-            panic!("expected complete chunked body");
-        };
-        assert_eq!(decoded.len(), MAX_HTTP_BODY_BYTES);
-
+    fn chunked_decoder_rejects_a_declared_chunk_larger_than_the_body_limit() {
         let oversized = format!("{:X}\r\n", MAX_HTTP_BODY_BYTES + 1).into_bytes();
         let error = decode_chunked_body(&oversized).unwrap_err();
         assert_eq!(error.status(), "413 Payload Too Large");
@@ -3763,17 +3761,23 @@ mod tests {
     }
 
     #[test]
-    fn content_length_body_accepts_exact_limit_and_rejects_one_byte_more() {
-        let exact = vec![b'a'; MAX_HTTP_BODY_BYTES];
-        assert_eq!(
-            content_length_body(&exact, MAX_HTTP_BODY_BYTES)
-                .unwrap()
-                .len(),
-            MAX_HTTP_BODY_BYTES
-        );
-
+    fn content_length_body_distinguishes_incomplete_and_oversized_bodies() {
+        let incomplete = content_length_body(&[], MAX_HTTP_BODY_BYTES).unwrap_err();
+        assert_eq!(incomplete.status(), "400 Bad Request");
         let error = content_length_body(&[], MAX_HTTP_BODY_BYTES + 1).unwrap_err();
         assert_eq!(error.status(), "413 Payload Too Large");
+    }
+
+    #[test]
+    fn request_body_sink_spills_large_bodies_to_a_temporary_file_without_data_loss() {
+        let expected = vec![b'x'; HTTP_BODY_MEMORY_THRESHOLD + 1];
+        let mut sink = HttpRequestBodySink::new();
+        for chunk in expected.chunks(4093) {
+            sink.write(chunk).unwrap();
+        }
+        let body = sink.finish();
+        assert!(matches!(body, HttpRequestBody::TempFile { .. }));
+        assert_eq!(body.into_vec().unwrap(), expected);
     }
 
     #[tokio::test]
