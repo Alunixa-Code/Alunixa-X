@@ -655,3 +655,9 @@
 - 上游“供应商模型立即热应用”与用户此前明确删除动态重载的决定冲突，因此不会同步；当前仓库继续以启动前完整注入、失败关闭和当前模型上下文/压缩 Token 阈值原子一致为权威行为喵~
 - 用户明确批准恢复 `Cargo.lock`、完成全部选择性同步、提交、推送用户仓库并通过 GitHub Actions 构建和发行；本轮不再受此前审批服务 `503` 阻塞喵~
 - 已执行精确 `git restore --worktree -- Cargo.lock`，仅撤销离线锁文件重生成造成的无关传递依赖漂移；恢复后 `Cargo.lock` 与 HEAD 完全一致，微信连接文件也确认仅有工作树换行状态噪声、没有内容差异喵~
+- DreamSkin 安全市场与协议阶段已按白名单提交为 `d07b0317`，共 48 个文件；提交未包含 `Cargo.lock`、微信格式噪声或模型兼容 CRLF 噪声喵~
+- 已同步上游 `v1.2.50` 用户脚本运行状态修复：进入脚本页面及切换/删除脚本后，通过一次性只读 CDP 探针读取 renderer 的 `window.__codexPlusUserScripts`，管理器显示真实 `loaded`、`failed`、错误内容或本地 fallback 状态，不替换 launcher 持有的 bridge 连接喵~
+- 已同步 Responses VLM 描述块修复：Responses 上游注入 `input_text`，其他协议继续注入 `text`，字符串消息转换也遵循同一协议；避免 DeepSeek 等 Responses 服务拒绝 Chat Completions 形态的描述块喵~
+- 已同步 Stepwise 关闭态修复：关闭时启动注入完全省略 Stepwise runtime，脚本内部的浮层、桥接请求、扫描和观察器也二次检查 enabled 状态并主动停止；管理器和页面菜单明确提示启停后需重启 Codex++ 生效喵~
+- 本阶段 TypeScript、前端 `31/31`、renderer/Stepwise JavaScript 语法、i18n plain `802/802` 与 template `69/69`、Rust formatter 和差异检查通过喵~
+- core 单元测试与 CDP bridge 测试均在依赖下载阶段因本机 DNS 无法解析 `static.crates.io`、缺少 `qrcode 0.14.1` 而停止，没有进入编译或测试执行；不重复本地下载，最终由 GitHub Actions 标准网络环境做权威验证喵~

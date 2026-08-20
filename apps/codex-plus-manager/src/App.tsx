@@ -1151,6 +1151,15 @@ export function App() {
     }
   };
 
+  const refreshUserScriptInventory = async () => {
+    const result = await run(() => call<SettingsResult>("refresh_user_script_inventory"));
+    if (result) {
+      setSettings(result);
+      setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
+    }
+    return result;
+  };
+
   const installMarketScript = async (id: string) => {
     const result = await run(() => call<ScriptMarketResult>("install_market_script", { id }));
     if (result) {
@@ -1166,6 +1175,7 @@ export function App() {
       setSettings(result);
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地脚本"), result);
+      await refreshUserScriptInventory();
     }
   };
 
@@ -1178,6 +1188,7 @@ export function App() {
       setSettings(result);
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地脚本"), result);
+      await refreshUserScriptInventory();
     }
   };
 
@@ -1713,6 +1724,7 @@ export function App() {
     if (next === "userScripts") {
       await refreshSettings(true);
       await refreshScriptMarket(true);
+      await refreshUserScriptInventory();
     }
     if (next === "recommendations") await refreshAds(true);
     if (next === "about") {
@@ -2967,6 +2979,7 @@ export function App() {
       syncLiveContextEntries,
       refreshAds,
       refreshScriptMarket,
+      refreshUserScriptInventory,
       installMarketScript,
       setUserScriptEnabled,
       deleteUserScript,
@@ -3328,6 +3341,7 @@ type Actions = {
   syncLiveContextEntries: (settings: BackendSettings, silent?: boolean) => Promise<LiveContextEntriesResult | null>;
   refreshAds: () => Promise<void>;
   refreshScriptMarket: () => Promise<void>;
+  refreshUserScriptInventory: () => Promise<SettingsResult | null>;
   installMarketScript: (id: string) => Promise<void>;
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
   deleteUserScript: (key: string) => Promise<void>;
@@ -4673,7 +4687,7 @@ function EnhanceScreen({
               ) : null}
             </FeatureGroup>
             <FeatureGroup title="Stepwise" detail={t("基于当前对话生成下一步建议，使用独立 API 配置。")}>
-              <FeatureToggle title="Stepwise" detail={t("在 Codex 页面显示可拖动的后续建议浮层；建议由单独配置的 Stepwise API 生成。")} checked={form.codexAppStepwiseEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseEnabled", value)} />
+              <FeatureToggle title="Stepwise" detail={t("在 Codex 页面显示可拖动的后续建议浮层；建议由单独配置的 Stepwise API 生成。启停后需重启 Codex++ 生效。")} checked={form.codexAppStepwiseEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseEnabled", value)} />
               <FeatureToggle title={t("Stepwise 直接发送")} detail={t("点击建议后自动发送；关闭时只填入输入框。")} checked={form.codexAppStepwiseDirectSend} disabled={!masterEnabled || !form.codexAppStepwiseEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseDirectSend", value)} />
             </FeatureGroup>
             <FeatureGroup title={t("记忆检索")} detail={t("从本地 Codex 记忆中检索与当前提示相关的片段。")}>

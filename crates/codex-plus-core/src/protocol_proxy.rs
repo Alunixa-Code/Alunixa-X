@@ -2005,6 +2005,7 @@ async fn apply_relay_image_handling(relay: &crate::settings::RelayProfile, body:
                                 &relay.model_windows,
                                 &relay.context_window,
                                 &model,
+                                relay.protocol == crate::settings::RelayProtocol::Responses,
                             )
                             .await;
                         }

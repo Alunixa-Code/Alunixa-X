@@ -468,25 +468,25 @@ async fn background_analyze_and_cache(urls: &[String], config: &VlmConfig) {
 
 // ── Description injection ─────────────────────────────────────────────
 
-/// 向指定 user 消息末尾注入分析文本。
-fn inject_text_into_user_message(msg: &mut Value, text: &str) {
+/// 向指定 user 消息末尾注入与上游协议匹配的分析文本。
+fn inject_text_into_user_message(msg: &mut Value, text: &str, responses: bool) {
+    let block_type = if responses { "input_text" } else { "text" };
+    let make_block = |value: &str| serde_json::json!({"type": block_type, "text": value});
     match msg.get_mut("content") {
         Some(Value::Array(parts)) => {
-            parts.push(serde_json::json!({"type": "text", "text": text}));
+            parts.push(make_block(text));
         }
         Some(Value::String(existing)) => {
             let old = existing.clone();
-            *msg.get_mut("content").unwrap() = serde_json::json!([
-                {"type": "text", "text": old},
-                {"type": "text", "text": text},
-            ]);
+            *msg.get_mut("content").unwrap() =
+                serde_json::json!([make_block(&old), make_block(text),]);
         }
         _ => {}
     }
 }
 
 /// 注入分析结果到**最后一条** user 消息（兼容旧接口，供 analyze_all 返回值注入）。
-pub fn inject_analysis(messages: &mut [Value], result: &Result<String, String>) {
+pub fn inject_analysis(messages: &mut [Value], result: &Result<String, String>, responses: bool) {
     let text = match result {
         Ok(c) => c.clone(),
         Err(_) => "用户发送了图片，但是 Router VLM 调用失败。请在回复中包含 \"Router VLM 调用失败，未能识别图片内容\""
@@ -494,7 +494,7 @@ pub fn inject_analysis(messages: &mut [Value], result: &Result<String, String>) 
     };
     for msg in messages.iter_mut().rev() {
         if msg.get("role").and_then(Value::as_str) == Some("user") {
-            inject_text_into_user_message(msg, &text);
+            inject_text_into_user_message(msg, &text, responses);
             break;
         }
     }
@@ -516,6 +516,7 @@ pub async fn strip_image_blocks(
     model_windows_json: &str,
     context_window_str: &str,
     request_model: &str,
+    responses: bool,
 ) {
     // 0. 上下文溢出保护：基于剥离图片后的纯文本预估，因为图片最终会被删掉。
     let context_window =
@@ -550,6 +551,7 @@ pub async fn strip_image_blocks(
                     "\n[系统：当前轮次有 {} 张图片因上下文已满未完成 VLM 分析，图片已被清理以释放空间]",
                     image_count
                 ),
+                responses,
             );
         }
         let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -853,7 +855,7 @@ pub async fn strip_image_blocks(
     // 9. 注入描述文本。
     for (msg_idx, desc) in &descriptions {
         if *msg_idx < messages.len() {
-            inject_text_into_user_message(&mut messages[*msg_idx], desc);
+            inject_text_into_user_message(&mut messages[*msg_idx], desc, responses);
         }
     }
 
@@ -1039,7 +1041,7 @@ mod tests {
             serde_json::json!({"role": "assistant", "content": [{"type": "text", "text": "ok"}]}),
             serde_json::json!({"role": "user", "content": [{"type": "text", "text": "hi"}]}),
         ];
-        inject_analysis(&mut messages, &Ok("image description".to_string()));
+        inject_analysis(&mut messages, &Ok("image description".to_string()), false);
         let parts = messages[1]["content"].as_array().unwrap();
         assert_eq!(parts.last().unwrap()["type"], "text");
         assert_eq!(parts.last().unwrap()["text"], "image description");
@@ -1051,7 +1053,7 @@ mod tests {
             "role": "user",
             "content": [{"type": "text", "text": "hi"}]
         })];
-        inject_analysis(&mut messages, &Err("failed".to_string()));
+        inject_analysis(&mut messages, &Err("failed".to_string()), false);
         let parts = messages[0]["content"].as_array().unwrap();
         let last = parts.last().unwrap();
         assert_eq!(last["type"], "text");
@@ -1064,11 +1066,23 @@ mod tests {
             "role": "user",
             "content": "a plain string message"
         })];
-        inject_analysis(&mut messages, &Ok("vlm result".to_string()));
+        inject_analysis(&mut messages, &Ok("vlm result".to_string()), false);
         let parts = messages[0]["content"].as_array().unwrap();
         assert_eq!(parts.len(), 2);
         assert_eq!(parts[0]["text"], "a plain string message");
         assert_eq!(parts[1]["text"], "vlm result");
+    }
+
+    #[test]
+    fn inject_analysis_uses_input_text_for_responses_protocol() {
+        let mut messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [{"type": "input_text", "text": "hi"}]
+        })];
+        inject_analysis(&mut messages, &Ok("image description".to_string()), true);
+        let parts = messages[0]["content"].as_array().unwrap();
+        assert_eq!(parts.last().unwrap()["type"], "input_text");
+        assert_eq!(parts.last().unwrap()["text"], "image description");
     }
 
     #[test]
@@ -1245,7 +1259,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
 
         // 图片已被删除
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1285,6 +1299,7 @@ mod tests {
             "{}",
             "1", // 上下文窗口 = 1 token → 必然溢出
             "gpt-4",
+            false,
         )
         .await;
 
@@ -1323,7 +1338,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
 
         // 消息应保持不变
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1350,7 +1365,7 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // 故意不可达
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
 
         // fail-closed：图片保留
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1403,7 +1418,7 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // VLM 不可达，触发 fail-closed 路径
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await;
 
         // VLM 不可达 → analyze_all 返回 Err → strip_image_blocks early return
         // → fail-closed：全部图片保留，不注入任何描述。
@@ -1462,7 +1477,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await;
 
         // 所有图片已删除
         for msg in &messages {
@@ -1572,7 +1587,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4").await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4", false).await;
 
         // 所有图片已删除
         for msg in &messages {
@@ -1741,7 +1756,7 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await;
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts
@@ -1830,7 +1845,7 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await;
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts.iter().any(|p| {
@@ -1925,7 +1940,7 @@ mod tests {
             }),
         ];
 
-        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4").await;
+        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4", false).await;
 
         // 两轮图片均应被剥离
         for (i, label) in ["historical", "current"].iter().enumerate() {

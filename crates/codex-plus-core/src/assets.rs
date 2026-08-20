@@ -508,6 +508,11 @@ pub fn injection_script_with_runtime(
     let fast_startup = fast_startup_config(settings);
     let performance_protection = performance_protection_config(settings);
     let local_ads = crate::ads::local_ad_list();
+    let stepwise_runtime = if settings.codex_app_stepwise_enabled {
+        stepwise_script()
+    } else {
+        ""
+    };
     format!(
         "window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ = {};\nwindow.__CODEX_PLUS_SPONSOR_IMAGES__ = {};\nwindow.__CODEX_PLUS_LOCAL_ADS__ = {};\nwindow.__CODEX_PLUS_VERSION__ = {};\nwindow.__CODEX_PLUS_BUILD__ = {};\nwindow.__CODEX_PLUS_IMAGE_OVERLAY__ = {};\nwindow.__CODEX_PLUS_PLUGIN_MARKETPLACES__ = {};\nwindow.__CODEX_PLUS_EXTERNAL_DREAM_SKIN_RUNTIME__ = true;\nwindow.__CODEX_PLUS_DREAM_SKIN_PLATFORM__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_REVISION__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_ART__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_ART_SIGNATURE__ = {};\nwindow.__CODEX_PLUS_DREAM_SKIN_THEME__ = {};\nwindow.__CODEX_PLUS_PASTE_FIX__ = {};\nwindow.__CODEX_PLUS_FORCE_CHINESE_LOCALE__ = {};\nwindow.__CODEX_PLUS_FAST_STARTUP__ = {};\nwindow.__CODEX_PLUS_PERFORMANCE_PROTECTION__ = {};\n{}\n{}\n{}",
         serde_json::to_string(&helper_url).expect("helper URL should serialize"),
@@ -532,7 +537,7 @@ pub fn injection_script_with_runtime(
         serde_json::to_string(&performance_protection)
             .expect("performance protection config should serialize"),
         renderer_script(),
-        stepwise_script(),
+        stepwise_runtime,
         dream_skin_target_runtime,
     )
 }
