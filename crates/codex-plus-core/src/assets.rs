@@ -132,7 +132,7 @@ fn dream_skin_target_runtime_script(settings: &BackendSettings, include_art: boo
     let style_revision = dream_skin_content_signature(css.as_bytes());
     let payload_revision =
         dream_skin_target_payload_signature(settings, engine, &style_revision, &theme);
-    let mut payload = renderer
+    let payload = renderer
         .replace("__DREAM_CSS_JSON__", &serde_json::to_string(&css).unwrap())
         .replace("__DREAM_ART_JSON__", "window.__CODEX_PLUS_DREAM_SKIN_ART__")
         .replace(

@@ -716,3 +716,6 @@
 - 第二轮完整 workspace 已通过主题字节测试和此前全部套件，随后 watcher 专项发现 macOS CDP 端口筛选把 `Codex Helper.app/Contents/MacOS/Codex Helper` 误判为 Codex 主进程，存在重启时误停 Helper 的风险喵~
 - 根因是使用通用 `.app/Contents/MacOS/Codex` 子串且只排除 `/Helpers/` 目录；现改为精确识别 `Codex.app/Contents/MacOS/Codex` 与 `ChatGPT.app/Contents/MacOS/ChatGPT`，并对 `--remote-debugging-port=<port>` 做完整参数匹配，避免 Helper 和相似端口被选中喵~
 - 修复后的 watcher 专项 `21/21` 通过，覆盖 Codex/ChatGPT 主进程、Codex Helper、Renderer Helper、Codex CLI、错误端口和精确 CDP 端口；Rust formatter 与差异空白检查通过喵~
+- 从完整 workspace 中断点继续补跑的全部剩余套件通过：Zed `27/27`、data `5/5`、Markdown `4/4`、Provider Sync `39/39`、Storage `22/22`、launcher `5/5`、manager `33/33`、Windows/发行契约 `22/22` 与所有 doc tests 零失败喵~
+- 验收期间唯一编译提醒是 DreamSkin payload 声明为可变但从未重新赋值；已移除无效 `mut`，不改变脚本内容或行为，后续发布构建不再携带该警告喵~
+- 移除无效可变性后 `cargo check -p codex-plus-core` 无警告通过，Rust formatter、`git diff --check` 和本地品牌保护再次通过喵~
