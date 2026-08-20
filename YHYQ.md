@@ -673,3 +673,7 @@
 - macOS DMG 构建改为独立临时目录并最多重试三次，成功后原子移动到正式资产路径；失败后清理临时文件并明确退出，资产名称、工作流和发布目标未改变喵~
 - `.gitattributes` 固定第一方注入脚本及上游主题 JS/CSS 为 LF，避免 Windows checkout 改变 `include_str!` 内容和字节哈希喵~
 - 本阶段独立验证通过 TypeScript、前端 `33/33`、renderer/Stepwise JavaScript 语法、i18n plain `802/802` 与 template `69/69`、本地品牌保护、Rust formatter 和差异检查；仍未连接、重启或操作当前 Codex 实例喵~
+- 用户再次要求继续完成全部选择性上游同步、压缩阈值一致性、当前 Codex 兼容修复、GitHub Actions 构建和正式发行；本轮从七个已提交阶段继续，不重复已完成实现喵~
+- 已读取项目记录、记忆索引、分支、远端和工作区状态；确认 `origin` 仍为 `Alunixa-Code/CodexPlusPlusPlus`，未修改用户仓库更新源、品牌或发行流程喵~
+- 已再次用内容级差异核验五个状态文件与 `HEAD` 完全一致，仅为 Windows CRLF 工作树噪声；它们将继续排除在所有暂存与提交之外喵~
+- 后续验收继续禁止启动、重启、连接或操作当前 Codex、当前任务、helper、CDP 与现有服务，只执行静态审计、独立 Node/Rust 测试和 GitHub Actions 权威构建喵~
