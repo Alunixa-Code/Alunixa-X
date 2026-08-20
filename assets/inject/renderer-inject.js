@@ -472,6 +472,7 @@
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
   const codexServiceTierRequestOverrideVersion = "7";
   const codexAppServerModelRequestPatchVersion = "5";
+  const codexRemoteSessionRecoveryVersion = "4";
   const codexModelJsonResponsePatchVersion = "2";
   const codexModelMessagePatchVersion = "2";
   const codexStatsigModelPatchVersion = "2";
@@ -2674,9 +2675,10 @@
   }
 
   function applyCodexServiceTierRequestOverride(method, params, threadIdHint = "") {
+    const providerParams = applyCodexRemoteSessionProviderOverride(method, params);
     const override = codexServiceTierOverrideForRequest(method, params, threadIdHint);
-    if (!override) return params;
-    const nextParams = { ...(params || {}), serviceTier: override.serviceTier };
+    if (!override) return providerParams;
+    const nextParams = { ...(providerParams || {}), serviceTier: override.serviceTier };
     if (Object.prototype.hasOwnProperty.call(nextParams, "service_tier") || override.fastBlocked) {
       nextParams.service_tier = override.serviceTier;
     }
@@ -2692,8 +2694,260 @@
     return nextParams;
   }
 
+  function codexRemoteSessionProviderNormalizationEnabled() {
+    if (!codexPlusBackendSettings.relayProfilesEnabled) return false;
+    const profiles = Array.isArray(codexPlusBackendSettings.relayProfiles)
+      ? codexPlusBackendSettings.relayProfiles
+      : [];
+    const activeId = String(codexPlusBackendSettings.activeRelayId || "");
+    const profile = profiles.find((item) => String(item?.id || "") === activeId);
+    if (!profile) return false;
+    return String(profile.relayMode || "") === "official" && !!profile.officialMixApiKey;
+  }
+
+  function codexRemoteSessionTargetProvider() {
+    return String(
+      codexModelCatalog?.codex_model_provider
+      || codexModelCatalog?.codexModelProvider
+      || codexModelCatalog?.model_provider
+      || codexModelCatalog?.modelProvider
+      || ""
+    ).trim();
+  }
+
+  function codexRemoteSessionThreadStartMethod(method) {
+    return [
+      "thread/start",
+      "start-conversation",
+      "start-thread-for-host",
+      "thread-prewarm-start",
+      "prewarm-thread-start-for-host",
+    ].includes(String(method || ""));
+  }
+
+  function applyCodexRemoteSessionProviderOverride(method, params) {
+    if (!codexRemoteSessionThreadStartMethod(method)) return params;
+    if (!codexRemoteSessionProviderNormalizationEnabled()) return params;
+    if (!params || typeof params !== "object" || Array.isArray(params)) return params;
+    const targetProvider = codexRemoteSessionTargetProvider();
+    if (!targetProvider || targetProvider === "openai") return params;
+    const requestedProvider = String(params.modelProvider || params.model_provider || "").trim();
+    if (requestedProvider && requestedProvider !== "openai" && requestedProvider !== targetProvider) {
+      return params;
+    }
+    if (requestedProvider === targetProvider && !Object.prototype.hasOwnProperty.call(params, "model_provider")) {
+      return params;
+    }
+    const nextParams = { ...params, modelProvider: targetProvider };
+    delete nextParams.model_provider;
+    sendCodexPlusDiagnostic("remote_session_provider_override_applied", {
+      method,
+      from: requestedProvider || "(missing)",
+      to: targetProvider,
+    });
+    return nextParams;
+  }
+
+  function codexRemoteSessionStartedThreadId(value) {
+    const queue = [{ value, depth: 0 }];
+    const seen = new WeakSet();
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const candidate = current?.value;
+      if (!candidate || typeof candidate !== "object") continue;
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      const method = String(candidate.method || candidate.type || "");
+      if (method === "thread/started") {
+        const thread = candidate.params?.thread || candidate.thread || candidate.payload?.thread;
+        const threadId = String(thread?.id || candidate.params?.threadId || candidate.threadId || "").trim();
+        if (threadId) return threadId;
+      }
+      if (method === "browser-use-session-route-capture") {
+        const threadId = String(
+          candidate.params?.conversationId
+          || candidate.params?.conversation_id
+          || candidate.conversationId
+          || candidate.conversation_id
+          || ""
+        ).trim();
+        if (threadId) return threadId;
+      }
+      if (method === "browser-sidebar-browser-use-state") {
+        const isActive = candidate.params?.isActive ?? candidate.params?.is_active
+          ?? candidate.isActive ?? candidate.is_active;
+        if (isActive !== true) continue;
+        const threadId = String(
+          candidate.params?.conversationId
+          || candidate.params?.conversation_id
+          || candidate.conversationId
+          || candidate.conversation_id
+          || ""
+        ).trim();
+        if (threadId) return threadId;
+      }
+      if (current.depth >= 4) continue;
+      for (const key of ["message", "response", "detail", "data", "payload", "params", "request"]) {
+        const nested = candidate[key];
+        if (nested && typeof nested === "object") {
+          queue.push({ value: nested, depth: current.depth + 1 });
+        }
+      }
+    }
+    return "";
+  }
+
+  function requestCodexRemoteSessionRecovery(threadId, attempt) {
+    const payload = { thread_id: threadId };
+    const testHook = window.__CODEX_PLUS_TEST_REMOTE_RECOVERY__;
+    const request = typeof testHook === "function"
+      ? Promise.resolve(testHook(payload, attempt))
+      : postJson("/remote-control-session/recover", payload);
+    return request.then((result) => {
+      if (attempt === 0
+        || result?.message === "Remote Control session recovery complete"
+        || result?.message === "Remote Control session catalog recovery complete") {
+        sendCodexPlusDiagnostic("remote_session_recovery_requested", {
+          threadId,
+          attempt,
+          status: result?.status || "",
+          message: result?.message || "",
+          changedSessionFiles: result?.changed_session_files || 0,
+          catalogRowsInserted: result?.sqlite_catalog_rows_inserted || 0,
+        });
+      }
+      return result;
+    }).catch((error) => {
+      if (attempt === 0) {
+        sendCodexPlusDiagnostic("remote_session_recovery_failed", {
+          threadId,
+          attempt,
+          errorName: error?.name || "",
+          errorMessage: error?.message || String(error),
+        });
+      }
+      return null;
+    });
+  }
+
+  function scheduleCodexRemoteSessionRecovery(threadId) {
+    if (!codexRemoteSessionProviderNormalizationEnabled()) return false;
+    const normalizedThreadId = String(threadId || "").trim();
+    if (!normalizedThreadId || normalizedThreadId.length > 128 || isClientNewThreadId(normalizedThreadId)) return false;
+    window.__codexPlusRemoteSessionRecoveryPending = window.__codexPlusRemoteSessionRecoveryPending || new Map();
+    const pending = window.__codexPlusRemoteSessionRecoveryPending;
+    if (pending.has(normalizedThreadId)) return false;
+    const retryOffsets = [100, 350, 800, 1600, 3000];
+    const state = { timer: 0 };
+    const finish = () => {
+      if (state.timer) window.clearTimeout(state.timer);
+      state.timer = 0;
+      if (pending.get(normalizedThreadId) === state) pending.delete(normalizedThreadId);
+    };
+    const runAttempt = async (attempt) => {
+      state.timer = 0;
+      if (!codexRemoteSessionProviderNormalizationEnabled()) {
+        finish();
+        return;
+      }
+      const result = await requestCodexRemoteSessionRecovery(normalizedThreadId, attempt);
+      const message = String(result?.message || "");
+      if (message === "Remote Control session recovery complete"
+        || message === "Remote Control session catalog recovery complete"
+        || message === "Remote Control session recovery is disabled for the active profile") {
+        finish();
+        return;
+      }
+      const nextAttempt = attempt + 1;
+      if (nextAttempt >= retryOffsets.length) {
+        finish();
+        return;
+      }
+      const nextDelay = retryOffsets[nextAttempt] - retryOffsets[attempt];
+      state.timer = window.setTimeout(() => void runAttempt(nextAttempt), nextDelay);
+    };
+    state.timer = window.setTimeout(() => void runAttempt(0), retryOffsets[0]);
+    pending.set(normalizedThreadId, state);
+    return true;
+  }
+
+  function observeCodexRemoteSessionNotification(value) {
+    const threadId = codexRemoteSessionStartedThreadId(value);
+    return threadId ? scheduleCodexRemoteSessionRecovery(threadId) : false;
+  }
+
+  function installCodexRemoteSessionRecoveryListener() {
+    if (window.__codexPlusRemoteSessionRecoveryInstalled === codexRemoteSessionRecoveryVersion) return true;
+    if (window.__codexPlusRemoteSessionRecoveryMessageHandler) {
+      window.removeEventListener("message", window.__codexPlusRemoteSessionRecoveryMessageHandler, true);
+    }
+    if (window.__codexPlusRemoteSessionRecoveryViewHandler) {
+      window.removeEventListener("codex-message-from-view", window.__codexPlusRemoteSessionRecoveryViewHandler, true);
+    }
+    const messageHandler = (event) => {
+      if (event?.source !== window) return false;
+      const origin = String(event?.origin || "");
+      if (origin && origin !== "null" && origin !== window.location.origin) return false;
+      return observeCodexRemoteSessionNotification(event?.data);
+    };
+    const viewHandler = (event) => observeCodexRemoteSessionNotification(event?.detail);
+    window.__codexPlusRemoteSessionRecoveryMessageHandler = messageHandler;
+    window.__codexPlusRemoteSessionRecoveryViewHandler = viewHandler;
+    window.addEventListener("message", messageHandler, true);
+    window.addEventListener("codex-message-from-view", viewHandler, true);
+    window.__codexPlusRemoteSessionRecoveryInstalled = codexRemoteSessionRecoveryVersion;
+    sendCodexPlusDiagnostic("remote_session_recovery_listener_installed", {
+      version: codexRemoteSessionRecoveryVersion,
+    });
+    return true;
+  }
+
+  function installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix = "") {
+    if (!dispatcher || typeof dispatcher.subscribe !== "function") return false;
+    if (window.__codexPlusRemoteSessionRecoveryDispatcher === dispatcher
+        && window.__codexPlusRemoteSessionRecoveryDispatcherVersion === codexRemoteSessionRecoveryVersion) {
+      return true;
+    }
+    if (typeof window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe === "function") {
+      try {
+        window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe();
+      } catch {
+      }
+    }
+    const handler = (payload) => {
+      if (observeCodexRemoteSessionNotification(payload)) return true;
+      const params = payload && typeof payload === "object" ? payload : {};
+      if (observeCodexRemoteSessionNotification({ method: "thread/started", params })) return true;
+      return observeCodexRemoteSessionNotification({
+        method: "thread/started",
+        params: { thread: params },
+      });
+    };
+    const browserUseHandler = (payload) => observeCodexRemoteSessionNotification({
+      type: "browser-sidebar-browser-use-state",
+      params: payload && typeof payload === "object" ? payload : {},
+    });
+    const unsubscribers = [
+      dispatcher.subscribe("thread/started", handler),
+      dispatcher.subscribe("browser-sidebar-browser-use-state", browserUseHandler),
+    ];
+    window.__codexPlusRemoteSessionRecoveryDispatcher = dispatcher;
+    window.__codexPlusRemoteSessionRecoveryDispatcherHandler = handler;
+    window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe = () => {
+      for (const unsubscribe of unsubscribers) {
+        if (typeof unsubscribe !== "function") continue;
+        try {
+          unsubscribe();
+        } catch {
+        }
+      }
+    };
+    window.__codexPlusRemoteSessionRecoveryDispatcherVersion = codexRemoteSessionRecoveryVersion;
+    sendCodexPlusDiagnostic("remote_session_dispatcher_subscription_installed", { assetPrefix });
+    return true;
+  }
+
   function codexServiceTierRequestOverride(message) {
-    if (!codexPlusSettings().serviceTierControls) return message;
     if (!message || typeof message !== "object") return message;
     if (message.type === "send-cli-request-for-host") {
       const method = String(message.method || "");
@@ -2790,6 +3044,7 @@
             return dispatchCodexPlusMessage(dispatcher, type, payload);
           };
           window.__codexServiceTierRequestOverrideInstalled = codexDynamicModelPatchInstance;
+          installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix);
           sendCodexPlusDiagnostic("service_tier_dispatcher_patch_upgraded", { assetPrefix });
           return;
         }
@@ -2798,6 +3053,7 @@
           return dispatchCodexPlusMessage(dispatcher, type, payload);
         };
         window.__codexServiceTierRequestOverrideInstalled = codexDynamicModelPatchInstance;
+        installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix);
         sendCodexPlusDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
       } catch (error) {
         if (attempt < 60) {
@@ -3303,6 +3559,9 @@
       }
       codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
       codexPlusBackendSettingsLoaded = true;
+      if (codexRemoteSessionProviderNormalizationEnabled()) {
+        void loadCodexModelCatalog();
+      }
       refreshCodexPlusBackendToggles();
       installCodexSharedTerminalRuntime();
       return true;
@@ -4832,16 +5091,57 @@
     return archivePageHintVisible() && archivedRows().length > 0;
   }
 
+  function isClientNewThreadId(value) {
+    return /^(?:local:)?client-new-thread:/i.test(String(value || "").trim());
+  }
+
+  function normalizedCodexThreadUuid(value) {
+    const id = String(value || "").trim().replace(/^local:/i, "");
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : "";
+  }
+
+  function reactConversationIdFromRow(row) {
+    const fiberKey = Object.getOwnPropertyNames(row).find((key) => key.startsWith("__reactFiber$"));
+    let fiber = fiberKey ? row[fiberKey] : null;
+    for (let fiberDepth = 0; fiber && fiberDepth < 16; fiberDepth += 1, fiber = fiber.return) {
+      for (const props of [fiber.pendingProps, fiber.memoizedProps]) {
+        const directId = normalizedCodexThreadUuid(props?.conversationId);
+        if (directId) return directId;
+        const childId = normalizedCodexThreadUuid(props?.children?.props?.conversationId);
+        if (childId) return childId;
+      }
+    }
+    return "";
+  }
+
   function sessionRefFromRow(row) {
     const href = row.getAttribute("href") || row.querySelector("a")?.getAttribute("href") || "";
     const idMatch = href.match(/(?:session|conversation|thread)[=/:-]([A-Za-z0-9_.-]+)/i) || href.match(/([A-Za-z0-9_-]{8,})$/);
     const codexThreadId = row.getAttribute("data-app-action-sidebar-thread-id") || "";
     const fallbackId = row.getAttribute("data-session-id") || row.getAttribute("data-testid") || "";
-    const sessionId = codexThreadId || (idMatch && idMatch[1]) || fallbackId;
+    const placeholderThreadId = isClientNewThreadId(codexThreadId);
+    const hrefId = idMatch && idMatch[1];
+    const canonicalHrefId = normalizedCodexThreadUuid(hrefId);
+    const hrefIsTemporary = isClientNewThreadId(href)
+      || isClientNewThreadId(hrefId)
+      || /(?:^|[=/])(?:local:)?client-new-thread:/i.test(href);
+    const sessionId = placeholderThreadId
+      ? canonicalHrefId || (!hrefIsTemporary ? reactConversationIdFromRow(row) : "")
+      : normalizedCodexThreadUuid(codexThreadId)
+        || canonicalHrefId
+        || codexThreadId
+        || hrefId
+        || fallbackId;
     const titleNode = row.querySelector(`${selectors.threadTitle}, .truncate.select-none, .truncate.text-base`);
     const rawTitle = (titleNode?.textContent || (titleNode ? "" : (row.textContent || "Untitled session")));
     const title = (titleNode ? rawTitle : rawTitle.replace(/\s*(导出|删除|移动|移出项目)(\s*(导出|删除|移动|移出项目))*$/g, "")).trim().slice(0, 160);
     return { session_id: sessionId, title };
+  }
+
+  if (window.__CODEX_PLUS_TEST_SESSION_REF__) {
+    window.__codexPlusSessionRefTest = {
+      fromRow: sessionRefFromRow,
+    };
   }
 
   function threadIdBadgeTitleNode(row) {
@@ -6190,7 +6490,7 @@
     return Array.from(new Set(values.filter((value) => typeof value === "string" && value.trim().length > 0)));
   }
 
-  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
+  let codexModelCatalog = { status: "loading", model: "", default_model: "", model_provider: "", codex_model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
   let codexModelCatalogLoadedAt = 0;
   let codexModelCatalogPromise = null;
   let codexModelCatalogRequestSeq = 0;
@@ -6211,6 +6511,9 @@
   if (window.__CODEX_PLUS_TEST_SERVICE_TIER__) {
     window.__codexPlusServiceTierTest = {
       applyServiceTierOverride: (method, params, threadIdHint = "") => applyCodexServiceTierRequestOverride(method, params, threadIdHint),
+      applyProviderOverride: (method, params) => applyCodexRemoteSessionProviderOverride(method, params),
+      remoteSessionStartedThreadId: (value) => codexRemoteSessionStartedThreadId(value),
+      observeRemoteSessionNotification: (value) => observeCodexRemoteSessionNotification(value),
       requestOverride: (message) => codexServiceTierRequestOverride(message),
       diagnostics: () => [...(window.__codexPlusServiceTierTestDiagnostics || [])],
       currentModelName: () => codexServiceTierCurrentModelName(),
@@ -6222,6 +6525,7 @@
           model: "",
           default_model: "",
           model_provider: "",
+          codex_model_provider: "",
           provider_name: "",
           models: [],
           model_details: [],
@@ -6231,6 +6535,10 @@
         };
         codexModelCatalogLoadedAt = Date.now();
         codexModelCatalogPromise = null;
+      },
+      setBackendSettings: (settings = {}) => {
+        codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
+        codexPlusBackendSettingsLoaded = true;
       },
       setServiceTierState: (state = {}) => {
         codexServiceTierState = { ...codexServiceTierState, ...state };
@@ -6355,7 +6663,7 @@
     const requestSeq = ++codexModelCatalogRequestSeq;
     const request = postJson("/codex-model-catalog", {})
       .then(async (result) => {
-        const nextCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
+        const nextCatalog = result && typeof result === "object" ? result : { status: "failed", model: "", default_model: "", model_provider: "", codex_model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
         const modelsMissing = !Array.isArray(nextCatalog.models) || nextCatalog.models.length === 0;
         const detailsMissing = !Array.isArray(nextCatalog.model_details) || nextCatalog.model_details.length === 0;
         if (modelsMissing || detailsMissing || nextCatalog.status === "not_configured" || nextCatalog.status === "failed") {
@@ -6367,7 +6675,7 @@
                 && settingsResp?.relayProfiles
                 && Array.isArray(settingsResp.relayProfiles)) {
               const activeId = settingsResp.activeRelayId || "";
-              const profile = settingsResp.relayProfiles.find(p => p.id === activeId) || settingsResp.relayProfiles[0];
+              const profile = settingsResp.relayProfiles.find(p => p.id === activeId);
               if (profile) {
                 const listedModels = typeof profile.modelList === "string"
                   ? profile.modelList.split(/[\r\n,]+/).map(s => s.trim()).filter(Boolean)
@@ -6434,7 +6742,7 @@
       })
       .catch((error) => {
         if (requestSeq !== codexModelCatalogRequestSeq) return codexModelCatalog;
-        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
+        codexModelCatalog = { status: "failed", message: String(error?.message || error), model: "", default_model: "", model_provider: "", codex_model_provider: "", provider_name: "", models: [], model_details: [], sources: [], responses_api: { status: "unknown", message: "" } };
         codexModelCatalogLoadedAt = Date.now();
         return codexModelCatalog;
       })
@@ -7014,11 +7322,17 @@
         }
       }
       nextParams = applyCodexEditableHistoryAppServerRequestOverride(method, nextParams);
-      nextParams = applyCodexDynamicModelRequestOverride(appServerModelRequestMethod(String(method || ""), nextParams), nextParams);
+      const requestMethod = appServerModelRequestMethod(String(method || ""), nextParams);
+      if (codexRemoteSessionThreadStartMethod(requestMethod)
+          && codexRemoteSessionProviderNormalizationEnabled()
+          && !codexRemoteSessionTargetProvider()) {
+        await loadCodexModelCatalog();
+      }
+      nextParams = applyCodexRemoteSessionProviderOverride(requestMethod, nextParams);
+      nextParams = applyCodexDynamicModelRequestOverride(requestMethod, nextParams);
       const result = await originalSendRequest(method, nextParams, options);
       if (!codexPlusModelUnlockEnabled()) return result;
       if (!codexPlusModelNames().length) await loadCodexModelCatalog();
-      const requestMethod = appServerModelRequestMethod(String(method || ""), nextParams);
       return patchAppServerModelResult(requestMethod, result);
     };
     client.__codexPlusModelRequestPatch = codexDynamicModelPatchInstance;
@@ -7028,6 +7342,17 @@
   const appServerModelRequestPatchMaxMisses = 8;
   let appServerModelRequestPatchMissCount = 0;
   let appServerModelRequestPatchDisabled = false;
+  let appServerModelRequestPatchPromise = null;
+  let appServerModelRequestPatchRetryTimer = 0;
+
+  function scheduleAppServerModelRequestPatchRetry() {
+    if (!codexRemoteSessionProviderNormalizationEnabled()) return;
+    if (appServerModelRequestPatchRetryTimer) return;
+    appServerModelRequestPatchRetryTimer = window.setTimeout(() => {
+      appServerModelRequestPatchRetryTimer = 0;
+      installAppServerModelRequestPatch();
+    }, 250);
+  }
 
   function noteAppServerModelRequestPatchMiss(event, detail) {
     appServerModelRequestPatchMissCount += 1;
@@ -7043,6 +7368,10 @@
     if (appServerModelRequestPatchMissCount === 1) {
       sendCodexPlusDiagnostic(event, detail);
     }
+    if (codexRemoteSessionProviderNormalizationEnabled()) {
+      scheduleAppServerModelRequestPatchRetry();
+      return;
+    }
     if (appServerModelRequestPatchMissCount >= appServerModelRequestPatchMaxMisses && !appServerModelRequestPatchDisabled) {
       appServerModelRequestPatchDisabled = true;
       sendCodexPlusDiagnostic("model_app_server_request_patch_skipped", {
@@ -7055,12 +7384,12 @@
   function installAppServerModelRequestPatch() {
     if (window.__codexPlusAppServerModelRequestPatchInstalled === codexDynamicModelPatchInstance) return;
     if (appServerModelRequestPatchDisabled) return;
+    if (appServerModelRequestPatchPromise) return;
     const patch = async () => {
       try {
         const { modules, candidates, sources, discovery } = await loadAppServerRequestCandidates();
         if (modules.length === 0) {
-          window.__codexPlusAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
-          sendCodexPlusDiagnostic("model_app_server_request_patch_skipped", {
+          noteAppServerModelRequestPatchMiss("model_app_server_request_patch_skipped", {
             reason: "app_server_request_assets_missing",
           });
           return;
@@ -7070,6 +7399,8 @@
           if (patchAppServerModelRequestClient(candidate)) patchedCount += 1;
         }
         if (patchedCount > 0) {
+          clearTimeout(appServerModelRequestPatchRetryTimer);
+          appServerModelRequestPatchRetryTimer = 0;
           appServerModelRequestPatchMissCount = 0;
           window.__codexPlusAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
           sendCodexPlusDiagnostic("model_app_server_request_patch_installed", {
@@ -7094,14 +7425,20 @@
         });
       }
     };
-    void patch();
+    appServerModelRequestPatchPromise = patch().finally(() => {
+      appServerModelRequestPatchPromise = null;
+    });
+    void appServerModelRequestPatchPromise;
   }
 
   function ensureCodexModelWhitelistInstalls() {
+    if (codexPlusModelUnlockEnabled()
+        || (codexPlusBackendSettingsLoaded && codexRemoteSessionProviderNormalizationEnabled())) {
+      installAppServerModelRequestPatch();
+    }
     if (!codexPlusModelUnlockEnabled()) return;
     installModelJsonResponsePatch();
     patchAppServerModelMessages();
-    installAppServerModelRequestPatch();
   }
 
   function runCodexModelWhitelistRefreshPass() {
@@ -9243,7 +9580,16 @@
       const row = button?.closest?.("[data-app-action-sidebar-thread-id]");
       if (!button || !row) return;
       const ref = sessionRefFromRow(row);
-      if (!ref.session_id) return;
+      if (!ref.session_id) {
+        const placeholderId = row.getAttribute("data-app-action-sidebar-thread-id");
+        if (isClientNewThreadId(placeholderId)) {
+          event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation?.();
+          showToast("会话仍在同步，请稍后重试", null);
+        }
+        return;
+      }
       openDeleteConfirmForRow(row, button, ref, event);
     };
     window.__codexSessionDeleteDocumentDeleteHandler = handler;
@@ -9553,7 +9899,7 @@
       deleteButton.className = `${actionButtonClass} ${buttonClass}`;
       deleteButton.dataset.codexDeleteVersion = codexDeleteVersion;
       configureSvgActionButton(deleteButton, "删除", trashIconSvg());
-      const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, deleteButton, ref, event);
+      const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, deleteButton, sessionRefFromRow(row), event);
       installActionButtonEvents(row, deleteButton, openDeleteConfirm);
       group.appendChild(deleteButton);
       setTimeout(() => refreshActionButton(deleteButton, row, openDeleteConfirm), 0);
@@ -10144,6 +10490,13 @@
     installStyle();
     installCodexPerformanceProtection();
     installCodexServiceTierDispatcherPatch();
+    installCodexRemoteSessionRecoveryListener();
+    if (window.__codexPlusRemoteSessionRecoveryDispatcher) {
+      installCodexRemoteSessionDispatcherSubscription(
+        window.__codexPlusRemoteSessionRecoveryDispatcher,
+        "existing-renderer"
+      );
+    }
     installCodexProjectlessNewTaskButtons();
     installCodexPlusMenu();
     localizeCodexMenus();
@@ -10912,7 +11265,12 @@
   window.addEventListener("resize", window.__codexPlusResizeHandler);
   window.__codexSessionDeleteObserver?.disconnect();
   window.__codexSessionDeleteObserver = new MutationObserver(scheduleScan);
-  window.__codexSessionDeleteObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  window.__codexSessionDeleteObserver.observe(document.body || document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-app-action-sidebar-thread-id", "href"],
+  });
 })();
 
 // === 粘贴修复 (CodexPlusPlus 页面增强) ===

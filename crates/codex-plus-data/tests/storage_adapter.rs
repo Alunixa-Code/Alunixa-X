@@ -658,6 +658,51 @@ fn list_local_sessions_reads_codex_threads_ordered_by_update_time() {
 }
 
 #[test]
+fn list_local_sessions_hides_spawned_subagent_threads() {
+    let tmp = tempdir().unwrap();
+    let db_path = tmp.path().join("state_5.sqlite");
+    let backup = BackupStore::new(tmp.path().join("backups"));
+    let adapter = SQLiteStorageAdapter::new(&db_path, backup);
+    let db = Connection::open(&db_path).unwrap();
+    db.execute(
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT, title TEXT, cwd TEXT, archived INTEGER, updated_at_ms INTEGER)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('parent', 'parent.jsonl', 'Parent', 'C:/a', 0, 100)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('child', 'child.jsonl', 'Internal agent', 'C:/a', 0, 200)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO thread_spawn_edges VALUES ('parent', 'child')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let sessions = adapter.list_local_sessions().unwrap();
+
+    assert_eq!(
+        sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .collect::<Vec<_>>(),
+        ["parent"]
+    );
+}
+
+#[test]
 fn list_local_sessions_reads_codex_automation_runs_schema() {
     let tmp = tempdir().unwrap();
     let db_path = tmp.path().join("codex-dev.db");

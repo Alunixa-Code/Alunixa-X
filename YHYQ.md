@@ -661,3 +661,15 @@
 - 已同步 Stepwise 关闭态修复：关闭时启动注入完全省略 Stepwise runtime，脚本内部的浮层、桥接请求、扫描和观察器也二次检查 enabled 状态并主动停止；管理器和页面菜单明确提示启停后需重启 Codex++ 生效喵~
 - 本阶段 TypeScript、前端 `31/31`、renderer/Stepwise JavaScript 语法、i18n plain `802/802` 与 template `69/69`、Rust formatter 和差异检查通过喵~
 - core 单元测试与 CDP bridge 测试均在依赖下载阶段因本机 DNS 无法解析 `static.crates.io`、缺少 `qrcode 0.14.1` 而停止，没有进入编译或测试执行；不重复本地下载，最终由 GitHub Actions 标准网络环境做权威验证喵~
+- 用户脚本、Responses VLM 与 Stepwise 关闭态兼容修复已提交为 `a32d14b8`，提交仅包含 12 个对应实现、测试和记录文件喵~
+- Provider Sync 模块已选择性同步至 BigPizzaV3 `v1.2.50` 的 `888f2bd` 数据实现；该文件是现有接口的功能超集，继续保留手动目标、索引预览/清理和备份回滚，同时新增移动端会话恢复、`local_thread_catalog` 补齐、provider 归一化、子代理排除和陈旧锁隔离喵~
+- Provider Sync 现在读取所有 Codex session/reference 数据库，从 `threads` 补齐本地主机目录记录，更新目录 metadata/sync state，并从目录中移除明确标记为 subagent、memory consolidation、spawn child 或 agent job 的非根任务，避免侧边栏出现内部代理会话喵~
+- Provider Sync 的 rollout、`threads` 和 `local_thread_catalog` provider 更新会跳过子代理；陈旧锁只有在 owner JSON 有效且 PID 明确不再运行时才原子改名隔离，活动进程、无法判断或损坏 owner 的锁保持不动喵~
+- 保留本仓库现有多数据库删除、撤销、项目移动与 rollout 图片清理实现，只在本地会话列表查询中增加 `thread_spawn_edges` 和 `agent_job_items` 子代理过滤，没有用上游精简版 `storage.rs` 覆盖现有能力喵~
+- 新增 Remote Control 恢复状态文件与 bridge 路由：官方混合模式新会话会记录 profile、目标 provider 和 config generation，先补齐目录，等桌面写入进程退出后再安全改写 rollout/SQLite provider；配置已切换时延期而不误写，损坏状态文件会隔离而非阻塞启动喵~
+- renderer 在官方混合模式下把缺失或 `openai` 的新会话 provider 规范为模型目录中的真实 Codex provider，不覆盖明确的第三方 provider；同时监听可信同窗消息、`thread/started` dispatcher 和 Browser Use 活动通知，以限次重试请求恢复喵~
+- 临时 `client-new-thread:` 会话 ID 不再用于删除或 Remote 恢复；优先从持久化 URL 或 React `conversationId` 解析 UUID，仍在同步时阻止操作并提示稍后重试，MutationObserver 监听 ID/href 提升后重新扫描喵~
+- app-server request client 在官方混合模式下找不到资源时会继续受控重试，不再把第一次资源缺失永久标记为跳过；当前 `app-initial-*`/`app-main-*` 结构化发现、无项目会话、动态模型和编辑历史补丁均保留喵~
+- macOS DMG 构建改为独立临时目录并最多重试三次，成功后原子移动到正式资产路径；失败后清理临时文件并明确退出，资产名称、工作流和发布目标未改变喵~
+- `.gitattributes` 固定第一方注入脚本及上游主题 JS/CSS 为 LF，避免 Windows checkout 改变 `include_str!` 内容和字节哈希喵~
+- 本阶段独立验证通过 TypeScript、前端 `33/33`、renderer/Stepwise JavaScript 语法、i18n plain `802/802` 与 template `69/69`、本地品牌保护、Rust formatter 和差异检查；仍未连接、重启或操作当前 Codex 实例喵~

@@ -7,6 +7,11 @@
 *.sh text eol=lf
 .github/workflows/*.yml text eol=lf
 
+# Embedded scripts and byte-verified upstream themes must stay stable across checkouts.
+assets/inject/*.js text eol=lf
+assets/inject/upstream/**/*.js text eol=lf
+assets/inject/upstream/**/*.css text eol=lf
+
 # Keep repository-owner branding when selectively merging upstream releases.
 README.md merge=binary
 README_EN.md merge=binary

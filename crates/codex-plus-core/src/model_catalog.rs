@@ -70,6 +70,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
     let models = relay_profile_model_ids(profile);
     let model_details = relay_profile_model_details(profile);
     let model = profile.preferred_model_name();
+    let codex_model_provider = codex_model_provider_for_relay_profile(home, profile);
     let default_model = models.first().cloned().unwrap_or_default();
     let provider_name = if profile.name.trim().is_empty() {
         profile.id.trim()
@@ -83,6 +84,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         "path": home.join("config.toml").to_string_lossy(),
         "model": model,
         "model_provider": profile.id.trim(),
+        "codex_model_provider": codex_model_provider,
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
@@ -110,6 +112,7 @@ fn disabled_relay_profile_model_catalog_value(home: &Path) -> Value {
         "message": "Codex++ relay profiles are disabled",
         "model": "",
         "model_provider": "",
+        "codex_model_provider": "",
         "provider_name": "",
         "default_model": "",
         "models": [],
@@ -118,6 +121,20 @@ fn disabled_relay_profile_model_catalog_value(home: &Path) -> Value {
         "sources": [],
         "responses_api": responses_api_status("unknown", "", "")
     })
+}
+
+pub fn codex_model_provider_for_relay_profile(home: &Path, profile: &RelayProfile) -> String {
+    let profile_config = parse_codex_config(&profile.config_contents);
+    let profile_provider = string_value(profile_config.root.get("model_provider"));
+    if !profile_provider.is_empty() {
+        return profile_provider;
+    }
+
+    let (live_config, _, error) = load_codex_config(&home.join("config.toml"));
+    if error.is_some() {
+        return String::new();
+    }
+    string_value(live_config.root.get("model_provider"))
 }
 
 fn relay_profile_model_details(profile: &RelayProfile) -> Vec<Value> {
@@ -872,6 +889,32 @@ mod tests {
             catalog["model_details"][0]["auto_compact_token_limit"],
             400_000
         );
+    }
+
+    #[test]
+    fn relay_catalog_exposes_the_actual_codex_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model_provider = \"live-provider\"\n",
+        )
+        .unwrap();
+        let profile = RelayProfile {
+            id: "manager-profile".to_string(),
+            config_contents: "model_provider = \"profile-provider\"\n".to_string(),
+            ..RelayProfile::default()
+        };
+
+        let catalog = relay_profile_model_catalog_value(temp.path(), &profile);
+        assert_eq!(catalog["model_provider"], "manager-profile");
+        assert_eq!(catalog["codex_model_provider"], "profile-provider");
+
+        let profile = RelayProfile {
+            id: "manager-profile".to_string(),
+            ..RelayProfile::default()
+        };
+        let catalog = relay_profile_model_catalog_value(temp.path(), &profile);
+        assert_eq!(catalog["codex_model_provider"], "live-provider");
     }
 
     #[test]

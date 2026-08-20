@@ -134,6 +134,15 @@ pub trait LaunchHooks: Send + Sync {
     fn select_helper_port(&self, requested: u16) -> u16;
     async fn load_settings(&self) -> anyhow::Result<BackendSettings>;
     async fn run_provider_sync(&self) -> anyhow::Result<()>;
+    fn has_pending_remote_control_session_recoveries(&self) -> bool {
+        false
+    }
+    fn remote_control_session_recovery_is_safe_to_run(&self) -> bool {
+        true
+    }
+    async fn run_remote_control_session_recovery(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn apply_active_relay_profile(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
@@ -300,6 +309,15 @@ where
             crate::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
                 &home,
                 "launcher.after_provider_sync",
+            );
+        }
+        let pending_remote_recovery = hooks.has_pending_remote_control_session_recoveries();
+        if pending_remote_recovery && hooks.remote_control_session_recovery_is_safe_to_run() {
+            hooks.run_remote_control_session_recovery().await?;
+        } else if pending_remote_recovery {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.remote_control_session_finalization_deferred",
+                serde_json::json!({"reason": "desktop_writer_active"}),
             );
         }
         if settings.codex_app_performance_protection {
