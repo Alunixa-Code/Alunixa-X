@@ -5987,6 +5987,9 @@ function CustomModelsRelayProfileEditor({
   actions: Actions;
 }) {
   const models = profile.customModels?.length ? profile.customModels : [createEmptyCustomModel()];
+  const selectedModelName = profile.lastUsedModel.trim() || models[0]?.model.trim() || "";
+  const selectedModel = models.find((model) => model.model.trim().toLowerCase() === selectedModelName.toLowerCase())
+    || models[0];
   const modelIds = models.map((model) => model.id);
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -6097,6 +6100,14 @@ function CustomModelsRelayProfileEditor({
             <ToggleVisual />
           </label>
         </Field>
+      </div>
+      <div className="custom-model-effective-config">
+        <span><strong>{t("启动模型")}</strong>{selectedModel?.model || "-"}</span>
+        <span><strong>{t("上下文窗口")}</strong>{selectedModel?.contextWindow || "-"}</span>
+        <span>
+          <strong>{t("自动压缩 Token 阈值")}</strong>
+          {selectedModel?.autoCompactEnabled ? selectedModel.autoCompactLimit || "-" : t("关闭")}
+        </span>
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={reorderModels}>
         <SortableContext items={modelIds} strategy={verticalListSortingStrategy}>

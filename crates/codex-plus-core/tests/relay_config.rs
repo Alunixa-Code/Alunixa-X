@@ -1,7 +1,7 @@
 use codex_plus_core::codex_sqlite::codex_session_db_path_from_home;
 use codex_plus_core::relay_config::{
-    apply_pure_api_config_to_home, apply_relay_config_file_to_home, apply_relay_config_to_home,
-    apply_relay_files_to_home, apply_relay_files_to_home_with_common,
+    apply_preferred_model_to_home, apply_pure_api_config_to_home, apply_relay_config_file_to_home,
+    apply_relay_config_to_home, apply_relay_files_to_home, apply_relay_files_to_home_with_common,
     apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard,
     apply_relay_profile_files_to_home_with_context, apply_relay_profile_to_home_with_switch_rules,
     apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard,
@@ -1764,8 +1764,8 @@ experimental_bearer_token = "codex-plus-custom"
     assert!(first.backup_path.is_some());
     assert!(second.backup_path.is_none());
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
-    assert!(!config.contains("model_context_window"));
-    assert!(!config.contains("model_auto_compact_token_limit"));
+    assert!(config.contains("model_context_window = 500000"));
+    assert!(config.contains("model_auto_compact_token_limit = 400000"));
 }
 
 #[test]
@@ -3386,7 +3386,7 @@ experimental_bearer_token = "sk-new"
 }
 
 #[test]
-fn custom_models_use_per_model_context_limits_without_root_override() {
+fn custom_models_use_per_model_context_limits_with_selected_root_override() {
     let temp = tempfile::tempdir().unwrap();
     let profile = RelayProfile {
         id: "custom-models".to_string(),
@@ -3442,8 +3442,8 @@ experimental_bearer_token = "codex-plus-custom"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(!config.contains("model_context_window"));
-    assert!(!config.contains("model_auto_compact_token_limit"));
+    assert!(config.contains("model_context_window = 250000"));
+    assert!(config.contains("model_auto_compact_token_limit = 200000"));
 
     let catalog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(
@@ -3466,7 +3466,55 @@ experimental_bearer_token = "codex-plus-custom"
 }
 
 #[test]
-fn normalize_custom_models_removes_stale_root_context_limits() {
+fn selected_custom_model_updates_root_context_and_compaction_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut profile = RelayProfile {
+        id: "custom-models".to_string(),
+        relay_mode: RelayMode::CustomModels,
+        config_contents: r#"model = "gpt-5.6-sol"
+model_provider = "custom-models"
+
+[model_providers.custom-models]
+name = "custom"
+wire_api = "responses"
+base_url = "http://127.0.0.1:57321/v1"
+"#
+        .to_string(),
+        custom_models: vec![
+            CustomRelayModel {
+                id: "sol".to_string(),
+                model: "gpt-5.6-sol".to_string(),
+                context_window: "1000000".to_string(),
+                auto_compact_enabled: true,
+                auto_compact_limit: "980000".to_string(),
+                ..CustomRelayModel::default()
+            },
+            CustomRelayModel {
+                id: "terra".to_string(),
+                model: "gpt-5.6-terra".to_string(),
+                context_window: "1000000".to_string(),
+                auto_compact_enabled: true,
+                auto_compact_limit: "990000".to_string(),
+                ..CustomRelayModel::default()
+            },
+        ],
+        default_custom_model_id: "sol".to_string(),
+        last_used_model: "gpt-5.6-sol".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+    profile.record_last_used_model("gpt-5.6-terra");
+    assert!(apply_preferred_model_to_home(temp.path(), &profile).unwrap());
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains("model = \"gpt-5.6-terra\""));
+    assert!(config.contains("model_context_window = 1000000"));
+    assert!(config.contains("model_auto_compact_token_limit = 990000"));
+}
+
+#[test]
+fn normalize_custom_models_replaces_stale_root_context_limits() {
     let mut profile = RelayProfile {
         id: "custom-models".to_string(),
         relay_mode: RelayMode::CustomModels,
@@ -3499,11 +3547,15 @@ experimental_bearer_token = "codex-plus-custom"
 
     normalize_relay_profile_for_storage(&mut profile).unwrap();
 
-    assert!(!profile.config_contents.contains("model_context_window"));
     assert!(
-        !profile
+        profile
             .config_contents
-            .contains("model_auto_compact_token_limit")
+            .contains("model_context_window = 500000")
+    );
+    assert!(
+        profile
+            .config_contents
+            .contains("model_auto_compact_token_limit = 400000")
     );
     assert_eq!(profile.context_window, "500000");
     assert_eq!(profile.auto_compact_limit, "400000");

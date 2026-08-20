@@ -353,7 +353,7 @@ impl BridgeSettingsService for CoreSettingsService {
 
     async fn record_model_selection(&self, model: String) -> anyhow::Result<bool> {
         let mut known = false;
-        self.store.mutate(|settings| {
+        let settings = self.store.mutate(|settings| {
             let active_id = settings.active_relay_id.clone();
             let Some(profile) = settings
                 .relay_profiles
@@ -370,6 +370,12 @@ impl BridgeSettingsService for CoreSettingsService {
                 profile.record_last_used_model(&model);
             }
         })?;
+        if known && settings.relay_profiles_enabled {
+            crate::relay_config::apply_preferred_model_to_home(
+                &crate::relay_config::default_codex_home_dir(),
+                &settings.active_relay_profile(),
+            )?;
+        }
         Ok(known)
     }
 

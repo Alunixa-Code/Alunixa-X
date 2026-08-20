@@ -1712,10 +1712,28 @@ fn apply_profile_context_limits_to_config(
     config_text: &str,
 ) -> anyhow::Result<String> {
     if profile.relay_mode == crate::settings::RelayMode::CustomModels {
-        let mut doc = parse_toml_document(config_text)?;
-        doc.as_table_mut().remove("model_context_window");
-        doc.as_table_mut().remove("model_auto_compact_token_limit");
-        return Ok(normalize_optional_toml(doc));
+        let preferred_model = profile.preferred_model_name();
+        let selected = profile
+            .custom_models
+            .iter()
+            .find(|model| model.model.eq_ignore_ascii_case(&preferred_model))
+            .or_else(|| profile.default_custom_model());
+        let Some(selected) = selected else {
+            let mut doc = parse_toml_document(config_text)?;
+            doc.as_table_mut().remove("model_context_window");
+            doc.as_table_mut().remove("model_auto_compact_token_limit");
+            return Ok(normalize_optional_toml(doc));
+        };
+        let compact_limit = if selected.auto_compact_enabled {
+            selected.auto_compact_limit.as_str()
+        } else {
+            ""
+        };
+        return apply_context_limits_to_config(
+            config_text,
+            &selected.context_window,
+            compact_limit,
+        );
     }
 
     apply_context_limits_to_config(
@@ -2711,15 +2729,14 @@ pub fn apply_preferred_model_to_home(home: &Path, profile: &RelayProfile) -> any
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error.into()),
     };
-    let mut doc = parse_toml_document(&existing)?;
-    if doc.get("model").and_then(Item::as_str) == Some(preferred_model.as_str()) {
+    let with_limits = apply_profile_context_limits_to_config(profile, &existing)?;
+    let mut doc = parse_toml_document(&with_limits)?;
+    doc["model"] = toml_edit::value(preferred_model);
+    let updated = ensure_trailing_newline(doc.to_string());
+    if updated == ensure_trailing_newline(existing) {
         return Ok(false);
     }
-    doc["model"] = toml_edit::value(preferred_model);
-    crate::settings::atomic_write(
-        &config_path,
-        ensure_trailing_newline(doc.to_string()).as_bytes(),
-    )?;
+    crate::settings::atomic_write(&config_path, updated.as_bytes())?;
     Ok(true)
 }
 

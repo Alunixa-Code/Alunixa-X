@@ -4077,6 +4077,29 @@ body {
   gap: 8px;
 }
 
+.custom-model-effective-config {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  padding: 9px 0;
+  border-top: 1px solid hsl(var(--border));
+  border-bottom: 1px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.custom-model-effective-config span {
+  display: inline-flex;
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.custom-model-effective-config strong {
+  color: hsl(var(--foreground));
+  font-weight: 600;
+}
+
 .custom-model-blocks {
   display: grid;
   gap: 12px;

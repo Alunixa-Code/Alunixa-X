@@ -630,3 +630,7 @@
 - CDP bridge 改为并发处理页面 binding call，长耗时 Stepwise/导出等请求不会阻塞 `/backend/status`；同一 renderer 的 bridge 使用分代机制，新的成功会话接管后旧会话停止响应，失败重装不会提前废弃旧连接喵~
 - 新增 renderer 样式初始化回归，动态提取 `installStyle()` 中全部模板变量并验证声明和执行；新增当前 app bundle request client 发现契约，防止残留样式引用或资源拆包变化再次让整个增强脚本中断喵~
 - 第一阶段独立验证通过：renderer JavaScript 语法、Node 注入回归 `2/2`、Rust CDP bridge 专项 `86/86`；验证未连接、替换、重启或操作当前 Codex 页面喵~
+- 压缩提前问题已取得直接数据证据：当前活动供应商 `9527` 中 `gpt-5.6-terra` 的模型级上下文为 `1000000`、自动压缩阈值为 `298000`，生成的 `model-catalogs/custom-mrjkc9t3.json` 也确实写入 `298000`；因此约 `250K` 至 `270K` 压缩不是 Codex 忽略 Token 阈值，而是管理器供应商级摘要与当前模型级真实值不一致造成误判喵~
+- 自定义多模型供应商现以当前选中模型作为唯一实际上下文来源：启动、供应商应用与页面模型选择回写都会同步顶层 `model`、`model_context_window`、`model_auto_compact_token_limit`，同时保留模型目录中的每模型元数据；切换模型时三项值一起原子更新喵~
+- 管理器自定义模型页面新增紧凑的实际启动配置摘要，直接显示当前模型、该模型上下文窗口与该模型自动压缩 Token 阈值，不再用供应商默认字段冒充当前模型的生效值喵~
+- 压缩专项独立验证通过：前端源码契约与 renderer 回归 `3/3`、`relay_config` 全集 `110/110`、Rust formatter；测试覆盖选中模型切换后顶层阈值从一个模型的值更新为另一个模型的精确 Token 值喵~
