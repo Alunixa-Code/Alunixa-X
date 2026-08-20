@@ -14,6 +14,7 @@ pub mod codex_local_storage;
 pub mod codex_sqlite;
 mod computer_use_guard;
 pub mod config_backup;
+pub mod connect;
 pub mod diagnostic_log;
 pub mod env_conflicts;
 pub mod http_client;

@@ -637,3 +637,7 @@
 - 用户要求从现有阶段提交继续完成选择性上游同步、兼容修复、GitHub Actions 构建和正式发行；本轮确认继续禁止连接、替换、重启或操作当前 Codex 实例，只使用静态审计、独立自动化测试和 CI 喵~
 - 已复核 `main`、`origin/main`、最近阶段提交与项目记录，确认本地功能提交尚未推送，远端仍是 `Alunixa-Code/CodexPlusPlusPlus`，工作树仅有四个内容与 HEAD 一致的既有 CRLF 状态噪声文件并继续排除喵~
 - 已读取上游微信连接、DreamSkin 社区市场和 `v1.2.50` 标签提交的文件级变更范围；这些提交同时包含版本、renderer 倒退和其他无关改动，后续只按当前仓库结构手工移植必要实现，不直接 cherry-pick 喵~
+- 已选择性导入上游微信连接的四个全新核心模块，并接入当前设置、Tauri 命令和管理器独立页面；未导入上游对 launcher、renderer、routes、数据层或现有 Remote Control 的删除与倒退改动喵~
+- 微信连接支持扫码登录、长轮询收发文本与语音转写、每联系人独立 Codex thread、消息去重、联系人白名单、工作目录与已有会话目录搜索、模型和沙箱选择、运行状态、启动停止及桌面内置 Codex CLI 自动发现喵~
+- 微信服务地址现强制为微信官方 HTTPS 域名，拒绝任意主机、HTTP、端口、认证信息、查询和重定向式配置，避免 bot token 被发送到第三方；默认沙箱为只读，页面不回显连接 token 喵~
+- 微信阶段独立验证通过 TypeScript、前端 `25/25`、i18n plain `778/778` 与 template `66/66`、Rust formatter 和差异检查；本机 Cargo 因 crates.io DNS 无法下载新增 `qrcode 0.14.1` 而未完成核心测试，最终由 GitHub Actions 标准网络环境进行权威编译验证喵~

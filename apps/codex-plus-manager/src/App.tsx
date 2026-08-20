@@ -41,6 +41,7 @@ import {
   LogOut,
   MessageCircle,
   FileCode2,
+  FolderOpen,
   Moon,
   Network,
   Power,
@@ -49,6 +50,7 @@ import {
   RefreshCw,
   Rocket,
   Save,
+  ScanLine,
   Settings,
   ShieldCheck,
   ShieldAlert,
@@ -200,6 +202,16 @@ type BackendSettings = {
   codexAppImageOverlayOpacity: number;
   codexAppImageOverlayFitMode: ImageOverlayFitMode;
   codexGoalsEnabled: boolean;
+  weixinConnectEnabled: boolean;
+  weixinConnectBaseUrl: string;
+  weixinConnectToken: string;
+  weixinConnectAccountId: string;
+  weixinConnectAllowFrom: string;
+  weixinConnectRouteTag: string;
+  weixinConnectWorkDir: string;
+  weixinConnectModel: string;
+  weixinConnectSandbox: "read-only" | "workspace-write" | "danger-full-access";
+  weixinConnectCodexPath: string;
   launchMode: LaunchMode;
   relayBaseUrl: string;
   relayApiKey: string;
@@ -829,7 +841,26 @@ type StartupResult = CommandResult<{
   showUpdate: boolean;
 }>;
 
-type Route = "overview" | "relay" | "reasoning" | "remoteControl" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
+type WeixinConnectStatusResult = CommandResult<{
+  state: string;
+  message: string;
+  accountId: string;
+  hasToken: boolean;
+  lastPeerId: string;
+  lastMessageAtMs: number;
+  processedMessages: number;
+}>;
+
+type WeixinQrResult = CommandResult<{
+  qrStatus: string;
+  qrContent: string;
+  qrSvg: string;
+  accountId: string;
+  linkedUserId: string;
+  hasToken: boolean;
+}>;
+
+type Route = "overview" | "relay" | "reasoning" | "remoteControl" | "weixin" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
@@ -837,6 +868,7 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   { id: "relay", label: t("供应商配置"), icon: KeyRound },
   { id: "reasoning", label: t("思考等级"), icon: BrainCircuit },
   { id: "remoteControl", label: t("手机远控"), icon: Smartphone },
+  { id: "weixin", label: t("微信连接"), icon: ScanLine },
   { id: "sessions", label: t("会话管理"), icon: MessageCircle },
   { id: "context", label: t("工具与插件"), icon: Network },
   { id: "enhance", label: t("Codex增强"), icon: Hammer },
@@ -907,6 +939,16 @@ const defaultSettings: BackendSettings = {
   codexAppImageOverlayOpacity: 35,
   codexAppImageOverlayFitMode: "fit",
   codexGoalsEnabled: false,
+  weixinConnectEnabled: false,
+  weixinConnectBaseUrl: "https://ilinkai.weixin.qq.com",
+  weixinConnectToken: "",
+  weixinConnectAccountId: "",
+  weixinConnectAllowFrom: "",
+  weixinConnectRouteTag: "",
+  weixinConnectWorkDir: "",
+  weixinConnectModel: "",
+  weixinConnectSandbox: "read-only",
+  weixinConnectCodexPath: "",
   launchMode: "patch",
   relayBaseUrl: "",
   relayApiKey: "",
@@ -968,6 +1010,8 @@ export function App() {
   } | null>(null);
   const [overview, setOverview] = useState<OverviewResult | null>(null);
   const [settings, setSettings] = useState<SettingsResult | null>(null);
+  const [weixinStatus, setWeixinStatus] = useState<WeixinConnectStatusResult | null>(null);
+  const [weixinQr, setWeixinQr] = useState<WeixinQrResult | null>(null);
   const [relay, setRelay] = useState<RelayResult | null>(null);
   const [relayFiles, setRelayFiles] = useState<RelayFilesResult | null>(null);
   const [officialRemote, setOfficialRemote] = useState<RemoteControlResult | null>(null);
@@ -1235,6 +1279,17 @@ export function App() {
     return result;
   };
 
+  const refreshWeixinStatus = async (silent = false) => {
+    const result = await run(() => call<WeixinConnectStatusResult>("weixin_connect_status"));
+    if (result) {
+      setWeixinStatus(result);
+      if (!silent || !isSuccessStatus(result.status)) {
+        showResultNotice(t("微信连接"), result, { silentSuccess: true });
+      }
+    }
+    return result;
+  };
+
   const previewRolloutImageCleanup = async (silent = false) => {
     const result = await run(() => call<RolloutImageCleanupResult>("preview_rollout_image_cleanup"));
     if (result) {
@@ -1466,6 +1521,11 @@ export function App() {
       await refreshSettings(true);
       await refreshRelay(true);
       await refreshOfficialRemote(true);
+    }
+    if (next === "weixin") {
+      await refreshSettings(true);
+      await refreshWeixinStatus(true);
+      await refreshLocalSessions(true);
     }
     if (next === "sessions") {
       await refreshSettings(true);
@@ -1726,6 +1786,64 @@ export function App() {
   const saveSettings = async () => {
     const next = normalizeSettings(settingsForm);
     await saveSettingsValue(next, false);
+  };
+
+  const beginWeixinQrLogin = async () => {
+    const result = await run(() =>
+      call<WeixinQrResult>("weixin_connect_qr_start", {
+        baseUrl: settingsForm.weixinConnectBaseUrl,
+        routeTag: settingsForm.weixinConnectRouteTag,
+      }),
+    );
+    if (!result) return;
+    setWeixinQr(result);
+    showResultNotice(t("微信扫码登录"), result, { silentSuccess: true });
+  };
+
+  const startWeixinConnect = async () => {
+    if (!await saveSettingsValue(settingsForm, true, true)) return;
+    const result = await run(() => call<WeixinConnectStatusResult>("weixin_connect_start"));
+    if (!result) return;
+    setWeixinStatus(result);
+    showResultNotice(t("微信连接"), result);
+    await refreshSettings(true);
+  };
+
+  const stopWeixinConnect = async () => {
+    const result = await run(() => call<WeixinConnectStatusResult>("weixin_connect_stop"));
+    if (!result) return;
+    setWeixinStatus(result);
+    showResultNotice(t("微信连接"), result);
+    await refreshSettings(true);
+  };
+
+  const chooseWeixinPath = async (kind: "workDir" | "codexPath") => {
+    try {
+      const selected = await open({
+        directory: kind === "workDir",
+        multiple: false,
+        title: kind === "workDir" ? t("选择微信连接工作目录") : t("选择 Codex CLI"),
+      });
+      if (typeof selected !== "string" || !selected.trim()) return;
+      setSettingsForm((current) => ({
+        ...current,
+        [kind === "workDir" ? "weixinConnectWorkDir" : "weixinConnectCodexPath"]:
+          selected.trim(),
+      }));
+    } catch (error) {
+      showNotice(t("微信连接"), stringifyError(error), "failed");
+    }
+  };
+
+  const findDesktopCodexCli = async () => {
+    const result = await run(() =>
+      call<CommandResult<{ path: string | null }>>("find_desktop_codex_cli"),
+    );
+    if (!result) return;
+    if (isSuccessStatus(result.status) && result.path) {
+      setSettingsForm((current) => ({ ...current, weixinConnectCodexPath: result.path || "" }));
+    }
+    showResultNotice(t("Codex CLI"), result);
   };
 
   const saveSettingsValue = async (
@@ -2482,6 +2600,43 @@ export function App() {
   }, [remotePairing?.pairingCode, remotePairing?.manualPairingCode, remotePairing?.expiresAt]);
 
   useEffect(() => {
+    if (!weixinQr || !["", "wait", "scaned"].includes(weixinQr.qrStatus)) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const result = await call<WeixinQrResult>("weixin_connect_qr_status");
+        if (cancelled) return;
+        setWeixinQr(result);
+        if (result.qrStatus === "confirmed") {
+          await refreshSettings(true);
+          await refreshWeixinStatus(true);
+          showNotice(t("微信扫码登录"), result.message, result.status);
+          return;
+        }
+        if (!isSuccessStatus(result.status) || result.qrStatus === "expired") {
+          showResultNotice(t("微信扫码登录"), result);
+          return;
+        }
+        timer = window.setTimeout(poll, 1_000);
+      } catch (error) {
+        if (!cancelled) showNotice(t("微信扫码登录"), stringifyError(error), "failed");
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [weixinQr?.qrStatus, weixinQr?.qrContent]);
+
+  useEffect(() => {
+    if (route !== "weixin") return;
+    const timer = window.setInterval(() => void refreshWeixinStatus(true), 2_000);
+    return () => window.clearInterval(timer);
+  }, [route]);
+
+  useEffect(() => {
     void (async () => {
       const startup = await run(() => call<StartupResult>("startup_options"));
       if (startup?.showUpdate) {
@@ -2821,6 +2976,22 @@ export function App() {
               actions={actions}
             />
           ) : null}
+          {route === "weixin" ? (
+            <WeixinConnectScreen
+              form={settingsForm}
+              status={weixinStatus}
+              qr={weixinQr}
+              sessions={localSessions?.sessions ?? []}
+              onFormChange={setSettingsForm}
+              onSave={() => void saveSettings()}
+              onQrLogin={() => void beginWeixinQrLogin()}
+              onStart={() => void startWeixinConnect()}
+              onStop={() => void stopWeixinConnect()}
+              onChooseWorkDir={() => void chooseWeixinPath("workDir")}
+              onChooseCodexPath={() => void chooseWeixinPath("codexPath")}
+              onFindCodexPath={() => void findDesktopCodexCli()}
+            />
+          ) : null}
           {route === "sessions" ? (
             <SessionsScreen
               settings={settings}
@@ -3098,6 +3269,220 @@ function OverviewScreen({
       </Panel>
     </>
   );
+}
+
+function WeixinConnectScreen({
+  form,
+  status,
+  qr,
+  sessions,
+  onFormChange,
+  onSave,
+  onQrLogin,
+  onStart,
+  onStop,
+  onChooseWorkDir,
+  onChooseCodexPath,
+  onFindCodexPath,
+}: {
+  form: BackendSettings;
+  status: WeixinConnectStatusResult | null;
+  qr: WeixinQrResult | null;
+  sessions: LocalSession[];
+  onFormChange: (value: BackendSettings) => void;
+  onSave: () => void;
+  onQrLogin: () => void;
+  onStart: () => void;
+  onStop: () => void;
+  onChooseWorkDir: () => void;
+  onChooseCodexPath: () => void;
+  onFindCodexPath: () => void;
+}) {
+  const running = ["starting", "running", "retrying", "stopping"].includes(status?.state || "");
+  const workDirectories = Array.from(
+    new Map(
+      sessions
+        .filter((session) => session.cwd.trim())
+        .map((session) => [session.cwd.trim(), session.title || session.id]),
+    ),
+  );
+  const qrImage = qr?.qrSvg
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(qr.qrSvg)}`
+    : "";
+  const setField = <K extends keyof BackendSettings>(key: K, value: BackendSettings[K]) => {
+    onFormChange({ ...form, [key]: value });
+  };
+
+  return (
+    <>
+      <Panel>
+        <CardHead
+          title={t("个人微信连接")}
+          detail={t("扫码登录后，联系人分别映射到独立 Codex 会话")}
+        />
+        <CardContent>
+          <div className="weixin-status-row">
+            <span className={`remote-status-indicator ${status?.state || "stopped"}`} />
+            <div>
+              <strong>{weixinStatusLabel(status?.state || "stopped")}</strong>
+              <small>{status?.message || t("微信连接未启动。")}</small>
+            </div>
+            <UiBadge variant={running ? "default" : "outline"}>
+              {status?.hasToken || form.weixinConnectToken ? t("已登录") : t("未登录")}
+            </UiBadge>
+          </div>
+          <div className="relay-grid compact weixin-metrics">
+            <div>
+              <span>{t("微信账号")}</span>
+              <code>{status?.accountId || form.weixinConnectAccountId || "--"}</code>
+            </div>
+            <div>
+              <span>{t("已处理消息")}</span>
+              <code>{status?.processedMessages ?? 0}</code>
+            </div>
+            <div>
+              <span>{t("最近联系人")}</span>
+              <code>{status?.lastPeerId || "--"}</code>
+            </div>
+          </div>
+          <Toolbar>
+            <Button onClick={onQrLogin} variant="secondary">
+              <ScanLine className="h-4 w-4" />
+              {status?.hasToken || form.weixinConnectToken ? t("重新扫码") : t("微信扫码登录")}
+            </Button>
+            {running ? (
+              <Button onClick={onStop} variant="outline">
+                <PowerOff className="h-4 w-4" />
+                {t("停止连接")}
+              </Button>
+            ) : (
+              <Button disabled={!(status?.hasToken || form.weixinConnectToken)} onClick={onStart}>
+                <Power className="h-4 w-4" />
+                {t("启动连接")}
+              </Button>
+            )}
+            <Button onClick={onSave} variant="outline">
+              <Save className="h-4 w-4" />
+              {t("保存设置")}
+            </Button>
+          </Toolbar>
+          {qrImage && ["", "wait", "scaned"].includes(qr?.qrStatus || "") ? (
+            <div className="weixin-qr-block">
+              <img alt={t("微信登录二维码")} src={qrImage} />
+              <div>
+                <strong>{qr?.qrStatus === "scaned" ? t("已扫码，请在微信中确认") : t("使用微信扫描二维码")}</strong>
+                <small>{t("确认后登录信息会直接保存，不会在页面显示连接 token。")}</small>
+              </div>
+            </div>
+          ) : null}
+        </CardContent>
+      </Panel>
+
+      <div className="grid two weixin-config-grid">
+        <Panel>
+          <CardHead title={t("会话目标")} detail={t("可直接输入目录，或搜索已有会话的工作目录")} />
+          <CardContent>
+            <Field label={t("工作目录")}>
+              <div className="weixin-path-row">
+                <Input
+                  list="weixin-session-workdirs"
+                  onChange={(event) => setField("weixinConnectWorkDir", event.target.value)}
+                  placeholder={t("输入目录或选择已有会话")}
+                  value={form.weixinConnectWorkDir}
+                />
+                <Button onClick={onChooseWorkDir} size="icon" title={t("选择文件夹")} variant="outline">
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+                <datalist id="weixin-session-workdirs">
+                  {workDirectories.map(([cwd, title]) => (
+                    <option key={cwd} label={title} value={cwd} />
+                  ))}
+                </datalist>
+              </div>
+            </Field>
+            <Field label={t("模型")}>
+              <Input
+                onChange={(event) => setField("weixinConnectModel", event.target.value)}
+                placeholder={t("留空时使用 Codex 当前默认模型")}
+                value={form.weixinConnectModel}
+              />
+            </Field>
+            <Field label={t("沙箱权限")}>
+              <select
+                className="field-select"
+                onChange={(event) =>
+                  setField(
+                    "weixinConnectSandbox",
+                    event.target.value as BackendSettings["weixinConnectSandbox"],
+                  )
+                }
+                value={form.weixinConnectSandbox}
+              >
+                <option value="read-only">{t("只读")}</option>
+                <option value="workspace-write">{t("工作区可写")}</option>
+                <option value="danger-full-access">{t("完全访问")}</option>
+              </select>
+            </Field>
+            <Field label={t("允许联系人")}>
+              <Input
+                onChange={(event) => setField("weixinConnectAllowFrom", event.target.value)}
+                placeholder={t("逗号分隔联系人 ID；留空允许所有联系人")}
+                value={form.weixinConnectAllowFrom}
+              />
+            </Field>
+          </CardContent>
+        </Panel>
+
+        <Panel>
+          <CardHead title={t("连接设置")} detail={t("默认连接固定微信服务，并复用本机 Codex app-server")} />
+          <CardContent>
+            <Field label="Codex CLI">
+              <div className="weixin-path-row">
+                <Input
+                  onChange={(event) => setField("weixinConnectCodexPath", event.target.value)}
+                  placeholder={t("留空使用 PATH 中的 codex")}
+                  value={form.weixinConnectCodexPath}
+                />
+                <Button onClick={onChooseCodexPath} size="icon" title={t("选择 Codex CLI")} variant="outline">
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              </div>
+              <Button className="weixin-find-cli" onClick={onFindCodexPath} variant="secondary">
+                <ScanLine className="h-4 w-4" />
+                {t("查找桌面版内置 CLI")}
+              </Button>
+            </Field>
+            <Field label="Base URL">
+              <Input
+                disabled
+                value={form.weixinConnectBaseUrl}
+              />
+              <p className="field-hint">{t("仅允许微信官方 HTTPS 服务地址。")}</p>
+            </Field>
+            <Field label={t("路由标签")}>
+              <Input
+                onChange={(event) => setField("weixinConnectRouteTag", event.target.value)}
+                placeholder={t("通常留空")}
+                value={form.weixinConnectRouteTag}
+              />
+            </Field>
+          </CardContent>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function weixinStatusLabel(state: string) {
+  const labels: Record<string, string> = {
+    stopped: t("未启动"),
+    starting: t("启动中"),
+    running: t("运行中"),
+    retrying: t("正在重连"),
+    stopping: t("正在停止"),
+    error: t("连接异常"),
+  };
+  return labels[state] || state;
 }
 
 function RemoteControlScreen({
@@ -7264,6 +7649,7 @@ function routeSubtitle(route: Route) {
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
     reasoning: t("按供应商设置每个模型的最高思考等级"),
     remoteControl: t("连接 ChatGPT 账号并管理官方手机远控"),
+    weixin: t("通过个人微信连接本机 Codex 会话"),
     relayEnvironment: t("排查可能干扰中转站配置的本机环境"),
     sessions: t("查看、删除和修复 Codex 本地会话"),
     context: t("独立管理 MCP、Skills、Plugins"),

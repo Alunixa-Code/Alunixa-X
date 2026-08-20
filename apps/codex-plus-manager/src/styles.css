@@ -2362,6 +2362,88 @@ body {
   padding: 7px 10px;
 }
 
+.weixin-status-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+}
+
+.weixin-status-row > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.weixin-status-row strong,
+.weixin-status-row small {
+  overflow-wrap: anywhere;
+}
+
+.weixin-status-row small {
+  color: var(--muted);
+}
+
+.weixin-metrics {
+  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.weixin-metrics code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.weixin-qr-block {
+  display: grid;
+  grid-template-columns: 184px minmax(0, 1fr);
+  align-items: center;
+  gap: 20px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.weixin-qr-block img {
+  width: 184px;
+  height: 184px;
+  padding: 8px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 6px;
+}
+
+.weixin-qr-block > div {
+  display: grid;
+  gap: 6px;
+}
+
+.weixin-qr-block small {
+  color: var(--muted);
+}
+
+.weixin-config-grid .panel {
+  min-width: 0;
+}
+
+.weixin-config-grid .field + .field {
+  margin-top: 14px;
+}
+
+.weixin-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+}
+
+.weixin-find-cli {
+  margin-top: 8px;
+}
+
 .shared-terminal-retention-control {
   display: grid;
   min-width: 0;
