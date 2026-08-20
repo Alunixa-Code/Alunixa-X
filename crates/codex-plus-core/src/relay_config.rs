@@ -154,7 +154,7 @@ pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Re
 
 pub fn set_codex_imagegen_mcp_in_home(
     home: &Path,
-    launcher_path: &Path,
+    imagegen_mcp_path: &Path,
     helper_port: u16,
     enabled: bool,
 ) -> anyhow::Result<bool> {
@@ -170,16 +170,13 @@ pub fn set_codex_imagegen_mcp_in_home(
     };
     let mut doc = parse_toml_document(&existing)?;
     if enabled {
-        let command = launcher_path
+        let command = imagegen_mcp_path
             .to_str()
             .filter(|path| !path.trim().is_empty())
-            .context("Codex++ launcher 路径无效")?;
+            .context("Codex++ image_gen MCP 路径无效")?;
         let servers = table_mut_or_insert(&mut doc, "mcp_servers")?;
         let mut server = Table::new();
         server["command"] = toml_edit::value(command);
-        let mut args = toml_edit::Array::new();
-        args.push("--codex-plus-imagegen-mcp");
-        server["args"] = toml_edit::value(args);
         server["startup_timeout_sec"] = toml_edit::value(20);
         server["tool_timeout_sec"] = toml_edit::value(900);
         server["enabled"] = toml_edit::value(true);

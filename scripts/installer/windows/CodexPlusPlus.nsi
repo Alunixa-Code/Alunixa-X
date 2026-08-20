@@ -30,10 +30,13 @@ Section "Install"
 
   nsExec::ExecToLog 'taskkill /IM codex-plus-plus.exe /F'
   Pop $0
+  nsExec::ExecToLog 'taskkill /IM codex-plus-imagegen-mcp.exe /F'
+  Pop $0
   nsExec::ExecToLog 'taskkill /IM codex-plus-plus-manager.exe /F'
   Pop $0
 
   File "${ROOT}\dist\windows\app\codex-plus-plus.exe"
+  File "${ROOT}\dist\windows\app\codex-plus-imagegen-mcp.exe"
   File "${ROOT}\dist\windows\app\codex-plus-plus-manager.exe"
 
   Delete "$DESKTOP\Codex++ 绠＄悊宸ュ叿.lnk"
@@ -59,6 +62,8 @@ SectionEnd
 Section "Uninstall"
   nsExec::ExecToLog 'taskkill /IM codex-plus-plus.exe /F'
   Pop $0
+  nsExec::ExecToLog 'taskkill /IM codex-plus-imagegen-mcp.exe /F'
+  Pop $0
   nsExec::ExecToLog 'taskkill /IM codex-plus-plus-manager.exe /F'
   Pop $0
 
@@ -72,6 +77,7 @@ Section "Uninstall"
   RMDir "$SMPROGRAMS\Codex++"
 
   Delete "$INSTDIR\codex-plus-plus.exe"
+  Delete "$INSTDIR\codex-plus-imagegen-mcp.exe"
   Delete "$INSTDIR\codex-plus-plus-manager.exe"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"

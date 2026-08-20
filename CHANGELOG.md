@@ -8,7 +8,7 @@
 - 新增 Realtime WebSocket 透明代理：`/v1/realtime` 等升级请求会保留查询参数、`OpenAI-Beta` 与上游选择的子协议，替换供应商认证，并双向转发 Text、Binary、Ping、Pong 与 Close 帧喵~
 - 通用非幂等请求和 Realtime 连接不执行自动重试或聚合故障转移，避免图片、上传、批处理、微调或视频任务被重复创建、重复计费；上游失败会返回明确的 Codex++ 代理错误喵~
 - HTTP 请求读取器改为 64 MiB 内存加临时文件的混合 body：Content-Length 与 chunked 请求都增量写入，单请求最大支持 8 GiB，满足大型图片编辑、Files 与 Uploads，同时避免全部请求体常驻内存喵~
-- 新增 Codex++ `image_gen` MCP 工具并在启动前写入专用 `codex-plus-imagegen` server 配置；Codex 的 `$imagegen` Skill 现在可以发现真实图片工具，不再只看到 Skill 却提示没有可调用的 `image_gen` 工具喵~
+- 新增独立控制台 companion `codex-plus-imagegen-mcp` 并在启动前写入专用 `codex-plus-imagegen` server 配置；Codex 的 `$imagegen` Skill 现在可以发现真实图片工具，不再只看到 Skill 却提示没有可调用的 `image_gen` 工具，且不再受 Windows GUI launcher 标准管道不可用影响喵~
 - `image_gen` 支持新图生成和本地多图编辑，提供 mask、模型、尺寸、质量、背景、输出格式、压缩、输入保真与多变体参数；请求分别进入活动供应商的 `/v1/images/generations` 和 `/v1/images/edits`喵~
 - 生成结果支持 `b64_json`、Base64 image 与 HTTPS URL 三种上游形态，统一保存到 `CODEX_HOME/generated_images`，同时以 MCP image content 返回 Codex，便于页面直接预览并继续复制到项目目录喵~
 - MCP 配置仅在 Codex 增强和供应商管理同时启用时安装，关闭后只删除 Codex++ 自己的 server 表；用户已有 MCP、Skills、Plugins、供应商品牌、更新源与 GitHub 发布流程均保持不变喵~

@@ -91,9 +91,12 @@ PLIST
 
 sign_app() {
   local app_dir="$1"
-  local executable
-  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_dir/Contents/Info.plist")"
-  codesign --force --sign - "$app_dir/Contents/MacOS/$executable"
+  local binary_path
+  for binary_path in "$app_dir/Contents/MacOS/"*; do
+    if [ -f "$binary_path" ]; then
+      codesign --force --sign - "$binary_path"
+    fi
+  done
   codesign --force --sign - "$app_dir"
 }
 
@@ -120,6 +123,12 @@ verify_app() {
 prepare_icon
 create_app "Codex++" "CodexPlusPlus" "$BINARY_DIR/codex-plus-plus" "com.bigpizzav3.codexplusplus" "true"
 create_app "Codex++ 管理工具" "CodexPlusPlusManager" "$BINARY_DIR/codex-plus-plus-manager" "com.bigpizzav3.codexplusplus.manager" "false"
+if [ ! -x "$BINARY_DIR/codex-plus-imagegen-mcp" ]; then
+  echo "error: imagegen MCP companion not found or not executable: $BINARY_DIR/codex-plus-imagegen-mcp" >&2
+  exit 1
+fi
+cp "$BINARY_DIR/codex-plus-imagegen-mcp" "$STAGE/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"
+chmod +x "$STAGE/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"
 
 sign_app "$STAGE/Codex++.app"
 sign_app "$STAGE/Codex++ 管理工具.app"

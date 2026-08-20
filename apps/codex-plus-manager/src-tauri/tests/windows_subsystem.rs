@@ -196,6 +196,8 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains(
         "create_app \"Codex++ 管理工具\" \"CodexPlusPlusManager\" \"$BINARY_DIR/codex-plus-plus-manager\" \"com.bigpizzav3.codexplusplus.manager\" \"false\""
     ));
+    assert!(script.contains("$BINARY_DIR/codex-plus-imagegen-mcp"));
+    assert!(script.contains("Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"));
 }
 
 #[test]
@@ -215,6 +217,28 @@ fn github_release_workflow_builds_separate_macos_x64_and_arm64_dmgs() {
     assert!(workflow.contains("aarch64-apple-darwin"));
     assert!(workflow.contains("package-dmg.sh \"$VERSION\" \"${{ matrix.arch }}\""));
     assert!(workflow.contains("target/${{ matrix.target }}/release"));
+    assert!(workflow.contains("target/release/codex-plus-imagegen-mcp.exe"));
+    assert!(workflow.contains("target/${{ matrix.target }}/release/codex-plus-imagegen-mcp"));
+}
+
+#[test]
+fn imagegen_mcp_companion_uses_a_console_subsystem_entrypoint() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = manifest_dir
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::parent)
+        .unwrap();
+    let manifest = std::fs::read_to_string(root.join("apps/codex-plus-launcher/Cargo.toml"))
+        .expect("read launcher manifest");
+    let entrypoint =
+        std::fs::read_to_string(root.join("apps/codex-plus-launcher/src/imagegen_mcp_main.rs"))
+            .expect("read imagegen MCP entrypoint");
+
+    assert!(manifest.contains("name = \"codex-plus-imagegen-mcp\""));
+    assert!(manifest.contains("path = \"src/imagegen_mcp_main.rs\""));
+    assert!(!entrypoint.contains("windows_subsystem"));
+    assert!(entrypoint.contains("run_imagegen_mcp_from_stdio"));
 }
 
 #[test]

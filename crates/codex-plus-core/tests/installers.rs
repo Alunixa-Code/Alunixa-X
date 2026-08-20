@@ -108,6 +108,10 @@ fn macos_dmg_includes_applications_shortcut_for_drag_install() {
         .expect("read macOS DMG packaging script");
 
     assert!(script.contains("ln -s /Applications \"$STAGE/Applications\""));
+    assert!(script.contains(
+        "cp \"$BINARY_DIR/codex-plus-imagegen-mcp\" \"$STAGE/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp\""
+    ));
+    assert!(script.contains("for binary_path in \"$app_dir/Contents/MacOS/\"*"));
 }
 
 #[test]

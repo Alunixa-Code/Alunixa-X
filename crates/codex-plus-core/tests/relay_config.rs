@@ -1527,21 +1527,22 @@ fn imagegen_mcp_config_is_managed_without_touching_user_servers() {
         "model = \"gpt-5\"\n\n[mcp_servers.user-server]\ncommand = \"user-mcp\"\n",
     )
     .unwrap();
-    let launcher = if cfg!(windows) {
-        std::path::PathBuf::from(r"C:\Program Files\Codex++\codex-plus-plus.exe")
+    let imagegen_mcp = if cfg!(windows) {
+        std::path::PathBuf::from(r"C:\Program Files\Codex++\codex-plus-imagegen-mcp.exe")
     } else {
-        std::path::PathBuf::from("/Applications/Codex++.app/Contents/MacOS/codex-plus-plus")
+        std::path::PathBuf::from("/Applications/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp")
     };
 
-    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &launcher, 57321, true).unwrap());
+    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &imagegen_mcp, 57321, true).unwrap());
     let enabled = std::fs::read_to_string(&config_path).unwrap();
     assert!(enabled.contains("[mcp_servers.user-server]"));
     assert!(enabled.contains("[mcp_servers.codex-plus-imagegen]"));
-    assert!(enabled.contains("--codex-plus-imagegen-mcp"));
+    assert!(enabled.contains("codex-plus-imagegen-mcp"));
+    assert!(!enabled.contains("args ="));
     assert!(enabled.contains("http://127.0.0.1:57321"));
     assert!(enabled.contains("tool_timeout_sec = 900"));
 
-    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &launcher, 57321, false).unwrap());
+    assert!(set_codex_imagegen_mcp_in_home(temp.path(), &imagegen_mcp, 57321, false).unwrap());
     let disabled = std::fs::read_to_string(&config_path).unwrap();
     assert!(disabled.contains("[mcp_servers.user-server]"));
     assert!(!disabled.contains("codex-plus-imagegen"));

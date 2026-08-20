@@ -504,6 +504,18 @@ fn relay_protocol_proxy_enabled(settings: &BackendSettings) -> bool {
     settings.active_relay_uses_protocol_proxy()
 }
 
+fn imagegen_mcp_executable_path(launcher_path: &Path) -> PathBuf {
+    let file_name = if cfg!(windows) {
+        "codex-plus-imagegen-mcp.exe"
+    } else {
+        "codex-plus-imagegen-mcp"
+    };
+    launcher_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(file_name)
+}
+
 fn select_native_menu_inspector_port(debug_port: u16) -> u16 {
     let requested = debug_port.saturating_add(100);
     crate::ports::select_platform_loopback_port(requested)
@@ -837,9 +849,16 @@ impl LaunchHooks for DefaultLaunchHooks {
         let home = crate::relay_config::default_codex_home_dir();
         let launcher_path = std::env::current_exe().context("无法解析 Codex++ launcher 路径")?;
         let enabled = settings.enhancements_enabled && settings.relay_profiles_enabled;
+        let imagegen_mcp_path = imagegen_mcp_executable_path(&launcher_path);
+        if enabled && !imagegen_mcp_path.is_file() {
+            anyhow::bail!(
+                "Codex++ image_gen MCP companion 不存在：{}",
+                imagegen_mcp_path.display()
+            );
+        }
         let changed = crate::relay_config::set_codex_imagegen_mcp_in_home(
             &home,
-            &launcher_path,
+            &imagegen_mcp_path,
             helper_port,
             enabled,
         )?;
@@ -3826,6 +3845,21 @@ mod tests {
         assert!(should_probe_launcher_cdp(true, false));
         assert!(!should_probe_launcher_cdp(true, true));
         assert!(!should_probe_launcher_cdp(false, false));
+    }
+
+    #[test]
+    fn imagegen_mcp_companion_is_resolved_next_to_the_launcher() {
+        let launcher = if cfg!(windows) {
+            PathBuf::from(r"C:\Program Files\Codex++\codex-plus-plus.exe")
+        } else {
+            PathBuf::from("/Applications/Codex++.app/Contents/MacOS/CodexPlusPlus")
+        };
+        let expected = launcher.parent().unwrap().join(if cfg!(windows) {
+            "codex-plus-imagegen-mcp.exe"
+        } else {
+            "codex-plus-imagegen-mcp"
+        });
+        assert_eq!(imagegen_mcp_executable_path(&launcher), expected);
     }
 
     #[test]

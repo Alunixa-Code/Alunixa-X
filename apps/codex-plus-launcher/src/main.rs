@@ -44,9 +44,6 @@ async fn main() -> Result<()> {
     if args.iter().any(|arg| arg == "--codex-plus-hook") {
         return codex_plus_core::codex_hooks::run_hook_from_stdio().await;
     }
-    if args.iter().any(|arg| arg == "--codex-plus-imagegen-mcp") {
-        return codex_plus_core::imagegen_mcp::run_imagegen_mcp_from_stdio().await;
-    }
     if args.iter().any(|arg| arg == "--codex-plus-shared-terminal") {
         return run_shared_terminal_proxy(args).await;
     }
@@ -1363,7 +1360,7 @@ mod tests {
         assert!(source.contains("self.core.ensure_computer_use_config(settings).await"));
         assert!(source.contains("async fn ensure_plugin_marketplace_config"));
         assert!(source.contains("self.core.ensure_plugin_marketplace_config(settings).await"));
-        assert!(source.contains("--codex-plus-imagegen-mcp"));
+        assert!(include_str!("../Cargo.toml").contains("name = \"codex-plus-imagegen-mcp\""));
         assert!(source.contains("async fn ensure_imagegen_mcp_config"));
         assert!(source.contains(".ensure_imagegen_mcp_config(settings, helper_port)"));
         assert!(source.contains("async fn start_computer_use_guard_watchdog"));
