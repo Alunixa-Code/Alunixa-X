@@ -648,17 +648,19 @@ pub fn macos_codex_process_ids_for_debug_port<'a>(
     process_lines: impl IntoIterator<Item = &'a str>,
     debug_port: u16,
 ) -> Vec<u32> {
-    let debug_flag = format!("remote-debugging-port={debug_port}");
+    let debug_flag = format!("--remote-debugging-port={debug_port}");
     let mut ids = process_lines
         .into_iter()
         .filter_map(|line| {
             let trimmed = line.trim_start();
             let (pid, args) = trimmed.split_once(char::is_whitespace)?;
             let process_id = pid.parse::<u32>().ok()?;
-            let is_desktop_main = (args.contains(".app/Contents/MacOS/ChatGPT")
-                || args.contains(".app/Contents/MacOS/Codex"))
-                && !args.contains("/Helpers/");
-            (is_desktop_main && args.contains(&debug_flag)).then_some(process_id)
+            let is_desktop_main = args.contains("Codex.app/Contents/MacOS/Codex")
+                || args.contains("ChatGPT.app/Contents/MacOS/ChatGPT");
+            let uses_debug_port = args
+                .split_whitespace()
+                .any(|arg| arg.trim_matches(['\'', '"']) == debug_flag);
+            (is_desktop_main && uses_debug_port).then_some(process_id)
         })
         .collect::<Vec<_>>();
     ids.sort_unstable();

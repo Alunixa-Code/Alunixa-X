@@ -713,3 +713,6 @@
 - 完整 workspace 已通过 core `258/258`、bridge `26/26`、CDP `91/91`、DreamSkin、安装器、launcher `80/80`、protocol proxy `62/62`、relay config `116/116` 等套件，最后在上游主题字节测试发现当前资源与陈旧哈希常量不匹配喵~
 - 审计确认当前主题文件来自较早 companion 版本并带局部修改，而用户指定的正式上游 `888f2bdc` 已更新 Windows/macOS 新聊天主表面、Dock/companion 与基础 CSS；现已将 12 份主题 JS/CSS 精确同步到该正式提交，并按 Git 规范 LF 做跨平台哈希验证喵~
 - 主题资源与 `888f2bdc` 的精确差异检查无输出，五份主题 renderer JavaScript 语法通过，`upstream_theme_assets` 定向测试 `1/1` 通过；哈希测试同时兼容 Windows CRLF 工作树和 Git/CI LF 规范字节喵~
+- 第二轮完整 workspace 已通过主题字节测试和此前全部套件，随后 watcher 专项发现 macOS CDP 端口筛选把 `Codex Helper.app/Contents/MacOS/Codex Helper` 误判为 Codex 主进程，存在重启时误停 Helper 的风险喵~
+- 根因是使用通用 `.app/Contents/MacOS/Codex` 子串且只排除 `/Helpers/` 目录；现改为精确识别 `Codex.app/Contents/MacOS/Codex` 与 `ChatGPT.app/Contents/MacOS/ChatGPT`，并对 `--remote-debugging-port=<port>` 做完整参数匹配，避免 Helper 和相似端口被选中喵~
+- 修复后的 watcher 专项 `21/21` 通过，覆盖 Codex/ChatGPT 主进程、Codex Helper、Renderer Helper、Codex CLI、错误端口和精确 CDP 端口；Rust formatter 与差异空白检查通过喵~

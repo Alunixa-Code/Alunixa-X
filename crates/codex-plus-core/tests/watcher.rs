@@ -152,6 +152,8 @@ fn macos_restart_targets_only_desktop_main_process_on_requested_cdp_port() {
         "103 /usr/local/bin/codex app-server --remote-debugging-port=9229",
         "104 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9333",
         "105 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9229",
+        "106 /Applications/Codex.app/Contents/MacOS/Codex --remote-debugging-port=92290",
+        "107 /Applications/Codex.app/Contents/Frameworks/Codex Helper (Renderer).app/Contents/MacOS/Codex Helper (Renderer) --remote-debugging-port=9229",
     ];
 
     assert_eq!(
