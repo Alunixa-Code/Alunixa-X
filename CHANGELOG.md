@@ -1,3 +1,31 @@
+## 1.2.65 - 2026-08-20
+
+- 选择性同步 BigPizzaV3 `v1.2.42` 至 `v1.2.50` 中适用于当前分支的功能与修复，没有合并上游分支，也没有改动 `Alunixa-Code/CodexPlusPlusPlus` 品牌、更新源、仓库入口、赞助内容或发行工作流喵~
+- 完整同步上游 `v1.2.50` 正式发行的会话自动命名和微信内置 CLI 发现：会话操作菜单复用 Codex 原生标题建议与保存流程，微信连接可自动定位桌面包内 Codex CLI 喵~
+- 新增个人微信连接：支持官方 HTTPS 扫码登录、长轮询收发文本与语音转写、联系人白名单、消息去重和每联系人独立 Codex 会话；工作目录可直接输入或搜索，已有会话可快速选择喵~
+- 微信连接默认只读沙箱，不回显连接 Token，并拒绝非微信官方域名、HTTP、端口、认证信息、查询和重定向式服务地址，避免凭据发送到任意第三方喵~
+- Dream Skin 接入安全社区市场：支持搜索、排序、在线预览、安装、更新、本地主题库、ZIP 导入和 `dreamskin://` 一键换肤；Windows 与 macOS 均注册协议入口喵~
+- Dream Skin 下载固定为 `https://api.dreamskin.cc` 且禁用重定向；新增压缩包大小、文件数量、解压大小、SHA-256、平台、版本、manifest、主题身份、图片内容和 Safe CSS 校验喵~
+- Dream Skin 运行时适配当前 Windows/macOS 主内容区域，并支持按真实比例在 composer 旁显示 companion；主题停用或恢复默认时会清理临时节点、class 和属性喵~
+- 修复新版 Codex 顶栏和资源拆包变化：Codex++ 菜单兼容当前 `ApplicationMenuTopBar`，renderer 资源发现覆盖 `app-initial-*`、`app-main-*` 与旧分包，不再依赖固定构建哈希或压缩导出名喵~
+- 增强脚本只注入精确 Codex/ChatGPT 主 renderer，阻止嵌入式浏览器、Quick Chat 或标题偶然包含 Codex 的网页抢占注入目标；新增样式模板变量执行回归，防止残留样式引用中断整个脚本喵~
+- CDP bridge 改为并发处理 binding 请求并使用分代接管；重注入继续携带完整 data bridge 上下文，长耗时 Stepwise、导出等请求不再阻塞后端状态，失败重装也不会提前废弃可用旧连接喵~
+- 修复会话删除撤销后的侧栏刷新、临时 `client-new-thread:` ID 误操作、Provider Sync 子代理混入、陈旧修复锁、`local_thread_catalog` 缺记录及移动端 Remote Control provider 恢复问题喵~
+- Provider Sync 现在扫描所有受支持的 session/reference 数据库，补齐本地目录并归一化 provider；明确标记的 subagent、memory consolidation、spawn child 与 agent job 不会出现在根会话列表或被错误修复喵~
+- Remote Control 恢复记录 profile、目标 provider 与配置 generation，仅在桌面写入进程退出且配置仍匹配时更新 rollout/SQLite；损坏状态文件隔离，配置变化时延期而不误写喵~
+- 修复 macOS 重启 Codex++ 误停止 Codex CLI：只终止命令行含当前 CDP 端口的 Codex/ChatGPT 桌面主进程，明确排除 Helper 与 CLI；重启链路重新建立 CDP、helper、bridge 和增强注入喵~
+- 修复 Windows 已有 Codex CDP 的 launcher recovery：无法从进程枚举识别桌面进程时继续验证当前调试端口，避免误关 helper 与 bridge；Windows 保留端口冲突继续回退到可用临时端口喵~
+- 新增供应商内单模型路由：按精确模型名转发到指定 Responses 供应商，可选改写目标模型；完整正向和反向引用校验阻止自引用、缺失目标、协议错误、聚合目标与本地代理循环喵~
+- 单模型路由保留 `/responses/compact` 及版本前缀，首次在活动供应商启用时明确确认并通过既有重启入口应用；稳定行 key 修复输入焦点丢失，供应商详情和全页面吸顶操作栏保持紧凑可用喵~
+- 修复自定义 Responses 模式下 Web Search、Lite override、Fast service tier 和 VLM 描述块作用域；Responses 使用 `input_text`，其他协议继续使用 `text`，关闭 Stepwise 时不再注入或运行其观察器喵~
+- 修复 cc-switch 模型目录接管和 Codex 26.707+ app-server model patch；外部标准 Responses 目录会保留搜索能力并禁用不兼容 Lite，cc-switch 指针由当前供应商目录安全替换喵~
+- 自动压缩继续使用精确 Token 阈值，并修复多模型供应商顶层摘要与当前选中模型不一致：启动、供应商应用和页面模型选择回写会原子同步 `model`、`model_context_window` 与 `model_auto_compact_token_limit` 喵~
+- 自定义模型页直接显示实际启动模型、该模型上下文窗口和该模型压缩 Token 阈值；例如上下文 `1000000`、阈值 `990000` 会在 config 与模型目录原样写入 `990000`，不再受其他模型的 `298000` 配置影响喵~
+- 修复 provider 字段混入 common config：`openai_base_url`、`chatgpt_base_url`、模型目录、provider 表及 API Key/Token 类根字段只保留在供应商 profile，不再进入公共配置或跨供应商泄漏喵~
+- 同步供应商 URL 导入安全、用户脚本真实运行状态、插件远端搜索与本地 fallback 隔离、长确认弹窗滚动、`CODEX_SQLITE_HOME` 统一解析、多数据库删除撤销和 ChatGPT-Desktop watcher 兼容喵~
+- 保留 `v1.2.64` 的启动前权威注入与失败关闭设计，不恢复与当前 Electron handler 不兼容的供应商动态热重载；保存结果会明确提示下次通过 Codex++ 启动器应用喵~
+- 没有同步上游网站、赞助、品牌、更新地址、发行元数据、整分支 UI 重构及正式 `v1.2.50` 标签之后的权限行为改动，避免改变用户仓库归属或现有服务权限模型喵~
+
 ## 1.2.64 - 2026-08-05
 
 - 撤销 `v1.2.63` 的供应商运行时动态重载事务：管理器保存设置、保存活动供应商、切换供应商和恢复官方配置时不再调用 Electron Host RPC、`batch-write-config-value`、CDP Runtime.evaluate、app-server 配置热重载或 React Query 缓存刷新，避免当前 Electron 主进程缺少 handler 时反复出现“已保存但动态注入失败”喵~

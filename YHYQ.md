@@ -703,3 +703,9 @@
 - 完整 workspace 第三轮已通过 launcher `80/80`、model catalog `7/7`、model suffix `15/15`、protocol proxy `62/62`，随后由 relay_config 的两项安全回归发现 `openai_base_url`、`chatgpt_base_url` 与凭据仍会被提取到 common config 喵~
 - 根因是阶段提交 `adacf592` 合并 cc-switch 兼容时误把 `extract_common_config_from_config` 恢复为旧手工字段列表，绕过了已经存在的统一 provider/credential 清理函数；现已恢复调用 `remove_provider_specific_common_keys`，不改供应商 profile 中的原始字段喵~
 - 修复后的 `cargo test -p codex-plus-core --test relay_config -- --test-threads=1` 已 `116/116` 通过，包含 common config 排除、profile 保留、压缩 Token 阈值、cc-switch、Responses Lite/Web Search 与单模型路由全部回归喵~
+- 已读取 BigPizzaV3 `v1.2.50` 正式 Release 正文和 `93c9ec4a..888f2bdc` 标签范围；正式发行的会话原生自动命名与微信桌面内置 CLI 自动发现均已存在于当前实现及前端合约测试喵~
+- `v1.2.42` 至 `v1.2.50` 适用范围最终审计为已覆盖：微信连接与目录/会话搜索、DreamSkin 安全市场、启动反馈与诊断、Remote Control 恢复、临时会话 ID、防子代理 Provider Sync、模型目录、新版顶栏/主 renderer 注入、会话删除撤销刷新、单模型路由、cc-switch、用户脚本状态、VLM、Stepwise、Fast/Lite/Web Search、保留端口、CDP recovery、data bridge 重连、companion、长弹窗、CODEX_SQLITE_HOME、多数据库和 ChatGPT-Desktop watcher 喵~
+- 明确不采用上游供应商模型动态热应用，因为用户已要求删除会触发当前 Electron 缺失 handler 的热重载；继续使用启动前完整注入、握手核验和失败关闭作为唯一权威路径喵~
+- 明确不合并上游网站、赞助、品牌、更新地址、发行元数据、整分支 UI 重构和正式 `v1.2.50` 标签之后的 Windows 权限行为改动；`origin` 仍为 `Alunixa-Code/CodexPlusPlusPlus`，用户仓库发布流程保持不变喵~
+- 已将 Cargo workspace、四个 Cargo.lock workspace 包、管理器 package/package-lock 与 Tauri 配置精确升级为 `1.2.65`，没有升级任何传递依赖；`CHANGELOG.md` 新增详细同步范围、根因、行为和取舍说明喵~
+- 版本一致性核验通过：`cargo metadata --no-deps` 显示 core、data、launcher、manager 均为 `1.2.65`，Node package、lock 与 Tauri 也一致；本地品牌保护通过，`origin` 和仓库链接仍指向 `Alunixa-Code/CodexPlusPlusPlus`，`.github` 无差异喵~
