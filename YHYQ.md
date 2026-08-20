@@ -699,3 +699,7 @@
 - TypeScript 与 i18n 再次通过，macOS 当前仅安装 Windows Rust target，macOS 条件编译和 DMG 将由 GitHub Actions 的真实 macOS x64/arm64 runner 做权威验证喵~
 - 完整 workspace 首轮进入 core `258` 项后通过 `257` 项，仅供应商安全导入测试仍错误期待 auth.json 只含 Key；产品设置规范化会按既有安全契约同时写入 `auth_mode = apikey`，已修正测试期望而不削弱认证结构喵~
 - 完整 workspace 第二轮已通过 core `258/258`、bridge `26/26`、CDP `91/91` 等前置套件，随后发现 DreamSkin 本地库测试仍在 Windows 期待旧人物主题名；当前安全社区市场已统一使用中性内置名 `Dream Skin`，已按实际默认配置修正陈旧断言喵~
+- 两项陈旧测试期望修正与阶段记录已先提交为检查点 `14ef1537`，仍只排除三个与 HEAD 内容相同的 CRLF 工作树噪声文件喵~
+- 完整 workspace 第三轮已通过 launcher `80/80`、model catalog `7/7`、model suffix `15/15`、protocol proxy `62/62`，随后由 relay_config 的两项安全回归发现 `openai_base_url`、`chatgpt_base_url` 与凭据仍会被提取到 common config 喵~
+- 根因是阶段提交 `adacf592` 合并 cc-switch 兼容时误把 `extract_common_config_from_config` 恢复为旧手工字段列表，绕过了已经存在的统一 provider/credential 清理函数；现已恢复调用 `remove_provider_specific_common_keys`，不改供应商 profile 中的原始字段喵~
+- 修复后的 `cargo test -p codex-plus-core --test relay_config -- --test-threads=1` 已 `116/116` 通过，包含 common config 排除、profile 保留、压缩 Token 阈值、cc-switch、Responses Lite/Web Search 与单模型路由全部回归喵~

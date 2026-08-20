@@ -884,16 +884,7 @@ pub fn backfill_relay_profile_from_home_with_common(
 
 pub fn extract_common_config_from_config(config_text: &str) -> anyhow::Result<String> {
     let mut doc = parse_toml_document(config_text)?;
-    for key in [
-        "model",
-        "model_provider",
-        "base_url",
-        "model_catalog_json",
-        CHAT_UPSTREAM_BASE_URL_KEY,
-    ] {
-        doc.as_table_mut().remove(key);
-    }
-    doc.as_table_mut().remove("model_providers");
+    remove_provider_specific_common_keys(doc.as_table_mut());
     Ok(normalize_optional_toml(doc))
 }
 
