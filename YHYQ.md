@@ -615,3 +615,12 @@
 - macOS arm64 DMG 为 22,967,223 bytes，SHA-256 `185082b026e23b7545cdf8cbfe2a3db387754f18939602a012ed72337a4cc7d6`；macOS arm64 ZIP 为 20,023,480 bytes，SHA-256 `94d5205da098023ea879e07221cca051aca530b9fee749d01a5b72e70341bc37` 喵~
 - Release notes 临时文件已删除，本地 Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程没有连接、替换、重启或操作当前 Codex 实例、当前任务、当前 helper 或 CDP 做测试喵~
 - 发布记录提交后的最终主分支 GitHub Actions `30999004196` 已全部成功：Windows artifacts、macOS x64 DMG 与 macOS arm64 DMG 三项均完成；远端 main、`v1.2.64` latest Release、4152 字符详细说明、六项资产与发布后构建至此全部闭环喵~
+
+## 2026-08-20
+
+- 用户要求选择性同步 BigPizzaV3/CodexPlusPlus 上游 `v1.2.42` 至 `v1.2.50` 的必要功能和修复，重点包含 `v1.2.50` 全部任务、`v1.2.49` 页面增强残留样式中断与回归测试、`v1.2.48` 微信连接和工作目录/已有会话选择、`v1.2.47` 路由与新版顶部栏兼容、`v1.2.46` DreamSkin 市场、`v1.2.44` 安全/兼容修复、`v1.2.43` macOS 重启与会话索引、`v1.2.42` 弹窗/SQLite/Watcher 修复；必须逐项判断可同步范围，不合并上游分支，不改变现有远端、更新源、品牌、发行流程或既有服务喵~
+- 用户同时报告管理器自动压缩设置与 Codex 实际行为不一致，Codex 会在约 `250K` 至 `270K` Token 自动压缩，要求定位配置写入、启动覆盖和模型元数据链路并修复喵~
+- 用户要求继续审计并修复 Codex 更新导致的增强功能、页面注入和启动异常，不得破坏现有服务或用无关上游改动覆盖本仓库后续功能喵~
+- 本地已存在修改前空检查点 `bdb5f03`，工作树仍只有四个内容与 HEAD 一致的既有 CRLF 状态噪声文件；本轮继续排除这些文件，不回滚、不修改、不纳入提交喵~
+- 已只读获取 `upstream/main` 最近提交并通过 GitHub API 核对上游 `v1.2.42` 至 `v1.2.50` 标签对象；未合并分支、未改本地 main 内容、未改 origin/codexppp/legacy-origin，也未连接或操作当前 Codex 页面做测试喵~
+- 初步现场核对确认当前 `~/.codex/config.toml` 只有 `model_provider = "openai_http"` 与 `model = "gpt-5.6-terra"`，没有 `model_context_window` 或 `model_auto_compact_token_limit`；多个历史 live 备份曾写入 `200000`，将继续核查管理器 settings 路径、启动器应用和模型目录元数据为何没有形成一致的最终配置喵~
