@@ -746,4 +746,8 @@
 - CHANGELOG 已详细记录全 HTTP 端点、Realtime WebSocket、请求/响应头保真、8 GiB 混合 body、非幂等不重放、image_gen MCP、生成结果保存路径、Responses 托管生图保真和配置隔离原则喵~- 隔离测试发现把 MCP stdio 子命令直接放进 Windows GUI subsystem launcher 会出现 os error 232 管道关闭，模型仍可能看不到工具；已改为独立 console subsystem companion codex-plus-imagegen-mcp，不是通过当前 Codex 或当前 helper 做测试喵~
 - 启动配置现在直接执行同目录 companion，不再给 GUI launcher 传子命令；启用时会验证 companion 文件存在，缺包时启动明确失败而不是显示工具已注入却无法调用喵~
 - Windows ZIP/NSIS 已包含、更新前终止并卸载该 companion；macOS ZIP 与 Codex++.app/Contents/MacOS 同样包含并签名该文件，Release workflow 增加跨平台存在性校验喵~
-- 独立 MCP stdio 握手已通过：console companion 对 initialize 与 	ools/list 返回 2 条有效 JSON-RPC 响应，server 为 codex-plus-imagegen、工具为 image_gen、版本为 1.2.66喵~
+- 独立 MCP stdio 握手已通过：console companion 对 initialize 与 	ools/list 返回 2 条有效 JSON-RPC 响应，server 为 codex-plus-imagegen、工具为 image_gen、版本为 1.2.66喵~- 用户要求继续完成 Codex++ 的图片生成能力与所有 OpenAI 端点补齐，确保 Codex 可以通过 `image_gen`/Responses 托管图片工具生图，并保留现有用户仓库、品牌、更新源和服务行为喵~
+- 继续阶段已复核 `main`、远端、版本和工作树：产品实现提交已到 `899343a7`，版本为 `1.2.66`，`origin` 仍为 `Alunixa-Code/CodexPlusPlusPlus`；三个既有文件仍仅为 CRLF 状态噪声并明确排除喵~
+- 最终完整 workspace 验证已成功：core `263/263`、CDP `91/91`、launcher `80/80`、relay config `117/117`、manager `33/33`、发行契约 `23/23` 及其余集成测试和 doc tests全部通过喵~
+- 完整测试期间发现发行契约测试用全文件第一个 `if cfg!(windows)` 定位启动顺序，新增 companion 后会误命中；现将断言范围限定到 `DefaultLaunchHooks::launch_codex`，只修复陈旧测试定位，不改变产品运行行为喵~
+- 本轮仍未启动、重启、连接或操作当前 Codex、当前 helper、CDP 或当前任务，验证仅使用隔离 companion 进程和自动化测试喵~

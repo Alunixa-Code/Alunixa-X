@@ -65,12 +65,20 @@ fn manager_exposes_a_persisted_codex_only_auto_update_switch() {
 #[test]
 fn launcher_applies_the_codex_update_policy_before_starting_any_codex_variant() {
     let source = include_str!("../src/launcher.rs");
+    let default_hooks_index = source
+        .find("impl LaunchHooks for DefaultLaunchHooks")
+        .expect("launcher should implement the default launch hooks");
+    let launch_codex_index = source[default_hooks_index..]
+        .find("async fn launch_codex(")
+        .map(|index| default_hooks_index + index)
+        .expect("default launch hooks should define launch_codex");
+    let launch_codex = &source[launch_codex_index..];
 
-    let policy_index = source
+    let policy_index = launch_codex
         .find("apply_codex_auto_update_policy")
         .expect("launcher should apply the Codex update policy");
-    let windows_activation_index = source
-        .find("if cfg!(windows)")
+    let windows_activation_index = launch_codex
+        .find("if cfg!(windows) {")
         .expect("launcher should contain Windows packaged activation");
     assert!(policy_index < windows_activation_index);
     assert_eq!(
