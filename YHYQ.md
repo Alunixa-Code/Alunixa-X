@@ -624,3 +624,9 @@
 - 本地已存在修改前空检查点 `bdb5f03`，工作树仍只有四个内容与 HEAD 一致的既有 CRLF 状态噪声文件；本轮继续排除这些文件，不回滚、不修改、不纳入提交喵~
 - 已只读获取 `upstream/main` 最近提交并通过 GitHub API 核对上游 `v1.2.42` 至 `v1.2.50` 标签对象；未合并分支、未改本地 main 内容、未改 origin/codexppp/legacy-origin，也未连接或操作当前 Codex 页面做测试喵~
 - 初步现场核对确认当前 `~/.codex/config.toml` 只有 `model_provider = "openai_http"` 与 `model = "gpt-5.6-terra"`，没有 `model_context_window` 或 `model_auto_compact_token_limit`；多个历史 live 备份曾写入 `200000`，将继续核查管理器 settings 路径、启动器应用和模型目录元数据为何没有形成一致的最终配置喵~
+- 已确认当前 Codex Desktop 为 `26.814.5517.0`；最近一次启动握手虽返回 ok，但日志连续出现 12 次 `model_app_server_request_patch_skipped: app_server_request_assets_missing`，说明新版将 app-server request client 移出旧 `use-host-config-*` / `app-server-manager-signals-*` 发现范围喵~
+- renderer 资源发现现统一扫描实际加载的 JavaScript assets，并把 `app-initial-*`、`app-main-*` 等当前 bundle 纳入结构化候选；模型目录补丁和插件市场补丁共享嵌套 request client 收集，不再只依赖已删除的独立资源名喵~
+- CDP 注入目标改为按精确 `app://-/index.html`、Codex 主 renderer、ChatGPT Desktop renderer 的优先级选择，标题或 URL 偶然包含 Codex 的外部网页和嵌入式浏览器不能再抢占增强脚本喵~
+- CDP bridge 改为并发处理页面 binding call，长耗时 Stepwise/导出等请求不会阻塞 `/backend/status`；同一 renderer 的 bridge 使用分代机制，新的成功会话接管后旧会话停止响应，失败重装不会提前废弃旧连接喵~
+- 新增 renderer 样式初始化回归，动态提取 `installStyle()` 中全部模板变量并验证声明和执行；新增当前 app bundle request client 发现契约，防止残留样式引用或资源拆包变化再次让整个增强脚本中断喵~
+- 第一阶段独立验证通过：renderer JavaScript 语法、Node 注入回归 `2/2`、Rust CDP bridge 专项 `86/86`；验证未连接、替换、重启或操作当前 Codex 页面喵~

@@ -1885,6 +1885,51 @@ fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_error_page() {
 }
 
 #[test]
+fn pick_injectable_codex_page_target_prefers_exact_app_main() {
+    let targets = vec![
+        target(
+            "help",
+            "page",
+            "Using Codex",
+            "https://help.openai.com/en/articles/using-codex",
+            Some("ws://help"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("the exact Codex app renderer should win");
+
+    assert_eq!(picked.id, "main");
+}
+
+#[test]
+fn pick_injectable_codex_page_target_rejects_incidental_external_codex_page() {
+    let targets = vec![target(
+        "help",
+        "page",
+        "Using Codex",
+        "https://help.openai.com/en/articles/using-codex",
+        Some("ws://help"),
+    )];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("an external page must never receive the desktop injection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[test]
 fn avatar_overlay_target_detection_is_narrow() {
     let overlay = target(
         "avatar",
@@ -2489,6 +2534,94 @@ async fn install_bridge_does_not_wait_for_resolve_runtime_evaluate_ack() {
     .await
     .expect("bridge install should not wait for resolve ack")
     .expect("bridge install should survive missing resolve ack");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn install_bridge_keeps_status_responsive_while_another_call_is_pending() {
+    let generate_started = Arc::new(tokio::sync::Notify::new());
+    let release_generate = Arc::new(tokio::sync::Notify::new());
+    let server_generate_started = Arc::clone(&generate_started);
+    let server_release_generate = Arc::clone(&release_generate);
+    let (url, request_rx) = spawn_cdp_server(move |mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "generate",
+                        "path": "/stepwise/generate",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            server_generate_started.notified(),
+        )
+        .await
+        .expect("the long-running handler should start");
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "status",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+
+        let status_resolve =
+            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut socket))
+                .await
+                .expect("status should resolve while the other call remains pending");
+        assert_expression_contains_request(&status_resolve, "status");
+
+        server_release_generate.notify_one();
+        let generate_resolve = recv_json(&mut socket).await;
+        assert_expression_contains_request(&generate_resolve, "generate");
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handler_generate_started = Arc::clone(&generate_started);
+    let handler_release_generate = Arc::clone(&release_generate);
+    let handler = Arc::new(move |path: String, _payload: serde_json::Value| {
+        let generate_started = Arc::clone(&handler_generate_started);
+        let release_generate = Arc::clone(&handler_release_generate);
+        Box::pin(async move {
+            if path == "/stepwise/generate" {
+                generate_started.notify_one();
+                release_generate.notified().await;
+            }
+            Ok(json!({ "status": "ok", "path": path }))
+        }) as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge install should return while a request is pending")
+    .expect("bridge should start its concurrent message pump");
     request_rx
         .await
         .expect("server task should finish without panicking");

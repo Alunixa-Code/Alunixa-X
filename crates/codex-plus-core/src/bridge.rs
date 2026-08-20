@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use futures_util::stream::FuturesUnordered;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio_tungstenite::connect_async;
@@ -24,6 +25,64 @@ pub type BridgeHandler = Arc<
 pub type BridgeDisconnect = tokio::sync::oneshot::Receiver<String>;
 
 static NEXT_MESSAGE_ID: AtomicU64 = AtomicU64::new(100);
+static NEXT_BRIDGE_GENERATION: AtomicU64 = AtomicU64::new(1);
+static CURRENT_BRIDGE_GENERATIONS: std::sync::LazyLock<std::sync::Mutex<HashMap<String, u64>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+#[derive(Clone)]
+struct BridgeGeneration {
+    target: String,
+    id: u64,
+}
+
+type PendingBridgeCall = Pin<Box<dyn Future<Output = CompletedBridgeCall> + Send>>;
+
+struct CompletedBridgeCall {
+    request_id: String,
+    generation: Option<BridgeGeneration>,
+    response: Result<Value, String>,
+}
+
+fn next_bridge_generation(target: &str) -> BridgeGeneration {
+    BridgeGeneration {
+        target: target.to_string(),
+        id: NEXT_BRIDGE_GENERATION.fetch_add(1, Ordering::SeqCst),
+    }
+}
+
+fn publish_bridge_generation(generation: &BridgeGeneration) -> bool {
+    let mut generations = CURRENT_BRIDGE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if generations
+        .get(&generation.target)
+        .is_some_and(|current| *current > generation.id)
+    {
+        return false;
+    }
+    generations.insert(generation.target.clone(), generation.id);
+    true
+}
+
+fn bridge_generation_is_current(generation: &BridgeGeneration) -> bool {
+    CURRENT_BRIDGE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&generation.target)
+        .is_some_and(|current| *current == generation.id)
+}
+
+fn release_bridge_generation(generation: &BridgeGeneration) {
+    let mut generations = CURRENT_BRIDGE_GENERATIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if generations
+        .get(&generation.target)
+        .is_some_and(|current| *current == generation.id)
+    {
+        generations.remove(&generation.target);
+    }
+}
 
 pub fn build_bridge_script(binding_name: &str) -> String {
     format!(
@@ -138,7 +197,10 @@ pub async fn install_bridge_with_disconnect(
     new_document_scripts: &[String],
 ) -> anyhow::Result<BridgeDisconnect> {
     let socket = connect_cdp_websocket(websocket_url).await?;
-    let mut session = CdpSession::new(socket).with_handler(handler);
+    let generation = next_bridge_generation(websocket_url);
+    let mut session = CdpSession::new(socket)
+        .with_handler(handler)
+        .with_generation(generation.clone());
 
     session.send_command(1, "Runtime.enable", json!({})).await?;
     session
@@ -185,19 +247,42 @@ pub async fn install_bridge_with_disconnect(
         ensure_runtime_evaluate_succeeded(script_response)?;
     }
 
-    session.drain_binding_queue().await?;
+    if !publish_bridge_generation(&generation) {
+        bail!("CDP bridge installation was superseded before it became active");
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "bridge.generation_published",
+        json!({ "generation": generation.id }),
+    );
+    let mut pending_calls = FuturesUnordered::new();
+    session.enqueue_binding_calls(&mut pending_calls);
     let (disconnect_tx, disconnect_rx) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
+        let mut generation_probe = tokio::time::interval(Duration::from_millis(250));
         let reason = loop {
-            if let Err(error) = session.drain_binding_queue().await {
-                break format!("failed to drain CDP bridge queue: {error:#}");
-            }
-            match session.next_message().await {
-                Ok(Some(_)) => {}
-                Ok(None) => break "CDP websocket closed".to_string(),
-                Err(error) => break format!("CDP websocket read failed: {error:#}"),
+            tokio::select! {
+                _ = generation_probe.tick() => {
+                    if !bridge_generation_is_current(&generation) {
+                        break "CDP bridge superseded by a newer session".to_string();
+                    }
+                }
+                completed = pending_calls.next(), if !pending_calls.is_empty() => {
+                    if let Some(completed) = completed
+                        && let Err(error) = session.finish_binding_call(completed).await
+                    {
+                        break format!("failed to finish CDP bridge call: {error:#}");
+                    }
+                }
+                message = session.next_message() => {
+                    match message {
+                        Ok(Some(_)) => session.enqueue_binding_calls(&mut pending_calls),
+                        Ok(None) => break "CDP websocket closed".to_string(),
+                        Err(error) => break format!("CDP websocket read failed: {error:#}"),
+                    }
+                }
             }
         };
+        release_bridge_generation(&generation);
         let _ = disconnect_tx.send(reason);
     });
 
@@ -255,6 +340,7 @@ struct CdpSession<S> {
     responses: HashMap<u64, Value>,
     binding_calls: VecDeque<Value>,
     handler: Option<BridgeHandler>,
+    generation: Option<BridgeGeneration>,
 }
 
 impl<S> CdpSession<S>
@@ -271,12 +357,24 @@ where
             responses: HashMap::new(),
             binding_calls: VecDeque::new(),
             handler: None,
+            generation: None,
         }
     }
 
     fn with_handler(mut self, handler: BridgeHandler) -> Self {
         self.handler = Some(handler);
         self
+    }
+
+    fn with_generation(mut self, generation: BridgeGeneration) -> Self {
+        self.generation = Some(generation);
+        self
+    }
+
+    fn is_current(&self) -> bool {
+        self.generation
+            .as_ref()
+            .is_none_or(bridge_generation_is_current)
     }
 
     async fn send_command(
@@ -377,54 +475,50 @@ where
         Ok(Some(value))
     }
 
-    async fn drain_binding_queue(&mut self) -> anyhow::Result<()> {
+    fn enqueue_binding_calls(&mut self, pending_calls: &mut FuturesUnordered<PendingBridgeCall>) {
         while let Some(message) = self.binding_calls.pop_front() {
-            self.route_binding_call(message).await?;
+            self.enqueue_binding_call(message, pending_calls);
         }
-        Ok(())
     }
 
-    fn route_binding_call(
-        &mut self,
+    fn enqueue_binding_call(
+        &self,
         message: Value,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + '_>> {
-        Box::pin(async move {
-            let Some(handler) = self.handler.clone() else {
-                return Ok(());
-            };
+        pending_calls: &mut FuturesUnordered<PendingBridgeCall>,
+    ) {
+        let Some(handler) = self.handler.clone() else {
+            return;
+        };
+        if !self.is_current() {
+            return;
+        }
+        let Some(payload_text) = message
+            .get("params")
+            .and_then(|params| params.get("payload"))
+            .and_then(Value::as_str)
+        else {
+            return;
+        };
 
-            let Some(payload_text) = message
-                .get("params")
-                .and_then(|params| params.get("payload"))
-                .and_then(Value::as_str)
-            else {
-                return Ok(());
-            };
-
-            let parsed: Value = match serde_json::from_str(payload_text) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    if let Some(request_id) = extract_string_field(payload_text, "id") {
-                        self.reject_bridge_request(
-                            &request_id,
-                            &format!("failed to parse bridge payload: {error}"),
-                        )
-                        .await?;
-                    }
-                    return Ok(());
+        let parsed: Value = match serde_json::from_str(payload_text) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                if let Some(request_id) = extract_string_field(payload_text, "id") {
+                    self.enqueue_completed_binding_call(
+                        request_id,
+                        Err(format!("failed to parse bridge payload: {error}")),
+                        pending_calls,
+                    );
                 }
-            };
-            self.route_parsed_binding_call(&handler, parsed).await
-        })
-    }
-
-    async fn route_parsed_binding_call(
-        &mut self,
-        handler: &BridgeHandler,
-        parsed: Value,
-    ) -> anyhow::Result<()> {
-        let Some(request_id) = parsed.get("id").and_then(Value::as_str) else {
-            return Ok(());
+                return;
+            }
+        };
+        let Some(request_id) = parsed
+            .get("id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+        else {
+            return;
         };
         let path = parsed
             .get("path")
@@ -432,18 +526,53 @@ where
             .unwrap_or_default()
             .to_string();
         let payload = parsed.get("payload").cloned().unwrap_or_else(|| json!({}));
+        let generation = self.generation.clone();
 
-        match handler(path, payload).await {
-            Ok(result) => {
-                self.resolve_bridge_request(request_id, &result).await?;
+        pending_calls.push(Box::pin(async move {
+            CompletedBridgeCall {
+                request_id,
+                generation,
+                response: handler(path, payload)
+                    .await
+                    .map_err(|error| error.to_string()),
             }
-            Err(error) => {
-                self.reject_bridge_request(request_id, &error.to_string())
-                    .await?;
+        }));
+    }
+
+    fn enqueue_completed_binding_call(
+        &self,
+        request_id: String,
+        response: Result<Value, String>,
+        pending_calls: &mut FuturesUnordered<PendingBridgeCall>,
+    ) {
+        let generation = self.generation.clone();
+        pending_calls.push(Box::pin(async move {
+            CompletedBridgeCall {
+                request_id,
+                generation,
+                response,
+            }
+        }));
+    }
+
+    async fn finish_binding_call(&mut self, completed: CompletedBridgeCall) -> anyhow::Result<()> {
+        if completed
+            .generation
+            .as_ref()
+            .is_some_and(|generation| !bridge_generation_is_current(generation))
+        {
+            return Ok(());
+        }
+        match completed.response {
+            Ok(result) => {
+                self.resolve_bridge_request(&completed.request_id, &result)
+                    .await
+            }
+            Err(message) => {
+                self.reject_bridge_request(&completed.request_id, &message)
+                    .await
             }
         }
-
-        Ok(())
     }
 
     async fn resolve_bridge_request(

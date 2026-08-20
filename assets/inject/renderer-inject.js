@@ -1798,27 +1798,46 @@
   const codexServiceTierControlModes = new Set(["inherit", "global-standard", "global-fast", "custom"]);
   ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].forEach((model) => codexServiceTierSupportedFastModels.add(model));
 
-  function codexAppAssetUrl(namePart) {
-    const urls = [
+  function uniqueCodexAppAssetUrls(urls) {
+    return Array.from(new Set((urls || []).filter((url) =>
+      typeof url === "string"
+      && url.includes("/assets/")
+      && url.split("?")[0].endsWith(".js")
+    )));
+  }
+
+  function codexAppAssetCandidateUrls() {
+    return uniqueCodexAppAssetUrls([
       ...Array.from(document.scripts || []).map((script) => script.src),
       ...Array.from(document.querySelectorAll("link[href]") || []).map((link) => link.href),
       ...performance.getEntriesByType("resource").map((entry) => entry.name),
-    ].filter(Boolean);
-    return urls.find((url) => url.includes("/assets/") && url.includes(namePart) && url.split("?")[0].endsWith(".js")) || "";
+    ]);
+  }
+
+  function codexAppAssetUrl(namePart) {
+    if (!namePart) return "";
+    return codexAppAssetCandidateUrls().find((url) => url.includes(namePart)) || "";
   }
 
   async function codexAppAssetUrlFromScriptText(namePart) {
-    const scripts = Array.from(document.scripts || []).map((script) => script.src).filter(Boolean);
+    if (!namePart) return "";
+    const scripts = codexAppAssetCandidateUrls();
+    const escaped = String(namePart).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const patterns = [
+      new RegExp(`["'](\\.?/assets/${escaped}[^"']+\\.js)["']`),
+      new RegExp(`["']([^"']*/assets/${escaped}[^"']+\\.js)["']`),
+      new RegExp(`["'](\\./${escaped}[^"']+\\.js)["']`),
+    ];
     for (const src of scripts) {
-      if (!src.includes("/assets/") || !src.split("?")[0].endsWith(".js")) continue;
       try {
         const text = await fetch(src).then((response) => response.ok ? response.text() : "");
-        const escaped = namePart.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const match = text.match(new RegExp(`["'](\\./${escaped}[^"']+\\.js)["']`))
-          || text.match(new RegExp(`["'](\\./assets/${escaped}[^"']+\\.js)["']`));
-        if (!match) continue;
-        const base = match[1].startsWith("./assets/") ? document.baseURI : src;
-        return new URL(match[1], base).href;
+        if (!text) continue;
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (!match) continue;
+          const base = match[1].startsWith("./assets/") ? document.baseURI : src;
+          return new URL(match[1], base).href;
+        }
       } catch {
       }
     }
@@ -1848,6 +1867,85 @@
       if (message.includes(`未找到 Codex App asset: ${namePart}`)) return null;
       throw error;
     }
+  }
+
+  function appServerFallbackAssetUrls() {
+    const preferred = codexAppAssetCandidateUrls().filter((url) => {
+      const name = (url.split("/").pop() || "").toLowerCase();
+      return /use-host-config|app-server-manager-signals|app-initial|app-main|page-|chatg|signals|server-manager/.test(name);
+    });
+    preferred.sort((left, right) => {
+      const score = (url) => {
+        const name = (url.split("/").pop() || "").toLowerCase();
+        if (name.includes("use-host-config")) return 0;
+        if (name.includes("app-server-manager-signals")) return 1;
+        if (name.includes("app-initial")) return 2;
+        if (name.includes("app-main")) return 3;
+        return 4;
+      };
+      return score(left) - score(right) || right.length - left.length;
+    });
+    return preferred.slice(0, 20);
+  }
+
+  function collectAppServerRequestCandidatesFromModule(module) {
+    const candidates = [];
+    const seen = new Set();
+    const push = (value) => {
+      if (!value || typeof value !== "object" || seen.has(value)) return;
+      seen.add(value);
+      candidates.push(value);
+    };
+    for (const value of Object.values(module || {})) {
+      push(value);
+      if (!value || typeof value !== "object") continue;
+      if (typeof value.get === "function") {
+        try { push(value.get()); } catch {}
+        try { push(value.get("local")); } catch {}
+      }
+      try {
+        for (const nested of Object.values(value).slice(0, 120)) push(nested);
+      } catch {
+      }
+    }
+    return candidates;
+  }
+
+  async function loadAppServerRequestCandidates() {
+    const modules = [];
+    const sources = [];
+    const seenModules = new Set();
+    const seenUrls = new Set();
+    const pushModule = (module, source) => {
+      if (!module || typeof module !== "object" || seenModules.has(module)) return;
+      seenModules.add(module);
+      modules.push(module);
+      sources.push(source);
+    };
+    for (const assetPrefix of ["use-host-config-", "app-server-manager-signals-"]) {
+      const module = await loadOptionalCodexAppModule(assetPrefix);
+      if (module) pushModule(module, assetPrefix);
+    }
+    for (const url of appServerFallbackAssetUrls()) {
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      try { pushModule(await import(url), url); } catch {}
+    }
+    const candidates = [];
+    const seenCandidates = new Set();
+    for (const module of modules) {
+      for (const candidate of collectAppServerRequestCandidatesFromModule(module)) {
+        if (seenCandidates.has(candidate)) continue;
+        seenCandidates.add(candidate);
+        candidates.push(candidate);
+      }
+    }
+    return {
+      modules,
+      candidates,
+      sources,
+      discovery: sources.some((source) => !source.endsWith("-")) ? "fallback" : "named-assets",
+    };
   }
 
   function codexModuleFunctionSource(candidate) {
@@ -4640,34 +4738,26 @@
     if (!codexPlusSettings().pluginMarketplaceUnlock) return;
     const patch = async () => {
       try {
-        const modules = [];
-        for (const assetPrefix of ["app-server-manager-signals-"]) {
-          const module = await loadOptionalCodexAppModule(assetPrefix);
-          if (module) modules.push({ assetPrefix, module });
-        }
-        const candidates = modules.flatMap(({ module }) => Object.values(module)
-          .filter((value) => value && typeof value === "object"));
+        const { modules, candidates, sources, discovery } = await loadAppServerRequestCandidates();
         let patchedCount = 0;
         for (const candidate of candidates) {
           if (patchPluginMarketplaceRequestClient(candidate)) patchedCount += 1;
-          if (typeof candidate.sendRequest !== "function" && typeof candidate.get === "function") {
-            try {
-              if (patchPluginMarketplaceRequestClient(candidate.get())) patchedCount += 1;
-            } catch {
-            }
-          }
         }
         if (patchedCount > 0) {
           window.__codexPluginMarketplaceUnlockInstalled = codexPluginMarketplaceUnlockVersion;
           sendCodexPlusDiagnostic("plugin_marketplace_request_patch_installed", {
             candidateCount: candidates.length,
             patchedCount,
-            assets: modules.map((entry) => entry.assetPrefix),
+            moduleCount: modules.length,
+            sources,
+            discovery,
           });
         } else {
           sendCodexPlusDiagnostic("plugin_marketplace_request_patch_not_found", {
-            exportCount: modules.reduce((count, entry) => count + Object.keys(entry.module || {}).length, 0),
+            moduleCount: modules.length,
             candidateCount: candidates.length,
+            sources,
+            discovery,
           });
         }
       } catch (error) {
@@ -6967,11 +7057,7 @@
     if (appServerModelRequestPatchDisabled) return;
     const patch = async () => {
       try {
-        const modules = [];
-        for (const assetPrefix of ["use-host-config-", "app-server-manager-signals-"]) {
-          const module = await loadOptionalCodexAppModule(assetPrefix);
-          if (module) modules.push({ assetPrefix, module });
-        }
+        const { modules, candidates, sources, discovery } = await loadAppServerRequestCandidates();
         if (modules.length === 0) {
           window.__codexPlusAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
           sendCodexPlusDiagnostic("model_app_server_request_patch_skipped", {
@@ -6979,38 +7065,26 @@
           });
           return;
         }
-        let candidateCount = 0;
         let patchedCount = 0;
-        const patchedAssets = [];
-        for (const { assetPrefix, module } of modules) {
-          const candidates = Object.values(module).filter((value) => value && typeof value === "object");
-          candidateCount += candidates.length;
-          let assetPatchedCount = 0;
-          for (const candidate of candidates) {
-            if (patchAppServerModelRequestClient(candidate)) assetPatchedCount += 1;
-            if (typeof candidate.sendRequest !== "function" && typeof candidate.get === "function") {
-              try {
-                if (patchAppServerModelRequestClient(candidate.get())) assetPatchedCount += 1;
-              } catch {
-              }
-            }
-          }
-          if (assetPatchedCount > 0) patchedAssets.push(assetPrefix);
-          patchedCount += assetPatchedCount;
+        for (const candidate of candidates) {
+          if (patchAppServerModelRequestClient(candidate)) patchedCount += 1;
         }
         if (patchedCount > 0) {
           appServerModelRequestPatchMissCount = 0;
           window.__codexPlusAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
           sendCodexPlusDiagnostic("model_app_server_request_patch_installed", {
-            candidateCount,
+            moduleCount: modules.length,
+            candidateCount: candidates.length,
             patchedCount,
-            assets: patchedAssets,
+            sources,
+            discovery,
           });
         } else {
           noteAppServerModelRequestPatchMiss("model_app_server_request_patch_not_found", {
-            exportCount: modules.reduce((count, entry) => count + Object.keys(entry.module || {}).length, 0),
-            candidateCount,
-            assets: modules.map((entry) => entry.assetPrefix),
+            moduleCount: modules.length,
+            candidateCount: candidates.length,
+            sources,
+            discovery,
           });
         }
       } catch (error) {
