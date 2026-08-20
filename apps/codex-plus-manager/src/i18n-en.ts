@@ -5,6 +5,32 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "皮肤管理": "Skin manager",
+  "DreamSkin 社区": "DreamSkin community",
+  "安装社区主题": "Install community theme",
+  "导入 DreamSkin ZIP 主题包": "Import DreamSkin ZIP package",
+  "导入主题包": "Import theme package",
+  "应用皮肤": "Apply skin",
+  "删除主题": "Delete theme",
+  "恢复 Codex 外观": "Restore Codex appearance",
+  "收到 DreamSkin 一键换肤请求": "DreamSkin one-click theme request received",
+  "验证并安装": "Verify and install",
+  "忽略": "Ignore",
+  "本地主题库": "Local theme library",
+  "主题应用后将在下次通过 Codex++ 启动时生效":
+    "Applied themes take effect the next time Codex starts through Codex++",
+  "导入 ZIP 主题包": "Import ZIP theme package",
+  "内置主题": "Built-in theme",
+  "应用": "Apply",
+  "搜索主题、作者或版本": "Search themes, authors, or versions",
+  "最近审核": "Recently reviewed",
+  "下载最多": "Most downloaded",
+  "名称排序": "Sort by name",
+  "刷新社区主题": "Refresh community themes",
+  "没有匹配的社区主题。": "No matching community themes.",
+  "在线预览": "Online preview",
+  "管理本地主题、DreamSkin.cc 社区主题和 ZIP 主题包":
+    "Manage local themes, DreamSkin.cc community themes, and ZIP theme packages",
   "微信连接": "WeChat connection",
   "微信扫码登录": "Sign in with WeChat QR code",
   "选择微信连接工作目录": "Choose WeChat connection working directory",
@@ -873,6 +899,9 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "删除主题“{0}”？": "Delete theme \"{0}\"?",
+  "社区主题 {0} 项": "{0} community themes",
+  "下载 {0} 次": "{0} downloads",
   "{0} 分钟": "{0} minute(s)",
   "撤销设备“{0}”？该设备之后需要重新配对。":
     "Revoke “{0}”? This device will need to be paired again.",

@@ -336,6 +336,92 @@ impl Default for CustomRelayModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinColors {
+    pub background: String,
+    pub panel: String,
+    pub panel_alt: String,
+    pub accent: String,
+    pub accent_alt: String,
+    pub secondary: String,
+    pub highlight: String,
+    pub text: String,
+    pub muted: String,
+    pub line: String,
+}
+
+impl Default for DreamSkinColors {
+    fn default() -> Self {
+        Self {
+            background: "#F7F4F5".to_string(),
+            panel: "#FFFFFF".to_string(),
+            panel_alt: "#FFF7F8".to_string(),
+            accent: "#E25563".to_string(),
+            accent_alt: "#F07A86".to_string(),
+            secondary: "#F3A8AF".to_string(),
+            highlight: "#C93D4C".to_string(),
+            text: "#2B2224".to_string(),
+            muted: "#8A7A7D".to_string(),
+            line: "rgba(196, 120, 128, .22)".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinThemeConfig {
+    #[serde(default = "default_dream_skin_schema_version")]
+    pub schema_version: u8,
+    #[serde(default = "default_dream_skin_id")]
+    pub id: String,
+    #[serde(default = "default_dream_skin_name")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub style_preset: String,
+    #[serde(default = "default_dream_skin_brand_subtitle")]
+    pub brand_subtitle: String,
+    #[serde(default = "default_dream_skin_tagline")]
+    pub tagline: String,
+    #[serde(default = "default_dream_skin_project_prefix")]
+    pub project_prefix: String,
+    #[serde(default = "default_dream_skin_project_label")]
+    pub project_label: String,
+    #[serde(default = "default_dream_skin_status_text")]
+    pub status_text: String,
+    #[serde(default = "default_dream_skin_quote")]
+    pub quote: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colors: Option<DreamSkinColors>,
+    #[serde(flatten)]
+    pub extra_fields: Map<String, Value>,
+}
+
+impl Default for DreamSkinThemeConfig {
+    fn default() -> Self {
+        let mut extra_fields = Map::new();
+        extra_fields.insert("appearance".to_string(), Value::String("auto".to_string()));
+        extra_fields.insert(
+            "art".to_string(),
+            json!({ "focusX": 0.5, "focusY": 0.5, "safeArea": "auto", "taskMode": "ambient" }),
+        );
+        Self {
+            schema_version: default_dream_skin_schema_version(),
+            id: default_dream_skin_id(),
+            name: default_dream_skin_name(),
+            style_preset: String::new(),
+            brand_subtitle: default_dream_skin_brand_subtitle(),
+            tagline: default_dream_skin_tagline(),
+            project_prefix: default_dream_skin_project_prefix(),
+            project_label: default_dream_skin_project_label(),
+            status_text: default_dream_skin_status_text(),
+            quote: default_dream_skin_quote(),
+            colors: Some(DreamSkinColors::default()),
+            extra_fields,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BackendSettings {
     #[serde(rename = "codexAppPath", default)]
     pub codex_app_path: String,
@@ -491,6 +577,20 @@ pub struct BackendSettings {
         deserialize_with = "deserialize_image_overlay_fit_mode"
     )]
     pub codex_app_image_overlay_fit_mode: String,
+    #[serde(rename = "codexAppDreamSkinEnabled", default)]
+    pub codex_app_dream_skin_enabled: bool,
+    #[serde(rename = "codexAppDreamSkinPaused", default)]
+    pub codex_app_dream_skin_paused: bool,
+    #[serde(
+        rename = "codexAppDreamSkinTheme",
+        default = "default_dream_skin_theme",
+        deserialize_with = "deserialize_dream_skin_theme"
+    )]
+    pub codex_app_dream_skin_theme: String,
+    #[serde(rename = "codexAppDreamSkinThemeConfig", default)]
+    pub codex_app_dream_skin_theme_config: DreamSkinThemeConfig,
+    #[serde(rename = "codexAppDreamSkinImagePath", default)]
+    pub codex_app_dream_skin_image_path: String,
     #[serde(rename = "codexGoalsEnabled", default)]
     pub codex_goals_enabled: bool,
     #[serde(rename = "weixinConnectEnabled", default)]
@@ -602,6 +702,11 @@ impl Default for BackendSettings {
             codex_app_image_overlay_path: String::new(),
             codex_app_image_overlay_opacity: default_image_overlay_opacity(),
             codex_app_image_overlay_fit_mode: default_image_overlay_fit_mode(),
+            codex_app_dream_skin_enabled: false,
+            codex_app_dream_skin_paused: false,
+            codex_app_dream_skin_theme: default_dream_skin_theme(),
+            codex_app_dream_skin_theme_config: DreamSkinThemeConfig::default(),
+            codex_app_dream_skin_image_path: String::new(),
             codex_goals_enabled: false,
             weixin_connect_enabled: false,
             weixin_connect_base_url: default_weixin_connect_base_url(),
@@ -820,6 +925,78 @@ fn normalize_image_overlay_fit_mode(value: &str) -> String {
     match value {
         "fill" | "fit" | "stretch" | "tile" | "center" => value.to_string(),
         _ => default_image_overlay_fit_mode(),
+    }
+}
+
+pub fn default_dream_skin_theme() -> String {
+    "pink".to_string()
+}
+
+fn default_dream_skin_schema_version() -> u8 {
+    1
+}
+
+fn default_dream_skin_id() -> String {
+    "dream-skin-default".to_string()
+}
+
+fn default_dream_skin_name() -> String {
+    "Dream Skin".to_string()
+}
+
+pub fn resolve_dream_skin_style_preset(id: &str, style_preset: &str) -> String {
+    let style_preset = style_preset.trim();
+    if !style_preset.is_empty() && style_preset != "dream-original" {
+        return style_preset.to_string();
+    }
+    match id.trim() {
+        "caishen-lite" => "caishen-lite",
+        "caishen-max" => "caishen-max",
+        "caishen-readable" => "caishen-readable",
+        "export-night" => "export-night",
+        "global-founder-bright" => "global-founder-bright",
+        "mythic-guardian-noir" => "mythic-guardian-noir",
+        "codex-snow-skin" => "codex-snow",
+        "glass-vision" => "glass-vision",
+        "preset-midnight-aurora" => "midnight-aurora",
+        "preset-amber-dusk" => "amber-dusk",
+        "preset-forest-mist" => "forest-mist",
+        "preset-cyber-neon" => "cyber-neon",
+        "preset-sakura-dawn" => "sakura-dawn",
+        _ => "dream-original",
+    }
+    .to_string()
+}
+
+fn default_dream_skin_brand_subtitle() -> String {
+    "CODEX DREAM SKIN".to_string()
+}
+
+fn default_dream_skin_tagline() -> String {
+    "把喜欢的画面变成可交互的 Codex 工作台。".to_string()
+}
+
+fn default_dream_skin_project_prefix() -> String {
+    "选择项目 · ".to_string()
+}
+
+fn default_dream_skin_project_label() -> String {
+    "选择项目".to_string()
+}
+
+fn default_dream_skin_status_text() -> String {
+    "THEME ONLINE".to_string()
+}
+
+fn default_dream_skin_quote() -> String {
+    "Make something wonderful".to_string()
+}
+
+fn normalize_dream_skin_theme(value: &str) -> String {
+    match value.trim() {
+        "pink" | "luckyGod" | "redWhite" | "clearGlass" | "inspiration" | "purpleNight"
+        | "miku" | "blackGold" => value.trim().to_string(),
+        _ => default_dream_skin_theme(),
     }
 }
 
@@ -1101,6 +1278,15 @@ where
     Ok(Option::<String>::deserialize(deserializer)?
         .map(|value| normalize_image_overlay_fit_mode(&value))
         .unwrap_or_else(default_image_overlay_fit_mode))
+}
+
+fn deserialize_dream_skin_theme<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .map(|value| normalize_dream_skin_theme(&value))
+        .unwrap_or_else(default_dream_skin_theme))
 }
 
 fn deserialize_codex_sub_agent_max_threads<'de, D>(deserializer: D) -> Result<u8, D::Error>
@@ -1588,6 +1774,28 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
             Value::String(normalize_image_overlay_fit_mode(value)),
         );
     }
+    merge_bool_setting(target, source, "codexAppDreamSkinEnabled");
+    merge_bool_setting(target, source, "codexAppDreamSkinPaused");
+    if let Some(value) = source.get("codexAppDreamSkinTheme").and_then(Value::as_str) {
+        target.insert(
+            "codexAppDreamSkinTheme".to_string(),
+            Value::String(normalize_dream_skin_theme(value)),
+        );
+    }
+    if let Some(value) = source.get("codexAppDreamSkinThemeConfig")
+        && serde_json::from_value::<DreamSkinThemeConfig>(value.clone()).is_ok()
+    {
+        target.insert("codexAppDreamSkinThemeConfig".to_string(), value.clone());
+    }
+    if let Some(value) = source
+        .get("codexAppDreamSkinImagePath")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppDreamSkinImagePath".to_string(),
+            Value::String(value.trim().to_string()),
+        );
+    }
     if let Some(value) = source.get("codexGoalsEnabled").and_then(Value::as_bool) {
         target.insert("codexGoalsEnabled".to_string(), Value::Bool(value));
     }
@@ -1795,6 +2003,15 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
         clamp_image_overlay_opacity(settings.codex_app_image_overlay_opacity);
     settings.codex_app_image_overlay_fit_mode =
         normalize_image_overlay_fit_mode(&settings.codex_app_image_overlay_fit_mode);
+    settings.codex_app_dream_skin_theme =
+        normalize_dream_skin_theme(&settings.codex_app_dream_skin_theme);
+    if settings.codex_app_dream_skin_theme_config == DreamSkinThemeConfig::default()
+        && settings.codex_app_dream_skin_theme != default_dream_skin_theme()
+    {
+        settings.codex_app_dream_skin_theme_config.id = settings.codex_app_dream_skin_theme.clone();
+    }
+    settings.codex_app_dream_skin_image_path =
+        settings.codex_app_dream_skin_image_path.trim().to_string();
     settings.codex_app_sub_agent_max_threads =
         clamp_codex_sub_agent_max_threads(settings.codex_app_sub_agent_max_threads);
     settings.codex_app_shared_terminal_retention_minutes =

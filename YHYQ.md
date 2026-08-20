@@ -641,3 +641,17 @@
 - 微信连接支持扫码登录、长轮询收发文本与语音转写、每联系人独立 Codex thread、消息去重、联系人白名单、工作目录与已有会话目录搜索、模型和沙箱选择、运行状态、启动停止及桌面内置 Codex CLI 自动发现喵~
 - 微信服务地址现强制为微信官方 HTTPS 域名，拒绝任意主机、HTTP、端口、认证信息、查询和重定向式配置，避免 bot token 被发送到第三方；默认沙箱为只读，页面不回显连接 token 喵~
 - 微信阶段独立验证通过 TypeScript、前端 `25/25`、i18n plain `778/778` 与 template `66/66`、Rust formatter 和差异检查；本机 Cargo 因 crates.io DNS 无法下载新增 `qrcode 0.14.1` 而未完成核心测试，最终由 GitHub Actions 标准网络环境进行权威编译验证喵~
+- 用户要求继续完成选择性同步、兼容修复、GitHub Actions 构建与正式发行；继续禁止连接、替换、重启或操作当前 Codex 页面、当前任务、helper 或 CDP 做测试喵~
+- DreamSkin 阶段选择性导入基础主题、社区 API、主题库、安全 ZIP 校验和必要运行时资源，没有合并上游分支，也没有导入上游旧市场、品牌、赞助、更新源、release 配置或会倒退当前 renderer 的改动喵~
+- DreamSkin 社区只允许固定 `https://api.dreamskin.cc`，禁用重定向，并对响应类型、下载大小、SHA-256、ZIP 路径、文件数、解压大小、manifest、平台、版本、主题身份、图片内容与 Safe CSS 做结构化校验喵~
+- 管理器新增本地主题库、社区搜索与排序、在线预览、安装和更新、ZIP 导入、应用、删除、恢复默认及 `dreamskin://` 待确认入口；默认主题改为中性 `dream-skin-default / Dream Skin`，没有引入上游特定人物或赞助跳转喵~
+- DreamSkin 采用下次启动注入而非热修改当前 Codex；目标 runtime 可撤销地适配当前 `MainContentSurface` 结构，并按图片真实比例在 composer 旁显示 companion，恢复默认或停用时清理临时 class、属性和节点喵~
+- Windows 安装入口注册并卸载 `dreamskin://`，macOS manager Info.plist 注册同一 scheme；已运行的 macOS 管理器通过 `RunEvent::Opened` 保存待确认版本、显示并聚焦主窗口，启动参数与运行中事件共用同一严格 URL 解析函数喵~
+- 同步上游 `v1.2.50` 的现代主内容区域兼容和 macOS bundle 二进制来源校验；缺失、非普通文件、过小文件或 shell wrapper 不会再被当作有效 macOS app 二进制打包喵~
+- `cargo generate-lockfile --offline` 曾意外升级多项无关传递依赖；两次精确 `git restore --worktree -- Cargo.lock` 均因审批服务 `503 Service Unavailable` 被拒绝，没有改动文件，也没有使用替代命令绕过审批，`Cargo.lock` 将继续排除直至用户明确批准恢复喵~
+- DreamSkin 阶段独立验证通过 TypeScript、前端 `31/31`、两份 Windows 主题脚本语法、i18n plain `802/802` 与 template `69/69`、本地品牌保护、Rust formatter 和 `git diff --check`；没有启动或连接 Codex 本体喵~
+- 审计 BigPizzaV3 上游真实 `v1.2.50` 发行范围 `93c9ec4..888f2bd`，确认本地同名标签属于用户仓库历史，不能用于上游差异判断；`origin`、更新源、品牌和发行工作流仍保持用户仓库版本喵~
+- `v1.2.50` 中当前仍缺失且适用的项目包括用户脚本运行状态同步、Responses VLM 描述块、关闭 Stepwise 时跳过运行时、子代理会话隔离、陈旧 Provider Sync 锁恢复、会话删除扫描恢复、macOS DMG 短暂失败重试和路径加固；后续逐项手工移植喵~
+- 上游“供应商模型立即热应用”与用户此前明确删除动态重载的决定冲突，因此不会同步；当前仓库继续以启动前完整注入、失败关闭和当前模型上下文/压缩 Token 阈值原子一致为权威行为喵~
+- 用户明确批准恢复 `Cargo.lock`、完成全部选择性同步、提交、推送用户仓库并通过 GitHub Actions 构建和发行；本轮不再受此前审批服务 `503` 阻塞喵~
+- 已执行精确 `git restore --worktree -- Cargo.lock`，仅撤销离线锁文件重生成造成的无关传递依赖漂移；恢复后 `Cargo.lock` 与 HEAD 完全一致，微信连接文件也确认仅有工作树换行状态噪声、没有内容差异喵~

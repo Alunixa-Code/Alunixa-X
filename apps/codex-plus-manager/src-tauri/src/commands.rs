@@ -86,6 +86,12 @@ struct WeixinRuntime {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PendingDreamSkinCommunityPayload {
+    pub version_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginMarketplaceRepairPayload {
     pub codex_home: String,
     pub marketplace_root: Option<String>,
@@ -901,6 +907,283 @@ fn empty_weixin_qr_payload(status: &str) -> WeixinQrPayload {
 }
 
 #[tauri::command]
+pub fn list_dream_skin_themes()
+-> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_library::list_dream_skin_themes(
+        &codex_plus_core::paths::default_app_state_dir(),
+        &settings,
+    ) {
+        Ok(library) => ok("DreamSkin 主题库已加载。", library),
+        Err(error) => failed(
+            &format!("读取 DreamSkin 主题库失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_dream_skin_community()
+-> CommandResult<codex_plus_core::dream_skin_community::DreamSkinCommunityCatalog> {
+    match codex_plus_core::dream_skin_community::load_community_catalog(
+        &codex_plus_core::paths::default_app_state_dir(),
+    )
+    .await
+    {
+        Ok(catalog) => ok("DreamSkin 社区主题已刷新。", catalog),
+        Err(error) => failed(
+            &format!("DreamSkin 社区加载失败：{error}"),
+            empty_dream_skin_community(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn install_dream_skin_community_theme(
+    version_id: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_community::install_community_theme(
+        &state_dir,
+        version_id.trim(),
+    )
+    .await
+    {
+        Ok(_) => {
+            match codex_plus_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
+            {
+                Ok(library) => ok("社区主题已安装到本地主题库。", library),
+                Err(error) => failed(
+                    &format!("主题已安装，但刷新本地主题库失败：{error}"),
+                    empty_dream_skin_library(&settings),
+                ),
+            }
+        }
+        Err(error) => failed(
+            &format!("安装社区主题失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn import_dream_skin_theme_package(
+    path: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_community::import_theme_package(
+        &state_dir,
+        Path::new(path.trim()),
+    ) {
+        Ok(_) => {
+            match codex_plus_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
+            {
+                Ok(library) => ok("DreamSkin ZIP 主题已导入。", library),
+                Err(error) => failed(
+                    &format!("主题已导入，但刷新本地主题库失败：{error}"),
+                    empty_dream_skin_library(&settings),
+                ),
+            }
+        }
+        Err(error) => failed(
+            &format!("导入 DreamSkin ZIP 主题失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn activate_dream_skin_theme(
+    id: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let draft = if id.trim() == "builtin" || id.trim() == "dream-skin-default" {
+        codex_plus_core::dream_skin_library::DreamSkinThemeDraft {
+            config: codex_plus_core::settings::DreamSkinThemeConfig::default(),
+            image_path: String::new(),
+            builtin: true,
+        }
+    } else {
+        match codex_plus_core::dream_skin_library::load_stored_dream_skin_theme(
+            &state_dir,
+            id.trim(),
+        ) {
+            Ok(draft) => draft,
+            Err(error) => {
+                return failed(
+                    &format!("加载 DreamSkin 主题失败：{error}"),
+                    empty_dream_skin_library(&previous),
+                );
+            }
+        }
+    };
+    let activation = match codex_plus_core::dream_skin_library::prepare_dream_skin_activation(
+        &state_dir, &draft,
+    ) {
+        Ok(activation) => activation,
+        Err(error) => {
+            return failed(
+                &format!("准备 DreamSkin 主题失败：{error}"),
+                empty_dream_skin_library(&previous),
+            );
+        }
+    };
+    let mut settings = previous.clone();
+    settings.codex_app_dream_skin_enabled = true;
+    settings.codex_app_dream_skin_paused = false;
+    settings.codex_app_dream_skin_theme_config = activation.config;
+    settings.codex_app_dream_skin_image_path = activation.active_image_path;
+    let saved = store
+        .save_preserving_runtime_model_selection(&settings)
+        .and_then(|_| {
+            codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+                settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
+                &settings.codex_app_dream_skin_theme_config,
+            )
+        });
+    if let Err(error) = saved {
+        let _ = store.save(&previous);
+        return failed(
+            &format!("保存 DreamSkin 主题失败：{error}"),
+            empty_dream_skin_library(&previous),
+        );
+    }
+    match codex_plus_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings) {
+        Ok(library) => ok("主题已保存，将在下次启动 Codex++ 时生效。", library),
+        Err(error) => failed(
+            &format!("主题已保存，但刷新主题库失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn delete_dream_skin_theme(
+    id: String,
+) -> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match codex_plus_core::dream_skin_library::delete_dream_skin_theme(
+        &state_dir,
+        id.trim(),
+        Some(settings.codex_app_dream_skin_theme_config.id.as_str()),
+    ) {
+        Ok(()) => {
+            match codex_plus_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
+            {
+                Ok(library) => ok("DreamSkin 主题已删除。", library),
+                Err(error) => failed(
+                    &format!("主题已删除，但刷新主题库失败：{error}"),
+                    empty_dream_skin_library(&settings),
+                ),
+            }
+        }
+        Err(error) => failed(
+            &format!("删除 DreamSkin 主题失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn restore_default_dream_skin()
+-> CommandResult<codex_plus_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let state_dir = codex_plus_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let mut settings = store.load().unwrap_or_default();
+    settings.codex_app_dream_skin_enabled = false;
+    settings.codex_app_dream_skin_paused = false;
+    settings.codex_app_dream_skin_theme = codex_plus_core::settings::default_dream_skin_theme();
+    settings.codex_app_dream_skin_theme_config = Default::default();
+    settings.codex_app_dream_skin_image_path.clear();
+    let result = store
+        .save_preserving_runtime_model_selection(&settings)
+        .and_then(|_| codex_plus_core::dream_skin::clear_managed_dream_skin_image(&state_dir))
+        .and_then(|_| {
+            codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+                false,
+                &settings.codex_app_dream_skin_theme_config,
+            )
+        });
+    match result {
+        Ok(()) => ok(
+            "已恢复 Codex 默认外观，下次启动生效。",
+            codex_plus_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+        Err(error) => failed(
+            &format!("恢复 Codex 默认外观失败：{error}"),
+            empty_dream_skin_library(&settings),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn load_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match codex_plus_core::dream_skin_community::load_pending_community_link() {
+        Ok(version_id) => ok(
+            "DreamSkin 一键换肤状态已读取。",
+            PendingDreamSkinCommunityPayload {
+                version_id: version_id.unwrap_or_default(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("读取 DreamSkin 一键换肤请求失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn dismiss_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match codex_plus_core::dream_skin_community::clear_pending_community_link() {
+        Ok(()) => ok(
+            "已忽略 DreamSkin 一键换肤请求。",
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("清理 DreamSkin 一键换肤请求失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+    }
+}
+
+fn empty_dream_skin_library(
+    settings: &BackendSettings,
+) -> codex_plus_core::dream_skin_library::DreamSkinThemeLibrary {
+    codex_plus_core::dream_skin_library::DreamSkinThemeLibrary {
+        themes: Vec::new(),
+        active_draft: codex_plus_core::dream_skin_library::DreamSkinThemeDraft {
+            config: settings.codex_app_dream_skin_theme_config.clone(),
+            image_path: settings.codex_app_dream_skin_image_path.clone(),
+            builtin: false,
+        },
+    }
+}
+
+fn empty_dream_skin_community() -> codex_plus_core::dream_skin_community::DreamSkinCommunityCatalog
+{
+    codex_plus_core::dream_skin_community::DreamSkinCommunityCatalog {
+        items: Vec::new(),
+        total: 0,
+        fetched_at: String::new(),
+        cached: false,
+        warning: String::new(),
+        installed_theme_id: String::new(),
+    }
+}
+
+#[tauri::command]
 pub fn load_settings() -> CommandResult<SettingsPayload> {
     settings_payload("设置已加载。", "设置读取失败")
 }
@@ -931,7 +1214,13 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             )
         })
         .and_then(|_| apply_codex_instructions_policy(&settings))
-        .and_then(|_| apply_codex_hook_policy(&settings));
+        .and_then(|_| apply_codex_hook_policy(&settings))
+        .and_then(|_| {
+            codex_plus_core::dream_skin::sync_default_dream_skin_base_theme(
+                settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
+                &settings.codex_app_dream_skin_theme_config,
+            )
+        });
     match save_result {
         Ok(()) => {
             let codex_app_path = settings.codex_app_path.clone();

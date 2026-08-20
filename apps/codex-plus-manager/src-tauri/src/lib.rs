@@ -26,7 +26,7 @@ pub fn run() {
     };
     let show_update = commands::startup_should_show_update();
     let start_hidden = std::env::args().any(|arg| arg == "--hidden");
-    let run_result = tauri::Builder::default()
+    let app_result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let url = if show_update {
@@ -65,6 +65,15 @@ pub fn run() {
             commands::weixin_connect_start,
             commands::weixin_connect_stop,
             commands::find_desktop_codex_cli,
+            commands::list_dream_skin_themes,
+            commands::refresh_dream_skin_community,
+            commands::install_dream_skin_community_theme,
+            commands::import_dream_skin_theme_package,
+            commands::activate_dream_skin_theme,
+            commands::delete_dream_skin_theme,
+            commands::restore_default_dream_skin,
+            commands::load_pending_dream_skin_community,
+            commands::dismiss_pending_dream_skin_community,
             commands::export_full_config,
             commands::import_full_config,
             commands::load_ccs_providers,
@@ -148,14 +157,50 @@ pub fn run() {
             manager_hide_to_tray,
             update_tray_labels
         ])
-        .run(tauri::generate_context!());
-    if let Err(error) = run_result {
-        let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
-            "manager.run_failed",
-            serde_json::json!({
-                "error": error.to_string()
-            }),
-        );
+        .build(tauri::generate_context!());
+    match app_result {
+        Ok(app) => app.run(|app_handle, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in urls {
+                    if handle_dream_skin_url(url.as_str()) {
+                        show_main_window(app_handle);
+                    }
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app_handle, event);
+        }),
+        Err(error) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "manager.run_failed",
+                serde_json::json!({
+                    "error": error.to_string()
+                }),
+            );
+        }
+    }
+}
+
+pub fn handle_dream_skin_url(url: &str) -> bool {
+    if !url.starts_with("dreamskin://") {
+        return false;
+    }
+    match codex_plus_core::dream_skin_community::save_pending_community_link(url) {
+        Ok(version_id) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "manager.dream_skin_url.pending",
+                serde_json::json!({ "version_id": version_id }),
+            );
+            true
+        }
+        Err(error) => {
+            let _ = codex_plus_core::diagnostic_log::append_diagnostic_log(
+                "manager.dream_skin_url.failed",
+                serde_json::json!({ "error": error.to_string() }),
+            );
+            false
+        }
     }
 }
 

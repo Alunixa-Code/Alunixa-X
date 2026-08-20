@@ -72,6 +72,34 @@ fn manager_queues_codexplusplus_provider_urls_for_confirmation_on_startup() {
 }
 
 #[test]
+fn manager_handles_dreamskin_urls_on_windows_and_running_macos_instances() {
+    let main_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
+        .expect("read manager main.rs");
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let core_root = manifest_dir
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(std::path::Path::parent)
+        .unwrap();
+    let windows_install =
+        std::fs::read_to_string(core_root.join("crates/codex-plus-core/src/install/windows.rs"))
+            .expect("read Windows install source");
+    let macos_install =
+        std::fs::read_to_string(core_root.join("crates/codex-plus-core/src/install/macos.rs"))
+            .expect("read macOS install source");
+
+    assert!(main_rs.contains("handle_dream_skin_url(arg)"));
+    assert!(lib_rs.contains("tauri::RunEvent::Opened { urls }"));
+    assert!(lib_rs.contains("handle_dream_skin_url(url.as_str())"));
+    assert!(windows_install.contains("Software\\Classes\\dreamskin"));
+    assert!(windows_install.contains("URL:DreamSkin Community Theme Protocol"));
+    assert!(macos_install.contains("<array><string>dreamskin</string></array>"));
+    assert!(macos_install.contains("DreamSkin Community Theme"));
+}
+
+#[test]
 fn launcher_binary_embeds_codex_icon_resource() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let launcher_build = manifest_dir
@@ -127,6 +155,7 @@ fn windows_entrypoints_register_codexplusplus_url_protocol() {
         std::fs::read_to_string(&windows_install).expect("read windows install source");
 
     assert!(windows_install.contains("Software\\Classes\\codexplusplus"));
+    assert!(windows_install.contains("Software\\Classes\\dreamskin"));
     assert!(windows_install.contains("URL Protocol"));
     assert!(windows_install.contains("%1"));
 }
