@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use fs2::FileExt;
 use serde::Deserialize;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use toml_edit::{DocumentMut, Item};
 
 use crate::zed_remote::ZedOpenStrategy;
@@ -193,6 +193,22 @@ pub struct RelayProfile {
         skip_serializing_if = "String::is_empty"
     )]
     pub default_custom_model_id: String,
+    #[serde(rename = "modelRoutes", default, skip_serializing_if = "Vec::is_empty")]
+    pub model_routes: Vec<RelayModelRoute>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayModelRoute {
+    pub model: String,
+    #[serde(rename = "targetRelayId")]
+    pub target_relay_id: String,
+    #[serde(
+        rename = "targetModel",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub target_model: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
@@ -259,6 +275,7 @@ impl Default for RelayProfile {
             user_agent: String::new(),
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
+            model_routes: Vec::new(),
         }
     }
 }
@@ -779,6 +796,7 @@ impl BackendSettings {
                 user_agent: String::new(),
                 custom_models: Vec::new(),
                 default_custom_model_id: String::new(),
+                model_routes: Vec::new(),
             };
         }
 
@@ -834,6 +852,7 @@ impl BackendSettings {
             user_agent: String::new(),
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
+            model_routes: Vec::new(),
         }
     }
 
@@ -863,9 +882,12 @@ impl BackendSettings {
     }
 
     pub fn active_relay_uses_protocol_proxy(&self) -> bool {
+        let profile = self.active_relay_profile();
         self.active_aggregate_relay_profile().is_some()
-            || self.active_relay_profile().protocol != RelayProtocol::Responses
-            || self.active_relay_profile().relay_mode == RelayMode::CustomModels
+            || profile.protocol != RelayProtocol::Responses
+            || profile.relay_mode == RelayMode::CustomModels
+            || (profile.relay_mode == RelayMode::Official && profile.official_mix_api_key)
+            || profile.has_model_routes()
     }
 }
 
@@ -1094,6 +1116,12 @@ pub fn percent_from_auto_compact_limit(context_window: u64, limit: u64) -> Optio
 }
 
 impl RelayProfile {
+    pub fn has_model_routes(&self) -> bool {
+        self.model_routes
+            .iter()
+            .any(|route| !route.model.trim().is_empty() && !route.target_relay_id.trim().is_empty())
+    }
+
     pub fn ordered_model_names(&self) -> Vec<String> {
         let mut models = Vec::new();
         if self.relay_mode == RelayMode::CustomModels {

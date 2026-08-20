@@ -238,11 +238,26 @@ pub fn build_model_catalog_json_with_efforts(
     fallback_window: Option<u64>,
     reasoning_efforts: &HashMap<String, ReasoningEffort>,
 ) -> String {
+    build_model_catalog_json_with_efforts_and_capabilities(
+        entries,
+        fallback_window,
+        reasoning_efforts,
+        None,
+    )
+}
+
+pub(crate) fn build_model_catalog_json_with_efforts_and_capabilities(
+    entries: &[ModelCatalogEntry],
+    fallback_window: Option<u64>,
+    reasoning_efforts: &HashMap<String, ReasoningEffort>,
+    use_responses_lite_override: Option<bool>,
+) -> String {
     build_model_catalog_json_with_template_and_efforts(
         entries,
         fallback_window,
         None,
         reasoning_efforts,
+        use_responses_lite_override,
     )
 }
 
@@ -258,6 +273,7 @@ pub fn build_model_catalog_json_with_template(
         fallback_window,
         template,
         &HashMap::new(),
+        None,
     )
 }
 
@@ -266,6 +282,7 @@ fn build_model_catalog_json_with_template_and_efforts(
     fallback_window: Option<u64>,
     template: Option<&Value>,
     reasoning_efforts: &HashMap<String, ReasoningEffort>,
+    use_responses_lite_override: Option<bool>,
 ) -> String {
     let models: Vec<Value> = entries
         .iter()
@@ -294,6 +311,9 @@ fn build_model_catalog_json_with_template_and_efforts(
             model["priority"] = json!(1000 + index);
             model["visibility"] = json!("list");
             model["supported_in_api"] = json!(true);
+            if let Some(use_responses_lite) = use_responses_lite_override {
+                model["use_responses_lite"] = json!(use_responses_lite);
+            }
             let maximum_effort = reasoning_efforts
                 .get(&entry.slug)
                 .copied()

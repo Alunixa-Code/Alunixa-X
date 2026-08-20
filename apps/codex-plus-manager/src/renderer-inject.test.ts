@@ -47,6 +47,50 @@ function rendererFunction(renderer: string, name: string) {
 }
 
 describe("renderer injection compatibility", () => {
+  it("anchors the Codex++ menu to current and legacy application top bars only", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /appHeader:\s*'[^']*ApplicationMenuTopBar[^']*\.app-header-tint'/);
+    assert.doesNotMatch(renderer, /document\.querySelector\(["']header["']\)/);
+    assert.match(renderer, /isApplicationMenuTopBar\s*\?\s*Math\.max\(4, headerRect\.top\)/);
+    assert.match(renderer, /isApplicationMenuTopBar\s*\?\s*28\s*:\s*headerRect\.height/);
+  });
+
+  it("does not install Codex++ UI in embedded browser documents", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /window\.top\s*!==\s*window/);
+    assert.match(renderer, /!window\.electronBridge/);
+    assert.match(renderer, /codexPlusIsSupportedMainDocument/);
+    assert.match(renderer, /url\.protocol === "app:"/);
+    assert.match(renderer, /url\.hostname === "chatgpt\.com"/);
+    assert.match(renderer, /codexPlusIsNodeTestHarness/);
+  });
+
+  it("adds session copy and native automatic rename workflows", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /原地复制会话 - Codex\+\+/);
+    assert.match(renderer, /activateSessionCopyMenuItem/);
+    assert.match(renderer, /button\[aria-label="从这里创建聊天分支"\]/);
+    assert.match(renderer, /data-app-action-sidebar-thread-selected/);
+    assert.match(renderer, /isClientNewThreadId\(targetId\)/);
+    assert.match(renderer, /自动重命名当前会话/);
+    assert.match(renderer, /activateSessionAutoRenameMenuItem/);
+    assert.match(renderer, /input\[aria-label="聊天标题"\], input\[aria-label="Chat title"\]/);
+    assert.match(renderer, /button\.classList\.contains\("text-info"\)/);
+    assert.match(renderer, /Codex 未能生成新名称/);
+  });
+
   it("initializes styles without unresolved template identifiers", async () => {
     const renderer = await readFile(
       new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
@@ -149,5 +193,45 @@ describe("renderer injection compatibility", () => {
     assert.match(renderer, /dispatcher\.subscribe\("thread\/started", handler\)/);
     assert.match(renderer, /postJson\("\/remote-control-session\/recover", payload\)/);
     assert.match(renderer, /attributeFilter: \["data-app-action-sidebar-thread-id", "href"\]/);
+  });
+
+  it("keeps remote plugin searches isolated from local fallback", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+    const api = new Function(`
+      const codexPluginRemoteOnlyMarketplaceKinds = new Set(["created-by-me-remote", "shared-with-me"]);
+      function restorePluginMarketplaceName(value) { return value; }
+      ${rendererFunction(renderer, "pluginMarketplaceRequestProfile")}
+      ${rendererFunction(renderer, "pluginMarketplaceErrorText")}
+      ${rendererFunction(renderer, "pluginMarketplaceRemoteAuthError")}
+      return { pluginMarketplaceRequestProfile, pluginMarketplaceRemoteAuthError };
+    `)() as {
+      pluginMarketplaceRequestProfile(value: unknown): { remoteOnly: boolean };
+      pluginMarketplaceRemoteAuthError(value: unknown): boolean;
+    };
+
+    assert.equal(
+      api.pluginMarketplaceRequestProfile({ marketplaceKinds: ["created-by-me-remote"] }).remoteOnly,
+      true,
+    );
+    assert.equal(
+      api.pluginMarketplaceRequestProfile({ marketplaceKinds: ["created-by-me-remote", "local"] }).remoteOnly,
+      false,
+    );
+    assert.equal(
+      api.pluginMarketplaceRemoteAuthError({
+        error: {
+          message: "ChatGPT authentication required for remote plugin catalog; API key auth is not supported",
+        },
+      }),
+      true,
+    );
+    assert.equal(api.pluginMarketplaceRemoteAuthError({ message: "temporary network error" }), false);
+    assert.match(renderer, /__codexPluginMarketplaceRequestProfiles/);
+    assert.match(renderer, /__codexPluginMarketplaceFetchRequestProfiles/);
+    assert.match(renderer, /remoteOnlyPluginMarketplaceFallbackResult/);
+    assert.match(renderer, /plugin_marketplace_remote_auth_fallback/);
   });
 });

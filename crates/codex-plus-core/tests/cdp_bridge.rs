@@ -473,7 +473,7 @@ fn injection_script_does_not_unlock_disabled_plugin_install_buttons() {
 fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
     assert!(!script.contains("function pluginMarketplaceAliasForName"));
     assert!(
         !script.contains("if (name === \"openai-bundled\") return \"codex-plus-openai-bundled\"")
@@ -485,7 +485,7 @@ fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
 fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
     assert!(script.contains("isCodexPluginBuildFlavorFilter"));
     assert!(script.contains("source.includes(\"!u(e.marketplaceName)||e.marketplaceName===r\")"));
     assert!(script.contains("source.includes(\"!t.includes(e.name)\")"));
@@ -497,7 +497,7 @@ fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
 fn injection_script_expands_api_key_plugin_marketplace_requests() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"12\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
     assert!(script.contains("installPluginMarketplaceRequestPatch"));
     assert!(script.contains("installPluginMarketplaceBridgePatch"));
     assert!(script.contains("installPluginBuildFlavorFilterPatch"));
@@ -517,13 +517,21 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(script.contains("message.type === \"fetch\""));
     assert!(script.contains("data?.type === \"fetch-response\""));
     assert!(script.contains("__codexPluginMarketplaceFetchRequestIds"));
-    assert!(script.contains("const nextKinds = Array.isArray(next.marketplaceKinds)"));
+    assert!(script.contains("__codexPluginMarketplaceFetchRequestProfiles"));
+    assert!(script.contains("__codexPluginMarketplaceRequestProfiles"));
+    assert!(script.contains("pluginMarketplaceRequestProfile"));
+    assert!(script.contains("remoteOnlyPluginMarketplaceFallbackResult"));
+    assert!(script.contains("let nextKinds = Array.isArray(next.marketplaceKinds)"));
+    assert!(script.contains("if (!nextKinds.includes(\"local\")) nextKinds.push(\"local\")"));
     assert!(script.contains("if (!nextKinds.includes(\"vertical\")) nextKinds.push(\"vertical\")"));
     assert!(script.contains("next.marketplaceKinds = Array.from(new Set(nextKinds))"));
+    assert!(script.contains("codexPluginBroadCatalogKindsFromVersion = \"26.803.0\""));
+    assert!(script.contains("broadCatalogPreserved: true"));
     assert!(script.contains("patchPluginMarketplaceResult"));
     assert!(script.contains("__CODEX_PLUS_PLUGIN_MARKETPLACES__"));
     assert!(script.contains("mergeLocalPluginMarketplaces(result)"));
     assert!(script.contains("plugin_marketplace_local_merged"));
+    assert!(script.contains("plugin_marketplace_remote_auth_fallback"));
     assert!(script.contains("cloned.marketplaceName = marketplaceName"));
     assert!(script.contains("cloned.marketplacePath = marketplaceName"));
     assert!(script.contains("restorePluginMarketplaceName"));
@@ -1649,10 +1657,16 @@ fn injection_script_installs_upstream_branch_dropdown_adapter() {
     assert!(script.contains("cleanupInvalidUpstreamBranchOptions"));
     assert!(script.contains("branchMenuInNewWorktreeMode"));
     assert!(script.contains("branchMenuTriggerIsBranchControl"));
-    assert!(script.contains("actual-upstream-refs-v16"));
+    assert!(script.contains("actual-upstream-refs-v17"));
     assert!(script.contains("create and checkout new branch"));
     assert!(script.contains("if (/^start in"));
     assert!(script.contains("if (!branchMenuInNewWorktreeMode(trigger))"));
+    assert!(script.contains("window.__codexUpstreamBranchDropdownObserver?.disconnect?.()"));
+    assert!(script.contains("record.addedNodes"));
+    assert!(script.contains("addedNodeContainsBranchMenu"));
+    assert!(!script.contains("new MutationObserver(schedule).observe"));
+    assert!(script.contains(r#".composer-footer button, .composer-footer [role="button"]"#));
+    assert!(!script.contains("return [...document.querySelectorAll('button')]"));
 }
 
 #[test]
@@ -1675,7 +1689,46 @@ fn injection_script_rebuilds_upstream_options_for_each_project_branch_menu() {
     assert!(script.contains("projectContextFromProjectLabel"));
     assert!(script.contains("upstreamBranchOptionsMatchRefs"));
     assert!(script.contains("upstreamBranchDefaultsCache = new Map()"));
-    assert!(script.contains("actual-upstream-refs-v16"));
+    assert!(script.contains("actual-upstream-refs-v17"));
+}
+
+#[test]
+fn injection_script_refreshes_sidebar_after_delete_undo() {
+    let script = assets::injection_script(57321);
+    let toast = script
+        .split_once("function showToast(message, undoToken)")
+        .expect("undo toast should exist")
+        .1
+        .split_once("function upstreamWorktreeField")
+        .expect("undo toast should end before worktree helpers")
+        .0;
+
+    assert!(script.contains("refresh-recent-conversations-for-host"));
+    assert!(toast.contains("const refreshed = await refreshRecentConversationsForHost();"));
+    assert!(toast.contains("if (!refreshed) window.location.reload();"));
+}
+
+#[test]
+fn injection_script_activates_session_delete_once_per_click() {
+    let script = assets::injection_script(57321);
+    let delegated_delete = script
+        .split_once("function installDeleteButtonEventDelegation()")
+        .expect("delete event delegation should exist")
+        .1
+        .split_once("function actionGroupFromRow")
+        .expect("delete event delegation should end before action helpers")
+        .0;
+    let action_events = script
+        .split_once("function installActionButtonEvents")
+        .expect("action button setup should exist")
+        .1
+        .split_once("function installMoreButtonEvents")
+        .expect("action button setup should end before more button setup")
+        .0;
+
+    assert!(delegated_delete.contains("document.addEventListener(\"click\", handler, true);"));
+    assert!(!delegated_delete.contains("document.addEventListener(\"pointerup\", handler, true);"));
+    assert!(!action_events.contains("button.addEventListener(\"pointerup\", onActivate, true);"));
 }
 
 #[test]

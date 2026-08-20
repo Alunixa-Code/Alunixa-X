@@ -1666,6 +1666,53 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
 }
 
 #[tokio::test]
+async fn official_mix_responses_keeps_proxy_when_supplier_switching_is_disabled() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone()).with_settings(BackendSettings {
+        enhancements_enabled: false,
+        relay_profiles_enabled: false,
+        active_relay_id: "official-mix".to_string(),
+        relay_profiles: vec![RelayProfile {
+            id: "official-mix".to_string(),
+            relay_mode: RelayMode::Official,
+            official_mix_api_key: true,
+            protocol: RelayProtocol::Responses,
+            ..RelayProfile::default()
+        }],
+        ..BackendSettings::default()
+    });
+
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 58123,
+            status_store,
+        },
+        &hooks,
+    )
+    .await
+    .unwrap();
+
+    let before_stop = events.lock().unwrap().clone();
+    assert!(before_stop.contains(&"select-helper:58123".to_string()));
+    assert!(before_stop.contains(&"start-helper:57321".to_string()));
+    assert!(!before_stop.iter().any(|event| event.starts_with("inject:")));
+
+    handle.wait_for_codex_exit().await.unwrap();
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .contains(&"shutdown-helper:57321".to_string())
+    );
+}
+
+#[tokio::test]
 async fn launch_lifecycle_stops_before_start_when_initial_status_save_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");

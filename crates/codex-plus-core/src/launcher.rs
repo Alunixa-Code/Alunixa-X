@@ -1651,9 +1651,10 @@ async fn handle_protocol_proxy_connection(
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
     let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
-    let upstream = match crate::protocol_proxy::open_responses_proxy_request(
+    let upstream = match crate::protocol_proxy::open_responses_proxy_request_for_path(
         request_body,
         request_user_agent,
+        path,
     )
     .await
     {

@@ -809,6 +809,14 @@ pub enum UpstreamWireApi {
     AudioTranscriptions,
 }
 
+#[derive(Debug, Clone)]
+struct ModelRouteSelection {
+    relay: crate::settings::RelayProfile,
+    source_relay_id: String,
+    source_model: String,
+    upstream_model: String,
+}
+
 impl UpstreamProxyResponse {
     pub fn status(&self) -> String {
         http_status_line(self.status_code)
@@ -1392,6 +1400,17 @@ pub fn is_responses_proxy_path(path: &str) -> bool {
     )
 }
 
+pub fn is_responses_compact_proxy_path(path: &str) -> bool {
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    matches!(
+        path,
+        "/responses/compact"
+            | "/v1/responses/compact"
+            | "/v1/v1/responses/compact"
+            | "/codex/v1/responses/compact"
+    )
+}
+
 pub fn is_chat_completions_proxy_path(path: &str) -> bool {
     let path = path.split_once('?').map_or(path, |(path, _)| path);
     matches!(
@@ -1426,50 +1445,98 @@ pub async fn open_responses_proxy_request(
     body: &str,
     original_user_agent: Option<&str>,
 ) -> anyhow::Result<UpstreamProxyResponse> {
+    open_responses_proxy_request_for_path(body, original_user_agent, "/responses").await
+}
+
+pub async fn open_responses_proxy_request_for_path(
+    body: &str,
+    original_user_agent: Option<&str>,
+    request_path: &str,
+) -> anyhow::Result<UpstreamProxyResponse> {
     let settings = SettingsStore::default().load().unwrap_or_default();
-    open_responses_proxy_request_with_settings_and_user_agent(body, settings, original_user_agent)
-        .await
+    open_responses_proxy_request_with_settings_and_user_agent(
+        body,
+        settings,
+        original_user_agent,
+        request_path,
+    )
+    .await
 }
 
 pub async fn open_responses_proxy_request_with_settings(
     body: &str,
     settings: crate::settings::BackendSettings,
 ) -> anyhow::Result<UpstreamProxyResponse> {
-    open_responses_proxy_request_with_settings_and_user_agent(body, settings, None).await
+    open_responses_proxy_request_with_settings_for_path(body, settings, "/responses").await
+}
+
+pub async fn open_responses_proxy_request_with_settings_for_path(
+    body: &str,
+    settings: crate::settings::BackendSettings,
+    request_path: &str,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_responses_proxy_request_with_settings_and_user_agent(body, settings, None, request_path)
+        .await
 }
 
 async fn open_responses_proxy_request_with_settings_and_user_agent(
     body: &str,
     settings: crate::settings::BackendSettings,
     original_user_agent: Option<&str>,
+    request_path: &str,
 ) -> anyhow::Result<UpstreamProxyResponse> {
-    let request_json: Value = serde_json::from_str(body)?;
+    let mut request_json: Value = serde_json::from_str(body)?;
     let is_stream = request_json
         .get("stream")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let source_model = request_json
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("")
+        .to_string();
+    let model_route = select_model_route(&settings, &source_model)?;
+    if let Some(route) = &model_route
+        && route.upstream_model != source_model
+    {
+        request_json["model"] = Value::String(route.upstream_model.clone());
+    }
     let context = RotationContext {
         conversation_id: conversation_id_from_responses_request(&request_json),
     };
-    let relay = crate::relay_rotation::select_relay_for_request(&settings, context)?;
-    if relay.relay_mode == crate::settings::RelayMode::CustomModels {
+    let selected_relay = if let Some(route) = &model_route {
+        route.relay.clone()
+    } else {
+        crate::relay_rotation::select_relay_for_request(&settings, context)?
+    };
+    if selected_relay.relay_mode == crate::settings::RelayMode::CustomModels {
         return open_custom_models_proxy_request(
-            &relay,
+            &selected_relay,
             &request_json,
             is_stream,
             original_user_agent,
         )
         .await;
     }
-    let mut relays = vec![relay.clone()];
-    relays.extend(crate::relay_rotation::fallback_relays_after(
-        &settings, &relay.id,
-    )?);
+    let relays = if model_route.is_some() {
+        vec![selected_relay]
+    } else {
+        let mut relays = vec![selected_relay.clone()];
+        relays.extend(crate::relay_rotation::fallback_relays_after(
+            &settings,
+            &selected_relay.id,
+        )?);
+        relays
+    };
     let relay_count = relays.len();
     for (attempt, relay) in relays.into_iter().enumerate() {
         validate_upstream(&relay)?;
-        let (endpoint, upstream_body, wire_api) =
+        let (mut endpoint, upstream_body, wire_api) =
             upstream_request_parts(&relay, request_json.clone()).await?;
+        if wire_api == UpstreamWireApi::Responses && is_responses_compact_proxy_path(request_path) {
+            endpoint = responses_compact_url(&relay.base_url);
+        }
         let has_more_candidates = attempt + 1 < relay_count;
         let header_timeout = response_header_timeout(is_stream);
         let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -1484,7 +1551,13 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 "candidateCount": relay_count,
                 "headerTimeoutSeconds": header_timeout.as_secs(),
                 "requestToolSummary": response_tools_diagnostic_summary(request_json.get("tools")),
-                "upstreamToolSummary": response_tools_diagnostic_summary(upstream_body.get("tools"))
+                "upstreamToolSummary": response_tools_diagnostic_summary(upstream_body.get("tools")),
+                "modelRoute": model_route.as_ref().map(|route| json!({
+                    "sourceRelayId": route.source_relay_id,
+                    "sourceModel": route.source_model,
+                    "targetRelayId": route.relay.id,
+                    "upstreamModel": route.upstream_model
+                }))
             }),
         );
         let client = crate::http_client::proxied_client(&effective_user_agent(
@@ -1586,6 +1659,53 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         );
     }
     anyhow::bail!("未找到可用的聚合供应商成员")
+}
+
+fn select_model_route(
+    settings: &crate::settings::BackendSettings,
+    model: &str,
+) -> anyhow::Result<Option<ModelRouteSelection>> {
+    if model.is_empty() || settings.active_aggregate_relay_profile().is_some() {
+        return Ok(None);
+    }
+    let source = settings.active_relay_profile();
+    let Some(route) = source
+        .model_routes
+        .iter()
+        .find(|route| route.model.trim() == model)
+    else {
+        return Ok(None);
+    };
+    let target_relay_id = route.target_relay_id.trim();
+    if target_relay_id == source.id {
+        anyhow::bail!("模型路由不能指向当前供应商自身：{model}");
+    }
+    let target = settings
+        .relay_profiles
+        .iter()
+        .find(|profile| profile.id == target_relay_id)
+        .cloned()
+        .with_context(|| format!("模型路由目标供应商不存在：{target_relay_id}"))?;
+    if target.relay_mode == crate::settings::RelayMode::Aggregate {
+        anyhow::bail!("模型路由目标不能是聚合供应商：{}", target.name);
+    }
+    if target.relay_mode == crate::settings::RelayMode::CustomModels {
+        anyhow::bail!("模型路由目标不能是自定义模型代理供应商：{}", target.name);
+    }
+    if target.protocol != RelayProtocol::Responses {
+        anyhow::bail!("模型路由目标必须使用 Responses API：{}", target.name);
+    }
+    let upstream_model = if route.target_model.trim().is_empty() {
+        model.to_string()
+    } else {
+        route.target_model.trim().to_string()
+    };
+    Ok(Some(ModelRouteSelection {
+        relay: target,
+        source_relay_id: source.id,
+        source_model: model.to_string(),
+        upstream_model,
+    }))
 }
 
 pub async fn open_models_proxy_request(
@@ -2437,6 +2557,18 @@ pub fn responses_url(base_url: &str) -> String {
         url = url.replace("/v1/v1", "/v1");
     }
     url
+}
+
+pub fn responses_compact_url(base_url: &str) -> String {
+    let responses = responses_url(base_url);
+    if responses
+        .to_ascii_lowercase()
+        .ends_with("/responses/compact")
+    {
+        responses
+    } else {
+        format!("{}/compact", responses.trim_end_matches('/'))
+    }
 }
 
 pub fn audio_transcriptions_url(base_url: &str) -> String {

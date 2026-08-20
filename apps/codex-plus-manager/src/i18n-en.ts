@@ -5,6 +5,24 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "单模型路由": "Per-model routing",
+  "首次启用单模型路由需要启动本地协议代理。保存后将立即重启 Codex，使路由安全生效。是否继续？":
+    "Enabling per-model routing for the first time requires the local protocol proxy. Codex will restart immediately after saving so routing can take effect safely. Continue?",
+  "匹配模型": "Match model",
+  "目标供应商": "Target provider",
+  "目标模型（可选）": "Target model (optional)",
+  "选择 Responses 供应商": "Select a Responses provider",
+  "例：gpt-5.6-luna": "Example: gpt-5.6-luna",
+  "留空保持原模型名": "Leave empty to keep the original model name",
+  "删除模型路由": "Delete model route",
+  "请先创建一个 Responses API 目标供应商": "Create a Responses API target provider first",
+  "添加模型路由": "Add model route",
+  "单模型路由需要填写模型名称和目标供应商。":
+    "Each model route requires a model name and target provider.",
+  "仅在当前供应商启用时生效；精确匹配模型名并使用目标供应商的 URL 与 Key。目标必须是 Responses API，且需要从 Codex++ 启动。":
+    "Applies only while this provider is active. It exactly matches the model name and uses the target provider's URL and key. The target must use the Responses API, and Codex must be launched through Codex++.",
+  "安全提示：网页链接中的自定义 config.toml 和 auth.json 不会执行；管理工具只会使用上方字段生成受管配置。":
+    "Security note: custom config.toml and auth.json data from web links is ignored; the manager generates managed configuration from the fields shown above.",
   "皮肤管理": "Skin manager",
   "DreamSkin 社区": "DreamSkin community",
   "安装社区主题": "Install community theme",
@@ -899,6 +917,16 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "模型「{0}」存在重复路由。": "Model “{0}” has duplicate routes.",
+  "模型「{0}」不能路由到当前供应商自身。": "Model “{0}” cannot route to the current provider itself.",
+  "模型「{0}」的目标供应商不存在。": "The target provider for model “{0}” does not exist.",
+  "模型「{0}」不能路由到聚合供应商。": "Model “{0}” cannot route to an aggregate provider.",
+  "模型「{0}」不能路由到自定义模型代理供应商。":
+    "Model “{0}” cannot route to a custom-model proxy provider.",
+  "模型「{0}」的目标供应商必须使用 Responses API。":
+    "The target provider for model “{0}” must use the Responses API.",
+  "模型「{0}」的目标供应商缺少 Base URL 或 Key。":
+    "The target provider for model “{0}” is missing a Base URL or key.",
   "删除主题“{0}”？": "Delete theme \"{0}\"?",
   "社区主题 {0} 项": "{0} community themes",
   "下载 {0} 次": "{0} downloads",

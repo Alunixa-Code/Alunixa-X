@@ -1,4 +1,20 @@
 (() => {
+  const codexPlusIsNodeTestHarness = typeof process === "object" && !!process.versions?.node;
+  const codexPlusIsSupportedMainDocument = (() => {
+    try {
+      const url = new URL(window.location.href);
+      return (url.protocol === "app:" && url.hostname === "-" && /^\/index\.html$/i.test(url.pathname))
+        || (url.protocol === "https:" && url.hostname === "chatgpt.com");
+    } catch {
+      return false;
+    }
+  })();
+  if (!codexPlusIsNodeTestHarness && (
+    window.top !== window
+    || window.self !== window
+    || !window.electronBridge
+    || !codexPlusIsSupportedMainDocument
+  )) return;
   const codexPlusIsWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent || "");
 
   function installCodexPlusFastStartup() {
@@ -391,6 +407,8 @@
   const subAgentDefaultThreads = 3;
   const zedRemoteButtonClass = "codex-zed-remote-button";
   const zedRemoteOpenInMenuItemClass = "codex-zed-open-in-menu-item";
+  const sessionCopyMenuActivationTimeoutMs = 12000;
+  const sessionAutoRenameTimeoutMs = 20000;
   const zedRemoteToastClass = "codex-zed-remote-toast";
   const upstreamWorktreeDialogClass = "codex-upstream-worktree-dialog";
   const upstreamBranchOptionAttribute = "data-codex-upstream-branch-option";
@@ -413,7 +431,7 @@
   const codexDeleteVersion = "7";
   const codexExportVersion = "1";
   const codexProjectMoveVersion = "1";
-  const codexActionGroupVersion = "5";
+  const codexActionGroupVersion = "6";
   const codexArchiveRowActionsVersion = "1";
   const codexArchiveDeleteAllVersion = "2";
   const codexConversationViewVersion = "1";
@@ -487,7 +505,7 @@
       codexStatsigModelPatchVersion,
       window.__codexPlusDynamicModelPatchGeneration,
     ].join(":");
-  const codexPluginMarketplaceUnlockVersion = "12";
+  const codexPluginMarketplaceUnlockVersion = "15";
   const codexPluginAutoExpandVersion = "1";
   const codexPluginAutoExpandMaxClicks = 80;
   const codexPluginAutoExpandClickDelayMs = 90;
@@ -601,7 +619,7 @@
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
     threadTitle: "[data-thread-title]",
-    appHeader: ".app-header-tint",
+    appHeader: '[class*="ApplicationMenuTopBar"], .app-header-tint',
     nativeMenuBar: "[class*=\"ms-auto\"][class*=\"flex\"][class*=\"items-center\"]",
     headerContextMenuSurface: '[data-testid="app-shell-header-context-menu-surface"]',
     archiveNav: 'button[aria-label="已归档对话"], button[aria-label="Archived conversations"]',
@@ -1715,6 +1733,7 @@
   let codexPlusBackendSettingsSeq = 0;
   const codexPluginLegacyEntryUnlockBeforeVersion = "26.601.2237";
   const codexPluginBridgeRequestUnlockFromVersion = "26.616.0";
+  const codexPluginBroadCatalogKindsFromVersion = "26.803.0";
 
   function parseCodexVersionParts(version) {
     const raw = String(version || "").trim();
@@ -1765,6 +1784,12 @@
     const comparison = compareCodexVersions(version, codexPluginBridgeRequestUnlockFromVersion);
     if (comparison == null) return "unknown";
     return comparison >= 0 ? "bridge" : "client";
+  }
+
+  function codexPluginUsesBroadCatalogKinds() {
+    const version = String(codexPlusBackendSettings.codexAppVersion || "").trim();
+    const comparison = compareCodexVersions(version, codexPluginBroadCatalogKindsFromVersion);
+    return comparison != null && comparison >= 0;
   }
 
   let codexPlusBackendSettingsLoaded = false;
@@ -4299,7 +4324,7 @@
 
   function updateFloatingCodexPlusMenuPosition(menu) {
     if (!menu?.classList?.contains(codexPlusMenuFloatingClass)) return;
-    const header = document.querySelector(selectors.appHeader) || document.querySelector("header");
+    const header = document.querySelector(selectors.appHeader);
     if (!header) return;
     const toolbarButtons = Array.from(header.querySelectorAll("button"))
       .map((button) => ({ button, rect: button.getBoundingClientRect() }))
@@ -4318,8 +4343,9 @@
 
     const headerRect = header.getBoundingClientRect();
     if (headerRect.height) {
-      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${headerRect.top}px`);
-      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${headerRect.height}px`);
+      const isApplicationMenuTopBar = header.matches?.('[class*="ApplicationMenuTopBar"]');
+      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${isApplicationMenuTopBar ? Math.max(4, headerRect.top) : headerRect.top}px`);
+      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${isApplicationMenuTopBar ? 28 : headerRect.height}px`);
     }
     menu.style.removeProperty("--codex-plus-menu-right");
   }
@@ -4376,6 +4402,23 @@
     removeDuplicateCodexPlusMenus(menu);
   }
 
+  const codexPluginRemoteOnlyMarketplaceKinds = new Set(["created-by-me-remote", "shared-with-me"]);
+
+  function pluginMarketplaceRequestProfile(params) {
+    const marketplaceKinds = Array.isArray(params?.marketplaceKinds)
+      ? Array.from(new Set(params.marketplaceKinds.map((kind) => restorePluginMarketplaceName(kind))))
+      : [];
+    const hasRemoteOnlyKind = marketplaceKinds.some((kind) => codexPluginRemoteOnlyMarketplaceKinds.has(kind));
+    const hasLocalKind = marketplaceKinds.includes("local");
+    const hasOtherKind = marketplaceKinds.some(
+      (kind) => !codexPluginRemoteOnlyMarketplaceKinds.has(kind) && kind !== "vertical"
+    );
+    return {
+      marketplaceKinds,
+      remoteOnly: hasRemoteOnlyKind && !hasLocalKind && !hasOtherKind,
+    };
+  }
+
   function patchPluginMarketplaceRequestParams(method, params) {
     if (method === "list-plugins") {
       if (!params || typeof params !== "object") return params;
@@ -4383,16 +4426,50 @@
       return params;
     }
     const next = { ...params };
+    const requestProfile = pluginMarketplaceRequestProfile(next);
+    const requestCwds = Array.isArray(next.cwds)
+      ? next.cwds.filter((cwd) => typeof cwd === "string" && cwd.trim())
+      : [];
+    if (requestCwds.length > 0) {
+      window.__codexPluginMarketplaceLastCwds = Array.from(new Set(requestCwds));
+    } else if (!requestProfile.remoteOnly && Array.isArray(window.__codexPluginMarketplaceLastCwds) && window.__codexPluginMarketplaceLastCwds.length > 0) {
+      next.cwds = [...window.__codexPluginMarketplaceLastCwds];
+    }
     const hadMarketplaceKinds = Object.prototype.hasOwnProperty.call(next, "marketplaceKinds");
-    const nextKinds = Array.isArray(next.marketplaceKinds)
+    const broadCatalogRequest = codexPluginUsesBroadCatalogKinds()
+      && (!hadMarketplaceKinds || next.marketplaceKinds == null);
+    const remoteCatalogUnavailable = window.__codexPluginMarketplaceRemoteCatalogUnavailable === true;
+    if (broadCatalogRequest && !remoteCatalogUnavailable) {
+      sendCodexPlusDiagnostic("plugin_marketplace_request_expanded", {
+        hadMarketplaceKinds,
+        marketplaceKinds: hadMarketplaceKinds ? next.marketplaceKinds : null,
+        broadCatalogPreserved: true,
+        cwdCount: Array.isArray(next.cwds) ? next.cwds.length : 0,
+        cwdRestored: requestCwds.length === 0 && Array.isArray(next.cwds) && next.cwds.length > 0,
+        remoteCatalogUnavailable,
+        remoteOnly: requestProfile.remoteOnly,
+      });
+      return next;
+    }
+    let nextKinds = Array.isArray(next.marketplaceKinds)
       ? next.marketplaceKinds.map((kind) => restorePluginMarketplaceName(kind))
       : ["local"];
-    if (!nextKinds.includes("vertical")) nextKinds.push("vertical");
+    if (!requestProfile.remoteOnly && remoteCatalogUnavailable) {
+      nextKinds = nextKinds.filter((kind) => kind !== "created-by-me-remote" && kind !== "shared-with-me");
+    }
+    if (!requestProfile.remoteOnly) {
+      if (!nextKinds.includes("local")) nextKinds.push("local");
+      if (!nextKinds.includes("vertical")) nextKinds.push("vertical");
+    }
     next.marketplaceKinds = Array.from(new Set(nextKinds));
     sendCodexPlusDiagnostic("plugin_marketplace_request_expanded", {
       hadMarketplaceKinds,
       marketplaceKinds: next.marketplaceKinds,
+      broadCatalogPreserved: false,
       cwdCount: Array.isArray(next.cwds) ? next.cwds.length : 0,
+      cwdRestored: requestCwds.length === 0 && Array.isArray(next.cwds) && next.cwds.length > 0,
+      remoteCatalogUnavailable,
+      remoteOnly: requestProfile.remoteOnly,
     });
     return next;
   }
@@ -4611,13 +4688,14 @@
     return next;
   }
 
-  function patchPluginMarketplaceResult(method, result) {
+  function patchPluginMarketplaceResult(method, result, options = {}) {
     if (method !== "list-plugins") return result;
+    const mergeLocal = options.mergeLocal !== false;
     let patchedCount = 0;
     try {
       const pluginMarketplaceCounts = {};
       if (Array.isArray(result?.marketplaces)) {
-        mergeLocalPluginMarketplaces(result);
+        if (mergeLocal) mergeLocalPluginMarketplaces(result);
         result.marketplaces.forEach((marketplace) => {
           if (Array.isArray(marketplace?.plugins)) {
             marketplace.plugins.forEach((plugin) => {
@@ -4636,6 +4714,7 @@
             remoteMarketplaceName: marketplace?.remoteMarketplaceName || null,
           })),
           pluginMarketplaceCounts,
+          mergeLocal,
         });
       }
       if (patchedCount > 0) {
@@ -4751,6 +4830,50 @@
     clickNext();
   }
 
+  function pluginMarketplaceErrorText(value, visited = new WeakSet(), depth = 0) {
+    if (typeof value === "string") return value;
+    if (!value || typeof value !== "object" || depth > 4 || visited.has(value)) return "";
+    visited.add(value);
+    const parts = [];
+    for (const key of ["message", "error", "detail", "cause", "data", "response"]) {
+      const text = pluginMarketplaceErrorText(value[key], visited, depth + 1);
+      if (text) parts.push(text);
+    }
+    return parts.join(" ");
+  }
+
+  function pluginMarketplaceRemoteAuthError(value) {
+    const text = pluginMarketplaceErrorText(value).toLowerCase();
+    return text.includes("chatgpt authentication required for remote plugin catalog")
+      && text.includes("api key auth is not supported");
+  }
+
+  function markPluginMarketplaceRemoteCatalogUnavailable(error) {
+    window.__codexPluginMarketplaceRemoteCatalogUnavailable = true;
+    sendCodexPlusDiagnostic("plugin_marketplace_remote_auth_fallback", {
+      errorMessage: pluginMarketplaceErrorText(error),
+      rememberedCwdCount: Array.isArray(window.__codexPluginMarketplaceLastCwds)
+        ? window.__codexPluginMarketplaceLastCwds.length
+        : 0,
+    });
+  }
+
+  function pluginMarketplaceFallbackResult(mergeLocal = true) {
+    return patchPluginMarketplaceResult("list-plugins", {
+      marketplaces: [],
+      marketplaceLoadErrors: [],
+      featuredPluginIds: [],
+    }, { mergeLocal });
+  }
+
+  function localPluginMarketplaceFallbackResult() {
+    return pluginMarketplaceFallbackResult(true);
+  }
+
+  function remoteOnlyPluginMarketplaceFallbackResult() {
+    return pluginMarketplaceFallbackResult(false);
+  }
+
   function patchPluginMarketplaceRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
     if (client.__codexPluginMarketplaceUnlockPatch === codexPluginMarketplaceUnlockVersion) return true;
@@ -4758,7 +4881,9 @@
     client.__codexPluginMarketplaceOriginalSendRequest = originalSendRequest;
     client.sendRequest = async function codexPluginMarketplacePatchedSendRequest(method, params, options) {
       const requestMethod = appServerModelRequestMethod(String(method || ""), params);
-      const requestParams = patchPluginMarketplaceRequestParams(requestMethod, restorePluginMarketplaceRequestParams(params, requestMethod));
+      const restoredRequestParams = restorePluginMarketplaceRequestParams(params, requestMethod);
+      const requestProfile = pluginMarketplaceRequestProfile(restoredRequestParams);
+      const requestParams = patchPluginMarketplaceRequestParams(requestMethod, restoredRequestParams);
       if (requestMethod === "install-plugin") {
         sendCodexPlusDiagnostic("plugin_install_request_debug", {
           method: String(method || ""),
@@ -4773,8 +4898,14 @@
       }
       try {
         const result = await originalSendRequest(method, requestParams, options);
-        return patchPluginMarketplaceResult(requestMethod, result);
+        return patchPluginMarketplaceResult(requestMethod, result, { mergeLocal: !requestProfile.remoteOnly });
       } catch (error) {
+        if (requestMethod === "list-plugins" && pluginMarketplaceRemoteAuthError(error)) {
+          markPluginMarketplaceRemoteCatalogUnavailable(error);
+          return requestProfile.remoteOnly
+            ? remoteOnlyPluginMarketplaceFallbackResult()
+            : localPluginMarketplaceFallbackResult();
+        }
         if (requestMethod === "install-plugin") {
           sendCodexPlusDiagnostic("plugin_install_request_failed", {
             method: String(method || ""),
@@ -4809,13 +4940,15 @@
       } else if (requestBody && typeof requestBody === "object") {
         params = requestBody;
       }
-      const requestParams = patchPluginMarketplaceRequestParams(
-        requestMethod,
-        restorePluginMarketplaceRequestParams(params, requestMethod)
-      );
+      const restoredRequestParams = restorePluginMarketplaceRequestParams(params, requestMethod);
+      const requestProfile = pluginMarketplaceRequestProfile(restoredRequestParams);
+      const requestParams = patchPluginMarketplaceRequestParams(requestMethod, restoredRequestParams);
       if (requestMethod === "list-plugins" && message.requestId != null) {
         window.__codexPluginMarketplaceFetchRequestIds = window.__codexPluginMarketplaceFetchRequestIds || new Set();
-        window.__codexPluginMarketplaceFetchRequestIds.add(String(message.requestId));
+        const requestId = String(message.requestId);
+        window.__codexPluginMarketplaceFetchRequestIds.add(requestId);
+        window.__codexPluginMarketplaceFetchRequestProfiles = window.__codexPluginMarketplaceFetchRequestProfiles || new Map();
+        window.__codexPluginMarketplaceFetchRequestProfiles.set(requestId, requestProfile);
       }
       if (requestParams === params) return message;
       if (requestMethod === "install-plugin") {
@@ -4838,13 +4971,15 @@
     if (message.type === "mcp-request" && message.request && typeof message.request === "object") {
       const requestMethod = appServerModelRequestMethod(String(message.request.method || ""), message.request.params);
       if (requestMethod !== "list-plugins" && requestMethod !== "install-plugin") return message;
-      const requestParams = patchPluginMarketplaceRequestParams(
-        requestMethod,
-        restorePluginMarketplaceRequestParams(message.request.params, requestMethod)
-      );
+      const restoredRequestParams = restorePluginMarketplaceRequestParams(message.request.params, requestMethod);
+      const requestProfile = pluginMarketplaceRequestProfile(restoredRequestParams);
+      const requestParams = patchPluginMarketplaceRequestParams(requestMethod, restoredRequestParams);
       if (requestMethod === "list-plugins" && message.request.id != null) {
         window.__codexPluginMarketplaceRequestIds = window.__codexPluginMarketplaceRequestIds || new Set();
-        window.__codexPluginMarketplaceRequestIds.add(String(message.request.id));
+        const requestId = String(message.request.id);
+        window.__codexPluginMarketplaceRequestIds.add(requestId);
+        window.__codexPluginMarketplaceRequestProfiles = window.__codexPluginMarketplaceRequestProfiles || new Map();
+        window.__codexPluginMarketplaceRequestProfiles.set(requestId, requestProfile);
       }
       if (requestParams === message.request.params) return message;
       if (requestMethod === "install-plugin") {
@@ -4868,16 +5003,31 @@
     if (data?.type === "fetch-response") {
       const requestId = data.requestId != null ? String(data.requestId) : "";
       const requestIds = window.__codexPluginMarketplaceFetchRequestIds;
+      const requestProfiles = window.__codexPluginMarketplaceFetchRequestProfiles;
+      const requestProfile = requestProfiles instanceof Map ? requestProfiles.get(requestId) : null;
       if (requestIds instanceof Set && requestIds.size > 0) {
         if (!requestIds.has(requestId)) return false;
         requestIds.delete(requestId);
       }
+      if (requestProfiles instanceof Map) requestProfiles.delete(requestId);
       if (typeof data.bodyJsonString !== "string" || !data.bodyJsonString.trim()) return false;
       try {
-        const result = JSON.parse(data.bodyJsonString);
-        if (result && typeof result === "object") {
-          patchPluginMarketplaceResult("list-plugins", result);
-          patchPluginMarketplaceResult("list-plugins", result.data);
+        let result = JSON.parse(data.bodyJsonString);
+        if (pluginMarketplaceRemoteAuthError(result?.error || result)) {
+          markPluginMarketplaceRemoteCatalogUnavailable(result?.error || result);
+          const fallback = requestProfile?.remoteOnly
+            ? remoteOnlyPluginMarketplaceFallbackResult()
+            : localPluginMarketplaceFallbackResult();
+          if (result && typeof result === "object" && Object.prototype.hasOwnProperty.call(result, "id")) {
+            delete result.error;
+            result.result = fallback;
+          } else {
+            result = fallback;
+          }
+        } else if (result && typeof result === "object") {
+          const patchOptions = { mergeLocal: requestProfile?.remoteOnly !== true };
+          patchPluginMarketplaceResult("list-plugins", result, patchOptions);
+          patchPluginMarketplaceResult("list-plugins", result.data, patchOptions);
         }
         data.bodyJsonString = JSON.stringify(result);
         return true;
@@ -4897,15 +5047,52 @@
     }
     const requestId = message?.id != null ? String(message.id) : "";
     const requestIds = window.__codexPluginMarketplaceRequestIds;
+    const requestProfiles = window.__codexPluginMarketplaceRequestProfiles;
+    const requestProfile = requestProfiles instanceof Map ? requestProfiles.get(requestId) : null;
     if (requestIds instanceof Set && requestIds.size > 0) {
       if (!requestIds.has(requestId)) return false;
       requestIds.delete(requestId);
     }
+    if (requestProfiles instanceof Map) requestProfiles.delete(requestId);
+    if (pluginMarketplaceRemoteAuthError(message?.error)) {
+      markPluginMarketplaceRemoteCatalogUnavailable(message.error);
+      delete message.error;
+      message.result = requestProfile?.remoteOnly
+        ? remoteOnlyPluginMarketplaceFallbackResult()
+        : localPluginMarketplaceFallbackResult();
+      return true;
+    }
     const result = message?.result;
     if (!result || typeof result !== "object") return false;
-    patchPluginMarketplaceResult("list-plugins", result);
-    patchPluginMarketplaceResult("list-plugins", result.data);
+    const patchOptions = { mergeLocal: requestProfile?.remoteOnly !== true };
+    patchPluginMarketplaceResult("list-plugins", result, patchOptions);
+    patchPluginMarketplaceResult("list-plugins", result.data, patchOptions);
     return true;
+  }
+
+  if (window.__CODEX_PLUS_TEST_PLUGIN_MARKETPLACE__) {
+    window.__codexPlusPluginMarketplaceTest = {
+      patchRequestParams: patchPluginMarketplaceRequestParams,
+      patchRequestMessage: patchPluginMarketplaceRequestMessage,
+      patchResponseData: patchPluginMarketplaceResponseData,
+      remoteAuthError: pluginMarketplaceRemoteAuthError,
+      localFallback: localPluginMarketplaceFallbackResult,
+      remoteOnlyFallback: remoteOnlyPluginMarketplaceFallbackResult,
+      requestProfile: pluginMarketplaceRequestProfile,
+      setCodexAppVersion: (version) => {
+        codexPlusBackendSettings.codexAppVersion = String(version || "");
+      },
+      remoteCatalogUnavailable: () => window.__codexPluginMarketplaceRemoteCatalogUnavailable === true,
+      reset: () => {
+        delete window.__codexPluginMarketplaceLastCwds;
+        delete window.__codexPluginMarketplaceRemoteCatalogUnavailable;
+        window.__codexPluginMarketplaceRequestIds = new Set();
+        window.__codexPluginMarketplaceFetchRequestIds = new Set();
+        window.__codexPluginMarketplaceRequestProfiles = new Map();
+        window.__codexPluginMarketplaceFetchRequestProfiles = new Map();
+      },
+    };
+    return;
   }
 
   function clearPluginMarketplaceQueryCache() {
@@ -8183,9 +8370,11 @@
         hostId: "local",
         sortKey: "updated_at",
       });
+      return true;
     } catch (error) {
       window.__codexProjectMoveRefreshFailures = window.__codexProjectMoveRefreshFailures || [];
       window.__codexProjectMoveRefreshFailures.push(String(error?.stack || error));
+      return false;
     }
   }
 
@@ -8378,7 +8567,10 @@
       undo.addEventListener("click", async () => {
         const result = await postJson("/undo", { undo_token: undoToken });
         toast.textContent = result.message || "撤销完成";
-        if (result.status === "undone") window.location.reload();
+        if (result.status === "undone") {
+          const refreshed = await refreshRecentConversationsForHost();
+          if (!refreshed) window.location.reload();
+        }
         setTimeout(() => toast.remove(), 5000);
       });
       toast.appendChild(undo);
@@ -8886,7 +9078,7 @@
       const trigger = document.getElementById(labelledBy);
       if (trigger instanceof Element) return trigger;
     }
-    return [...document.querySelectorAll('button')]
+    return [...document.querySelectorAll('.composer-footer button, .composer-footer [role="button"]')]
       .filter((button) => (button.innerText || button.textContent || "").trim() === "main")
       .sort((left, right) => right.getBoundingClientRect().x - left.getBoundingClientRect().x)[0] || null;
   }
@@ -9038,13 +9230,23 @@
   }
 
   function installUpstreamBranchDropdownAdapter() {
-    const adapterVersion = "actual-upstream-refs-v16";
+    const adapterVersion = "actual-upstream-refs-v17";
     window.__codexUpstreamBranchDropdownAdapterVersion = adapterVersion;
     if (window.__codexUpstreamBranchDropdownAdapterInstalled === adapterVersion) return;
+    window.__codexUpstreamBranchDropdownObserver?.disconnect?.();
     window.__codexUpstreamBranchDropdownAdapterInstalled = adapterVersion;
+    let upstreamBranchInjectTimer = null;
+    const schedule = () => {
+      clearTimeout(upstreamBranchInjectTimer);
+      upstreamBranchInjectTimer = setTimeout(() => {
+        injectUpstreamBranchOptions().catch((error) => reportDiagnostic("upstream_branch_inject_failed", { error: error?.message || String(error) }));
+      }, 80);
+    };
     document.addEventListener("click", (event) => {
       rememberStartNewChatProjectContext(event);
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const control = target?.closest?.('button, [role="button"]');
+      if (control && branchMenuTriggerIsBranchControl(control)) schedule();
       const option = target?.closest?.(`[${upstreamBranchOptionAttribute}]`);
       if (!option) {
         handleNativeBranchSelection(event);
@@ -9065,14 +9267,16 @@
       syncUpstreamBranchMenuSelection(option.closest?.('[role="menu"], [data-radix-menu-content], [cmdk-list]'));
       showToast(`将从 ${upstreamBranchOptionLabel(option) || "upstream/main"} 创建新 worktree`, null);
     }, true);
-    let upstreamBranchInjectTimer = null;
-    const schedule = () => {
-      clearTimeout(upstreamBranchInjectTimer);
-      upstreamBranchInjectTimer = setTimeout(() => {
-        injectUpstreamBranchOptions().catch((error) => reportDiagnostic("upstream_branch_inject_failed", { error: error?.message || String(error) }));
-      }, 80);
+    const branchMenuSelector = '[role="menu"], [data-radix-menu-content], [cmdk-list]';
+    const addedNodeContainsBranchMenu = (node) => {
+      if (!(node instanceof Element)) return false;
+      return node.matches(branchMenuSelector) || !!node.querySelector(branchMenuSelector);
     };
-    new MutationObserver(schedule).observe(document.body || document.documentElement, { childList: true, subtree: true });
+    const observer = new MutationObserver((records) => {
+      if (records.some((record) => [...record.addedNodes].some(addedNodeContainsBranchMenu))) schedule();
+    });
+    observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
+    window.__codexUpstreamBranchDropdownObserver = observer;
     schedule();
   }
 
@@ -9573,7 +9777,6 @@
   }
 
   function installDeleteButtonEventDelegation() {
-    document.removeEventListener("pointerup", window.__codexSessionDeleteDocumentDeleteHandler, true);
     document.removeEventListener("click", window.__codexSessionDeleteDocumentDeleteHandler, true);
     const handler = (event) => {
       const button = event.target?.closest?.(`.${buttonClass}`);
@@ -9593,7 +9796,6 @@
       openDeleteConfirmForRow(row, button, ref, event);
     };
     window.__codexSessionDeleteDocumentDeleteHandler = handler;
-    document.addEventListener("pointerup", handler, true);
     document.addEventListener("click", handler, true);
   }
 
@@ -9655,6 +9857,9 @@
   }
 
   function removeActionGroups(row) {
+    document.querySelectorAll(`.${moreMenuClass}`).forEach((menu) => {
+      if (menu.__codexSessionMoreRow === row) menu.remove();
+    });
     row.querySelectorAll(`.${actionGroupClass}`).forEach((group) => group.remove());
   }
 
@@ -9673,7 +9878,6 @@
     button.addEventListener("pointerleave", hideActionButtonTooltip);
     button.addEventListener("focus", () => showActionButtonTooltip(button));
     button.addEventListener("blur", hideActionButtonTooltip);
-    button.addEventListener("pointerup", onActivate, true);
     button.addEventListener("click", (event) => {
       hideActionButtonTooltip();
       onActivate(event);
@@ -9760,6 +9964,181 @@
     return item;
   }
 
+  function sessionActionActivationIsDuplicate(target) {
+    if (!(target instanceof HTMLElement)) return false;
+    const now = Date.now();
+    const activatedAt = Number(target.dataset.codexSessionActionActivatedAt || 0);
+    if (activatedAt && now - activatedAt < 600) return true;
+    target.dataset.codexSessionActionActivatedAt = String(now);
+    return false;
+  }
+
+  async function selectSessionRowForNativeAction(row) {
+    if (!(row instanceof HTMLElement) || !row.isConnected) return false;
+    const targetId = row.getAttribute("data-app-action-sidebar-thread-id") || "";
+    if (!targetId || isClientNewThreadId(targetId)) return false;
+    if (row.getAttribute("data-app-action-sidebar-thread-selected") !== "true") row.click();
+    const deadline = Date.now() + sessionCopyMenuActivationTimeoutMs;
+    while (Date.now() < deadline) {
+      const selected = [...document.querySelectorAll(selectors.sidebarThread)]
+        .find((candidate) => candidate.getAttribute("data-app-action-sidebar-thread-selected") === "true");
+      if (selected?.getAttribute("data-app-action-sidebar-thread-id") === targetId) return true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return false;
+  }
+
+  function dispatchNativePointerClick(node) {
+    if (!(node instanceof HTMLElement)) return;
+    node.focus?.();
+    if (typeof PointerEvent === "function") {
+      node.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        button: 0,
+        buttons: 1,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+      node.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        button: 0,
+        buttons: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+      }));
+    }
+    node.click();
+  }
+
+  async function waitForSessionElement(resolveElement, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const element = resolveElement();
+      if (element) return element;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    return null;
+  }
+
+  function visibleSessionRenameDialog() {
+    return [...document.querySelectorAll('[role="dialog"]')]
+      .filter(visibleElement)
+      .find((dialog) => dialog.querySelector('input[aria-label="聊天标题"], input[aria-label="Chat title"]')) || null;
+  }
+
+  function closeSessionRenameDialog(dialog) {
+    const cancelButton = [...dialog?.querySelectorAll?.("button") || []]
+      .find((button) => /^(取消|Cancel)$/i.test(normalizedElementText(button)));
+    if (cancelButton) {
+      cancelButton.click();
+      return;
+    }
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  }
+
+  function nativeSessionActionMenuScopes() {
+    return [...document.querySelectorAll('[role="menu"]')]
+      .filter((menu) => !menu.matches(`.${moreMenuClass}, .${codexPlusMenuFloatingClass}, #${codexPlusMenuId}`));
+  }
+
+  function looksLikeNativeSessionActionMenu(menu) {
+    if (!(menu instanceof HTMLElement) || menu.hidden || !visibleElement(menu)) return false;
+    const text = normalizedElementText(menu);
+    return /(?:重命名|rename)/i.test(text)
+      && /(?:置顶|取消置顶|pin|unpin|归档|archive|删除|delete|移动|move)/i.test(text);
+  }
+
+  async function activateSessionAutoRenameMenuItem(event) {
+    if (sessionActionActivationIsDuplicate(event?.currentTarget)) return;
+    const row = event?.currentTarget?.__codexSessionAutoRenameRow;
+    closeSessionMoreMenus();
+    if (!await selectSessionRowForNativeAction(row)) {
+      showToast("会话仍在同步或加载超时，请稍后重试", null);
+      return;
+    }
+    const trigger = row.querySelector('button[aria-label="聊天操作"], button[aria-label="Chat actions"]');
+    if (!(trigger instanceof HTMLElement)) {
+      showToast("找不到 Codex 原生重命名入口", null);
+      return;
+    }
+    dispatchNativePointerClick(trigger);
+    const renameItem = await waitForSessionElement(() => nativeSessionActionMenuScopes()
+      .filter(looksLikeNativeSessionActionMenu)
+      .flatMap((menu) => [...menu.querySelectorAll('[role="menuitem"]')])
+      .find((candidate) => /^(重命名|Rename)$/i.test(normalizedElementText(candidate))) || null, 1800);
+    if (!(renameItem instanceof HTMLElement)) {
+      showToast("无法打开 Codex 原生重命名入口", null);
+      return;
+    }
+    renameItem.click();
+    const dialog = await waitForSessionElement(visibleSessionRenameDialog, 3000);
+    if (!(dialog instanceof HTMLElement)) {
+      showToast("无法打开 Codex 原生重命名窗口", null);
+      return;
+    }
+    const titleInput = dialog.querySelector('input[aria-label="聊天标题"], input[aria-label="Chat title"]');
+    const initialTitle = titleInput?.value || "";
+    showToast("正在使用 Codex 生成会话名称…", null);
+    const suggestionButton = await waitForSessionElement(() => {
+      const currentDialog = visibleSessionRenameDialog();
+      return [...currentDialog?.querySelectorAll?.("button") || []]
+        .filter(visibleElement)
+        .find((button) => {
+          const text = normalizedElementText(button);
+          return button.classList.contains("text-info")
+            && !!text
+            && text !== initialTitle
+            && !/^(取消|保存|Cancel|Save)$/i.test(text);
+        }) || null;
+    }, sessionAutoRenameTimeoutMs);
+    if (!(suggestionButton instanceof HTMLElement)) {
+      closeSessionRenameDialog(visibleSessionRenameDialog());
+      showToast("Codex 未能生成新名称，请稍后重试", null);
+      return;
+    }
+    suggestionButton.click();
+    const renamedInput = await waitForSessionElement(() => {
+      const input = visibleSessionRenameDialog()?.querySelector('input[aria-label="聊天标题"], input[aria-label="Chat title"]');
+      return input?.value?.trim() && input.value.trim() !== initialTitle.trim() ? input : null;
+    }, 1500);
+    const activeDialog = visibleSessionRenameDialog();
+    const saveButton = [...activeDialog?.querySelectorAll?.("button") || []]
+      .find((button) => /^(保存|Save)$/i.test(normalizedElementText(button)));
+    if (!renamedInput || !(saveButton instanceof HTMLElement) || saveButton.disabled) {
+      closeSessionRenameDialog(activeDialog);
+      showToast("Codex 未能应用新名称，请稍后重试", null);
+      return;
+    }
+    saveButton.click();
+    showToast("已自动重命名当前会话", null);
+  }
+
+  async function activateSessionCopyMenuItem(event) {
+    if (sessionActionActivationIsDuplicate(event?.currentTarget)) return;
+    const row = event?.currentTarget?.__codexSessionCopyRow;
+    closeSessionMoreMenus();
+    if (!await selectSessionRowForNativeAction(row)) {
+      showToast("会话仍在同步或加载超时，请稍后重试", null);
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const forkButton = [...document.querySelectorAll('button[aria-label="从这里创建聊天分支"], button[aria-label="Fork from here"]')]
+      .filter(visibleElement)
+      .filter((button) => !isExtensionUiNode(button))
+      .at(-1);
+    if (!(forkButton instanceof HTMLElement)) {
+      showToast("当前会话没有可用的 Codex 原生分支入口", null);
+      return;
+    }
+    forkButton.click();
+  }
+
   function showActionButtonTooltip(button) {
     const label = button.dataset.codexActionLabel || button.getAttribute("aria-label") || "";
     if (!label) return;
@@ -9819,18 +10198,12 @@
 
   function attachButton(row) {
     const settings = codexPlusSettings();
-    if (!settings.sessionDelete && !settings.markdownExport && !settings.projectMove) {
-      removeActionGroups(row);
-      row.dataset.codexDeleteRow = "false";
-      row.dataset.codexProjectMoveRow = "false";
-      return;
-    }
     const existingGroup = actionGroupFromRow(row);
     const existingDeleteButton = existingGroup?.querySelector(`.${buttonClass}`);
     const existingMoreButton = existingGroup?.querySelector(`.${moreButtonClass}`);
     const existingExportButton = existingGroup?.querySelector(`.${exportButtonClass}`);
     const existingMoveButton = existingGroup?.querySelector(`.${projectMoveButtonClass}`);
-    const needsMoreMenu = settings.markdownExport || settings.projectMove;
+    const needsMoreMenu = true;
     const hasUnexpectedDelete = !settings.sessionDelete && !!existingDeleteButton;
     const hasUnexpectedMore = !needsMoreMenu && !!existingMoreButton;
     const hasUnexpectedExport = !!existingExportButton;
@@ -9852,7 +10225,7 @@
     const group = document.createElement("div");
     group.className = actionGroupClass;
     group.dataset.codexActionGroupVersion = codexActionGroupVersion;
-    if (settings.markdownExport || settings.projectMove) {
+    if (needsMoreMenu) {
       const moreButton = document.createElement("button");
       moreButton.type = "button";
       moreButton.className = `${actionButtonClass} ${moreButtonClass}`;
@@ -9877,6 +10250,12 @@
           openProjectMoveMenuForRow(row, moreButton, ref, event);
         }));
       }
+      const sessionCopyItem = createSessionMoreMenuItem("原地复制会话 - Codex++", "⧉", activateSessionCopyMenuItem);
+      sessionCopyItem.__codexSessionCopyRow = row;
+      moreMenu.appendChild(sessionCopyItem);
+      const sessionAutoRenameItem = createSessionMoreMenuItem("自动重命名当前会话", "✦", activateSessionAutoRenameMenuItem);
+      sessionAutoRenameItem.__codexSessionAutoRenameRow = row;
+      moreMenu.appendChild(sessionAutoRenameItem);
       const openMoreMenu = (event) => {
         stopActionButtonEvent(row, moreButton, event);
         hideActionButtonTooltip();

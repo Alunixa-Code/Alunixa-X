@@ -936,8 +936,12 @@ fn extracts_codex_common_config_without_provider_fields() {
         r#"model = "gpt-5"
 model_provider = "custom"
 base_url = "https://root-provider.example/v1"
+openai_base_url = "https://openai-provider.example/v1"
+chatgpt_base_url = "https://chatgpt-provider.example/backend-api"
 model_catalog_json = "C:\\Users\\Administrator\\.codex\\model-catalogs\\relay-a.json"
 OPENAI_API_KEY = "sk-root"
+CUSTOM_API_KEY = "sk-custom"
+model_reasoning_effort = "high"
 
 [model_providers.custom]
 name = "custom"
@@ -963,14 +967,46 @@ path = "C:\\Tools\\plugin"
     assert!(!extracted.contains("model ="));
     assert!(!extracted.contains("model_catalog_json"));
     assert!(!extracted.contains("base_url = \"https://root-provider.example/v1\""));
-    assert!(extracted.contains("OPENAI_API_KEY = \"sk-root\""));
+    assert!(!extracted.contains("openai_base_url"));
+    assert!(!extracted.contains("chatgpt_base_url"));
+    assert!(!extracted.contains("OPENAI_API_KEY"));
+    assert!(!extracted.contains("CUSTOM_API_KEY"));
+    assert!(extracted.contains("model_reasoning_effort = \"high\""));
     assert!(!extracted.contains("[model_providers"));
+}
+
+#[test]
+fn excluded_provider_fields_remain_in_profile_config_after_extraction() {
+    let config = r#"model_provider = "custom"
+openai_base_url = "https://openai-provider.example/v1"
+chatgpt_base_url = "https://chatgpt-provider.example/backend-api"
+OPENAI_API_KEY = "sk-root"
+CUSTOM_API_KEY = "sk-custom"
+approval_policy = "never"
+
+[model_providers.custom]
+base_url = "https://relay.example/v1"
+"#;
+    let common = extract_common_config_from_config(config).unwrap();
+    let profile = strip_common_config_from_config(config, &common).unwrap();
+
+    assert_eq!(common, "approval_policy = \"never\"\n");
+    assert!(profile.contains("openai_base_url"));
+    assert!(profile.contains("chatgpt_base_url"));
+    assert!(profile.contains("OPENAI_API_KEY"));
+    assert!(profile.contains("CUSTOM_API_KEY"));
+    assert!(profile.contains("[model_providers.custom]"));
+    assert!(!profile.contains("approval_policy"));
 }
 
 #[test]
 fn sanitizes_model_catalog_json_from_common_config() {
     let sanitized = sanitize_common_config_contents(
         r#"model_catalog_json = "C:\\Users\\Administrator\\.codex\\model-catalogs\\relay-a.json"
+openai_base_url = "https://openai-provider.example/v1"
+chatgpt_base_url = "https://chatgpt-provider.example/backend-api"
+OPENAI_API_KEY = "sk-root"
+CUSTOM_API_KEY = "sk-custom"
 model_reasoning_effort = "high"
 
 [features]
@@ -979,6 +1015,10 @@ goals = true
     );
 
     assert!(!sanitized.contains("model_catalog_json"));
+    assert!(!sanitized.contains("openai_base_url"));
+    assert!(!sanitized.contains("chatgpt_base_url"));
+    assert!(!sanitized.contains("OPENAI_API_KEY"));
+    assert!(!sanitized.contains("CUSTOM_API_KEY"));
     assert!(sanitized.contains("model_reasoning_effort = \"high\""));
     assert!(sanitized.contains("[features]"));
     assert!(sanitized.contains("goals = true"));
@@ -989,11 +1029,19 @@ fn sanitizes_model_catalog_json_from_invalid_common_config() {
     let sanitized = sanitize_common_config_contents(
         r#"model_catalog_json = "C:\\Users\\Administrator\\.codex\\model-catalogs\\relay-a.json"
 model_catalog_json = 'C:\Users\Administrator\.codex\model-catalogs\relay-b.json'
+"openai_base_url" = "https://openai-provider.example/v1"
+chatgpt_base_url = "https://chatgpt-provider.example/backend-api"
+OPENAI_API_KEY = "sk-root"
+CUSTOM_API_KEY = "sk-custom"
 model_reasoning_effort = "high"
 "#,
     );
 
     assert!(!sanitized.contains("model_catalog_json"));
+    assert!(!sanitized.contains("openai_base_url"));
+    assert!(!sanitized.contains("chatgpt_base_url"));
+    assert!(!sanitized.contains("OPENAI_API_KEY"));
+    assert!(!sanitized.contains("CUSTOM_API_KEY"));
     assert!(sanitized.contains("model_reasoning_effort = \"high\""));
 }
 
@@ -3673,6 +3721,113 @@ experimental_bearer_token = "sk-new"
     assert_eq!(sol["context_window"], 272_000);
     assert_eq!(sol["default_reasoning_level"], "low");
     assert_eq!(sol["service_tiers"][0]["id"], "priority");
+    assert_eq!(sol["supports_search_tool"], true);
+    assert_eq!(sol["use_responses_lite"], false);
+}
+
+#[test]
+fn apply_custom_chat_profile_preserves_generated_catalog_lite_behavior() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "relay-gpt56-chat".to_string(),
+        model: "gpt-5.6-sol".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "gpt-5.6-sol"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "chat"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "gpt-5.6-sol".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            temp.path()
+                .join("model-catalogs")
+                .join("relay-gpt56-chat.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(catalog["models"][0]["use_responses_lite"], true);
+}
+
+#[test]
+fn apply_relay_profile_copies_external_lite_catalog_for_standard_responses() {
+    let temp = tempfile::tempdir().unwrap();
+    let external_dir = temp.path().join("external");
+    std::fs::create_dir_all(&external_dir).unwrap();
+    let external_catalog = external_dir.join("gpt56.json");
+    std::fs::write(
+        &external_catalog,
+        r#"{
+  "models": [
+    {
+      "slug": "gpt-5.6-sol",
+      "supports_search_tool": true,
+      "web_search_tool_type": "text_and_image",
+      "use_responses_lite": true
+    }
+  ]
+}"#,
+    )
+    .unwrap();
+    let external_absolute = external_catalog.to_string_lossy();
+    let profile = RelayProfile {
+        id: "relay-gpt56-external".to_string(),
+        model: "gpt-5.6-sol".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: format!(
+            r#"model = "gpt-5.6-sol"
+model_catalog_json = '{external_absolute}'
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        ),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "gpt-5.6-sol".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-gpt56-external.json""#));
+    let copied: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            temp.path()
+                .join("model-catalogs")
+                .join("relay-gpt56-external.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(copied["models"][0]["supports_search_tool"], true);
+    assert_eq!(
+        copied["models"][0]["web_search_tool_type"],
+        "text_and_image"
+    );
+    assert_eq!(copied["models"][0]["use_responses_lite"], false);
+
+    let original: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(external_catalog).unwrap()).unwrap();
+    assert_eq!(original["models"][0]["use_responses_lite"], true);
 }
 
 #[test]
@@ -3708,6 +3863,121 @@ experimental_bearer_token = "sk-new"
     assert!(config.contains(r#"model_catalog_json = "/old/catalog.json""#));
     assert!(!config.contains("model-catalogs/relay-a.json"));
     assert!(!temp.path().join("model-catalogs").exists());
+}
+
+#[test]
+fn apply_relay_profile_replaces_cc_switch_catalog_from_profile_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "relay-cc-switch".to_string(),
+        model: "deepseek-v4-pro".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "deepseek-v4-pro"
+model_catalog_json = "cc-switch-model-catalog.json"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "deepseek-v4-pro".to_string(),
+        model_windows: r#"{"deepseek-v4-pro":"1000000"}"#.to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-cc-switch.json""#));
+    assert!(!config.contains("cc-switch-model-catalog.json"));
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            temp.path()
+                .join("model-catalogs")
+                .join("relay-cc-switch.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(catalog["models"][0]["context_window"], 1_000_000);
+}
+
+#[test]
+fn apply_relay_profile_replaces_cc_switch_catalog_from_live_config() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        "model_catalog_json = \"C:\\\\Users\\\\test\\\\.codex\\\\cc-switch-model-catalog.json\"\n",
+    )
+    .unwrap();
+    let profile = RelayProfile {
+        id: "relay-live-cc-switch".to_string(),
+        model: "deepseek-v4-pro".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "deepseek-v4-pro"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "deepseek-v4-pro".to_string(),
+        model_windows: r#"{"deepseek-v4-pro":"500000"}"#.to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-live-cc-switch.json""#));
+    assert!(!config.contains("cc-switch-model-catalog.json"));
+}
+
+#[test]
+fn apply_relay_profile_replaces_cc_switch_catalog_without_custom_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "relay-plain-cc-switch".to_string(),
+        model: "qwen3-coder".to_string(),
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "qwen3-coder"
+model_catalog_json = "cc-switch-model-catalog.json"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://relay.example/v1"
+experimental_bearer_token = "sk-new"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
+        model_list: "qwen3-coder".to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/relay-plain-cc-switch.json""#));
+    assert!(!config.contains("cc-switch-model-catalog.json"));
+    assert!(
+        temp.path()
+            .join("model-catalogs")
+            .join("relay-plain-cc-switch.json")
+            .exists()
+    );
 }
 
 #[test]

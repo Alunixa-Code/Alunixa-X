@@ -10,7 +10,18 @@ use crate::settings::{RelayContextSelection, RelayProfile, RelayProtocol};
 
 const RELAY_PROVIDER: &str = "custom";
 const LEGACY_RELAY_PROVIDERS: &[&str] = &["CodexPlusPlus", "CodexPP"];
+const CC_SWITCH_MODEL_CATALOG_FILENAME: &str = "cc-switch-model-catalog.json";
 const CHAT_UPSTREAM_BASE_URL_KEY: &str = "codex_plus_chat_base_url";
+const PROVIDER_SPECIFIC_COMMON_ROOT_KEYS: &[&str] = &[
+    "model",
+    "model_provider",
+    "base_url",
+    "openai_base_url",
+    "chatgpt_base_url",
+    "model_catalog_json",
+    "OPENAI_API_KEY",
+    CHAT_UPSTREAM_BASE_URL_KEY,
+];
 const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "amazon-bedrock",
     "openai",
@@ -1441,16 +1452,33 @@ fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
 }
 
 fn remove_provider_specific_common_keys(table: &mut dyn TableLike) {
-    for key in [
-        "model",
-        "model_provider",
-        "base_url",
-        "model_catalog_json",
-        CHAT_UPSTREAM_BASE_URL_KEY,
-    ] {
+    for key in PROVIDER_SPECIFIC_COMMON_ROOT_KEYS {
         table.remove(key);
     }
+    let sensitive_keys = table
+        .iter()
+        .map(|(key, _)| key.to_string())
+        .filter(|key| is_provider_credential_root_key(key))
+        .collect::<Vec<_>>();
+    for key in sensitive_keys {
+        table.remove(&key);
+    }
     table.remove("model_providers");
+}
+
+fn is_provider_specific_common_root_key(key: &str) -> bool {
+    let key = key.trim().trim_matches(['"', '\'']);
+    PROVIDER_SPECIFIC_COMMON_ROOT_KEYS.contains(&key) || is_provider_credential_root_key(key)
+}
+
+fn is_provider_credential_root_key(key: &str) -> bool {
+    let key = key.to_ascii_lowercase();
+    matches!(
+        key.as_str(),
+        "api_key" | "access_token" | "bearer_token" | "experimental_bearer_token"
+    ) || key.ends_with("_api_key")
+        || key.ends_with("_access_token")
+        || key.ends_with("_bearer_token")
 }
 
 fn sanitize_common_config_text_fallback(common_config: &str) -> String {
@@ -1473,15 +1501,7 @@ fn sanitize_common_config_text_fallback(common_config: &str) -> String {
 
         if in_root {
             if let Some((key, _)) = trimmed.split_once('=') {
-                let key = key.trim();
-                if matches!(
-                    key,
-                    "model"
-                        | "model_provider"
-                        | "base_url"
-                        | "model_catalog_json"
-                        | CHAT_UPSTREAM_BASE_URL_KEY
-                ) {
+                if is_provider_specific_common_root_key(key) {
                     continue;
                 }
             }
@@ -1752,27 +1772,45 @@ fn apply_model_catalog_to_config(
         "model-catalogs/{}.json",
         sanitize_catalog_filename(&profile.id)
     );
+    let custom_responses = custom_responses_provider(config_text);
+    let mut config_text = config_text.to_string();
     // 用户已手写 model_catalog_json 指针时保留，不覆盖（保 preserves_user_model_catalog_json 测试）
     // 仅当现有指针指向本 profile 自己生成的 catalog 时才重新生成。
-    if let Some(existing) = root_key_string(config_text, "model_catalog_json") {
+    if let Some(existing) = root_key_string(&config_text, "model_catalog_json") {
         if existing != catalog_relative {
-            return Ok(config_text.to_string());
+            if is_cc_switch_model_catalog(&existing) {
+                config_text = remove_root_key(&config_text, "model_catalog_json");
+            } else if custom_responses
+                && copy_standard_responses_catalog(home, &existing, &catalog_relative)?
+            {
+                let mut doc = parse_toml_document(&config_text)?;
+                doc["model_catalog_json"] = toml_edit::value(catalog_relative);
+                return Ok(normalize_optional_toml(doc));
+            } else {
+                return Ok(config_text);
+            }
         }
     }
     if profile.relay_mode == crate::settings::RelayMode::CustomModels {
-        let catalog_json = build_custom_models_catalog_json(profile)?;
+        let catalog_json = build_custom_models_catalog_json(profile, custom_responses)?;
         let catalog_path = home.join(&catalog_relative);
         if let Some(parent) = catalog_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(&catalog_path, catalog_json)?;
-        let mut doc = parse_toml_document(config_text)?;
+        let mut doc = parse_toml_document(&config_text)?;
         doc["model_catalog_json"] = toml_edit::value(catalog_relative);
         return Ok(normalize_optional_toml(doc));
     }
     if let Some(external_catalog) = live_external_model_catalog(home) {
-        let mut doc = parse_toml_document(config_text)?;
-        doc["model_catalog_json"] = toml_edit::value(external_catalog);
+        let mut doc = parse_toml_document(&config_text)?;
+        if custom_responses
+            && copy_standard_responses_catalog(home, &external_catalog, &catalog_relative)?
+        {
+            doc["model_catalog_json"] = toml_edit::value(catalog_relative);
+        } else {
+            doc["model_catalog_json"] = toml_edit::value(external_catalog);
+        }
         return Ok(normalize_optional_toml(doc));
     }
     let (model_list, model_windows): (String, std::collections::HashMap<String, String>) =
@@ -1787,18 +1825,20 @@ fn apply_model_catalog_to_config(
     let entries =
         crate::model_suffix::collect_catalog_entries(&model_list, &model_windows, &profile.model);
     if entries.is_empty() {
-        return Ok(config_text.to_string());
+        return Ok(config_text);
     }
     let fallback = parse_optional_positive_u64(&profile.context_window, "上下文大小")?;
     let catalog_path = home.join(&catalog_relative);
     if let Some(parent) = catalog_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut catalog_json = crate::model_suffix::build_model_catalog_json_with_efforts(
-        &entries,
-        fallback,
-        &profile.model_reasoning_efforts,
-    );
+    let mut catalog_json =
+        crate::model_suffix::build_model_catalog_json_with_efforts_and_capabilities(
+            &entries,
+            fallback,
+            &profile.model_reasoning_efforts,
+            custom_responses.then_some(false),
+        );
     catalog_json = apply_auto_compact_limits_to_catalog_json(
         &catalog_json,
         profile,
@@ -1806,7 +1846,7 @@ fn apply_model_catalog_to_config(
         fallback,
     )?;
     std::fs::write(&catalog_path, catalog_json)?;
-    let mut doc = parse_toml_document(config_text)?;
+    let mut doc = parse_toml_document(&config_text)?;
     doc["model_catalog_json"] = toml_edit::value(catalog_relative);
     Ok(normalize_optional_toml(doc))
 }
@@ -1852,7 +1892,10 @@ fn apply_auto_compact_limits_to_catalog_json(
     Ok(serde_json::to_string_pretty(&catalog).unwrap_or_else(|_| catalog_json.to_string()))
 }
 
-fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<String> {
+fn build_custom_models_catalog_json(
+    profile: &RelayProfile,
+    custom_responses: bool,
+) -> anyhow::Result<String> {
     if profile.custom_models.is_empty() {
         anyhow::bail!("自定义供应商至少需要一个模型");
     }
@@ -1894,11 +1937,13 @@ fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<St
     let fallback = profile
         .default_custom_model()
         .and_then(|model| crate::settings::parse_context_window_tokens(&model.context_window));
-    let mut catalog_json = crate::model_suffix::build_model_catalog_json_with_efforts(
-        &entries,
-        fallback,
-        &profile.model_reasoning_efforts,
-    );
+    let mut catalog_json =
+        crate::model_suffix::build_model_catalog_json_with_efforts_and_capabilities(
+            &entries,
+            fallback,
+            &profile.model_reasoning_efforts,
+            custom_responses.then_some(false),
+        );
     if !auto_limits.is_empty() {
         let mut catalog: Value = serde_json::from_str(&catalog_json)?;
         if let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) {
@@ -1918,11 +1963,82 @@ fn build_custom_models_catalog_json(profile: &RelayProfile) -> anyhow::Result<St
     Ok(catalog_json)
 }
 
+fn custom_responses_provider(config_text: &str) -> bool {
+    let Ok(doc) = parse_toml_document(config_text) else {
+        return false;
+    };
+    let Some(provider_id) = active_provider_id(&doc) else {
+        return false;
+    };
+    if !is_custom_provider_id(&provider_id) {
+        return false;
+    }
+    doc.get("model_providers")
+        .and_then(Item::as_table)
+        .and_then(|providers| providers.get(&provider_id))
+        .and_then(Item::as_table_like)
+        .and_then(|provider| provider.get("wire_api"))
+        .and_then(Item::as_str)
+        .is_some_and(|wire_api| wire_api.trim().eq_ignore_ascii_case("responses"))
+}
+
+fn copy_standard_responses_catalog(
+    home: &Path,
+    source: &str,
+    target_relative: &str,
+) -> anyhow::Result<bool> {
+    let source_path = {
+        let path = Path::new(source);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            home.join(path)
+        }
+    };
+    let Ok(contents) = std::fs::read_to_string(source_path) else {
+        return Ok(false);
+    };
+    let Ok(mut catalog) = serde_json::from_str::<Value>(&contents) else {
+        return Ok(false);
+    };
+    let Some(models) = catalog.get_mut("models").and_then(Value::as_array_mut) else {
+        return Ok(false);
+    };
+    let mut changed = false;
+    for model in models {
+        if model.get("use_responses_lite").and_then(Value::as_bool) == Some(true) {
+            model["use_responses_lite"] = Value::Bool(false);
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(false);
+    }
+
+    let target = home.join(target_relative);
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(target, serde_json::to_string_pretty(&catalog)?)?;
+    Ok(true)
+}
+
 fn live_external_model_catalog(home: &Path) -> Option<String> {
     let live_text = read_optional_text(&home.join("config.toml")).ok()?;
     let live = parse_toml_document(&live_text).ok()?;
     let path = live.get("model_catalog_json")?.as_str()?.trim();
-    (!path.is_empty() && !is_codex_plus_managed_model_catalog(home, path)).then(|| path.to_string())
+    (!path.is_empty()
+        && !is_codex_plus_managed_model_catalog(home, path)
+        && !is_cc_switch_model_catalog(path))
+    .then(|| path.to_string())
+}
+
+fn is_cc_switch_model_catalog(path: &str) -> bool {
+    path.trim()
+        .replace('\\', "/")
+        .rsplit('/')
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case(CC_SWITCH_MODEL_CATALOG_FILENAME))
 }
 
 fn is_codex_plus_managed_model_catalog(home: &Path, path: &str) -> bool {
@@ -2375,6 +2491,17 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         );
     }
+    if profile.has_model_routes() {
+        if !profile.upstream_base_url.trim().is_empty() {
+            return profile.upstream_base_url.trim().to_string();
+        }
+        let local_proxy = crate::protocol_proxy::local_responses_proxy_base_url(
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        );
+        if !profile.base_url.trim().is_empty() && profile.base_url.trim() != local_proxy {
+            return profile.base_url.trim().to_string();
+        }
+    }
     if profile.protocol != RelayProtocol::Responses {
         if !profile.upstream_base_url.trim().is_empty() {
             return profile.upstream_base_url.trim().to_string();
@@ -2485,7 +2612,9 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
         profile.protocol,
         crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
-    let provider_base_url = if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+    let provider_base_url = if profile.relay_mode == crate::settings::RelayMode::CustomModels
+        || profile.has_model_routes()
+    {
         crate::protocol_proxy::local_responses_proxy_base_url(
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         )
@@ -2509,6 +2638,24 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
 pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow::Result<()> {
     profile.config_contents =
         crate::codex_instructions::strip_managed_model_instructions_file(&profile.config_contents)?;
+    let mut seen_models = HashSet::new();
+    profile.model_routes = profile
+        .model_routes
+        .drain(..)
+        .filter_map(|mut route| {
+            route.model = route.model.trim().to_string();
+            route.target_relay_id = route.target_relay_id.trim().to_string();
+            route.target_model = route.target_model.trim().to_string();
+            if route.model.is_empty()
+                || route.target_relay_id.is_empty()
+                || !seen_models.insert(route.model.clone())
+            {
+                None
+            } else {
+                Some(route)
+            }
+        })
+        .collect();
     if profile.model_windows.trim().is_empty() && profile.model_list.contains('[') {
         let (clean_list, windows) =
             crate::model_suffix::migrate_model_list_with_suffixes(&profile.model_list);
@@ -2572,6 +2719,7 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         profile.base_url.clear();
         profile.upstream_base_url.clear();
         profile.api_key.clear();
+        profile.model_routes.clear();
         if auth_contents_looks_like_chatgpt_auth(&profile.auth_contents) {
             profile.auth_contents =
                 remove_openai_api_key_from_auth_contents(&profile.auth_contents)?;
@@ -3328,6 +3476,11 @@ fn unquote_toml_string(value: &str) -> String {
     value
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| {
+            value
+                .strip_prefix('\'')
+                .and_then(|value| value.strip_suffix('\''))
+        })
         .unwrap_or(value)
         .to_string()
 }

@@ -78,6 +78,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  findRelayModelRouteIssue,
+  modelRouteSaveRequiresRestart,
+  normalizeRelayModelRoutes,
+  PROTOCOL_PROXY_BASE_URL,
+  type RelayModelRoute,
+} from "./model-routes";
+import {
   mergeModelWindowRows,
   modelWindowRowsFromProfile,
   serializeModelWindowRows,
@@ -277,6 +284,7 @@ export type RelayProfile = {
   userAgent: string;
   customModels: CustomRelayModel[];
   defaultCustomModelId: string;
+  modelRoutes?: RelayModelRoute[];
   aggregate?: RelayAggregateConfig | null;
 };
 
@@ -342,7 +350,6 @@ type RelayProtocol =
   | "anthropicMessages"
   | "geminiGenerateContent";
 type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate" | "customModels";
-const PROTOCOL_PROXY_BASE_URL = "http://127.0.0.1:57321/v1";
 const CHAT_UPSTREAM_BASE_URL_KEY = "codex_plus_chat_base_url";
 const RELAY_PROTOCOL_OPTIONS: Array<{ value: RelayProtocol; label: string }> = [
   { value: "chatCompletions", label: "/v1/chat/completions" },
@@ -1005,6 +1012,7 @@ const defaultSettings: BackendSettings = {
       userAgent: "",
       customModels: [],
       defaultCustomModelId: "",
+      modelRoutes: [],
     },
   ],
   relayCommonConfigContents: "",
@@ -1752,6 +1760,7 @@ export function App() {
       showNotice(t("重启 Codex++"), result.message, result.status);
       await refreshOverview(true);
     }
+    return !!result && isSuccessStatus(result.status);
   };
 
   const launchCommand = async (command: "launch_codex_plus" | "restart_codex_plus") => {
@@ -2396,7 +2405,7 @@ export function App() {
       sameActiveProfile,
     });
     const selectedBeforeSave = activeRelayProfile(switchSettings);
-    const validationError = relayProfileSwitchValidation(selectedBeforeSave);
+    const validationError = relayProfileSwitchValidation(selectedBeforeSave, switchSettings);
     if (validationError) {
       logDiagnostic("switchRelayProfile.validation_failed", {
         targetRelayId: selectedBeforeSave.id,
@@ -3301,7 +3310,7 @@ export function App() {
 type Actions = {
   refreshCurrent: () => Promise<void>;
   launch: () => Promise<void>;
-  restart: () => Promise<void>;
+  restart: () => Promise<boolean>;
   repairPluginMarketplace: () => Promise<void>;
   refreshRemotePluginMarketplace: (silent?: boolean) => Promise<RemotePluginMarketplaceResult | null>;
   repairRemotePluginMarketplace: () => Promise<void>;
@@ -6180,7 +6189,9 @@ function RelayProfileDetail({
     setDraft(nextDraft);
     setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm));
   }, [profile.id, profile.modelList, profile.modelWindows, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
-  const validationError = relayProfileValidation(draft);
+  const validationSettings = relaySettingsWithDraft(form, profile.id, draft, isNew);
+  const validationError = relayProfileValidation(draft)
+    ?? relayModelRoutesSettingsValidation(validationSettings);
   const draftWithModelRows = () => {
     const serializedRows = serializeModelWindowRows(modelWindowRows);
     return { ...draft, modelList: serializedRows.modelList, modelWindows: serializedRows.modelWindows, modelVlm: serializedRows.modelVlm };
@@ -6192,6 +6203,16 @@ function RelayProfileDetail({
     const next = isNew
       ? addRelayProfile(form, normalizedDraft)
       : updateRelayProfile(form, profile.id, normalizedDraft);
+    const settingsValidationError = relayModelRoutesSettingsValidation(next);
+    if (settingsValidationError) return;
+    const requiresRestart = isActive && modelRouteSaveRequiresRestart(
+      normalizeSettings(form),
+      normalizeSettings(next),
+      codexBaseUrlFromConfig(relayFiles?.configContents ?? profile.configContents),
+    );
+    if (requiresRestart && !window.confirm(t("首次启用单模型路由需要启动本地协议代理。保存后将立即重启 Codex，使路由安全生效。是否继续？"))) {
+      return;
+    }
     const saved = isActive && form.relayProfilesEnabled
       ? await actions.switchRelayProfile(next, form.activeRelayId)
       : await onFormChange(next);
@@ -6204,13 +6225,18 @@ function RelayProfileDetail({
       );
       return;
     }
+    if (requiresRestart) {
+      if (!await actions.restart()) return;
+      onSaved?.();
+      return;
+    }
     if (!isActive) {
       await actions.showMessage(t("供应商配置"), t("供应商配置已保存。"), "ok");
     }
     onSaved?.();
   };
   const switchDraft = () => {
-    if (isNew || !form.relayProfilesEnabled) return;
+    if (isNew || !form.relayProfilesEnabled || validationError) return;
     const draftWithWindows = draftWithModelRows();
     const normalizedDraft = isAggregateRelayProfile(draftWithWindows) ? normalizeAggregateRelayProfile(draftWithWindows, form) : deriveRelayProfileFromFiles(draftWithWindows);
     const previousActiveRelayId = form.activeRelayId;
@@ -6352,6 +6378,18 @@ function RelayProfileEditor({
       nextPatch.autoCompactLimit = "";
     }
     onProfileChange(applyRelayProfilePatchToFiles(profile, nextPatch, { allowGenerateFiles: isNew }));
+  };
+  const modelRoutes = normalizeRelayModelRoutes(profile.modelRoutes);
+  const modelRouteTargets = form.relayProfiles.filter(
+    (candidate) => candidate.id !== profile.id
+      && !isAggregateRelayProfile(candidate)
+      && !isCustomModelsRelayProfile(candidate)
+      && candidate.protocol === "responses",
+  );
+  const updateModelRoute = (index: number, patch: Partial<RelayModelRoute>) => {
+    updateDraft({
+      modelRoutes: modelRoutes.map((route, routeIndex) => (routeIndex === index ? { ...route, ...patch } : route)),
+    });
   };
   const updateModelWindowRow = (index: number, patch: Partial<ModelWindowRow>) => {
     setModelWindowRows(
@@ -6626,6 +6664,67 @@ function RelayProfileEditor({
             </div>
             <p className="field-hint">
               {t("每行一个模型；上下文窗口可填")} <code>1M</code>{t("、")}<code>200K</code> {t("或")} <code>1000000</code>{t("，留空表示使用 Codex 默认长度。")}
+            </p>
+          </Field>
+        ) : null}
+        {showApiFields ? (
+          <Field className="relay-field-model-routes" label={t("单模型路由")}>
+            <div className="relay-model-route-editor">
+              <div className="relay-model-route-row relay-model-route-head">
+                <span>{t("匹配模型")}</span>
+                <span>{t("目标供应商")}</span>
+                <span>{t("目标模型（可选）")}</span>
+              </div>
+              {modelRoutes.map((route, index) => (
+                <div className="relay-model-route-row" key={`model-route-${index}`}>
+                  <Input
+                    value={route.model}
+                    onChange={(event) => updateModelRoute(index, { model: event.currentTarget.value })}
+                    placeholder={t("例：gpt-5.6-luna")}
+                  />
+                  <select
+                    className="field-select"
+                    value={route.targetRelayId}
+                    onChange={(event) => updateModelRoute(index, { targetRelayId: event.currentTarget.value })}
+                  >
+                    <option disabled value="">{t("选择 Responses 供应商")}</option>
+                    {modelRouteTargets.map((candidate) => (
+                      <option key={candidate.id} value={candidate.id}>{candidate.name || candidate.id}</option>
+                    ))}
+                  </select>
+                  <Input
+                    value={route.targetModel}
+                    onChange={(event) => updateModelRoute(index, { targetModel: event.currentTarget.value })}
+                    placeholder={t("留空保持原模型名")}
+                  />
+                  <Button
+                    aria-label={t("删除模型路由")}
+                    onClick={() => updateDraft({ modelRoutes: modelRoutes.filter((_, routeIndex) => routeIndex !== index) })}
+                    size="icon"
+                    title={t("删除模型路由")}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <div className="relay-model-list-tools">
+              <Button
+                disabled={modelRouteTargets.length === 0}
+                onClick={() => updateDraft({ modelRoutes: [...modelRoutes, { model: "", targetRelayId: "", targetModel: "" }] })}
+                size="sm"
+                title={modelRouteTargets.length === 0 ? t("请先创建一个 Responses API 目标供应商") : t("添加模型路由")}
+                type="button"
+                variant="secondary"
+              >
+                <Plus className="h-4 w-4" />
+                {t("添加模型路由")}
+              </Button>
+            </div>
+            <p className="field-hint">
+              {t("仅在当前供应商启用时生效；精确匹配模型名并使用目标供应商的 URL 与 Key。目标必须是 Responses API，且需要从 Codex++ 启动。")}
             </p>
           </Field>
         ) : null}
@@ -7894,6 +7993,9 @@ function PendingProviderImportDialog({
           <Metric label={t("模式")} value={providerImportRelayModeLabel(request.relayMode)} />
           <Metric label="API Key" value={maskSecret(request.apiKey)} />
         </div>
+        <div className="hint-line" role="note">
+          {t("安全提示：网页链接中的自定义 config.toml 和 auth.json 不会执行；管理工具只会使用上方字段生成受管配置。")}
+        </div>
         <Toolbar>
           <Button onClick={onConfirm}>
             <Download className="h-4 w-4" />
@@ -8923,6 +9025,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         lastUsedModel: "",
         customModels: [],
         defaultCustomModelId: "",
+        modelRoutes: [],
       },
       null,
     );
@@ -8968,10 +9071,14 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         }))
       : [],
     defaultCustomModelId: profile.defaultCustomModelId || "",
+    modelRoutes: relayMode === "official" && !officialMixApiKey
+      ? []
+      : normalizeRelayModelRoutes(profile.modelRoutes),
     aggregate: null,
   };
   normalized = migrateLegacyAutoCompact(normalized);
   if (normalized.relayMode === "customModels") {
+    normalized.modelRoutes = [];
     if (!normalized.customModels.length) {
       const model = createEmptyCustomModel();
       normalized.customModels = [model];
@@ -9293,8 +9400,10 @@ function applyRelayProfilePatchToFiles(
   if ("upstreamBaseUrl" in patch) {
     next.baseUrl = patch.upstreamBaseUrl || "";
   }
-  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch) {
-    const baseUrlForConfig = next.protocol !== "responses" ? PROTOCOL_PROXY_BASE_URL : next.upstreamBaseUrl || next.baseUrl;
+  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch || "modelRoutes" in patch) {
+    const baseUrlForConfig = next.protocol !== "responses" || normalizeRelayModelRoutes(next.modelRoutes).length > 0
+      ? PROTOCOL_PROXY_BASE_URL
+      : next.upstreamBaseUrl || next.baseUrl;
     next.configContents = setCodexProviderStringKey(next.configContents, "base_url", baseUrlForConfig);
     next.configContents = removeRootTomlKey(next.configContents, CHAT_UPSTREAM_BASE_URL_KEY);
   }
@@ -9544,9 +9653,11 @@ function removeTomlSectionKey(contents: string, sectionName: string, key: string
   return ensureTrailingNewline(next.join("\n").trimEnd());
 }
 
-function relayProfileSwitchValidation(profile: RelayProfile): string | null {
+function relayProfileSwitchValidation(profile: RelayProfile, settings: BackendSettings | null = null): string | null {
   const validation = relayProfileValidation(profile);
   if (validation) return validation;
+  const modelRouteValidation = relayModelRoutesValidation(profile, settings);
+  if (modelRouteValidation) return modelRouteValidation;
   if (isAggregateRelayProfile(profile)) return null;
   if (profile.relayMode === "official" && !profile.officialMixApiKey) return null;
   if (!profile.configContents.trim()) {
@@ -9554,6 +9665,54 @@ function relayProfileSwitchValidation(profile: RelayProfile): string | null {
   }
   if (profile.relayMode !== "official" || !authJsonHasOpenAiApiKey(profile.authContents)) return null;
   return t("官方混合 API 不应在 auth.json 中保存 OPENAI_API_KEY。请清理此供应商的 auth.json 后再切换。");
+}
+
+function relayModelRoutesValidation(profile: RelayProfile, settings: BackendSettings | null): string | null {
+  return relayModelRouteIssueMessage(
+    findRelayModelRouteIssue([profile], settings?.relayProfiles ?? [profile]),
+  );
+}
+
+function relayModelRoutesSettingsValidation(settings: BackendSettings): string | null {
+  return relayModelRouteIssueMessage(
+    findRelayModelRouteIssue(settings.relayProfiles, settings.relayProfiles),
+  );
+}
+
+function relayModelRouteIssueMessage(issue: ReturnType<typeof findRelayModelRouteIssue>): string | null {
+  if (!issue) return null;
+  switch (issue.kind) {
+    case "incomplete":
+      return t("单模型路由需要填写模型名称和目标供应商。");
+    case "duplicate":
+      return tf("模型「{0}」存在重复路由。", [issue.model]);
+    case "self":
+      return tf("模型「{0}」不能路由到当前供应商自身。", [issue.model]);
+    case "missingTarget":
+      return tf("模型「{0}」的目标供应商不存在。", [issue.model]);
+    case "aggregateTarget":
+      return tf("模型「{0}」不能路由到聚合供应商。", [issue.model]);
+    case "localProxyTarget":
+      return tf("模型「{0}」不能路由到自定义模型代理供应商。", [issue.model]);
+    case "targetProtocol":
+      return tf("模型「{0}」的目标供应商必须使用 Responses API。", [issue.model]);
+    case "targetCredentials":
+      return tf("模型「{0}」的目标供应商缺少 Base URL 或 Key。", [issue.model]);
+  }
+}
+
+function relaySettingsWithDraft(
+  settings: BackendSettings,
+  profileId: string,
+  draft: RelayProfile,
+  isNew: boolean,
+): BackendSettings {
+  const normalizedDraft = isAggregateRelayProfile(draft)
+    ? normalizeAggregateRelayProfile(draft, settings)
+    : deriveRelayProfileFromFiles(draft);
+  return isNew
+    ? addRelayProfile(settings, normalizedDraft)
+    : updateRelayProfile(settings, profileId, normalizedDraft);
 }
 
 function relayProfileValidation(profile: RelayProfile): string | null {
@@ -9690,6 +9849,7 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     userAgent: "",
     customModels: [],
     defaultCustomModelId: "",
+    modelRoutes: [],
   };
   return withGeneratedRelayFiles(next);
 }
@@ -9729,6 +9889,7 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       userAgent: "",
       customModels: [],
       defaultCustomModelId: "",
+      modelRoutes: [],
       aggregate: {
         strategy: "failover",
         members: candidates.slice(0, 1).map((profile) => ({ profileId: profile.id, weight: 1 })),
@@ -9800,7 +9961,10 @@ function removeRelayProfile(settings: BackendSettings, id: string): BackendSetti
           },
           { ...settings, relayProfiles: profiles },
         )
-      : profile,
+      : {
+          ...profile,
+          modelRoutes: normalizeRelayModelRoutes(profile.modelRoutes).filter((route) => route.targetRelayId !== id),
+        },
   );
   return syncLegacyRelayFields({
     ...settings,
@@ -9849,6 +10013,7 @@ function normalizeAggregateRelayProfile(profile: RelayProfile, settings: Backend
     officialMixApiKey: false,
     configContents: "",
     authContents: "",
+    modelRoutes: [],
     aggregate,
   };
 }
@@ -9935,6 +10100,7 @@ function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile
     userAgent: "",
     customModels: [model],
     defaultCustomModelId: model.id,
+    modelRoutes: [],
     aggregate: null,
   };
 }
