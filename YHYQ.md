@@ -723,3 +723,11 @@
 - Rust `target`、前端 `node_modules` 与 `dist` 均已核验不存在；工作树仅剩 `assets/gpt56-model-metadata-compat.json`、`connect/weixin.rs`、`tests/model_catalog.rs` 三个内容与 HEAD 完全相同的 CRLF 状态噪声文件，继续不暂存喵~
 - 首次推送因当前网络无法连接 GitHub `443` 而超时，GitHub API 同期也连接失败；未改代理或现有网络服务，短暂等待后原命令重试成功，将远端 `main` 从 `17817d43` 更新到 `acd3614f` 喵~
 - 主分支 GitHub Actions `32369333936` 已全部成功：Windows 完成品牌保护、前端测试、TypeScript、生产构建、完整 Rust tests、release 二进制、安装程序和 artifacts 上传；macOS x64/arm64 均完成前端、release 二进制、DMG、包结构验证与上传喵~
+- 发布记录提交 `6c7f0a79` 推送后触发的标签目标复验 Actions `32370947171` 已全部成功，Windows、macOS x64 与 macOS arm64 三项均完成构建、包验证和 artifacts 上传；两次状态读取遇到 GitHub API `443` 超时，远端 workflow 未受影响，重查结果均为 success 喵~
+- 已创建并推送注释标签 `v1.2.65`，标签与远端 `main` 均指向 `6c7f0a79c78fe1e771c905b1d866f9fda15adae3`；正式 Release workflow `32372619680` 的版本校验、Windows x64、macOS x64、macOS arm64 与 Publish GitHub Release 全部成功喵~
+- 自动生成的单行 Release 正文已替换为详细中文说明，完整记录选择性同步原则、明确不采用项、微信、DreamSkin、新版注入、供应商与模型、精确 Token 压缩、会话同步、跨平台重启、测试矩阵、Actions 和资产校验喵~
+- `v1.2.65` 已核验为 latest、非草稿、非预发布，正式地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.65`，六项资产状态全部为 `uploaded` 喵~
+- Windows setup 为 `18,478,523` 字节，SHA-256 `5692cf6c80d934c513ae31f4da9c9e23c3aa6b52a772d0abd5fcac4aecfd6c21`；Windows ZIP 为 `23,009,865` 字节，SHA-256 `08555579b54abd8dbff95ac05bf42f97590c9a0edf8f082b7ba027c9784005bb` 喵~
+- macOS x64 DMG 为 `29,358,285` 字节，SHA-256 `e88318de4c72e97027018431bf3dddc28277a84a7a28910ec08e45d46c2a04bb`；x64 ZIP 为 `24,867,377` 字节，SHA-256 `694d20819431633818552e23a1ebb9e4241e9ad59cef012d263c498ba065b13d` 喵~
+- macOS arm64 DMG 为 `28,261,769` 字节，SHA-256 `567feaae73a65d2f4eb58b9a561fbf33840ec5e859ba2799be97ec8a681c2beb`；arm64 ZIP 为 `24,324,064` 字节，SHA-256 `6e0b101c3613923428eb06f52095b76820dc47548f75f00c3d088e42cbb2bcf4` 喵~
+- Release notes 临时文件已删除，Rust `target`、前端 `node_modules` 与 `dist` 仍不存在；全程未启动、重启、连接或操作当前 Codex、当前任务、helper、CDP 与现有服务做测试喵~
