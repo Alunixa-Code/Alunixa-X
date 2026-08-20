@@ -18,6 +18,7 @@ const UPSTREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 const UPSTREAM_STREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(120);
 const UPSTREAM_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const UPSTREAM_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(150);
+const TRANSPARENT_PROXY_HEADER_TIMEOUT: Duration = Duration::from_secs(600);
 const THINK_OPEN_TAG: &str = "<think>";
 const THINK_CLOSE_TAG: &str = "</think>";
 const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
@@ -807,6 +808,7 @@ pub enum UpstreamWireApi {
     AnthropicMessages,
     GeminiGenerateContent,
     AudioTranscriptions,
+    Transparent,
 }
 
 #[derive(Debug, Clone)]
@@ -1344,7 +1346,9 @@ pub enum UpstreamSseToResponsesConverter {
 impl UpstreamSseToResponsesConverter {
     pub fn with_request(wire_api: UpstreamWireApi, original_request: &Value) -> Option<Self> {
         match wire_api {
-            UpstreamWireApi::Responses | UpstreamWireApi::AudioTranscriptions => None,
+            UpstreamWireApi::Responses
+            | UpstreamWireApi::AudioTranscriptions
+            | UpstreamWireApi::Transparent => None,
             UpstreamWireApi::ChatCompletions => Some(Self::Chat(
                 ChatSseToResponsesConverter::with_request(original_request),
             )),
@@ -1438,6 +1442,216 @@ pub fn is_audio_transcriptions_proxy_path(path: &str) -> bool {
             | "/v1/audio/transcriptions"
             | "/v1/v1/audio/transcriptions"
             | "/codex/v1/audio/transcriptions"
+    )
+}
+
+pub fn is_transparent_api_proxy_path(path: &str) -> bool {
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    if path == "/v1"
+        || path.starts_with("/v1/")
+        || path == "/codex/v1"
+        || path.starts_with("/codex/v1/")
+    {
+        return true;
+    }
+
+    let first_segment = path
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .unwrap_or_default();
+    matches!(
+        first_segment,
+        "assistants"
+            | "audio"
+            | "batches"
+            | "chat"
+            | "completions"
+            | "containers"
+            | "embeddings"
+            | "evals"
+            | "files"
+            | "fine_tuning"
+            | "images"
+            | "models"
+            | "moderations"
+            | "realtime"
+            | "responses"
+            | "threads"
+            | "uploads"
+            | "vector_stores"
+            | "videos"
+    )
+}
+
+pub async fn open_transparent_proxy_request(
+    method: &str,
+    request_path: &str,
+    request_headers: &[(String, String)],
+    body: reqwest::Body,
+    body_len: Option<u64>,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    open_transparent_proxy_request_with_settings(
+        method,
+        request_path,
+        request_headers,
+        body,
+        body_len,
+        original_user_agent,
+        settings,
+    )
+    .await
+}
+
+pub async fn open_transparent_proxy_request_with_settings(
+    method: &str,
+    request_path: &str,
+    request_headers: &[(String, String)],
+    body: reqwest::Body,
+    body_len: Option<u64>,
+    original_user_agent: Option<&str>,
+    settings: crate::settings::BackendSettings,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    if !is_transparent_api_proxy_path(request_path) {
+        anyhow::bail!("不允许透明代理非 OpenAI API 路径：{request_path}");
+    }
+    let relay = transparent_proxy_relay(&settings)?;
+    validate_upstream(&relay)?;
+    let method = reqwest::Method::from_bytes(method.as_bytes()).context("HTTP 方法无效")?;
+    let endpoint = transparent_api_url(&relay.base_url, request_path);
+    let client = crate::http_client::proxied_client(&effective_user_agent(
+        &relay.user_agent,
+        original_user_agent,
+    ))?;
+    let mut request = client.request(method.clone(), &endpoint);
+    for (name, value) in request_headers {
+        if !transparent_request_header_allowed(name) {
+            continue;
+        }
+        let Ok(name) = reqwest::header::HeaderName::from_bytes(name.as_bytes()) else {
+            continue;
+        };
+        let Ok(value) = reqwest::header::HeaderValue::from_str(value) else {
+            continue;
+        };
+        request = request.header(name, value);
+    }
+    request = match relay.protocol {
+        RelayProtocol::AnthropicMessages => request
+            .header("x-api-key", relay.api_key.trim())
+            .header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => {
+            request.header("x-goog-api-key", relay.api_key.trim())
+        }
+        _ => request.bearer_auth(relay.api_key.trim()),
+    };
+    if let Some(body_len) = body_len {
+        request = request.header(reqwest::header::CONTENT_LENGTH, body_len);
+    }
+    if method != reqwest::Method::GET && method != reqwest::Method::HEAD {
+        request = request.body(body);
+    }
+
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.transparent_request",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "method": method.as_str(),
+            "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
+            "endpoint": sanitized_endpoint(&endpoint),
+            "bodyBytes": body_len,
+            "headerTimeoutSeconds": TRANSPARENT_PROXY_HEADER_TIMEOUT.as_secs()
+        }),
+    );
+    let upstream = match send_upstream_request_with_header_timeout(
+        request,
+        TRANSPARENT_PROXY_HEADER_TIMEOUT,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.transparent_request_failed",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "method": method.as_str(),
+                    "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
+                    "endpoint": sanitized_endpoint(&endpoint),
+                    "bodyBytes": body_len,
+                    "error": sanitized_upstream_error(&error)
+                }),
+            );
+            return Err(error).context("透明 API 上游请求失败");
+        }
+    };
+    let status_code = upstream.status().as_u16();
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let is_stream = content_type.contains("text/event-stream");
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.transparent_response",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "method": method.as_str(),
+            "path": request_path.split_once('?').map_or(request_path, |(path, _)| path),
+            "statusCode": status_code,
+            "stream": is_stream
+        }),
+    );
+    Ok(UpstreamProxyResponse {
+        status_code,
+        content_type,
+        is_stream,
+        wire_api: UpstreamWireApi::Transparent,
+        response: upstream,
+    })
+}
+
+fn transparent_proxy_relay(
+    settings: &crate::settings::BackendSettings,
+) -> anyhow::Result<crate::settings::RelayProfile> {
+    let relay = crate::relay_rotation::select_relay_for_probe(settings)?;
+    if relay.relay_mode != crate::settings::RelayMode::CustomModels {
+        return Ok(relay);
+    }
+    let model = relay
+        .default_custom_model()
+        .context("自定义供应商未配置默认模型，无法选择透明 API 上游")?;
+    let mut synthetic = relay.clone();
+    synthetic.base_url = model.base_url.clone();
+    synthetic.upstream_base_url = model.base_url.clone();
+    synthetic.api_key = model.api_key.clone();
+    synthetic.protocol = model.protocol;
+    synthetic.model = model.model.clone();
+    Ok(synthetic)
+}
+
+fn transparent_request_header_allowed(name: &str) -> bool {
+    !matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "authorization"
+            | "connection"
+            | "content-length"
+            | "cookie"
+            | "host"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+            | "user-agent"
     )
 }
 
@@ -2404,7 +2618,9 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
                 converted.extend(converter.finish());
                 converted
             }
-            UpstreamWireApi::Responses | UpstreamWireApi::AudioTranscriptions => {
+            UpstreamWireApi::Responses
+            | UpstreamWireApi::AudioTranscriptions
+            | UpstreamWireApi::Transparent => {
                 upstream_body.to_vec()
             }
         };
@@ -2429,7 +2645,9 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
         UpstreamWireApi::GeminiGenerateContent => {
             gemini_generate_content_to_response_with_request(upstream_json, &request_json)?
         }
-        UpstreamWireApi::Responses | UpstreamWireApi::AudioTranscriptions => upstream_json,
+        UpstreamWireApi::Responses
+        | UpstreamWireApi::AudioTranscriptions
+        | UpstreamWireApi::Transparent => upstream_json,
     };
     Ok(ProxyHttpResponse {
         status: "200 OK".to_string(),
@@ -2589,6 +2807,65 @@ pub fn audio_transcriptions_url(base_url: &str) -> String {
         url = url.replace("/v1/v1", "/v1");
     }
     url
+}
+
+pub fn transparent_api_url(base_url: &str, request_path: &str) -> String {
+    let skip_version_prefix = base_url.trim().ends_with('#');
+    let mut base = base_url
+        .trim()
+        .trim_end_matches('#')
+        .trim_end_matches('/')
+        .to_string();
+    let lower = base.to_ascii_lowercase();
+    for suffix in [
+        "/audio/transcriptions",
+        "/chat/completions",
+        "/responses/compact",
+        "/responses",
+        "/completions",
+        "/models",
+        "/messages",
+    ] {
+        if lower.ends_with(suffix) {
+            base.truncate(base.len() - suffix.len());
+            break;
+        }
+    }
+
+    let (path, query) = request_path
+        .split_once('?')
+        .map_or((request_path, None), |(path, query)| (path, Some(query)));
+    let mut normalized = path.to_string();
+    if let Some(rest) = normalized.strip_prefix("/codex/v1") {
+        normalized = format!("/v1{rest}");
+    }
+    while normalized == "/v1/v1" || normalized.starts_with("/v1/v1/") {
+        normalized = normalized.replacen("/v1/v1", "/v1", 1);
+    }
+    if normalized != "/v1" && !normalized.starts_with("/v1/") {
+        normalized = format!("/v1/{}", normalized.trim_start_matches('/'));
+    }
+    let suffix = normalized.strip_prefix("/v1").unwrap_or(&normalized);
+    let origin_only = base
+        .split_once("://")
+        .map_or(!base.contains('/'), |(_, rest)| !rest.contains('/'));
+    let mut endpoint = if skip_version_prefix {
+        format!("{base}{suffix}")
+    } else if origin_only {
+        format!("{base}/v1{suffix}")
+    } else if has_version_suffix(&base) {
+        format!("{base}{suffix}")
+    } else {
+        format!("{base}{suffix}")
+    };
+    while endpoint.contains("/v1/v1") {
+        endpoint = endpoint.replace("/v1/v1", "/v1");
+    }
+    if let Some(query) = query.filter(|query| !query.is_empty()) {
+        endpoint.push('?');
+        endpoint.push_str(query);
+    }
+    endpoint
 }
 
 pub fn models_url(base_url: &str) -> String {

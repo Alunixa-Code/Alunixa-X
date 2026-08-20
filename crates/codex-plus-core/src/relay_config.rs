@@ -12,6 +12,7 @@ const RELAY_PROVIDER: &str = "custom";
 const LEGACY_RELAY_PROVIDERS: &[&str] = &["CodexPlusPlus", "CodexPP"];
 const CC_SWITCH_MODEL_CATALOG_FILENAME: &str = "cc-switch-model-catalog.json";
 const CHAT_UPSTREAM_BASE_URL_KEY: &str = "codex_plus_chat_base_url";
+const CODEX_PLUS_IMAGEGEN_MCP_SERVER_ID: &str = "codex-plus-imagegen";
 const PROVIDER_SPECIFIC_COMMON_ROOT_KEYS: &[&str] = &[
     "model",
     "model_provider",
@@ -149,6 +150,56 @@ pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Re
         Err(_) => set_codex_goals_feature_text_fallback(&existing, enabled),
     };
     crate::settings::atomic_write(&config_path, updated.as_bytes())
+}
+
+pub fn set_codex_imagegen_mcp_in_home(
+    home: &Path,
+    launcher_path: &Path,
+    helper_port: u16,
+    enabled: bool,
+) -> anyhow::Result<bool> {
+    std::fs::create_dir_all(home)?;
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("读取 {} 失败", config_path.to_string_lossy()));
+        }
+    };
+    let mut doc = parse_toml_document(&existing)?;
+    if enabled {
+        let command = launcher_path
+            .to_str()
+            .filter(|path| !path.trim().is_empty())
+            .context("Codex++ launcher 路径无效")?;
+        let servers = table_mut_or_insert(&mut doc, "mcp_servers")?;
+        let mut server = Table::new();
+        server["command"] = toml_edit::value(command);
+        let mut args = toml_edit::Array::new();
+        args.push("--codex-plus-imagegen-mcp");
+        server["args"] = toml_edit::value(args);
+        server["startup_timeout_sec"] = toml_edit::value(20);
+        server["tool_timeout_sec"] = toml_edit::value(900);
+        server["enabled"] = toml_edit::value(true);
+        let mut env = Table::new();
+        env["CODEX_PLUS_HELPER_URL"] =
+            toml_edit::value(format!("http://127.0.0.1:{helper_port}"));
+        server["env"] = Item::Table(env);
+        servers[CODEX_PLUS_IMAGEGEN_MCP_SERVER_ID] = Item::Table(server);
+    } else if let Some(servers) = table_mut_if_exists(&mut doc, "mcp_servers") {
+        servers.remove(CODEX_PLUS_IMAGEGEN_MCP_SERVER_ID);
+        if servers.is_empty() {
+            doc.as_table_mut().remove("mcp_servers");
+        }
+    }
+    let updated = ensure_trailing_newline(doc.to_string());
+    if updated == normalize_config_text_for_write(&existing) {
+        return Ok(false);
+    }
+    crate::settings::atomic_write(&config_path, updated.as_bytes())?;
+    Ok(true)
 }
 
 fn set_codex_goals_feature_text_fallback(existing: &str, enabled: bool) -> String {

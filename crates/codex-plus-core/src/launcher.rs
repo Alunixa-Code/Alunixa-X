@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::io::{Seek, SeekFrom, Write as _};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -14,6 +15,7 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tokio_util::io::ReaderStream;
 
 use crate::settings::{BackendSettings, SettingsStore, normalize_codex_extra_args};
 use crate::status::{LaunchStatus, StatusStore};
@@ -155,6 +157,13 @@ pub trait LaunchHooks: Send + Sync {
     async fn ensure_plugin_marketplace_config(
         &self,
         _settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn ensure_imagegen_mcp_config(
+        &self,
+        _settings: &BackendSettings,
+        _helper_port: u16,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -406,6 +415,10 @@ where
         if protocol_proxy_enabled {
             helper_port = crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT;
         }
+        hooks
+            .ensure_imagegen_mcp_config(&settings, helper_port)
+            .await
+            .context("failed to configure the Codex++ image_gen tool")?;
         if settings.enhancements_enabled || protocol_proxy_enabled {
             hooks.start_helper(helper_port).await?;
             helper_started = true;
@@ -816,6 +829,33 @@ impl LaunchHooks for DefaultLaunchHooks {
         Ok(())
     }
 
+    async fn ensure_imagegen_mcp_config(
+        &self,
+        settings: &BackendSettings,
+        helper_port: u16,
+    ) -> anyhow::Result<()> {
+        let home = crate::relay_config::default_codex_home_dir();
+        let launcher_path = std::env::current_exe().context("无法解析 Codex++ launcher 路径")?;
+        let enabled = settings.enhancements_enabled && settings.relay_profiles_enabled;
+        let changed = crate::relay_config::set_codex_imagegen_mcp_in_home(
+            &home,
+            &launcher_path,
+            helper_port,
+            enabled,
+        )?;
+        if changed {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.imagegen_mcp_config_updated",
+                serde_json::json!({
+                    "enabled": enabled,
+                    "helper_port": helper_port,
+                    "home": home
+                }),
+            );
+        }
+        Ok(())
+    }
+
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
         let bind_host = helper_bind_host();
         let listener = tokio::net::TcpListener::bind((bind_host.as_str(), helper_port))
@@ -1218,7 +1258,6 @@ async fn handle_helper_connection(
     let raw_path = parts.next().unwrap_or_default();
     let path = raw_path.split('?').next().unwrap_or(raw_path);
     let request_user_agent = header_value_from_headers(&request_headers, "user-agent");
-    let request_content_type = header_value_from_headers(&request_headers, "content-type");
     let remote_addr_text = remote_addr.map(|addr| addr.to_string());
 
     let quiet_status_request = matches!(
@@ -1253,19 +1292,8 @@ async fn handle_helper_connection(
             .await;
     }
 
-    if crate::protocol_proxy::is_audio_transcriptions_proxy_path(path) && method == "POST" {
-        return handle_audio_transcriptions_proxy_connection(
-            &mut stream,
-            &request.body,
-            request_content_type.as_deref(),
-            request_user_agent.as_deref(),
-            method,
-            path,
-            remote_addr_text,
-        )
-        .await;
-    }
-    let request_body = String::from_utf8_lossy(&request.body);
+    let request_body_bytes = request.body.as_bytes();
+    let request_body = request_body_bytes.map(String::from_utf8_lossy);
     if path.starts_with("/shared-terminal/")
         && !remote_addr.is_some_and(|address| address.ip().is_loopback())
     {
@@ -1284,9 +1312,10 @@ async fn handle_helper_connection(
         return Ok(());
     }
     if path == "/shared-terminal/submit" && method == "POST" {
-        let request =
-            serde_json::from_slice::<crate::shared_terminal::SharedTerminalRequest>(&request.body)
-                .context("共享终端提交请求无效")?;
+        let request = serde_json::from_slice::<crate::shared_terminal::SharedTerminalRequest>(
+            request_body_bytes.context("共享终端请求体过大")?,
+        )
+        .context("共享终端提交请求无效")?;
         let response = shared_terminal.submit(request).await?;
         let body = serde_json::to_vec(&response)?;
         write_http_response(
@@ -1299,10 +1328,13 @@ async fn handle_helper_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    if crate::protocol_proxy::is_responses_proxy_path(path) && method == "POST" {
+    if crate::protocol_proxy::is_responses_proxy_path(path)
+        && method == "POST"
+        && request_body.is_some()
+    {
         return handle_protocol_proxy_connection(
             &mut stream,
-            &request_body,
+            request_body.as_deref().unwrap_or_default(),
             request_user_agent.as_deref(),
             method,
             path,
@@ -1310,10 +1342,13 @@ async fn handle_helper_connection(
         )
         .await;
     }
-    if crate::protocol_proxy::is_chat_completions_proxy_path(path) && method == "POST" {
+    if crate::protocol_proxy::is_chat_completions_proxy_path(path)
+        && method == "POST"
+        && request_body.is_some()
+    {
         return handle_chat_completions_proxy_connection(
             &mut stream,
-            &request_body,
+            request_body.as_deref().unwrap_or_default(),
             request_user_agent.as_deref(),
             method,
             path,
@@ -1331,6 +1366,32 @@ async fn handle_helper_connection(
         )
         .await;
     }
+    if crate::protocol_proxy::is_transparent_api_proxy_path(path)
+        && matches!(
+            method,
+            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
+        )
+    {
+        if method == "OPTIONS" {
+            write_http_cors_preflight_response(&mut stream).await?;
+            stream.shutdown().await?;
+            return Ok(());
+        }
+        let forward_headers = header_pairs_from_headers(&request_headers);
+        let request_body_len = request.body.len();
+        let request_body = request.body.into_reqwest_body()?;
+        return handle_transparent_proxy_connection(
+            &mut stream,
+            method,
+            raw_path,
+            &forward_headers,
+            request_body,
+            Some(request_body_len),
+            request_user_agent.as_deref(),
+            remote_addr_text,
+        )
+        .await;
+    }
 
     let (status, body, content_type, log_event) = if path == "/backend/status"
         && matches!(method, "GET" | "POST" | "OPTIONS")
@@ -1344,10 +1405,10 @@ async fn handle_helper_connection(
     } else if path == "/diagnostics/log" && matches!(method, "POST" | "OPTIONS") {
         if method == "POST" {
             let detail =
-                serde_json::from_str::<serde_json::Value>(&request_body).unwrap_or_else(|error| {
+                serde_json::from_str::<serde_json::Value>(request_body.as_deref().unwrap_or_default()).unwrap_or_else(|error| {
                     serde_json::json!({
                         "parse_error": error.to_string(),
-                        "raw": request_body
+                        "raw": request_body.as_deref().unwrap_or_default()
                     })
                 });
             let event = detail
@@ -1882,7 +1943,8 @@ async fn handle_protocol_proxy_connection(
             )?
         }
         crate::protocol_proxy::UpstreamWireApi::Responses
-        | crate::protocol_proxy::UpstreamWireApi::AudioTranscriptions => upstream_json,
+        | crate::protocol_proxy::UpstreamWireApi::AudioTranscriptions
+        | crate::protocol_proxy::UpstreamWireApi::Transparent => upstream_json,
     };
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
@@ -1896,78 +1958,6 @@ async fn handle_protocol_proxy_connection(
     stream.shutdown().await?;
     Ok(())
 }
-async fn handle_audio_transcriptions_proxy_connection(
-    stream: &mut tokio::net::TcpStream,
-    request_body: &[u8],
-    request_content_type: Option<&str>,
-    request_user_agent: Option<&str>,
-    method: &str,
-    path: &str,
-    remote_addr_text: Option<String>,
-) -> anyhow::Result<()> {
-    let upstream = match crate::protocol_proxy::open_audio_transcriptions_proxy_request(
-        request_body,
-        request_content_type.unwrap_or_default(),
-        request_user_agent,
-    )
-    .await
-    {
-        Ok(upstream) => upstream,
-        Err(error) => {
-            log_proxy_open_failure(
-                "helper.audio_transcriptions_proxy_open_failed",
-                method,
-                path,
-                remote_addr_text.as_deref(),
-                None,
-                &error,
-            );
-            let body = serde_json::to_vec(&serde_json::json!({
-                "status": "failed",
-                "message": error.to_string()
-            }))?;
-            write_http_response(
-                stream,
-                "502 Bad Gateway",
-                "application/json; charset=utf-8",
-                &body,
-            )
-            .await?;
-            log_helper_response(
-                "helper.audio_transcriptions_proxy_failed",
-                method,
-                path,
-                "502 Bad Gateway",
-                remote_addr_text,
-            );
-            stream.shutdown().await?;
-            return Ok(());
-        }
-    };
-    let status = upstream.status();
-    let is_success = upstream.is_success();
-    let content_type = if upstream.content_type.is_empty() {
-        "application/json; charset=utf-8".to_string()
-    } else {
-        upstream.content_type.clone()
-    };
-    let body = upstream.response.bytes().await?.to_vec();
-    write_http_response(stream, &status, &content_type, &body).await?;
-    log_helper_response(
-        if is_success {
-            "helper.audio_transcriptions_proxy_ok"
-        } else {
-            "helper.audio_transcriptions_proxy_upstream_error"
-        },
-        method,
-        path,
-        &status,
-        remote_addr_text,
-    );
-    stream.shutdown().await?;
-    Ok(())
-}
-
 async fn handle_chat_completions_proxy_connection(
     stream: &mut tokio::net::TcpStream,
     request_body: &str,
@@ -2057,6 +2047,85 @@ async fn handle_chat_completions_proxy_connection(
     Ok(())
 }
 
+async fn handle_transparent_proxy_connection(
+    stream: &mut tokio::net::TcpStream,
+    method: &str,
+    path: &str,
+    request_headers: &[(String, String)],
+    request_body: reqwest::Body,
+    request_body_len: Option<u64>,
+    request_user_agent: Option<&str>,
+    remote_addr_text: Option<String>,
+) -> anyhow::Result<()> {
+    let upstream = match crate::protocol_proxy::open_transparent_proxy_request(
+        method,
+        path,
+        request_headers,
+        request_body,
+        request_body_len,
+        request_user_agent,
+    )
+    .await
+    {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            log_proxy_open_failure(
+                "helper.transparent_proxy_open_failed",
+                method,
+                path,
+                remote_addr_text.as_deref(),
+                None,
+                &error,
+            );
+            let body = serde_json::to_vec(&serde_json::json!({
+                "error": {
+                    "type": "codex_plus_proxy_error",
+                    "message": error.to_string()
+                }
+            }))?;
+            write_http_response(
+                stream,
+                "502 Bad Gateway",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            log_helper_response(
+                "helper.transparent_proxy_failed",
+                method,
+                path,
+                "502 Bad Gateway",
+                remote_addr_text,
+            );
+            stream.shutdown().await?;
+            return Ok(());
+        }
+    };
+    let status = upstream.status();
+    let is_success = upstream.is_success();
+    let response_headers = upstream.response.headers().clone();
+    write_http_proxy_headers(stream, &status, &response_headers).await?;
+    if method != "HEAD" {
+        let mut bytes_stream = upstream.response.bytes_stream();
+        while let Some(chunk) = bytes_stream.next().await {
+            stream.write_all(&chunk?).await?;
+        }
+    }
+    log_helper_response(
+        if is_success {
+            "helper.transparent_proxy_ok"
+        } else {
+            "helper.transparent_proxy_upstream_error"
+        },
+        method,
+        path,
+        &status,
+        remote_addr_text,
+    );
+    stream.shutdown().await?;
+    Ok(())
+}
+
 async fn write_http_response(
     stream: &mut tokio::net::TcpStream,
     status: &str,
@@ -2070,6 +2139,62 @@ async fn write_http_response(
     stream.write_all(response.as_bytes()).await?;
     stream.write_all(body).await?;
     Ok(())
+}
+
+async fn write_http_cors_preflight_response(
+    stream: &mut tokio::net::TcpStream,
+) -> anyhow::Result<()> {
+    stream
+        .write_all(
+            b"HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Max-Age: 86400\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await?;
+    Ok(())
+}
+
+async fn write_http_proxy_headers(
+    stream: &mut tokio::net::TcpStream,
+    status: &str,
+    upstream_headers: &reqwest::header::HeaderMap,
+) -> anyhow::Result<()> {
+    let mut response = format!(
+        "HTTP/1.1 {status}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Expose-Headers: *\r\n"
+    );
+    for (name, value) in upstream_headers {
+        if !transparent_response_header_allowed(name.as_str()) {
+            continue;
+        }
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        response.push_str(name.as_str());
+        response.push_str(": ");
+        response.push_str(value);
+        response.push_str("\r\n");
+    }
+    response.push_str("Connection: close\r\n\r\n");
+    stream.write_all(response.as_bytes()).await?;
+    Ok(())
+}
+
+fn transparent_response_header_allowed(name: &str) -> bool {
+    !matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "access-control-allow-credentials"
+            | "access-control-allow-headers"
+            | "access-control-allow-methods"
+            | "access-control-allow-origin"
+            | "access-control-expose-headers"
+            | "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "set-cookie"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
 }
 
 async fn write_http_stream_headers(
@@ -2191,12 +2316,110 @@ mod computer_use_tests {
 }
 
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
-const MAX_HTTP_BODY_BYTES: usize = 32 * 1024 * 1024;
-const MAX_HTTP_ENCODED_BODY_BYTES: usize = 64 * 1024 * 1024;
+const HTTP_BODY_MEMORY_THRESHOLD: usize = 64 * 1024 * 1024;
+const MAX_HTTP_BODY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
 struct HttpRequest {
     headers: Vec<u8>,
-    body: Vec<u8>,
+    body: HttpRequestBody,
+}
+
+enum HttpRequestBody {
+    Memory(Vec<u8>),
+    TempFile {
+        file: tempfile::NamedTempFile,
+        len: u64,
+    },
+}
+
+impl HttpRequestBody {
+    fn len(&self) -> u64 {
+        match self {
+            Self::Memory(body) => body.len() as u64,
+            Self::TempFile { len, .. } => *len,
+        }
+    }
+
+    fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Memory(body) => Some(body),
+            Self::TempFile { .. } => None,
+        }
+    }
+
+    fn into_reqwest_body(self) -> anyhow::Result<reqwest::Body> {
+        match self {
+            Self::Memory(body) => Ok(reqwest::Body::from(body)),
+            Self::TempFile { mut file, .. } => {
+                file.as_file_mut().seek(SeekFrom::Start(0))?;
+                let file = file.into_file();
+                let file = tokio::fs::File::from_std(file);
+                Ok(reqwest::Body::wrap_stream(ReaderStream::new(file)))
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn into_vec(self) -> Result<Vec<u8>, HttpRequestReadError> {
+        match self {
+            Self::Memory(body) => Ok(body),
+            Self::TempFile { mut file, len } => {
+                file.as_file_mut().seek(SeekFrom::Start(0))?;
+                let mut body = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+                std::io::Read::read_to_end(file.as_file_mut(), &mut body)?;
+                Ok(body)
+            }
+        }
+    }
+}
+
+struct HttpRequestBodySink {
+    body: HttpRequestBody,
+}
+
+impl HttpRequestBodySink {
+    fn new() -> Self {
+        Self {
+            body: HttpRequestBody::Memory(Vec::new()),
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) -> Result<(), HttpRequestReadError> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let new_len = self
+            .body
+            .len()
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(HttpRequestReadError::payload_too_large)?;
+        if new_len > MAX_HTTP_BODY_BYTES {
+            return Err(HttpRequestReadError::payload_too_large());
+        }
+        match &mut self.body {
+            HttpRequestBody::Memory(body)
+                if body.len().saturating_add(bytes.len()) <= HTTP_BODY_MEMORY_THRESHOLD =>
+            {
+                body.extend_from_slice(bytes);
+            }
+            HttpRequestBody::Memory(body) => {
+                let mut file = tempfile::NamedTempFile::new()
+                    .map_err(|error| HttpRequestReadError::internal(error.to_string()))?;
+                file.write_all(body)?;
+                file.write_all(bytes)?;
+                self.body = HttpRequestBody::TempFile { file, len: new_len };
+            }
+            HttpRequestBody::TempFile { file, len } => {
+                file.write_all(bytes)?;
+                *len = new_len;
+            }
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> HttpRequestBody {
+        self.body
+    }
 }
 
 #[derive(Debug)]
@@ -2217,6 +2440,13 @@ impl HttpRequestReadError {
         Self {
             status: "413 Payload Too Large",
             message: format!("HTTP 请求体超过 {MAX_HTTP_BODY_BYTES} 字节限制"),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: "500 Internal Server Error",
+            message: message.into(),
         }
     }
 
@@ -2242,7 +2472,7 @@ impl From<std::io::Error> for HttpRequestReadError {
 #[derive(Debug)]
 enum HttpBodyFraming {
     Empty,
-    ContentLength(usize),
+    ContentLength(u64),
     Chunked,
 }
 
@@ -2260,79 +2490,119 @@ enum ChunkedBodyScan {
 
 #[derive(Default)]
 struct ChunkedScanState {
-    position: usize,
-    decoded_len: usize,
+    buffer: Vec<u8>,
+    state: ChunkedDecodeState,
+    trailer_bytes: usize,
     complete: bool,
 }
 
+#[derive(Default)]
+enum ChunkedDecodeState {
+    #[default]
+    Size,
+    Data(u64),
+    DataCrLf,
+    Trailers,
+}
+
 impl ChunkedScanState {
-    fn advance(&mut self, encoded: &[u8]) -> Result<ChunkedBodyScan, HttpRequestReadError> {
+    fn advance(
+        &mut self,
+        encoded: &[u8],
+        sink: &mut HttpRequestBodySink,
+    ) -> Result<ChunkedBodyScan, HttpRequestReadError> {
         if self.complete {
             return Ok(ChunkedBodyScan::Complete);
         }
+        self.buffer.extend_from_slice(encoded);
         loop {
-            let chunk_start = self.position;
-            let Some(line_end_offset) = encoded[chunk_start..]
-                .windows(2)
-                .position(|window| window == b"\r\n")
-            else {
-                if encoded.len().saturating_sub(chunk_start) > MAX_HTTP_HEADER_BYTES {
-                    return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-                }
-                return Ok(ChunkedBodyScan::Incomplete);
-            };
-            if line_end_offset > MAX_HTTP_HEADER_BYTES {
-                return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-            }
-            let line_end = chunk_start + line_end_offset;
-            let size_text = std::str::from_utf8(&encoded[chunk_start..line_end])
-                .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
-            let size_token = size_text.split(';').next().unwrap_or_default().trim();
-            let chunk_size = usize::from_str_radix(size_token, 16)
-                .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
-            let data_start = line_end + 2;
-
-            if chunk_size == 0 {
-                let mut trailer_start = data_start;
-                loop {
-                    let Some(trailer_end_offset) = encoded[trailer_start..]
+            match self.state {
+                ChunkedDecodeState::Size => {
+                    let Some(line_end) = self
+                        .buffer
                         .windows(2)
                         .position(|window| window == b"\r\n")
                     else {
-                        if encoded.len().saturating_sub(data_start) > MAX_HTTP_HEADER_BYTES {
+                        if self.buffer.len() > MAX_HTTP_HEADER_BYTES {
+                            return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+                        }
+                        return Ok(ChunkedBodyScan::Incomplete);
+                    };
+                    if line_end > MAX_HTTP_HEADER_BYTES {
+                        return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+                    }
+                    let size_text = std::str::from_utf8(&self.buffer[..line_end])
+                        .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
+                    let size_token = size_text.split(';').next().unwrap_or_default().trim();
+                    let chunk_size = u64::from_str_radix(size_token, 16)
+                        .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
+                    if sink
+                        .body
+                        .len()
+                        .checked_add(chunk_size)
+                        .is_none_or(|length| length > MAX_HTTP_BODY_BYTES)
+                    {
+                        return Err(HttpRequestReadError::payload_too_large());
+                    }
+                    self.buffer.drain(..line_end + 2);
+                    self.state = if chunk_size == 0 {
+                        ChunkedDecodeState::Trailers
+                    } else {
+                        ChunkedDecodeState::Data(chunk_size)
+                    };
+                }
+                ChunkedDecodeState::Data(remaining) => {
+                    if self.buffer.is_empty() {
+                        return Ok(ChunkedBodyScan::Incomplete);
+                    }
+                    let take = usize::try_from(remaining.min(self.buffer.len() as u64))
+                        .unwrap_or(self.buffer.len());
+                    sink.write(&self.buffer[..take])?;
+                    self.buffer.drain(..take);
+                    let remaining = remaining - take as u64;
+                    self.state = if remaining == 0 {
+                        ChunkedDecodeState::DataCrLf
+                    } else {
+                        ChunkedDecodeState::Data(remaining)
+                    };
+                }
+                ChunkedDecodeState::DataCrLf => {
+                    if self.buffer.len() < 2 {
+                        return Ok(ChunkedBodyScan::Incomplete);
+                    }
+                    if &self.buffer[..2] != b"\r\n" {
+                        return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
+                    }
+                    self.buffer.drain(..2);
+                    self.state = ChunkedDecodeState::Size;
+                }
+                ChunkedDecodeState::Trailers => {
+                    let Some(line_end) = self
+                        .buffer
+                        .windows(2)
+                        .position(|window| window == b"\r\n")
+                    else {
+                        if self.trailer_bytes.saturating_add(self.buffer.len())
+                            > MAX_HTTP_HEADER_BYTES
+                        {
                             return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
                         }
                         return Ok(ChunkedBodyScan::Incomplete);
                     };
-                    if trailer_start + trailer_end_offset - data_start > MAX_HTTP_HEADER_BYTES {
+                    self.trailer_bytes = self
+                        .trailer_bytes
+                        .checked_add(line_end + 2)
+                        .ok_or_else(|| HttpRequestReadError::bad_request("chunk trailer 过大"))?;
+                    if self.trailer_bytes > MAX_HTTP_HEADER_BYTES {
                         return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
                     }
-                    if trailer_end_offset == 0 {
-                        self.position = trailer_start + 2;
+                    self.buffer.drain(..line_end + 2);
+                    if line_end == 0 {
                         self.complete = true;
                         return Ok(ChunkedBodyScan::Complete);
                     }
-                    trailer_start += trailer_end_offset + 2;
                 }
             }
-            let next_decoded_len = self
-                .decoded_len
-                .checked_add(chunk_size)
-                .ok_or_else(HttpRequestReadError::payload_too_large)?;
-            if next_decoded_len > MAX_HTTP_BODY_BYTES {
-                return Err(HttpRequestReadError::payload_too_large());
-            }
-            let chunk_end = data_start
-                .checked_add(chunk_size)
-                .ok_or_else(HttpRequestReadError::payload_too_large)?;
-            if encoded.len() < chunk_end + 2 {
-                return Ok(ChunkedBodyScan::Incomplete);
-            }
-            if &encoded[chunk_end..chunk_end + 2] != b"\r\n" {
-                return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
-            }
-            self.decoded_len = next_decoded_len;
-            self.position = chunk_end + 2;
         }
     }
 }
@@ -2341,68 +2611,64 @@ async fn read_http_request(
     stream: &mut tokio::net::TcpStream,
 ) -> Result<HttpRequest, HttpRequestReadError> {
     let mut buffer = Vec::new();
-    let mut chunk = vec![0_u8; 4096];
-    let mut header_end = None;
-    let mut framing = HttpBodyFraming::Empty;
-    let mut chunked_scan = ChunkedScanState::default();
-
-    loop {
+    let mut chunk = vec![0_u8; 16 * 1024];
+    let header_end = loop {
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
-            break;
+            return Err(HttpRequestReadError::bad_request("HTTP 请求头不完整"));
         }
         buffer.extend_from_slice(&chunk[..read]);
-        if header_end.is_none() {
-            header_end = find_header_end(&buffer);
-            if let Some(end) = header_end {
-                if end > MAX_HTTP_HEADER_BYTES {
-                    return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
-                }
-                framing = http_body_framing(&buffer[..end])?;
-            } else if buffer.len() > MAX_HTTP_HEADER_BYTES {
+        if let Some(end) = find_header_end(&buffer) {
+            if end > MAX_HTTP_HEADER_BYTES {
                 return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
             }
+            break end;
         }
-        if let Some(end) = header_end {
-            let body = &buffer[end + 4..];
-            if body.len() > MAX_HTTP_ENCODED_BODY_BYTES {
+        if buffer.len() > MAX_HTTP_HEADER_BYTES {
+            return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
+        }
+    };
+    if buffer.is_empty() || header_end + 4 > buffer.len() {
+        return Err(HttpRequestReadError::bad_request("HTTP 请求头不完整"));
+    }
+    let headers = buffer[..header_end].to_vec();
+    let framing = http_body_framing(&headers)?;
+    let initial_body = buffer[header_end + 4..].to_vec();
+    let mut sink = HttpRequestBodySink::new();
+    let body = match framing {
+        HttpBodyFraming::Empty => sink.finish(),
+        HttpBodyFraming::ContentLength(content_length) => {
+            if content_length > MAX_HTTP_BODY_BYTES {
                 return Err(HttpRequestReadError::payload_too_large());
             }
-            match framing {
-                HttpBodyFraming::Empty => break,
-                HttpBodyFraming::ContentLength(content_length) => {
-                    if content_length > MAX_HTTP_BODY_BYTES {
-                        return Err(HttpRequestReadError::payload_too_large());
-                    }
-                    if body.len() >= content_length {
-                        break;
-                    }
+            let initial_take = usize::try_from(content_length.min(initial_body.len() as u64))
+                .unwrap_or(initial_body.len());
+            sink.write(&initial_body[..initial_take])?;
+            while sink.body.len() < content_length {
+                let read = stream.read(&mut chunk).await?;
+                if read == 0 {
+                    return Err(HttpRequestReadError::bad_request("HTTP 请求体不完整"));
                 }
-                HttpBodyFraming::Chunked => match chunked_scan.advance(body)? {
-                    ChunkedBodyScan::Incomplete => {}
-                    ChunkedBodyScan::Complete => break,
-                },
+                let remaining = content_length - sink.body.len();
+                let take = usize::try_from(remaining.min(read as u64)).unwrap_or(read);
+                sink.write(&chunk[..take])?;
             }
+            sink.finish()
         }
-    }
-
-    let header_end =
-        header_end.ok_or_else(|| HttpRequestReadError::bad_request("HTTP 请求头不完整"))?;
-    let headers = buffer[..header_end].to_vec();
-    let encoded_body = &buffer[header_end + 4..];
-    let body = match framing {
-        HttpBodyFraming::Empty => Vec::new(),
-        HttpBodyFraming::ContentLength(content_length) => {
-            content_length_body(encoded_body, content_length)?
-        }
-        HttpBodyFraming::Chunked => match decode_chunked_body(encoded_body)? {
-            ChunkedBody::Complete(body) => body,
-            ChunkedBody::Incomplete => {
-                return Err(HttpRequestReadError::bad_request(
-                    "chunked HTTP 请求体不完整",
-                ));
+        HttpBodyFraming::Chunked => {
+            let mut decoder = ChunkedScanState::default();
+            let mut status = decoder.advance(&initial_body, &mut sink)?;
+            while matches!(status, ChunkedBodyScan::Incomplete) {
+                let read = stream.read(&mut chunk).await?;
+                if read == 0 {
+                    return Err(HttpRequestReadError::bad_request(
+                        "chunked HTTP 请求体不完整",
+                    ));
+                }
+                status = decoder.advance(&chunk[..read], &mut sink)?;
             }
-        },
+            sink.finish()
+        }
     };
 
     Ok(HttpRequest { headers, body })
@@ -2423,7 +2689,7 @@ fn http_body_framing(headers: &[u8]) -> Result<HttpBodyFraming, HttpRequestReadE
         if name.trim().eq_ignore_ascii_case("content-length") {
             let parsed = value
                 .trim()
-                .parse::<usize>()
+                .parse::<u64>()
                 .map_err(|_| HttpRequestReadError::bad_request("Content-Length 无效"))?;
             if content_length
                 .replace(parsed)
@@ -2460,83 +2726,32 @@ fn http_body_framing(headers: &[u8]) -> Result<HttpBodyFraming, HttpRequestReadE
     }
 }
 
-fn content_length_body(
-    encoded: &[u8],
-    content_length: usize,
-) -> Result<Vec<u8>, HttpRequestReadError> {
+#[cfg(test)]
+fn content_length_body(encoded: &[u8], content_length: u64) -> Result<Vec<u8>, HttpRequestReadError> {
     if content_length > MAX_HTTP_BODY_BYTES {
         return Err(HttpRequestReadError::payload_too_large());
     }
+    let content_length = usize::try_from(content_length)
+        .map_err(|_| HttpRequestReadError::payload_too_large())?;
     if encoded.len() < content_length {
         return Err(HttpRequestReadError::bad_request("HTTP 请求体不完整"));
     }
     Ok(encoded[..content_length].to_vec())
 }
 
+#[cfg(test)]
 fn decode_chunked_body(encoded: &[u8]) -> Result<ChunkedBody, HttpRequestReadError> {
-    let mut decoded = Vec::new();
-    let mut position = 0;
-    loop {
-        let Some(line_end_offset) = encoded[position..]
-            .windows(2)
-            .position(|window| window == b"\r\n")
-        else {
-            if encoded.len().saturating_sub(position) > MAX_HTTP_HEADER_BYTES {
-                return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-            }
-            return Ok(ChunkedBody::Incomplete);
-        };
-        if line_end_offset > MAX_HTTP_HEADER_BYTES {
-            return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-        }
-        let line_end = position + line_end_offset;
-        let size_text = std::str::from_utf8(&encoded[position..line_end])
-            .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
-        let size_token = size_text.split(';').next().unwrap_or_default().trim();
-        let chunk_size = usize::from_str_radix(size_token, 16)
-            .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
-        position = line_end + 2;
-
-        if chunk_size == 0 {
-            loop {
-                let Some(trailer_end_offset) = encoded[position..]
-                    .windows(2)
-                    .position(|window| window == b"\r\n")
-                else {
-                    if encoded.len().saturating_sub(line_end + 2) > MAX_HTTP_HEADER_BYTES {
-                        return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
-                    }
-                    return Ok(ChunkedBody::Incomplete);
-                };
-                if position + trailer_end_offset - (line_end + 2) > MAX_HTTP_HEADER_BYTES {
-                    return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
-                }
-                if trailer_end_offset == 0 {
-                    return Ok(ChunkedBody::Complete(decoded));
-                }
-                position += trailer_end_offset + 2;
-            }
-        }
-        if decoded.len().saturating_add(chunk_size) > MAX_HTTP_BODY_BYTES {
-            return Err(HttpRequestReadError::payload_too_large());
-        }
-        let chunk_end = position
-            .checked_add(chunk_size)
-            .ok_or_else(HttpRequestReadError::payload_too_large)?;
-        if encoded.len() < chunk_end + 2 {
-            return Ok(ChunkedBody::Incomplete);
-        }
-        if &encoded[chunk_end..chunk_end + 2] != b"\r\n" {
-            return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
-        }
-        decoded.extend_from_slice(&encoded[position..chunk_end]);
-        position = chunk_end + 2;
+    let mut sink = HttpRequestBodySink::new();
+    let mut decoder = ChunkedScanState::default();
+    match decoder.advance(encoded, &mut sink)? {
+        ChunkedBodyScan::Incomplete => Ok(ChunkedBody::Incomplete),
+        ChunkedBodyScan::Complete => Ok(ChunkedBody::Complete(sink.finish().into_vec()?)),
     }
 }
 
 #[cfg(test)]
 fn scan_chunked_body(encoded: &[u8]) -> Result<ChunkedBodyScan, HttpRequestReadError> {
-    ChunkedScanState::default().advance(encoded)
+    ChunkedScanState::default().advance(encoded, &mut HttpRequestBodySink::new())
 }
 
 fn header_value_from_headers(headers: &str, header_name: &str) -> Option<String> {
@@ -2550,6 +2765,20 @@ fn header_value_from_headers(headers: &str, header_name: &str) -> Option<String>
                 .then(|| value.trim().to_string())
         })
         .filter(|value| !value.is_empty())
+}
+
+fn header_pairs_from_headers(headers: &str) -> Vec<(String, String)> {
+    headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            let name = name.trim();
+            let value = value.trim();
+            (!name.is_empty() && !value.is_empty())
+                .then(|| (name.to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 fn sanitize_diagnostic_event(event: &str) -> String {

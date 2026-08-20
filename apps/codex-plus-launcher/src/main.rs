@@ -44,6 +44,9 @@ async fn main() -> Result<()> {
     if args.iter().any(|arg| arg == "--codex-plus-hook") {
         return codex_plus_core::codex_hooks::run_hook_from_stdio().await;
     }
+    if args.iter().any(|arg| arg == "--codex-plus-imagegen-mcp") {
+        return codex_plus_core::imagegen_mcp::run_imagegen_mcp_from_stdio().await;
+    }
     if args.iter().any(|arg| arg == "--codex-plus-shared-terminal") {
         return run_shared_terminal_proxy(args).await;
     }
@@ -594,6 +597,16 @@ impl LaunchHooks for LauncherHooks {
         settings: &codex_plus_core::settings::BackendSettings,
     ) -> anyhow::Result<()> {
         self.core.ensure_plugin_marketplace_config(settings).await
+    }
+
+    async fn ensure_imagegen_mcp_config(
+        &self,
+        settings: &codex_plus_core::settings::BackendSettings,
+        helper_port: u16,
+    ) -> anyhow::Result<()> {
+        self.core
+            .ensure_imagegen_mcp_config(settings, helper_port)
+            .await
     }
 
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {

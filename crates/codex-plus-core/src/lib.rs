@@ -22,6 +22,7 @@ pub mod dream_skin_library;
 pub mod dream_skin_package;
 pub mod env_conflicts;
 pub mod http_client;
+pub mod imagegen_mcp;
 pub mod install;
 pub mod launcher;
 pub mod model_catalog;

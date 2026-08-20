@@ -734,3 +734,8 @@
 - 用户报告 Codex++ 当前无法通过 `$imagegen` / `image_generation` 正常生成图片，且协议代理只覆盖少量 API 路径；要求补齐图片生成、编辑和所有其他 OpenAI 端点的可用转发喵~
 - 已读取项目历史、现有代理路由、imagegen 技能契约与 OpenAI 官方 API 文档；确认需要同时解决 Codex Responses 托管 `image_generation` 工具保真和 Image API/其余 HTTP 端点透明转发，不能只新增 `/images/generations` 一个路径喵~
 - 当前工作树仍只有三个与 HEAD 内容相同的 CRLF 状态噪声文件；已创建修改前空检查点 `efc201d6`，后续继续不启动、重启、连接或操作正在运行的 Codex、helper 与 CDP 做测试喵~
+- 已开始实现全端点能力：helper 在保留现有 Responses、Chat 和模型特殊逻辑的同时，对 /v1/**、/codex/v1/** 及无版本常见 OpenAI API 路径增加 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS 通用透明代理，保留查询参数并替换为当前供应商认证喵~
+- 通用代理不会对非幂等请求自动重试或聚合故障转移，响应状态、二进制/SSE body 与安全端到端响应头原样返回，图片、文件、上传、批处理、嵌入、审核、语音、视频、向量库等不再被 helper 的 404 白名单阻断喵~
+- HTTP 请求读取器已改为 64 MiB 内存加临时文件的混合 body，Content-Length 与 chunked 均增量落盘，最大支持 8 GiB，避免大图片编辑、Files 和 Uploads 请求把全部内容常驻内存喵~
+- 已新增 Codex++ image_gen MCP 服务基础实现：通过当前 helper 的 /v1/images/generations 与 /v1/images/edits 调用活动供应商，支持本地多图编辑、mask、尺寸、质量、背景、格式和多变体，并把输出保存到 CODEX_HOME/generated_images 后以 MCP image content 返回喵~
+- 启动流程将为增强已开启且供应商管理已启用的环境写入专用 codex-plus-imagegen MCP 配置，关闭对应能力时只移除 Codex++ 自己的表，不覆盖用户其他 MCP、Skills 或 Plugins 配置喵~
