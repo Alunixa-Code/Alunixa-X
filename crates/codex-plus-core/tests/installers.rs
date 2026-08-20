@@ -115,6 +115,28 @@ fn macos_dmg_includes_applications_shortcut_for_drag_install() {
 }
 
 #[test]
+fn windows_ci_stages_the_imagegen_companion_before_building_installers() {
+    for workflow_path in [
+        "../../.github/workflows/pr-build.yml",
+        "../../.github/workflows/release-assets.yml",
+    ] {
+        let workflow = std::fs::read_to_string(workflow_path)
+            .unwrap_or_else(|error| panic!("read {workflow_path}: {error}"));
+        let stage_index = workflow
+            .find("Copy-Item target/release/codex-plus-imagegen-mcp.exe dist/windows/app/")
+            .unwrap_or_else(|| panic!("{workflow_path} should stage the imagegen companion"));
+        let installer_index = workflow
+            .find("CodexPlusPlus.nsi")
+            .unwrap_or_else(|| panic!("{workflow_path} should build the Windows installer"));
+
+        assert!(
+            stage_index < installer_index,
+            "{workflow_path} must stage the imagegen companion before invoking NSIS"
+        );
+    }
+}
+
+#[test]
 fn companion_binary_path_resolves_macos_silent_app_next_to_manager_app() {
     let manager_exe = std::path::Path::new(
         "/Applications/Codex++ 管理工具.app/Contents/MacOS/CodexPlusPlusManager",
