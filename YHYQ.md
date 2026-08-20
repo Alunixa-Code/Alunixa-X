@@ -719,3 +719,5 @@
 - 从完整 workspace 中断点继续补跑的全部剩余套件通过：Zed `27/27`、data `5/5`、Markdown `4/4`、Provider Sync `39/39`、Storage `22/22`、launcher `5/5`、manager `33/33`、Windows/发行契约 `22/22` 与所有 doc tests 零失败喵~
 - 验收期间唯一编译提醒是 DreamSkin payload 声明为可变但从未重新赋值；已移除无效 `mut`，不改变脚本内容或行为，后续发布构建不再携带该警告喵~
 - 移除无效可变性后 `cargo check -p codex-plus-core` 无警告通过，Rust formatter、`git diff --check` 和本地品牌保护再次通过喵~
+- 构建清理首次尝试因执行策略在进程启动前拒绝组合递归删除，未产生文件变化；随后独立解析并核验三个绝对路径均位于 `D:\Cursor\CodexPP`，再用 .NET 目录 API 完成删除喵~
+- Rust `target`、前端 `node_modules` 与 `dist` 均已核验不存在；工作树仅剩 `assets/gpt56-model-metadata-compat.json`、`connect/weixin.rs`、`tests/model_catalog.rs` 三个内容与 HEAD 完全相同的 CRLF 状态噪声文件，继续不暂存喵~
