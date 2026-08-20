@@ -1,3 +1,20 @@
+## 1.2.66 - 2026-08-20
+
+- 新增 OpenAI 兼容全端点透明代理：除现有 Responses、Chat Completions 与模型目录特殊处理外，`/v1/**`、`/v1/v1/**`、`/codex/v1/**` 及常见无版本别名现在支持 GET、POST、PUT、PATCH、DELETE、HEAD 和 OPTIONS，不再由 helper 白名单返回“未知后端路径”喵~
+- 图片生成与编辑、音频合成/转写/翻译、Files、Uploads、Batches、Embeddings、Moderations、Fine-tuning、Vector Stores、Videos、Evals、Containers、Assistants、Threads 等 HTTP API 均通过同一通用通道转发；新增或未显式枚举的官方 `/v1/**` 路径也自动兼容喵~
+- 通用代理完整保留路径参数与查询字符串，并把 `/v1/v1`、`/codex/v1` 归一化为供应商真实 API 根；自定义根路径、末尾 `#` 跳过版本前缀和已填写具体 endpoint 的 Base URL 继续按原有规则工作喵~
+- 请求会替换为当前活动供应商认证，保留 `Content-Type`、`Accept`、`OpenAI-Organization`、`OpenAI-Project`、`OpenAI-Beta`、`Idempotency-Key`、Range 与其他安全端到端头；原 Authorization、Cookie、Host 和 hop-by-hop 头不会泄漏给上游喵~
+- 响应按真实状态码流式返回二进制、JSON、SSE 与下载内容，并保留 `Content-Disposition`、`Location`、`ETag`、`Cache-Control`、`Retry-After`、`OpenAI-*`、请求 ID、Range 与内容编码头，不再把图片、语音或文件响应强制改写为 JSON喵~
+- 新增 Realtime WebSocket 透明代理：`/v1/realtime` 等升级请求会保留查询参数、`OpenAI-Beta` 与上游选择的子协议，替换供应商认证，并双向转发 Text、Binary、Ping、Pong 与 Close 帧喵~
+- 通用非幂等请求和 Realtime 连接不执行自动重试或聚合故障转移，避免图片、上传、批处理、微调或视频任务被重复创建、重复计费；上游失败会返回明确的 Codex++ 代理错误喵~
+- HTTP 请求读取器改为 64 MiB 内存加临时文件的混合 body：Content-Length 与 chunked 请求都增量写入，单请求最大支持 8 GiB，满足大型图片编辑、Files 与 Uploads，同时避免全部请求体常驻内存喵~
+- 新增 Codex++ `image_gen` MCP 工具并在启动前写入专用 `codex-plus-imagegen` server 配置；Codex 的 `$imagegen` Skill 现在可以发现真实图片工具，不再只看到 Skill 却提示没有可调用的 `image_gen` 工具喵~
+- `image_gen` 支持新图生成和本地多图编辑，提供 mask、模型、尺寸、质量、背景、输出格式、压缩、输入保真与多变体参数；请求分别进入活动供应商的 `/v1/images/generations` 和 `/v1/images/edits`喵~
+- 生成结果支持 `b64_json`、Base64 image 与 HTTPS URL 三种上游形态，统一保存到 `CODEX_HOME/generated_images`，同时以 MCP image content 返回 Codex，便于页面直接预览并继续复制到项目目录喵~
+- MCP 配置仅在 Codex 增强和供应商管理同时启用时安装，关闭后只删除 Codex++ 自己的 server 表；用户已有 MCP、Skills、Plugins、供应商品牌、更新源与 GitHub 发布流程均保持不变喵~
+- Responses 直连继续完全保真转发 `tools: [{"type":"image_generation"}]` 以及 `response.image_generation_call.*` SSE 事件；Chat/Completions 等非托管协议继续使用本地 MCP `image_gen`，不把服务端托管生图伪装成普通函数后宣称成功喵~
+- 新增全端点、URL 归一化、multipart/二进制、认证和头过滤、响应下载头、SSE、生图事件、Realtime WebSocket、大 body 落盘、MCP schema、启动入口及配置隔离回归测试喵~
+
 ## 1.2.65 - 2026-08-20
 
 - 选择性同步 BigPizzaV3 `v1.2.42` 至 `v1.2.50` 中适用于当前分支的功能与修复，没有合并上游分支，也没有改动 `Alunixa-Code/CodexPlusPlusPlus` 品牌、更新源、仓库入口、赞助内容或发行工作流喵~
