@@ -756,3 +756,14 @@
 - 首次 `1.2.66` 主分支 Actions `32420052379` 中 macOS x64/arm64 均成功，Windows 的前端测试、TypeScript、完整 Rust 测试和三项 release 二进制编译也成功，但 PR 构建工作流漏把已生成的 `codex-plus-imagegen-mcp.exe` 复制到 NSIS staging，导致安装器在打包第 39 行找不到 companion 后失败喵~
 - 已在 PR 构建的 Windows staging 中补齐 companion 复制，并新增同时锁定 PR/Release 两份 workflow 都必须先 stage companion 再调用 NSIS 的发行回归测试；正式 Release workflow 原本已有正确复制，不改变其余构建和发行行为喵~
 - Windows staging 修复专项验证通过：Rust formatter、差异空白检查和 `installers` 回归 `12/12` 全部成功，未启动或连接当前 Codex 实例喵~
+- 产品代码与测试已推送用户仓库 `origin/main`；首次主分支 Actions `32420052379` 暴露并定位到 PR workflow 的 Windows companion staging 漏项，macOS 两平台和 Windows 到 release 二进制阶段均成功，没有重复修改产品功能喵~
+- staging 修复提交 `8c383393` 推送后，权威主分支 Actions `32422226590` 全部成功：Windows 前端测试、TypeScript、生产构建、完整 Rust tests、三项 release 二进制、NSIS 安装器和 artifacts 上传均成功，macOS x64/arm64 的构建、DMG、包结构校验和上传也全部成功喵~
+- 已创建并推送注释标签 `v1.2.66`，标签指向产品与 workflow 修复提交 `8c383393a6197e0209d45c856c04f3b4904b5237`，未改动 `origin`、品牌或更新源喵~
+- 正式 Release Actions `32424278950` 全部成功：版本/品牌校验、Windows x64、macOS x64、macOS arm64、六项资产汇总验证和 `Publish GitHub Release` 均完成喵~
+- 自动生成的简短发行说明已替换为 3709 字符详细中文说明，完整记录图片生成/编辑 MCP、Responses 托管生图、全 `/v1/**` HTTP 代理、Realtime WebSocket、8 GiB 混合 body、头部保真、非幂等不重放、兼容修复、验证矩阵和升级说明喵~
+- `v1.2.66` 已核验为 latest、非草稿、非预发布，六项 Windows/macOS x64/macOS arm64 资产状态全部为 uploaded，正式地址为 `https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.66` 喵~
+- Windows setup 为 `20,139,038` 字节，SHA-256 `067ddfe8902386fedb9c01cf4dd1bcc75c792b3294fe3af938776fa998056bf4`；Windows ZIP 为 `25,843,787` 字节，SHA-256 `d7173cdd381bfb5615175e271dd0c7c0bdcd2ca0c2e45f937df2e468a718b370` 喵~
+- macOS x64 DMG 为 `31,811,213` 字节，SHA-256 `82284a828a32ab1fb4cbda19e16244ccd05de5a6a216489cfe7703796232eb22`；x64 ZIP 为 `27,014,148` 字节，SHA-256 `30f6133d02b944efa7976a076451bb3ea823b9c8e00162e8051d2c96f9e43fab` 喵~
+- macOS arm64 DMG 为 `30,463,138` 字节，SHA-256 `60bce22843c3100e1d2a6bdabb80658ca08252d584ca254b79fe2af2c0b710f5`；arm64 ZIP 为 `26,391,727` 字节，SHA-256 `a377d59ad7ddfe5e047cdbf9c4d7d95bd36b608bdb1c48e5f06608189c7db886` 喵~
+- Release notes 临时文件、本地 Rust `target`、前端 `node_modules`/`dist` 和 `.tmp` 已全部删除；工作树继续只保留三个与 HEAD 内容相同的 CRLF 状态噪声文件并不纳入提交喵~
+- 全过程没有启动、重启、连接或操作当前 Codex、当前任务、helper、CDP 或现有服务做测试；产品验收使用隔离 companion、自动化测试和 GitHub Actions喵~
