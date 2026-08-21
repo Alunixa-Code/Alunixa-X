@@ -815,3 +815,7 @@
 - 已使用独立 Vite + Playwright 预览验证 UI，没有启动或连接 Codex：页面标题和 ALUNIXA X 品牌正确、Agent Rail 为 5 个节点、无水平溢出、浏览器页面异常为 0；预览图保存到 `docs/images/alunixa-x-dashboard.png` 并写入中英文 README 喵~
 - 最新前端验证再次通过 `41/41`、TypeScript、i18n plain `835/835`、template `76/76`、品牌保护和生产构建；Vite 产物 JS `590.73 kB`、gzip `180.73 kB`，仅有既有 chunk 大小提示喵~
 - Rust 定向验证通过：installer/updater `12/12 + 12/12`、Windows/发行契约 `23/23`、`cargo check --workspace --all-targets` 和 Rust formatter均成功；完整本地 workspace 执行因 Windows 在 core unit test 链接后即时缺失 EXE 而未能启动该单元测试二进制，编译本身成功，后续由 GitHub Actions 标准 Windows runner执行权威全量测试喵~
+- 已将 `main` 首次推送到新仓库 `https://github.com/Alunixa-Code/Alunixa-X`，远端默认分支指向 `e7da003d4732093fdf37cd98058563b4d2de1789`，旧仓库和旧远端未被覆盖喵~
+- GitHub 仓库简介、Homepage 和 Topics 已完成：简介明确为跨平台 AI Agent Control System，Homepage 指向 Releases，Topics 包含 `ai-agent`、`codex`、`desktop`、`mcp`、`model-router`、`openai`、`rust` 与 `tauri` 喵~
+- 新仓库 Actions 已启用且三份 workflow 均为 active；首次建仓推送未生成 run，因此本记录提交作为默认分支第二次推送触发正式主分支构建，若仍未自动触发则使用 workflow_dispatch 执行同一权威流程喵~
+- 本地 Rust `target`、前端 `node_modules`/`dist` 与 `.tmp` 已按绝对路径校验后删除，工作树清理完成喵~
