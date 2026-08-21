@@ -832,3 +832,5 @@
 - 新增 `dashboard_usage_analytics` Tauri 命令、data 聚合结构和真实临时 rollout 回归测试，验证 `3000` 输入、`300` 输出、`1500` 缓存、`3300` 总 Token、`50%` 缓存命中与 `80%` 上下文占用计算喵~
 - 更新后的独立 Vite/Playwright 预览通过：2 个使用率环形图、1 个模型频率饼图、3 条 Token 构成条均存在，无水平溢出、页面异常为 0；新预览图已更新至 `docs/images/alunixa-x-dashboard.png` 喵~
 - 最新验证通过前端 `42/42`、TypeScript、i18n plain `847/847`、template `79/79`、品牌保护、Rust formatter、数据统计专项和 `cargo check --workspace --all-targets`；没有启动、连接或读取当前运行中的 Codex/Helper/CDP，统计测试只使用隔离临时 rollout喵~
+- 集成使用统计后的主分支权威 Actions `32483993900` 全部成功：Windows 完成品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、三项 release 二进制、NSIS、二进制/安装器上传；macOS x64/arm64 完成前端、release 二进制、DMG、包结构验证和上传喵~
+- 该成功 run 对应提交 `a4295b03a589e5b0a517bce160dba5effb07e1d2`，说明 Alunixa X 品牌迁移、Agent Rail、Usage Intelligence、Token/缓存/模型统计和三平台发行链路已在 GitHub 标准 runner 闭环喵~
