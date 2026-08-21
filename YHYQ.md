@@ -775,3 +775,7 @@
 - 已按独立 AI Agent 桌面中枢而非“Codex 换皮”定位进行品牌、UI、商业化、服务端推荐和隐私统计架构构思，并快速排查若干候选名称的公开同名冲突喵~
 - 当前建议优先采用个人品牌延展路线：母品牌 `Gardenia Labs / 栀子实验室`，桌面产品候选 `Gardenia One`，配套服务可命名为 `Gardenia Hub`、`Gardenia Market` 与 `Gardenia Pulse`；正式确定前再做域名、GitHub、应用商店和商标四项核验喵~
 - 本轮未改任何产品代码、UI、名称、远端、更新源、服务器、统计逻辑或发布流程，也没有推送 GitHub 喵~
+- 用户补充品牌必须优先使用 `Alunixa` 开头，利用现有 `Alunixa-Code` 组织、`AC` 搜索缩写和应用列表中字母 A 排序优势；当前仍只做构思，不修改产品代码或品牌资源喵~
+- 已快速检索 `Alunixa Console`、`Alunixa Control` 与 `Alunixa Core` 的公开同名情况，当前优先建议桌面产品使用 `Alunixa Console`，简称 `AC`，它比 Control/Center 更贴合供应商、模型、工具、连接和诊断统一控制台的产品定位喵~
+- 建议品牌体系调整为：组织 `Alunixa-Code`、桌面端 `Alunixa Console`、云服务 `Alunixa Cloud`、推荐市场 `Alunixa Catalog`、统计服务 `Alunixa Pulse`；正式采用前仍做域名、GitHub、应用商店与商标核验喵~
+- 本轮未修改产品代码、UI、远端、仓库名称、更新源、服务器或发行配置，也未推送 GitHub 喵~
