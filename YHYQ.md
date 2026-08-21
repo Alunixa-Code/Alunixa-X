@@ -857,3 +857,11 @@
 - 本地验收通过前端 `42/42`、TypeScript、Vite 生产构建、i18n plain `847/847` 与 template `80/80`、品牌保护、Rust formatter、数据统计专项、Windows/发行契约 `23/23` 和 `cargo check --workspace --all-targets`；只使用隔离页面与 mock 数据，未连接当前 Codex/Helper/CDP喵~
 - `v1.0.1` 修复提交 `6640c031e0770cbe350c612dc40889f7af0a09e2` 的权威主分支 Actions `32501728927` 全部成功：Windows 品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 和上传均完成，macOS x64/arm64 的前端、release 二进制、DMG、结构验证和上传也均成功喵~
 - `v1.0.1` 已完成本地与 GitHub Actions 验收，准备创建正式标签和 Release；版本包含紧凑窗口单列响应、长文本换行、Token M 数显示、频率百分比保留、字号放大和 `1179×820` 精确视口回归喵~
+- `v1.0.1` 正式 Release workflow `32504589407` 全部成功：版本/品牌校验、Windows x64、macOS x64、macOS arm64、六项资产验证和 `Publish GitHub Release` 均完成；同一 release-prep 提交触发的重复主分支 build `32504583808` 已取消喵~
+- 自动发行说明已替换为 1926 字符详细中文说明，完整记录 `1179×820` 溢出修复、Token M 数、模型频率保留、字号提升、状态徽章、精确视口回归和三平台验证喵~
+- `v1.0.1` 已核验为 latest、非草稿、非预发布，六项发行资产状态全部为 `uploaded`，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.1` 喵~
+- Windows Setup 为 `20,777,162` 字节，SHA-256 `489dd84ae72b58513d724caef219e304eff6451850e49a1f9a8f751f7ceaa2af`；Windows ZIP 为 `26,512,903` 字节，SHA-256 `f53c6af7cfcedf5f500b7d1743c1a25804421d9102fd6328f0e8ebef4cfd8c5c` 喵~
+- macOS x64 DMG 为 `33,550,814` 字节，SHA-256 `35e10abb55cd761ac0c953ebb34bd97330a9afac9415e273fbd43feffc003863`；x64 ZIP 为 `28,023,411` 字节，SHA-256 `d43ac5a8a3eb035ea560476ff7adb38a0728e9049f1c297f5c756e97c1469c91` 喵~
+- macOS arm64 DMG 为 `32,295,809` 字节，SHA-256 `aa6d4b9a66e4f61053def7f1df6c82dd8d2889e70b8e80aa939265625e8ab525`；arm64 ZIP 为 `27,445,501` 字节，SHA-256 `27ed87ce741cab02ba0031a434203c944aeab4f6f442ffce6301e22095e4bd32` 喵~
+- 本地 Rust `target`、前端 `dist`、临时 `.tmp`/`.tmp-release`、Playwright mock 和临时依赖目录已清理；用于断网验证的 `node_modules` junction 只删除了链接，来源依赖目录仍存在且未被修改喵~
+- 全过程未启动、重启、连接或操作当前 Codex、当前任务、helper 或 CDP，UI 验证只使用隔离 Vite 页面和 mock 状态喵~
