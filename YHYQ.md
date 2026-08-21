@@ -767,3 +767,11 @@
 - macOS arm64 DMG 为 `30,463,138` 字节，SHA-256 `60bce22843c3100e1d2a6bdabb80658ca08252d584ca254b79fe2af2c0b710f5`；arm64 ZIP 为 `26,391,727` 字节，SHA-256 `a377d59ad7ddfe5e047cdbf9c4d7d95bd36b608bdb1c48e5f06608189c7db886` 喵~
 - Release notes 临时文件、本地 Rust `target`、前端 `node_modules`/`dist` 和 `.tmp` 已全部删除；工作树继续只保留三个与 HEAD 内容相同的 CRLF 状态噪声文件并不纳入提交喵~
 - 全过程没有启动、重启、连接或操作当前 Codex、当前任务、helper、CDP 或现有服务做测试；产品验收使用隔离 companion、自动化测试和 GitHub Actions喵~
+
+## 2026-08-21
+
+- 用户提出将当前 Codex++ 产品化为独立品牌：更换名称和默认视觉、迁移到独立仓库、由自有服务器提供推荐/推广内容并增加匿名使用人数统计；当前阶段只做构思，不修改产品代码、品牌、仓库、服务器或发行配置喵~
+- 已读取项目历史和当前工作树，确认仍只有三个内容与 HEAD 相同的 CRLF 状态噪声文件；本轮没有暂存或更改它们喵~
+- 已按独立 AI Agent 桌面中枢而非“Codex 换皮”定位进行品牌、UI、商业化、服务端推荐和隐私统计架构构思，并快速排查若干候选名称的公开同名冲突喵~
+- 当前建议优先采用个人品牌延展路线：母品牌 `Gardenia Labs / 栀子实验室`，桌面产品候选 `Gardenia One`，配套服务可命名为 `Gardenia Hub`、`Gardenia Market` 与 `Gardenia Pulse`；正式确定前再做域名、GitHub、应用商店和商标四项核验喵~
+- 本轮未改任何产品代码、UI、名称、远端、更新源、服务器、统计逻辑或发布流程，也没有推送 GitHub 喵~
