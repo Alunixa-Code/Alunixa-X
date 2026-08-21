@@ -855,3 +855,4 @@
 - 更新后的主预览图保存为 `docs/images/alunixa-x-dashboard.png`，下半区长路径/最近运行验证图保存为 `docs/images/alunixa-x-dashboard-compact-runtime.png`，两份图片 SHA-256 均纳入品牌保护喵~
 - `v1.0.1` 版本已统一写入 Cargo workspace/lock、前端 package/lock 与 Tauri 配置；CHANGELOG 详细记录窗口溢出、M 单位、字号和状态徽章修复喵~
 - 本地验收通过前端 `42/42`、TypeScript、Vite 生产构建、i18n plain `847/847` 与 template `80/80`、品牌保护、Rust formatter、数据统计专项、Windows/发行契约 `23/23` 和 `cargo check --workspace --all-targets`；只使用隔离页面与 mock 数据，未连接当前 Codex/Helper/CDP喵~
+- `v1.0.1` 修复提交 `6640c031e0770cbe350c612dc40889f7af0a09e2` 的权威主分支 Actions `32501728927` 全部成功：Windows 品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 和上传均完成，macOS x64/arm64 的前端、release 二进制、DMG、结构验证和上传也均成功喵~
