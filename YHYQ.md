@@ -834,3 +834,4 @@
 - 最新验证通过前端 `42/42`、TypeScript、i18n plain `847/847`、template `79/79`、品牌保护、Rust formatter、数据统计专项和 `cargo check --workspace --all-targets`；没有启动、连接或读取当前运行中的 Codex/Helper/CDP，统计测试只使用隔离临时 rollout喵~
 - 集成使用统计后的主分支权威 Actions `32483993900` 全部成功：Windows 完成品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、三项 release 二进制、NSIS、二进制/安装器上传；macOS x64/arm64 完成前端、release 二进制、DMG、包结构验证和上传喵~
 - 该成功 run 对应提交 `a4295b03a589e5b0a517bce160dba5effb07e1d2`，说明 Alunixa X 品牌迁移、Agent Rail、Usage Intelligence、Token/缓存/模型统计和三平台发行链路已在 GitHub 标准 runner 闭环喵~
+- 首次推送 `v1.0.0` 标签后未生成 Release workflow，确认原因是标签指向的发布记录提交标题包含 `[skip ci]`，GitHub 同时跳过了该提交上的 tag workflow；已删除未发布且无资产的初始标签，准备在无 skip 标记的新提交上重新创建喵~
