@@ -823,3 +823,6 @@
 - 根因不是产品 UI 或 Alunixa X 品牌代码失败，而是 `assets/inject/upstream/**` 属于固定第三方兼容快照，不应参与品牌替换；现已从旧稳定仓库精确恢复这 7 个上游资源，保留其原始字节、许可证与哈希喵~
 - 修复后 `upstream_theme_assets` 专项 `1/1` 通过，恢复动作不改变 Alunixa X 主界面、图标、安装包、仓库链接或用户可见产品品牌喵~
 - 为避免重复消耗 Actions，首次自动生成的旧提交 run 和误判未触发后手动生成的 workflow_dispatch run 均已请求取消，只保留最新 main push 作为后续权威构建喵~
+- 第二次权威主分支 Actions `32480249963` 中 macOS x64/arm64 再次全部成功，Windows 在前端 `40/41` 时停止；失败来自 `dream-skin.test.ts` 仍错误要求固定第三方 renderer 使用 Alunixa X DOM marker，而恢复后的字节精确快照按设计使用历史 `data-codex-plus-dream-surface` 标记喵~
+- 已将前端契约改为明确验证第三方快照的历史 DOM marker，并写下注释说明该资源不得原地重品牌；产品自己的 Alunixa X runtime、UI 和安装资源仍继续使用新品牌标识喵~
+- 修正后的前端测试 `41/41` 通过，确保不是删除断言或绕过测试，而是同时锁定第三方快照完整性与 Alunixa X 产品品牌边界喵~
