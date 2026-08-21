@@ -856,3 +856,4 @@
 - `v1.0.1` 版本已统一写入 Cargo workspace/lock、前端 package/lock 与 Tauri 配置；CHANGELOG 详细记录窗口溢出、M 单位、字号和状态徽章修复喵~
 - 本地验收通过前端 `42/42`、TypeScript、Vite 生产构建、i18n plain `847/847` 与 template `80/80`、品牌保护、Rust formatter、数据统计专项、Windows/发行契约 `23/23` 和 `cargo check --workspace --all-targets`；只使用隔离页面与 mock 数据，未连接当前 Codex/Helper/CDP喵~
 - `v1.0.1` 修复提交 `6640c031e0770cbe350c612dc40889f7af0a09e2` 的权威主分支 Actions `32501728927` 全部成功：Windows 品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 和上传均完成，macOS x64/arm64 的前端、release 二进制、DMG、结构验证和上传也均成功喵~
+- `v1.0.1` 已完成本地与 GitHub Actions 验收，准备创建正式标签和 Release；版本包含紧凑窗口单列响应、长文本换行、Token M 数显示、频率百分比保留、字号放大和 `1179×820` 精确视口回归喵~
