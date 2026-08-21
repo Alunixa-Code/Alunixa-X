@@ -6129,3 +6129,328 @@ body {
   .token-mix-chart { grid-template-columns: 1fr; }
   .token-mix-chart > .usage-chart-label { grid-column: auto; }
 }
+
+/* ========================================================================== */
+/* Alunixa X v1.0.1 — compact-window readability and overflow repair          */
+/* ========================================================================== */
+
+:root {
+  font-size: 15px;
+}
+
+.brand-title {
+  font-size: 15px;
+}
+
+.brand-subtitle {
+  font-size: 9px;
+}
+
+.nav-item {
+  font-size: 14px;
+}
+
+.topbar h1 {
+  font-size: 22px;
+}
+
+.topbar p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.panel-head {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  min-width: 0;
+  row-gap: 5px;
+}
+
+.panel-head h3 {
+  flex: 0 0 auto;
+  min-width: 0;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.panel-head p {
+  flex: 1 1 240px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: right;
+  word-break: break-word;
+}
+
+.overview-grid,
+.overview-grid > *,
+.ax-status-panel,
+.ax-launch-panel,
+.health-grid,
+.health-item,
+.health-item > div,
+.metric-list,
+.metric-list > div,
+.metric-list strong {
+  min-width: 0;
+}
+
+.health-item {
+  align-items: start;
+  padding: 14px;
+}
+
+.health-item strong {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.health-item span {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.ax-status-panel .health-grid {
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+}
+
+.ax-status-panel .health-item > :last-child {
+  grid-column: 2;
+  justify-self: start;
+  display: inline-flex;
+  max-width: none;
+  width: max-content;
+  white-space: nowrap;
+  writing-mode: horizontal-tb;
+  word-break: keep-all;
+}
+
+.metric-list div {
+  grid-template-columns: 88px minmax(0, 1fr);
+}
+
+.metric-list span {
+  font-size: 13px;
+}
+
+.metric-list strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.latest-launch-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.latest-launch-metrics > div {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+
+.latest-launch-status,
+.latest-launch-message,
+.latest-launch-time {
+  grid-column: 1 / -1;
+}
+
+.ax-runtime-note {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.rail-node-index {
+  font-size: 10px;
+}
+
+.rail-node-copy span {
+  font-size: 11px;
+}
+
+.rail-node-copy strong {
+  font-size: 13px;
+}
+
+.agent-rail-head > div > span,
+.usage-intelligence-head > div:first-child > span {
+  font-size: 11px;
+}
+
+.agent-rail-head h3,
+.usage-intelligence-head h3 {
+  font-size: 17px;
+}
+
+.usage-intelligence-head p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.usage-total span,
+.usage-total small {
+  font-size: 12px;
+}
+
+.usage-total strong {
+  font-size: 27px;
+}
+
+.usage-chart-grid {
+  grid-template-columns: 170px 170px minmax(300px, 1.2fr) minmax(250px, 0.8fr);
+  gap: 14px;
+}
+
+.usage-donut-card,
+.model-frequency-chart,
+.token-mix-chart {
+  padding: 16px;
+}
+
+.usage-donut-card {
+  min-height: 168px;
+  gap: 10px;
+}
+
+.usage-donut-card > small {
+  max-width: 150px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.usage-donut,
+.model-frequency-donut {
+  width: 112px;
+  height: 112px;
+}
+
+.model-frequency-donut > div {
+  width: 76px;
+  height: 76px;
+}
+
+.usage-donut strong,
+.model-frequency-donut strong {
+  font-size: 22px;
+  letter-spacing: -0.06em;
+}
+
+.usage-donut span,
+.model-frequency-donut span {
+  font-size: 11px;
+}
+
+.model-frequency-chart {
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.usage-chart-label {
+  font-size: 13px;
+}
+
+.model-frequency-legend {
+  gap: 8px;
+}
+
+.model-frequency-legend span,
+.model-frequency-legend strong,
+.model-frequency-legend small {
+  font-size: 12px;
+}
+
+.model-frequency-legend > div {
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  gap: 9px;
+}
+
+.model-frequency-legend i {
+  width: 9px;
+  height: 9px;
+}
+
+.token-mix-chart {
+  gap: 12px;
+}
+
+.token-mix-row {
+  gap: 7px;
+}
+
+.token-mix-row span,
+.token-mix-row strong {
+  font-size: 12px;
+}
+
+.token-mix-track {
+  height: 7px;
+}
+
+@media (max-width: 1320px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-chart-grid {
+    grid-template-columns: 170px 170px minmax(300px, 1fr);
+  }
+
+  .token-mix-chart {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .token-mix-chart > .usage-chart-label {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1040px) {
+  .usage-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .model-frequency-chart,
+  .token-mix-chart {
+    grid-column: 1 / -1;
+  }
+
+  .token-mix-chart {
+    grid-template-columns: 1fr;
+  }
+
+  .token-mix-chart > .usage-chart-label {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 860px) {
+  .panel-head p {
+    flex-basis: 100%;
+    text-align: left;
+  }
+
+  .usage-intelligence-head {
+    flex-wrap: wrap;
+  }
+
+  .usage-total {
+    justify-items: start;
+  }
+
+  .latest-launch-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .latest-launch-metrics > div {
+    grid-column: 1;
+  }
+}

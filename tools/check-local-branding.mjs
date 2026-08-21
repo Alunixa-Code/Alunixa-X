@@ -9,7 +9,8 @@ const hash = (file) => createHash("sha256").update(readFileSync(resolve(root, fi
 const expectedImages = new Map([
   ["assets/brand/alunixa-x-icon.png", "b5c748d7fa799065a97b31a1a9176b32bf3091ae86b73ecd6b00b09f18126650"],
   ["assets/brand/alunixa-x-social.png", "c4370972fdcde405625930f2e3423cdf354201f4375e25c4e2de1e7b3552c605"],
-  ["docs/images/alunixa-x-dashboard.png", "e0864825b2c0442d229467e31c2e1757b42e5827fec2202c03e44495acfcf81b"],
+  ["docs/images/alunixa-x-dashboard.png", "57fbfdb85d4533a2ef580f6f876763f454fd1db8aee806a7f2fce822c0bbf9e7"],
+  ["docs/images/alunixa-x-dashboard-compact-runtime.png", "cf6f01060f1dfd06e4e0320c378e340c32e8408b4c60b84f74eedcf1db8687dc"],
   ["apps/alunixa-x-manager/src-tauri/icons/icon.png", "b5c748d7fa799065a97b31a1a9176b32bf3091ae86b73ecd6b00b09f18126650"],
   ["apps/alunixa-x-manager/src-tauri/icons/icon.ico", "aa74f520d54f4aadeb264df7fa771a82a116716e98940d67e7a819eb4b4279c2"],
   ["assets/images/sponsor-alipay.jpg", "8e50166194d3e78953248b94506737156767bbfb9059d82736d04f1c5827afa2"],

@@ -3596,22 +3596,24 @@ function UsageAnalyticsPanel({ usage }: { usage: DashboardUsageResult | null }) 
         </div>
         <div className="usage-total">
           <span>{t("累计 Token")}</span>
-          <strong>{formatCompactTokenCount(usage?.totalTokens ?? 0)}</strong>
+          <strong>{formatTokenMillions(usage?.totalTokens ?? 0)}</strong>
           <small>{tf("{0} 个调用回合", [usage?.turns ?? 0])}</small>
         </div>
       </div>
       <div className="usage-chart-grid">
         <UsageDonut
           color="var(--usage-cyan)"
-          detail={`${formatCompactTokenCount(usage?.contextUsed ?? 0)} / ${formatCompactTokenCount(usage?.contextLimit ?? 0)}`}
-          label={t("Token 使用率")}
+          detail={tf("上限 {0}", [formatTokenMillions(usage?.contextLimit ?? 0)])}
+          label={t("Token 已用")}
           rate={contextRate}
+          value={formatTokenMillions(usage?.contextUsed ?? 0)}
         />
         <UsageDonut
           color="var(--usage-violet)"
-          detail={tf("缓存 {0}", [formatCompactTokenCount(usage?.cachedTokens ?? 0)])}
-          label={t("缓存命中率")}
+          detail={tf("输入 {0}", [formatTokenMillions(usage?.inputTokens ?? 0)])}
+          label={t("缓存命中")}
           rate={cacheRate}
+          value={formatTokenMillions(usage?.cachedTokens ?? 0)}
         />
         <div className="model-frequency-chart">
           <div className="model-frequency-donut" style={{ background: modelGradient }}>
@@ -3641,12 +3643,23 @@ function UsageAnalyticsPanel({ usage }: { usage: DashboardUsageResult | null }) 
   );
 }
 
-function UsageDonut({ label, detail, rate, color }: { label: string; detail: string; rate: number; color: string }) {
-  const percent = Math.round(rate * 100);
+function UsageDonut({
+  label,
+  detail,
+  rate,
+  color,
+  value,
+}: {
+  label: string;
+  detail: string;
+  rate: number;
+  color: string;
+  value: string;
+}) {
   return (
     <div className="usage-donut-card">
       <div className="usage-donut" style={{ "--usage-rate": rate, "--usage-color": color } as CSSProperties}>
-        <div><strong>{percent}%</strong><span>{label}</span></div>
+        <div><strong>{value}</strong><span>{label}</span></div>
       </div>
       <small>{detail}</small>
     </div>
@@ -3657,7 +3670,7 @@ function TokenMixRow({ label, value, total, color }: { label: string; value: num
   const rate = total > 0 ? Math.min(1, value / total) : 0;
   return (
     <div className="token-mix-row">
-      <div><span>{label}</span><strong>{formatCompactTokenCount(value)}</strong></div>
+      <div><span>{label}</span><strong>{formatTokenMillions(value)}</strong></div>
       <div className="token-mix-track"><i style={{ width: `${Math.max(rate * 100, value ? 3 : 0)}%`, background: color }} /></div>
     </div>
   );
@@ -3691,11 +3704,11 @@ function clampRatio(value: number) {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
-function formatCompactTokenCount(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return "0";
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
-  return String(Math.round(value));
+function formatTokenMillions(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0M";
+  const millions = value / 1_000_000;
+  const digits = millions >= 100 ? 0 : millions >= 10 ? 1 : 2;
+  return `${millions.toFixed(digits).replace(/\.0+$|(?<=\.[0-9])0$/, "")}M`;
 }
 
 function DreamSkinScreen({
@@ -8314,19 +8327,19 @@ function Badge({ status }: { status: string }) {
 function LatestLaunch({ status }: { status: LaunchStatus | null }) {
   if (!status) return <div className="empty">{t("暂无启动状态。")}</div>;
   return (
-    <div className="metric-list">
-      <Metric label={t("状态")} value={status.status} />
-      <Metric label={t("消息")} value={status.message} />
+    <div className="metric-list latest-launch-metrics">
+      <Metric className="latest-launch-status" label={t("状态")} value={status.status} />
+      <Metric className="latest-launch-message" label={t("消息")} value={status.message} />
       <Metric label="Debug" value={String(status.debug_port ?? "-")} />
       <Metric label="Helper" value={String(status.helper_port ?? "-")} />
-      <Metric label={t("时间")} value={formatTime(status.started_at_ms)} />
+      <Metric className="latest-launch-time" label={t("时间")} value={formatTime(status.started_at_ms)} />
     </div>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
+function Metric({ label, value, className = "" }: { label: string; value: string; className?: string }) {
   return (
-    <div>
+    <div className={className}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>

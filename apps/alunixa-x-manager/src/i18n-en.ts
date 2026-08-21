@@ -7,8 +7,8 @@
 export const EN_PLAIN: Record<string, string> = {
   "Token 与模型使用统计": "Token and model usage",
   "累计 Token": "Total tokens",
-  "Token 使用率": "Token usage",
-  "缓存命中率": "Cache hit rate",
+  "Token 已用": "Tokens used",
+  "缓存命中": "Cached tokens",
   "模型回合": "model turns",
   "模型使用频率": "Model frequency",
   "暂无模型使用记录": "No model usage recorded",
@@ -953,9 +953,10 @@ export const EN_PLAIN: Record<string, string> = {
 
 // Interpolated strings: tf("前缀 {0}", [x]) -> EN_TEMPLATE["前缀 {0}"] with {0} filled.
 export const EN_TEMPLATE: Record<string, string> = {
+  "上限 {0}": "Limit {0}",
+  "输入 {0}": "Input {0}",
   "基于最近 {0} 个本地会话的 rollout 记录": "Based on rollout records from the latest {0} local tasks",
   "{0} 个调用回合": "{0} invocation turns",
-  "缓存 {0}": "Cached {0}",
   "模型「{0}」存在重复路由。": "Model “{0}” has duplicate routes.",
   "模型「{0}」不能路由到当前供应商自身。": "Model “{0}” cannot route to the current provider itself.",
   "模型「{0}」的目标供应商不存在。": "The target provider for model “{0}” does not exist.",
