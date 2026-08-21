@@ -835,3 +835,11 @@
 - 集成使用统计后的主分支权威 Actions `32483993900` 全部成功：Windows 完成品牌保护、前端 `42/42`、TypeScript、生产构建、完整 Rust workspace tests、三项 release 二进制、NSIS、二进制/安装器上传；macOS x64/arm64 完成前端、release 二进制、DMG、包结构验证和上传喵~
 - 该成功 run 对应提交 `a4295b03a589e5b0a517bce160dba5effb07e1d2`，说明 Alunixa X 品牌迁移、Agent Rail、Usage Intelligence、Token/缓存/模型统计和三平台发行链路已在 GitHub 标准 runner 闭环喵~
 - 首次推送 `v1.0.0` 标签后未生成 Release workflow，确认原因是标签指向的发布记录提交标题包含 `[skip ci]`，GitHub 同时跳过了该提交上的 tag workflow；已删除未发布且无资产的初始标签，准备在无 skip 标记的新提交上重新创建喵~
+- `v1.0.0` 正式 Release workflow `32487601551` 全部成功：版本与品牌校验、Windows x64、macOS x64、macOS arm64、六项资产校验和 `Publish GitHub Release` 均完成；同时由 release-prep 提交触发的重复主分支 build `32487597674` 已取消，避免重复消耗喵~
+- 自动发行说明已替换为 2809 字符详细中文说明，完整记录独立品牌、AX 图标、Agent Rail、Usage Intelligence、统计隐私边界、继承功能、第三方快照边界、验证结果和安装方式喵~
+- `v1.0.0` 已核验为 latest、非草稿、非预发布，六项资产均为 `uploaded`，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.0` 喵~
+- Windows Setup 为 `20,782,335` 字节，SHA-256 `8a095b6955388123304d65f97c5e40c865aa9bcb2a5f00384676081e887b8b8a`；Windows ZIP 为 `26,509,588` 字节，SHA-256 `c9695a25f026b2fc626f575e4a76a5e76f8b505a6044c80f589c0a74f90ee678` 喵~
+- macOS x64 DMG 为 `33,551,346` 字节，SHA-256 `6586325e01454e8488bf3c8748c2bd9f3c763483e3a29c68f902fe45235e545d`；x64 ZIP 为 `28,023,649` 字节，SHA-256 `02d7260c9e3a09a571ae337f8ecd4e2491fb67ecbfb8cd36404ee67bf7329674` 喵~
+- macOS arm64 DMG 为 `32,293,481` 字节，SHA-256 `f035d550f39042c4874b00d1a106d88de063874ea197c891491e366f8dd6e787`；arm64 ZIP 为 `27,443,874` 字节，SHA-256 `73f1017278750929058faf2b2aa48078492834b98009a6f92d9abbc65bf6248c` 喵~
+- 本地 Rust `target`、前端 `node_modules`/`dist` 和 `.tmp` 已全部删除；Playwright 遗留的独立 Vite/esbuild 预览进程已按仓库命令行精确识别后停止，没有影响当前 Codex 或其他 Node 进程喵~
+- 至此新仓库、简介、Topics、README、UI、图标、使用统计、Actions、跨平台构建和首个正式 Release 全部完成喵~
