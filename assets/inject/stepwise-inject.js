@@ -264,7 +264,7 @@
         if (state.open && before !== `${state.themeMode}:${state.theme}`) renderFloat();
       })
       .catch((error) => {
-        console.warn("[Codex++ Stepwise] Failed to switch Codex theme", error);
+        console.warn("[Alunixa X Stepwise] Failed to switch Codex theme", error);
       });
   }
 
@@ -1142,7 +1142,7 @@
   }
 
   function statusLine(settings) {
-    if (settings.enabled !== true) return "Stepwise 已关闭，请在 Codex++ Manager 里开启。";
+    if (settings.enabled !== true) return "Stepwise 已关闭，请在 Alunixa X Manager 里开启。";
     if (!settings.baseUrlConfigured || !settings.model) return "Stepwise 已开启，但 Base URL 或 Model 未配置。";
     if (!settings.apiKeyConfigured) return `Stepwise 已开启，但 API Key 未配置；可填写密钥或设置 ${settings.apiKeyEnv || "环境变量"}。`;
     return `Stepwise 已开启 · ${settings.model || ""}`.replace(/\s+·\s+$/, "");
@@ -1194,7 +1194,7 @@
   }
 
   async function openManager() {
-    state.settingsStatus = "正在打开 Codex++ Manager...";
+    state.settingsStatus = "正在打开 Alunixa X Manager...";
     renderFloat();
     const payload = await bridgeCall("/manager/open", {});
     if (!isCurrentInstance()) return;

@@ -15,7 +15,7 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const appRoot = path.join(repoRoot, "apps", "codex-plus-manager");
+const appRoot = path.join(repoRoot, "apps", "alunixa-x-manager");
 const require = createRequire(path.join(appRoot, "package.json"));
 const ts = require("typescript");
 

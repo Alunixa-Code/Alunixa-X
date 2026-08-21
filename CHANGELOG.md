@@ -1,3 +1,10 @@
+## 1.0.0 - 2026-08-21
+
+- Codex++ 独立产品分支正式更名为 **Alunixa X**，仓库、应用标题、安装包、进程、Bundle ID、协议、更新源、文档和注入界面统一迁移到 `Alunixa-Code/Alunixa-X` 喵~
+- 管理器重做为 Alunixa X 深海控制面：新增 Agent Rail 运行轨道、链路就绪度、模型/工具/运行时总览、独立品牌导航和响应式桌面布局喵~
+- 新增 Alunixa X `AX` 轨道图标、横向字标和社交预览图，Windows ICO、Tauri PNG、macOS DMG 图标和 launcher 资源统一使用新视觉喵~
+- 主应用入口统一为 `Alunixa X`，后台接管入口为 `Alunixa X Launch`；二进制统一为 `alunixa-x`、`alunixa-x-manager` 和 `alunixa-x-imagegen-mcp` 喵~
+- 新仓库继续保留 CodexPlusPlus 及其他第三方代码的 AGPL、版权和兼容性说明，不把第三方商标或上游历史改写为 Alunixa X 所有喵~
 ## 1.2.66 - 2026-08-20
 
 - 新增 OpenAI 兼容全端点透明代理：除现有 Responses、Chat Completions 与模型目录特殊处理外，`/v1/**`、`/v1/v1/**`、`/codex/v1/**` 及常见无版本别名现在支持 GET、POST、PUT、PATCH、DELETE、HEAD 和 OPTIONS，不再由 helper 白名单返回“未知后端路径”喵~

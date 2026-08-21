@@ -1,86 +1,45 @@
-# Contributing to CodexPlusPlus
+# Contributing to Alunixa X
 
-Thank you for your interest in contributing to CodexPlusPlus!
+Thanks for helping improve Alunixa X.
 
-## Development Setup
+## Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Alunixa-Code/CodexPlusPlusPlus.git
-   cd CodexPlusPlusPlus
-   ```
+```powershell
+git clone https://github.com/Alunixa-Code/Alunixa-X.git
+cd Alunixa-X
 
-2. **Install Rust toolchain**
-   Ensure you have Rust 1.70+ installed:
-   ```bash
-   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-   rustc --version  # Should be 1.70+
-   ```
+cd apps/alunixa-x-manager
+npm ci
+npm test
+npm run check
+npm run vite:build
 
-3. **Build the project**
-   ```bash
-   cargo build --release
-   ```
-
-4. **Run tests**
-   ```bash
-   cargo test
-   ```
-
-## Project Structure
-
-```
-CodexPlusPlus/
-├── crates/
-│   ├── codex-plus-data/    # Data handling and provider sync
-│   └── codex-plus-core/    # Core Codex++ logic
-└── README.md               # Project documentation
+cd ../..
+cargo fmt --all -- --check
+cargo test --workspace -- --test-threads=1
 ```
 
-## Making Changes
+## Project structure
 
-1. **Create a feature branch**
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
+```text
+apps/alunixa-x-launcher     Launcher and image-generation companion
+apps/alunixa-x-manager      Tauri / React desktop control system
+crates/alunixa-x-core       Core launch, proxy, injection, and install logic
+crates/alunixa-x-data       Session and provider data workflows
+assets/brand                Product icon and brand assets
+assets/inject               Codex renderer integrations
+```
 
-2. **Make your changes**
-   - Write idiomatic Rust code
-   - Add tests for new functionality
-   - Update documentation as needed
+## Pull requests
 
-3. **Run the test suite**
-   ```bash
-   cargo test --all-features
-   cargo clippy  # Linting
-   ```
+1. Create a focused branch.
+2. Preserve unrelated behavior and compatibility contracts.
+3. Add or update tests for user-visible changes.
+4. Run frontend, Rust, branding, and formatting checks.
+5. Explain the behavior change, compatibility impact, and verification in the PR.
 
-4. **Commit your changes**
-   ```bash
-   git commit -m "feat: add your feature description"
-   ```
-
-## Code Style
-
-- Follow Rust standard formatting (`cargo fmt`)
-- Use `clippy` for linting recommendations
-- Write self-documenting code with clear variable/function names
-- Add doc comments (`///`) for public APIs
-
-## Pull Request Process
-
-1. Fork the repository
-2. Create your feature branch
-3. Make your changes with adequate tests
-4. Ensure all tests pass and clippy is clean
-5. Submit a pull request with a clear description
-
-## Reporting Issues
-
-- Use GitHub Issues for bug reports and feature requests
-- Include Rust version (`rustc --version`) and OS information
-- For bugs, provide minimal reproduction steps
+Never include real API keys, login data, prompts, session contents, or private file paths in commits or issues.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's [GNU Affero General Public License v3.0](LICENSE), using the SPDX identifier `AGPL-3.0-only`.
+Contributions are licensed under [AGPL-3.0-only](LICENSE). Existing third-party copyright and attribution notices must be preserved.

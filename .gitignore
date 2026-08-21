@@ -7,7 +7,7 @@ build/
 dist/
 target/
 node_modules/
-apps/codex-plus-manager/src-tauri/gen/
+apps/alunixa-x-manager/src-tauri/gen/
 
 .codex_asar_extract/
 .codex_asar_extract_latest/

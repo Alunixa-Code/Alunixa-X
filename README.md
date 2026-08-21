@@ -1,184 +1,125 @@
-# Codex+++
+<p align="center">
+  <img src="assets/brand/alunixa-x-icon.png" alt="Alunixa X" width="148">
+</p>
 
-上游为Codex++
-以下为大致使用教程，由++提供
+<h1 align="center">Alunixa X</h1>
+
+<p align="center"><strong>AI Agent Control System</strong></p>
+
+<p align="center">把模型、供应商、工具、自动化、连接与 Codex 桌面运行时接入同一条控制轨道。</p>
 
 <p align="center">
-  <img src="docs/images/codex-plus-plus.png" alt="Codex++ 图标" width="160">
+  中文 · <a href="README_EN.md">English</a>
 </p>
 
 <p align="center">
-  中文 | <a href="README_EN.md">English</a>
+  <img alt="Release" src="https://img.shields.io/github/v/release/Alunixa-Code/Alunixa-X">
+  <img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Alunixa-Code/Alunixa-X/pr-build.yml?branch=main">
+  <img alt="License" src="https://img.shields.io/github/license/Alunixa-Code/Alunixa-X">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2024-111827">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-43DCFF">
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/github/v/release/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="Stars" src="https://img.shields.io/github/stars/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="License" src="https://img.shields.io/github/license/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
-  <img alt="Tauri" src="https://img.shields.io/badge/tauri-2.x-24C8DB">
+  <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
-Codex++ 是面向 OpenAI Codex / ChatGPT 桌面应用的外部启动器与管理工具。它通过 Chromium DevTools Protocol 和本地辅助服务提供供应商切换、协议转换、会话管理与界面增强，不修改官方应用的 `app.asar`，也不向安装目录写入补丁文件。
+## Alunixa X 是什么
 
-## 快速使用
+Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点连接 OpenAI Codex / ChatGPT Desktop，在不替换官方应用原始渲染器和 `app.asar` 的前提下，通过外部启动器、CDP、本地 helper 与协议代理提供统一管理能力。
 
-从 [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest) 下载最新版安装包：
+它不是简单的模型切换器，也不是一套只会改配置文件的皮肤。Alunixa X 把下面这些链路放进同一个桌面界面：
 
-- Windows：`CodexPlusPlus-*-windows-x64-setup.exe`
-- macOS Intel：`CodexPlusPlus-*-macos-x64.dmg`
-- macOS Apple Silicon：`CodexPlusPlus-*-macos-arm64.dmg`
+```text
+供应商 → 模型 → 上下文 → MCP / Skills / Plugins → Codex → 桌面运行时
+```
 
-项目主页：[Alunixa-Code/CodexPlusPlusPlus](https://github.com/Alunixa-Code/CodexPlusPlusPlus)；问题反馈：[GitHub Issues](https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues)。
+## 核心能力
 
-安装后会有两个入口：
-
-- `Codex++`：静默启动官方桌面应用，并加载已保存的供应商配置与增强功能。
-- `Codex++ 管理工具`：管理供应商、模型、工具插件、会话、增强功能、脚本、更新和诊断。
-
-首次使用建议先打开管理工具，确认应用路径和运行状态，再配置供应商与增强功能，最后从 `Codex++` 入口启动。Windows 安装包会创建桌面和开始菜单快捷方式；macOS DMG 会安装 `/Applications/Codex++.app` 和 `/Applications/Codex++ 管理工具.app`。
-
-如果 Codex++ 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。
-
-<p align="center">
-  <img src="assets/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="220">
-  <img src="assets/images/sponsor-wechat.jpg" alt="微信赞赏码" width="220">
-</p>
-
-## 当前功能
-
-| 模块 | 功能 |
+| 控制面 | 能力 |
 | --- | --- |
-| 供应商配置 | 官方登录、官方登录混入 API、纯 API、聚合供应商；Responses / Chat Completions；模型测试、模型列表、Provider Doctor、cc-switch 与链接导入 |
-| 模型与上下文 | 每模型上下文窗口、自动压缩阈值、`model_catalog_json`、通用配置，以及按供应商选择 MCP、Skill 和 Plugin |
-| 会话管理 | 扫描本地会话、批量删除、Markdown 导出、Token 用量历史、Provider metadata 同步与备份 |
-| Codex 增强 | 插件市场与模型白名单、会话操作、粘贴修复、中文界面、快速启动、会话宽度与滚动恢复、服务层级控制、Goals、Stepwise、图片覆盖层 |
-| 开发工作流 | 项目移动、Upstream worktree、线程 ID、Zed Remote 项目识别与打开 |
-| 脚本与维护 | 用户脚本安装与启停、应用检测、快捷方式、Watcher、环境冲突、日志诊断、健康检查和 Release 更新 |
+| Agent Rail | 在概览页连续展示供应商、模型、工具、Codex 与本地运行时状态 |
+| 供应商网络 | 官方登录、混合 API、纯 API、聚合轮转、单模型路由、Provider Doctor |
+| 模型目录 | 每模型上下文窗口、自动压缩 Token 阈值、思考等级、图片处理方式 |
+| 全端点代理 | `/v1/**` HTTP、SSE、二进制、multipart、大文件和 Realtime WebSocket |
+| 图片工具 | 独立 `image_gen` MCP，支持生成、编辑、多图、mask 与本地结果保存 |
+| Agent 能力 | 共享终端、会话操作、导出、项目移动、Stepwise、记忆、Goals 与用户脚本 |
+| 连接中心 | Remote Control、个人微信连接、Zed Remote 与已有会话恢复 |
+| 扩展系统 | MCP、Skills、Plugins、脚本市场和 DreamSkin 主题市场 |
+| 运行维护 | 启动注入、失败关闭、Watcher、环境诊断、日志、更新与跨平台安装包 |
 
-所有界面增强都可以单独关闭。关闭“Codex 增强”总开关后，Codex++ 仍可作为供应商和启动管理工具使用。
+## 下载与安装
 
-## 供应商模式
+从 [GitHub Releases](https://github.com/Alunixa-Code/Alunixa-X/releases/latest) 下载对应平台的正式包：
 
-Codex++ 将官方登录、混入 API 和纯 API 分开保存和切换：
+- Windows：`Alunixa-X-*-windows-x64-setup.exe`
+- macOS Intel：`Alunixa-X-*-macos-x64.dmg`
+- macOS Apple Silicon：`Alunixa-X-*-macos-arm64.dmg`
 
-| 模式 | 用途 | 认证边界 |
-| --- | --- | --- |
-| 官方登录 | 只使用 ChatGPT / Codex 官方账号 | 清理自定义 provider 和 API Key，保留官方登录状态 |
-| 官方登录 + API | 保留官方账号与插件入口，模型请求走兼容 API | API Key 写入 provider bearer token，不写入纯 API 的 `auth.json` |
-| 纯 API | 不依赖官方账号，完全使用自定义 Base URL / Key | 独立保存 `config.toml` 与 API Key，不混入官方认证 |
-| 聚合供应商 | 在多个普通 API 供应商之间路由 | 支持故障转移、按会话轮转、按请求轮转和权重轮转 |
+安装后会出现两个入口：
 
-每个供应商可配置 Responses 或 Chat Completions 协议、模型列表、测试模型、User-Agent、上下文窗口、自动压缩阈值，以及该供应商启用的 MCP Server、Skill 和 Plugin。Chat Completions 可通过本地代理转换为 Codex 使用的 Responses 协议。
+- **Alunixa X**：打开主控制台，用于配置、诊断、更新和管理全部能力。
+- **Alunixa X Launch**：按照已保存配置启动并接管 Codex Desktop。
 
-每模型窗口支持 `1M`、`200K` 或纯数字。Codex++ 会生成独立 `model_catalog_json`，让 Codex 按当前模型使用对应窗口。
+首次使用建议先打开 **Alunixa X**，确认 Codex 应用路径、供应商和模型，然后点击概览页的“启动 Agent 轨道”。
 
-切换供应商时会先保存当前配置，再写入目标配置。真实 API Key 只保存在本机，请勿放入日志、截图或 issue。
+## 数据与隐私
 
-## Codex 界面增强
-
-- 会话删除、批量删除、Markdown 导出和项目移动。
-- 插件市场解锁、插件自动展开和模型白名单处理。
-- 富文本粘贴转纯文本、强制中文、启动加速和原生菜单本地化。
-- 会话宽度、滚动位置恢复、线程 ID、服务层级切换和 Goals。
-- Stepwise 下一步建议，可单独配置 API、模型、建议数量与超时。
-- Upstream worktree、Zed Remote、自定义图片覆盖层和用户脚本。
-
-依赖注入脚本的设置通常需要保存后重新启动 Codex++ 才会生效。
-
-## 自动更新与安装包
-
-Codex++ 通过 GitHub Release 发布安装包。Windows 会生成 NSIS 安装程序，macOS 会生成 Intel x64 和 Apple Silicon arm64 两个 DMG。
-
-管理工具的“关于”页可以检查并启动更新。静默启动器发现新版本时会拉起管理工具并进入更新提示。
-
-## 数据位置
+Alunixa X 默认在本机处理配置、密钥、会话索引和运行日志：
 
 - Codex 配置：`~/.codex/config.toml`
 - Codex 登录状态：`~/.codex/auth.json`
-- Codex 本地数据库：优先读取 `~/.codex/sqlite/*.db`，旧版回退到 `~/.codex/state_5.sqlite`
-- Codex++ 状态与日志：`~/.codex-session-delete/`
-- Provider 同步备份：`~/.codex/backups_state/provider-sync`
+- Alunixa X 状态：`~/.codex-session-delete/`
+- 生成图片：`$CODEX_HOME/generated_images/`
+- Provider 同步备份：`~/.codex/backups_state/provider-sync/`
 
-## 常见问题
-
-### Codex++ 菜单没出现
-
-确认从 `Codex++` 入口启动，而不是直接打开官方应用。然后在管理工具的“安装维护”和“关于”页面检查应用路径、启动状态与诊断日志。
-
-### 切换供应商后请求失败
-
-先在供应商详情中运行模型测试或 Provider Doctor，并确认协议、Base URL、Key 和测试模型匹配。纯 API 与官方混入模式使用不同的认证位置，不要手工复制两种模式的 `auth.json`。
-
-### Upstream worktree 和 Codex 原生创建有什么区别
-
-Codex++ 的 Upstream worktree 功能等价于先更新远端分支，再执行：
-
-```bash
-git worktree add -b <new-branch> <worktree-path> upstream/<base-branch>
-```
-
-这样新 worktree 从最新的远端跟踪分支开始，而不是从当前会话所在的本地 HEAD 开始。如果 Codex++ 无法安全识别当前 Codex 版本的原生 worktree 创建表单，请从 Codex++ 菜单中手动填写仓库路径、分支名、worktree 路径、remote 和 base branch。
-
-### macOS 提示无法打开或已损坏
-
-当前安装包未签名/未公证时，macOS Gatekeeper 可能拦截，出现“已损坏，无法打开”的提示：
-
-![macOS 提示 Codex++ 管理工具已损坏](docs/images/macos-damaged-warning.png)
-
-如果遇到该提示，可以在终端执行下面两条命令，解除苹果系统的安全隔离限制：
-
-```bash
-sudo xattr -rd com.apple.quarantine /Applications/Codex++\ 管理工具.app
-sudo xattr -rd com.apple.quarantine /Applications/Codex++.app
-```
-
-执行后重新打开 `Codex++` 或 `Codex++ 管理工具` 即可。
-
-### macOS Intel 能用吗
-
-可以。Release 会分别提供 `macos-x64.dmg` 和 `macos-arm64.dmg`。Intel Mac 下载 x64 包，Apple Silicon 下载 arm64 包。
+API Key 不应写入 Issue、截图或公开日志。推荐内容、匿名使用统计和 Alunixa 在线目录将在具备清晰开关与隐私说明后接入，不以采集提示词、聊天内容、文件内容或终端输出为前提。
 
 ## 开发
 
-```bash
-# 前端检查
-cd apps/codex-plus-manager
+```powershell
+cd apps/alunixa-x-manager
 npm ci
+npm test
 npm run check
 npm run vite:build
 
-# Rust 检查
 cd ../..
 cargo fmt --all -- --check
-cargo test
+cargo test --workspace -- --test-threads=1
 cargo build --release
 ```
 
-主要结构：
+主要目录如下：
 
 ```text
 apps/
-  codex-plus-launcher/          静默启动入口
-  codex-plus-manager/           Tauri 管理工具
-assets/inject/
-  renderer-inject.js            注入到 Codex 渲染端的增强脚本
+  alunixa-x-launcher/       后台启动与 image_gen companion
+  alunixa-x-manager/        Tauri / React 主控制台
 crates/
-  codex-plus-core/              启动、注入、配置、更新、安装、桥接等核心逻辑
-  codex-plus-data/              会话数据、导出、Provider 同步
-scripts/installer/
-  windows/CodexPlusPlus.nsi     Windows NSIS 安装包
-  macos/package-dmg.sh          macOS DMG 打包
+  alunixa-x-core/           启动、注入、代理、安装与配置核心
+  alunixa-x-data/           会话、导出与 Provider Sync
+assets/
+  brand/                    Alunixa X 品牌资产
+  inject/                   Codex renderer 增强脚本
+scripts/installer/          Windows NSIS 与 macOS DMG 打包
 ```
 
-## 开源协议
+## 项目与反馈
 
-Copyright (C) 2026 BigPizzaV3
+- 项目主页：https://github.com/Alunixa-Code/Alunixa-X
+- 问题反馈：https://github.com/Alunixa-Code/Alunixa-X/issues
+- 讨论区：https://github.com/Alunixa-Code/Alunixa-X/discussions
 
-CodexPlusPlus 采用 [GNU Affero General Public License v3.0](LICENSE)，SPDX 标识为 `AGPL-3.0-only`。修改并分发本项目，或通过网络提供修改后的版本时，需要按 AGPLv3 提供对应源代码。
+如果 Alunixa X 帮到了你，可以支持项目持续维护：
 
-许可证只覆盖 CodexPlusPlus 自身代码，不授予 OpenAI、ChatGPT、Codex 的商标、应用资源或其他第三方内容的权利。
+<p align="center">
+  <img src="assets/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="210">
+  <img src="assets/images/sponsor-wechat.jpg" alt="微信赞赏码" width="210">
+</p>
 
-## 兼容性说明
+## 开源与兼容性
 
-Codex++ 依赖官方桌面应用的页面结构、CDP 和本地数据格式。官方应用更新后，部分注入功能可能需要跟随适配；修改供应商配置或本地会话数据前应保留备份。
+Alunixa X 以 [GNU Affero General Public License v3.0](LICENSE) 发布，SPDX 标识为 `AGPL-3.0-only`。本项目包含从 CodexPlusPlus 及其贡献历史演进而来的代码，相关原始版权与许可证声明继续保留；Alunixa X 新增与修改部分由 Alunixa-Code 维护。
+
+Alunixa X 是独立第三方项目，不隶属于 OpenAI，也不授予 OpenAI、ChatGPT、Codex 或其他第三方商标和资源的权利。Codex Desktop 更新可能改变页面、CDP 或本地数据契约，届时相关集成功能需要跟随适配。

@@ -1,4 +1,4 @@
-// i18n codemod for codex-plus-manager.
+// i18n codemod for alunixa-x-manager.
 //
 // Wraps every Chinese (CJK) UI string in the React frontend with a translation
 // helper:
@@ -27,7 +27,7 @@ import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
-const appRoot = path.join(repoRoot, "apps", "codex-plus-manager");
+const appRoot = path.join(repoRoot, "apps", "alunixa-x-manager");
 const require = createRequire(path.join(appRoot, "package.json"));
 const ts = require("typescript");
 

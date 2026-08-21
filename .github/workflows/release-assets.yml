@@ -45,9 +45,9 @@ jobs:
           VERSION="$VERSION" node <<'NODE'
           const fs = require("fs");
           const expected = process.env.VERSION;
-          const packageJson = JSON.parse(fs.readFileSync("apps/codex-plus-manager/package.json", "utf8"));
-          const packageLock = JSON.parse(fs.readFileSync("apps/codex-plus-manager/package-lock.json", "utf8"));
-          const tauri = JSON.parse(fs.readFileSync("apps/codex-plus-manager/src-tauri/tauri.conf.json", "utf8"));
+          const packageJson = JSON.parse(fs.readFileSync("apps/alunixa-x-manager/package.json", "utf8"));
+          const packageLock = JSON.parse(fs.readFileSync("apps/alunixa-x-manager/package-lock.json", "utf8"));
+          const tauri = JSON.parse(fs.readFileSync("apps/alunixa-x-manager/src-tauri/tauri.conf.json", "utf8"));
           const actual = {
             "package.json": packageJson.version,
             "package-lock.json": packageLock.version,
@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/codex-plus-manager/package-lock.json
+          cache-dependency-path: apps/alunixa-x-manager/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -90,11 +90,11 @@ jobs:
         run: choco install nsis -y
 
       - name: Install frontend dependencies
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm ci
 
       - name: Build frontend
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
       - name: Build binaries
@@ -104,19 +104,19 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist/windows/app | Out-Null
-          Copy-Item target/release/codex-plus-plus.exe dist/windows/app/
-          Copy-Item target/release/codex-plus-imagegen-mcp.exe dist/windows/app/
-          Copy-Item target/release/codex-plus-plus-manager.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x-imagegen-mcp.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x-manager.exe dist/windows/app/
 
       - name: Build Windows assets
         shell: pwsh
         run: |
           $version = "${{ needs.verify-version.outputs.version }}"
-          Compress-Archive -Path dist/windows/app/* -DestinationPath "dist/windows/CodexPlusPlus-$version-windows-x64.zip" -Force
+          Compress-Archive -Path dist/windows/app/* -DestinationPath "dist/windows/Alunixa-X-$version-windows-x64.zip" -Force
           $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
           if (-not (Test-Path $makensis)) { $makensis = "makensis" }
           Push-Location scripts/installer/windows
-          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" CodexPlusPlus.nsi
+          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" AlunixaX.nsi
           Pop-Location
 
       - name: Upload Windows workflow artifact
@@ -153,7 +153,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/codex-plus-manager/package-lock.json
+          cache-dependency-path: apps/alunixa-x-manager/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -161,11 +161,11 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm ci
 
       - name: Build frontend
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
       - name: Build binaries
@@ -178,10 +178,10 @@ jobs:
           VERSION="${{ needs.verify-version.outputs.version }}"
           BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
           mkdir -p dist/macos/app-${{ matrix.arch }}
-          cp "target/${{ matrix.target }}/release/codex-plus-plus" "dist/macos/app-${{ matrix.arch }}/"
-          cp "target/${{ matrix.target }}/release/codex-plus-imagegen-mcp" "dist/macos/app-${{ matrix.arch }}/"
-          cp "target/${{ matrix.target }}/release/codex-plus-plus-manager" "dist/macos/app-${{ matrix.arch }}/"
-          (cd dist/macos && zip -r "CodexPlusPlus-${VERSION}-macos-${{ matrix.arch }}.zip" "app-${{ matrix.arch }}")
+          cp "target/${{ matrix.target }}/release/alunixa-x" "dist/macos/app-${{ matrix.arch }}/"
+          cp "target/${{ matrix.target }}/release/alunixa-x-imagegen-mcp" "dist/macos/app-${{ matrix.arch }}/"
+          cp "target/${{ matrix.target }}/release/alunixa-x-manager" "dist/macos/app-${{ matrix.arch }}/"
+          (cd dist/macos && zip -r "Alunixa-X-${VERSION}-macos-${{ matrix.arch }}.zip" "app-${{ matrix.arch }}")
 
       - name: Verify macOS bundle structure
         shell: bash
@@ -189,14 +189,14 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Codex++.app" "dist/macos/stage/Codex++ 管理工具.app"; do
+          for app in "dist/macos/stage/Alunixa X Launch.app" "dist/macos/stage/Alunixa X.app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
             plutil -lint "$app/Contents/Info.plist" >/dev/null
             codesign -dv "$app" >/dev/null 2>&1
           done
-          test -x "dist/macos/stage/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"
+          test -x "dist/macos/stage/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
 
       - name: Upload macOS workflow artifact
         uses: actions/upload-artifact@v4
@@ -227,12 +227,12 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.verify-version.outputs.version }}"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-windows-x64-setup.exe"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-windows-x64.zip"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-macos-x64.dmg"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-macos-x64.zip"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-macos-arm64.dmg"
-          test -f "dist/release/CodexPlusPlus-${VERSION}-macos-arm64.zip"
+          test -f "dist/release/Alunixa-X-${VERSION}-windows-x64-setup.exe"
+          test -f "dist/release/Alunixa-X-${VERSION}-windows-x64.zip"
+          test -f "dist/release/Alunixa-X-${VERSION}-macos-x64.dmg"
+          test -f "dist/release/Alunixa-X-${VERSION}-macos-x64.zip"
+          test -f "dist/release/Alunixa-X-${VERSION}-macos-arm64.dmg"
+          test -f "dist/release/Alunixa-X-${VERSION}-macos-arm64.zip"
 
       - name: Create or update GitHub Release
         env:
@@ -246,6 +246,6 @@ jobs:
             gh release create "$RELEASE_TAG" dist/release/* \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
-              --title "Codex++ ${{ needs.verify-version.outputs.version }}" \
+              --title "Alunixa X ${{ needs.verify-version.outputs.version }}" \
               --generate-notes
           fi

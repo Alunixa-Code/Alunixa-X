@@ -1,0 +1,33 @@
+[package]
+name = "alunixa-x-manager"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "alunixa_x_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "alunixa-x-manager"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait = "0.1"
+alunixa-x-core = { path = "../../../crates/alunixa-x-core" }
+alunixa-x-data = { path = "../../../crates/alunixa-x-data" }
+directories.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["protocol-asset", "custom-protocol", "tray-icon"] }
+tauri-plugin-dialog = "2"
+tokio = { workspace = true, features = ["sync"] }
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+rusqlite.workspace = true
+tempfile.workspace = true

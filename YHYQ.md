@@ -797,3 +797,16 @@
 - 已确认 `Alunixa-Code/Alunixa-X` 当前不存在，可作为新仓库名称；后续将在独立本地仓库完成迁移，不纳入旧仓库三个内容相同的 CRLF 状态噪声文件喵~
 - UI 方向确定为独立 AI Agent 桌面中枢，不仅替换文字和颜色：采用 Alunixa X 深海控制台视觉、运行轨道总览、专业默认主题和可选个性皮肤，同时保留现有功能与协议兼容喵~
 - 后续验证继续禁止启动、重启、连接或操作当前 Codex、当前任务、helper 与 CDP，只使用独立前端预览、静态测试、本地自动化测试和 GitHub Actions喵~
+
+## 2026-08-21 · Alunixa X 独立产品
+
+- 用户正式确定产品名为 `Alunixa X`，要求在 `Alunixa-Code` 组织中新建独立仓库，完整修改 UI、图标、名称、应用标识、仓库介绍及所有用户可见品牌位置，并先制作可查看版本喵~
+- 已创建公开 GitHub 仓库 `Alunixa-Code/Alunixa-X`，简介为跨平台 AI Agent 桌面控制中心；旧 `CodexPlusPlusPlus` 仓库保持不变，新仓库从其 `v1.2.66` 稳定代码历史独立演进喵~
+- 已建立修改前提交 `9ae773a`，随后将 workspace、四个 Cargo package、前端 package、Tauri 应用、二进制、安装脚本、工作流、仓库链接和更新源统一迁移到 `Alunixa X / alunixa-x / Alunixa-Code/Alunixa-X`，产品版本重置为 `1.0.0` 喵~
+- 主应用入口定为 `Alunixa X`，后台接管入口定为 `Alunixa X Launch`；Windows/macOS 名称、Bundle ID、安装目录、卸载项、进程和发行资产均按独立产品规划调整，同时保留旧 `codexplusplus://` 链接的只读兼容入口喵~
+- 已生成原创 `AX` 运行轨道图标、横向字标和社交预览图；Windows ICO、Tauri PNG、launcher 资源和 macOS 打包图标统一替换，新图标/社交图的 SHA-256 已纳入品牌保护脚本喵~
+- 管理器默认 UI 重做为“深海控制面”：侧栏采用 ALUNIXA X 标识，顶部增加 Control Surface 信息层，概览新增 Agent Rail、链路就绪度、供应商/模型/工具/Codex/Runtime 连续轨道、系统检查和运行状态卡喵~
+- README 中英文、CONTRIBUTING、CHANGELOG、GitHub Issue/Discussion 链接和品牌保护均已按独立产品重写，同时依法保留 CodexPlusPlus 与其他第三方代码的 AGPL 和原始版权归属说明喵~
+- 前端阶段验证通过：`41/41` 合约测试、TypeScript、i18n plain `836/836`、template `76/76`、品牌保护和 Vite 生产构建成功；产物 JS `590.73 kB`、gzip `180.73 kB`，只有既有单 chunk 大小提示喵~
+- Rust `cargo check --workspace --all-targets` 通过，当前尚未执行完整 workspace 测试、安装包构建、UI 截图验收或 GitHub Actions/Release，这些将在下一阶段继续完成喵~
+- 全过程没有启动、重启、连接或操作当前 Codex、当前任务、helper 或 CDP，UI 验收将使用独立 Vite/Playwright 页面，不触碰现有服务喵~

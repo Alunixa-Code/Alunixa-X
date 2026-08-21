@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-  "crates/codex-plus-core",
-  "crates/codex-plus-data",
-  "apps/codex-plus-launcher",
-  "apps/codex-plus-manager/src-tauri",
+  "crates/alunixa-x-core",
+  "crates/alunixa-x-data",
+  "apps/alunixa-x-launcher",
+  "apps/alunixa-x-manager/src-tauri",
 ]
 
 [workspace.package]
-version = "1.2.66"
+version = "1.0.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-repository = "https://github.com/Alunixa-Code/CodexPlusPlusPlus"
+repository = "https://github.com/Alunixa-Code/Alunixa-X"
 
 [workspace.dependencies]
 aes-gcm = "0.10"

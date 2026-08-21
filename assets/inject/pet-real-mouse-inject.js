@@ -1,6 +1,6 @@
 (() => {
   const runtimeVersion = "4";
-  const existing = window.__codexPlusPetRealMouseLook;
+  const existing = window.__alunixaXPetRealMouseLook;
   if (existing?.version === runtimeVersion && existing?.isReady?.()) return;
   existing?.stop?.();
 
@@ -191,8 +191,8 @@
     document.removeEventListener("lostpointercapture", onPointerUp, true);
     window.removeEventListener("blur", onPointerUp);
     unsubscribe?.();
-    if (window.__codexPlusPetRealMouseLook?.version === runtimeVersion) {
-      delete window.__codexPlusPetRealMouseLook;
+    if (window.__alunixaXPetRealMouseLook?.version === runtimeVersion) {
+      delete window.__alunixaXPetRealMouseLook;
     }
   }
 
@@ -217,5 +217,5 @@
       return true;
     },
   };
-  window.__codexPlusPetRealMouseLook = runtime;
+  window.__alunixaXPetRealMouseLook = runtime;
 })();

@@ -1,6 +1,6 @@
 (() => {
-  const codexPlusIsNodeTestHarness = typeof process === "object" && !!process.versions?.node;
-  const codexPlusIsSupportedMainDocument = (() => {
+  const alunixaXIsNodeTestHarness = typeof process === "object" && !!process.versions?.node;
+  const alunixaXIsSupportedMainDocument = (() => {
     try {
       const url = new URL(window.location.href);
       return (url.protocol === "app:" && url.hostname === "-" && /^\/index\.html$/i.test(url.pathname))
@@ -9,19 +9,19 @@
       return false;
     }
   })();
-  if (!codexPlusIsNodeTestHarness && (
+  if (!alunixaXIsNodeTestHarness && (
     window.top !== window
     || window.self !== window
     || !window.electronBridge
-    || !codexPlusIsSupportedMainDocument
+    || !alunixaXIsSupportedMainDocument
   )) return;
-  const codexPlusIsWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent || "");
+  const alunixaXIsWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent || "");
 
-  function installCodexPlusFastStartup() {
-    const config = window.__CODEX_PLUS_FAST_STARTUP__;
+  function installAlunixaXFastStartup() {
+    const config = window.__ALUNIXA_X_FAST_STARTUP__;
     if (!config || config.enabled !== true) return;
-    if (window.__codexPlusFastStartupInstalled === "1") return;
-    window.__codexPlusFastStartupInstalled = "1";
+    if (window.__alunixaXFastStartupInstalled === "1") return;
+    window.__alunixaXFastStartupInstalled = "1";
     const timeoutMs = Math.max(100, Math.min(Number(config.statsigTimeoutMs) || 800, 3000));
     const statsigHosts = new Set([
       "ab.chatgpt.com",
@@ -53,7 +53,7 @@
     };
 
     const patchFetch = () => {
-      if (typeof window.fetch !== "function" || window.fetch.__codexPlusFastStartupPatched) return;
+      if (typeof window.fetch !== "function" || window.fetch.__alunixaXFastStartupPatched) return;
       const originalFetch = window.fetch.bind(window);
       const patchedFetch = (input, init = undefined) => {
         if (!isStatsigUrl(input)) return originalFetch(input, init);
@@ -61,13 +61,13 @@
         const nextInit = { ...(init || {}), signal };
         return originalFetch(input, nextInit).finally(clear);
       };
-      patchedFetch.__codexPlusFastStartupPatched = true;
+      patchedFetch.__alunixaXFastStartupPatched = true;
       window.fetch = patchedFetch;
     };
 
     const markStatsigReady = (client) => {
-      if (!client || typeof client !== "object" || client.__codexPlusFastStartupReadyPatched) return;
-      client.__codexPlusFastStartupReadyPatched = true;
+      if (!client || typeof client !== "object" || client.__alunixaXFastStartupReadyPatched) return;
+      client.__alunixaXFastStartupReadyPatched = true;
       const markReady = () => {
         try {
           if (client.loadingStatus && client.loadingStatus !== "Ready") client.loadingStatus = "Ready";
@@ -108,17 +108,17 @@
     }, 50);
   }
 
-  function installCodexPlusForceChineseLocale() {
-    const config = window.__CODEX_PLUS_FORCE_CHINESE_LOCALE__;
+  function installAlunixaXForceChineseLocale() {
+    const config = window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__;
     if (!config) return;
     const enabled = config.enabled === true;
     const locale = typeof config.locale === "string" && config.locale ? config.locale : "zh-CN";
     const installationKey = `2:${enabled ? "on" : "off"}:${locale}`;
-    if (window.__codexPlusForceChineseLocaleInstalled === installationKey) return;
-    window.__codexPlusForceChineseLocaleInstalled = installationKey;
+    if (window.__alunixaXForceChineseLocaleInstalled === installationKey) return;
+    window.__alunixaXForceChineseLocaleInstalled = installationKey;
     const languages = [locale, "zh", "en-US", "en"];
-    const managedLocaleStorageKey = "codexPlus.forceChineseLocale.managed.v1";
-    const localeReloadStorageKey = "codexPlus.forceChineseLocale.reload.v1";
+    const managedLocaleStorageKey = "alunixaX.forceChineseLocale.managed.v1";
+    const localeReloadStorageKey = "alunixaX.forceChineseLocale.reload.v1";
 
     const readManagedLocale = () => {
       try {
@@ -160,7 +160,7 @@
     const callCodexSettingApi = (bridge, method, params) => new Promise((resolve, reject) => {
       const requestId = typeof crypto?.randomUUID === "function"
         ? crypto.randomUUID()
-        : `codex-plus-locale-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        : `alunixa-x-locale-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       let timeout;
       const cleanup = () => {
         window.clearTimeout(timeout);
@@ -285,14 +285,14 @@
         dynamicConfig.value = nextValue;
       } catch {
       }
-      if (typeof dynamicConfig.get === "function" && !dynamicConfig.__codexPlusForceChineseLocaleGetPatched) {
+      if (typeof dynamicConfig.get === "function" && !dynamicConfig.__alunixaXForceChineseLocaleGetPatched) {
         const originalGet = dynamicConfig.get.bind(dynamicConfig);
         dynamicConfig.get = (key, fallback) => {
           if (key === "enable_i18n") return true;
           if (key === "locale_source") return "SYSTEM";
           return originalGet(key, fallback);
         };
-        dynamicConfig.__codexPlusForceChineseLocaleGetPatched = true;
+        dynamicConfig.__alunixaXForceChineseLocaleGetPatched = true;
       }
       return dynamicConfig;
     };
@@ -308,13 +308,13 @@
     const patchStatsigClient = (client) => {
       if (!client || typeof client !== "object") return;
       if (typeof client.getDynamicConfig !== "function") return;
-      if (!client.__codexPlusForceChineseLocalePatched) {
+      if (!client.__alunixaXForceChineseLocalePatched) {
         const originalGetDynamicConfig = client.getDynamicConfig.bind(client);
         client.getDynamicConfig = (name, options) => {
           const result = originalGetDynamicConfig(name, options);
           return name === "72216192" ? patchI18nConfig(result) : result;
         };
-        client.__codexPlusForceChineseLocalePatched = true;
+        client.__alunixaXForceChineseLocalePatched = true;
       }
       try {
         patchI18nConfig(client.getDynamicConfig("72216192", { disableExposureLog: true }));
@@ -323,8 +323,8 @@
     };
 
     const patchStatsigRoot = (root) => {
-      if (!root || typeof root !== "object" || root.__codexPlusForceChineseLocaleRootPatched) return;
-      root.__codexPlusForceChineseLocaleRootPatched = true;
+      if (!root || typeof root !== "object" || root.__alunixaXForceChineseLocaleRootPatched) return;
+      root.__alunixaXForceChineseLocaleRootPatched = true;
       ["firstInstance", "instance"].forEach((key) => {
         let current;
         try {
@@ -384,8 +384,8 @@
     }, 50);
   }
 
-  installCodexPlusFastStartup();
-  installCodexPlusForceChineseLocale();
+  installAlunixaXFastStartup();
+  installAlunixaXForceChineseLocale();
 
   const helperBase = window.__CODEX_SESSION_DELETE_HELPER__ || "http://127.0.0.1:57321";
   const buttonClass = "codex-delete-button";
@@ -401,7 +401,7 @@
   const conversationViewMinWidth = 320;
   const conversationViewMaxAllowedWidth = 4000;
   const conversationViewDefaultWidth = 900;
-  const conversationViewLegacyWidthKey = "codexPlus.threadCenter.maxWidth";
+  const conversationViewLegacyWidthKey = "alunixaX.threadCenter.maxWidth";
   const subAgentMinThreads = 3;
   const subAgentMaxThreads = 50;
   const subAgentDefaultThreads = 3;
@@ -426,8 +426,8 @@
   const chatsSortDbRefreshIntervalMs = 5000;
   const styleId = "codex-delete-style";
   const codexDeleteStyleVersion = "14";
-  const codexPlusMenuId = "codex-plus-menu";
-  const codexPlusMenuFloatingClass = "codex-plus-menu-floating";
+  const alunixaXMenuId = "alunixa-x-menu";
+  const alunixaXMenuFloatingClass = "alunixa-x-menu-floating";
   const codexDeleteVersion = "7";
   const codexExportVersion = "1";
   const codexProjectMoveVersion = "1";
@@ -481,9 +481,9 @@
     ["Copy session id", "复制会话 ID"],
     ["Copy working directory", "复制工作目录"],
   ]);
-  let codexPlusVersion = window.__CODEX_PLUS_VERSION__ || "unknown";
-  const codexPlusBuild = window.__CODEX_PLUS_BUILD__ || "unknown";
-  const codexPlusSettingsKey = "codexPlusSettings";
+  let alunixaXVersion = window.__ALUNIXA_X_VERSION__ || "unknown";
+  const alunixaXBuild = window.__ALUNIXA_X_BUILD__ || "unknown";
+  const alunixaXSettingsKey = "alunixaXSettings";
   const codexThreadScrollKey = "codexThreadScroll";
   const codexThreadServiceTierKey = "codexThreadServiceTierOverrides";
   const codexThreadServiceTierMaxEntries = 120;
@@ -494,8 +494,8 @@
   const codexModelJsonResponsePatchVersion = "2";
   const codexModelMessagePatchVersion = "2";
   const codexStatsigModelPatchVersion = "2";
-  window.__codexPlusDynamicModelPatchGeneration =
-    Number(window.__codexPlusDynamicModelPatchGeneration || 0) + 1;
+  window.__alunixaXDynamicModelPatchGeneration =
+    Number(window.__alunixaXDynamicModelPatchGeneration || 0) + 1;
   const codexDynamicModelPatchInstance =
     [
       codexServiceTierRequestOverrideVersion,
@@ -503,7 +503,7 @@
       codexModelJsonResponsePatchVersion,
       codexModelMessagePatchVersion,
       codexStatsigModelPatchVersion,
-      window.__codexPlusDynamicModelPatchGeneration,
+      window.__alunixaXDynamicModelPatchGeneration,
     ].join(":");
   const codexPluginMarketplaceUnlockVersion = "15";
   const codexPluginAutoExpandVersion = "1";
@@ -521,7 +521,7 @@
   const codexProjectlessMainWindowVersion = "5";
   const codexProjectlessMainWindowSetting = { key: "hotkey-window-projectless-default-enabled", default: false };
   const codexProjectlessMainWindowRetryDelaysMs = [0, 250, 750, 1500, 3000];
-  const codexPlusImageOverlayId = "codex-plus-image-overlay";
+  const alunixaXImageOverlayId = "alunixa-x-image-overlay";
   window.__codexProjectMoveRuntimeId = (window.__codexProjectMoveRuntimeId || 0) + 1;
   const codexProjectMoveRuntimeId = window.__codexProjectMoveRuntimeId;
   clearTimeout(window.__codexProjectMoveProjectionTimer);
@@ -536,15 +536,15 @@
   window.__codexThreadScrollSyncTimers = [];
   window.__codexThreadScrollRestoreRevision = (window.__codexThreadScrollRestoreRevision || 0) + 1;
 
-  function installCodexPlusImageOverlay() {
-    const config = window.__CODEX_PLUS_IMAGE_OVERLAY__ || {};
+  function installAlunixaXImageOverlay() {
+    const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
     const canQueryById = typeof document?.getElementById === "function";
-    const existing = canQueryById ? document.getElementById(codexPlusImageOverlayId) : null;
+    const existing = canQueryById ? document.getElementById(alunixaXImageOverlayId) : null;
     const source = config.dataUrl || "";
     if (!config.enabled || !source) {
-      if (window.__codexPlusImageOverlayBlobUrl) {
-        URL.revokeObjectURL(window.__codexPlusImageOverlayBlobUrl);
-        window.__codexPlusImageOverlayBlobUrl = "";
+      if (window.__alunixaXImageOverlayBlobUrl) {
+        URL.revokeObjectURL(window.__alunixaXImageOverlayBlobUrl);
+        window.__alunixaXImageOverlayBlobUrl = "";
       }
       if (existing) existing.remove();
       return;
@@ -566,7 +566,7 @@
     }[fitMode];
     const overlay = existing?.tagName === "DIV" ? existing : document.createElement("div");
     if (existing && existing !== overlay) existing.remove();
-    overlay.id = codexPlusImageOverlayId;
+    overlay.id = alunixaXImageOverlayId;
     overlay.setAttribute("aria-hidden", "true");
     Object.assign(overlay.style, {
       position: "fixed",
@@ -583,23 +583,23 @@
       userSelect: "none",
     });
     if (!overlay.parentElement) root.appendChild(overlay);
-    sendCodexPlusDiagnostic("image_overlay_installed", {
+    sendAlunixaXDiagnostic("image_overlay_installed", {
       opacity,
       fitMode,
       sourceKind: source.startsWith("data:") ? "data-uri" : "unknown",
     });
   }
 
-  function scheduleCodexPlusImageOverlay() {
+  function scheduleAlunixaXImageOverlay() {
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", installCodexPlusImageOverlay, { once: true });
+      document.addEventListener("DOMContentLoaded", installAlunixaXImageOverlay, { once: true });
       return;
     }
-    installCodexPlusImageOverlay();
-    setTimeout(installCodexPlusImageOverlay, 250);
+    installAlunixaXImageOverlay();
+    setTimeout(installAlunixaXImageOverlay, 250);
   }
 
-  scheduleCodexPlusImageOverlay();
+  scheduleAlunixaXImageOverlay();
   window.__codexThreadScrollSyncRevision = (window.__codexThreadScrollSyncRevision || 0) + 1;
   let upstreamBranchDefaultsCache = new Map();
   const upstreamBranchDefaultsCacheTtlMs = 5000;
@@ -607,15 +607,15 @@
   let upstreamBranchDefaultsInflight = new Map();
   const upstreamProjectContextTtlMs = 10 * 60 * 1000;
   const branchWorktreePathAttribute = "data-codex-branch-worktree-path";
-  ["__codexPlusHtmlCenteredThreadWidth", "__codexPlusViewportCenteredThreadWidth", "__codexPlusBoundedThreadCenter"].forEach((key) => {
+  ["__alunixaXHtmlCenteredThreadWidth", "__alunixaXViewportCenteredThreadWidth", "__alunixaXBoundedThreadCenter"].forEach((key) => {
     try {
       window[key]?.cleanup?.();
     } catch (_) {}
   });
   try {
-    window.__codexPlusConversationViewCleanup?.();
+    window.__alunixaXConversationViewCleanup?.();
   } catch (_) {}
-  window.__codexPlusConversationViewCleanup = null;
+  window.__alunixaXConversationViewCleanup = null;
   const selectors = {
     sidebarThread: "[data-app-action-sidebar-thread-id]",
     threadTitle: "[data-thread-title]",
@@ -941,7 +941,7 @@
       /* Dark theme overrides for delete-confirm and project-move dialogs.
          Triggered either by Codex applying a "dark" class / data-theme="dark"
          on its document root, or by the OS-level prefers-color-scheme hint.
-         Palette matches the existing Codex++ dark modal (.codex-plus-modal-content). */
+         Palette matches the existing Alunixa X dark modal (.alunixa-x-modal-content). */
       html.dark .codex-delete-confirm-overlay,
       html[data-theme="dark"] .codex-delete-confirm-overlay,
       :root[data-theme="dark"] .codex-delete-confirm-overlay {
@@ -1060,13 +1060,13 @@
           color: #9ca3af;
         }
       }
-      #${codexPlusMenuId}.${codexPlusMenuFloatingClass} {
+      #${alunixaXMenuId}.${alunixaXMenuFloatingClass} {
         position: fixed;
-        top: var(--codex-plus-menu-top, 0);
-        right: var(--codex-plus-menu-right, 140px);
+        top: var(--alunixa-x-menu-top, 0);
+        right: var(--alunixa-x-menu-right, 140px);
         left: auto;
         z-index: 2147483645;
-        height: var(--codex-plus-menu-height, 30px);
+        height: var(--alunixa-x-menu-height, 30px);
         color: #d1d5db;
         font: 13px system-ui, sans-serif;
         text-align: right;
@@ -1076,7 +1076,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      #${codexPlusMenuId} {
+      #${alunixaXMenuId} {
         display: inline-flex;
         align-items: center;
         height: 100%;
@@ -1084,7 +1084,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-trigger {
+      .alunixa-x-trigger {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1100,7 +1100,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-overlay {
+      .alunixa-x-modal-overlay {
         position: fixed;
         inset: 0;
         z-index: 2147483646;
@@ -1111,7 +1111,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-content {
+      .alunixa-x-modal-content {
         width: min(520px, calc(100vw - 48px));
         max-height: min(680px, calc(100vh - 40px));
         display: flex;
@@ -1126,8 +1126,8 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-content[data-codex-plus-active-tab="support"] { width: min(820px, calc(100vw - 48px)); }
-      .codex-plus-modal-header {
+      .alunixa-x-modal-content[data-alunixa-x-active-tab="support"] { width: min(820px, calc(100vw - 48px)); }
+      .alunixa-x-modal-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -1135,12 +1135,12 @@
         flex: 0 0 auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 650; }
-      .codex-plus-backend-indicator { width: 9px; height: 9px; border-radius: 999px; background: #a1a1aa; display: inline-block; }
-      .codex-plus-backend-indicator[data-status="ok"] { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.75); }
-      .codex-plus-backend-indicator[data-status="failed"] { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.75); }
-      .codex-plus-backend-indicator[data-status="checking"] { background: #fbbf24; }
-      .codex-plus-modal-close {
+      .alunixa-x-modal-title { display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 650; }
+      .alunixa-x-backend-indicator { width: 9px; height: 9px; border-radius: 999px; background: #a1a1aa; display: inline-block; }
+      .alunixa-x-backend-indicator[data-status="ok"] { background: #34d399; box-shadow: 0 0 8px rgba(52,211,153,.75); }
+      .alunixa-x-backend-indicator[data-status="failed"] { background: #ef4444; box-shadow: 0 0 8px rgba(239,68,68,.75); }
+      .alunixa-x-backend-indicator[data-status="checking"] { background: #fbbf24; }
+      .alunixa-x-modal-close {
         border: 0;
         background: transparent;
         color: #d1d5db;
@@ -1149,7 +1149,7 @@
         pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .codex-plus-modal-body {
+      .alunixa-x-modal-body {
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
@@ -1159,16 +1159,16 @@
         scrollbar-width: thin;
         scrollbar-color: rgba(255,255,255,.28) transparent;
       }
-      .codex-plus-modal-body::-webkit-scrollbar { width: 10px; }
-      .codex-plus-modal-body::-webkit-scrollbar-track { background: transparent; }
-      .codex-plus-modal-body::-webkit-scrollbar-thumb {
+      .alunixa-x-modal-body::-webkit-scrollbar { width: 10px; }
+      .alunixa-x-modal-body::-webkit-scrollbar-track { background: transparent; }
+      .alunixa-x-modal-body::-webkit-scrollbar-thumb {
         border: 2px solid transparent;
         border-radius: 999px;
         background: rgba(255,255,255,.28);
         background-clip: padding-box;
       }
-      .codex-plus-modal-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.38); background-clip: padding-box; }
-      .codex-plus-row {
+      .alunixa-x-modal-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.38); background-clip: padding-box; }
+      .alunixa-x-row {
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
@@ -1176,11 +1176,11 @@
         padding: 10px 0;
         border-top: 1px solid rgba(255,255,255,.1);
       }
-      .codex-plus-row:first-child { border-top: 0; }
-      .codex-plus-row-title { font-weight: 550; line-height: 1.35; }
-      .codex-plus-row-description { margin-top: 2px; color: #a1a1aa; font-size: 12px; line-height: 1.4; }
-      .codex-plus-model-compat-warning { margin-top: 6px; color: #fbbf24; font-size: 12px; line-height: 1.45; }
-      .codex-plus-toggle {
+      .alunixa-x-row:first-child { border-top: 0; }
+      .alunixa-x-row-title { font-weight: 550; line-height: 1.35; }
+      .alunixa-x-row-description { margin-top: 2px; color: #a1a1aa; font-size: 12px; line-height: 1.4; }
+      .alunixa-x-model-compat-warning { margin-top: 6px; color: #fbbf24; font-size: 12px; line-height: 1.45; }
+      .alunixa-x-toggle {
         width: 42px;
         height: 24px;
         border: 0;
@@ -1188,7 +1188,7 @@
         background: #52525b;
         padding: 2px;
       }
-      .codex-plus-toggle span {
+      .alunixa-x-toggle span {
         display: block;
         width: 20px;
         height: 20px;
@@ -1196,22 +1196,22 @@
         background: white;
         transition: transform .12s ease;
       }
-      .codex-plus-toggle,
-      .codex-plus-action-button,
-      .codex-plus-issue-button,
-      .codex-plus-backend-status {
+      .alunixa-x-toggle,
+      .alunixa-x-action-button,
+      .alunixa-x-issue-button,
+      .alunixa-x-backend-status {
         flex-shrink: 0;
         align-self: center;
       }
-      .codex-plus-toggle[data-enabled="true"] { background: #10a37f; }
-      .codex-plus-toggle[data-enabled="true"] span { transform: translateX(18px); }
-      .codex-plus-toggle[data-pending="true"],
-      .codex-plus-toggle:disabled { cursor: not-allowed; opacity: .55; }
-      .codex-plus-toggle[data-relay-unneeded="true"] { width: 72px; cursor: default; background: rgba(16,163,127,.16); color: #6ee7b7; }
-      .codex-plus-toggle[data-relay-unneeded="true"] span { display: none; }
-      .codex-plus-toggle[data-relay-unneeded="true"]::after { content: "无需开启"; font-size: 12px; font-weight: 650; line-height: 1; }
-      .codex-plus-width-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 176px; align-self: center; }
-      .codex-plus-width-input {
+      .alunixa-x-toggle[data-enabled="true"] { background: #10a37f; }
+      .alunixa-x-toggle[data-enabled="true"] span { transform: translateX(18px); }
+      .alunixa-x-toggle[data-pending="true"],
+      .alunixa-x-toggle:disabled { cursor: not-allowed; opacity: .55; }
+      .alunixa-x-toggle[data-relay-unneeded="true"] { width: 72px; cursor: default; background: rgba(16,163,127,.16); color: #6ee7b7; }
+      .alunixa-x-toggle[data-relay-unneeded="true"] span { display: none; }
+      .alunixa-x-toggle[data-relay-unneeded="true"]::after { content: "无需开启"; font-size: 12px; font-weight: 650; line-height: 1; }
+      .alunixa-x-width-control { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 176px; align-self: center; }
+      .alunixa-x-width-input {
         width: 78px;
         height: 26px;
         box-sizing: border-box;
@@ -1222,9 +1222,9 @@
         font: 12px system-ui, sans-serif;
         padding: 0 8px;
       }
-      .codex-plus-width-input:disabled { opacity: .55; cursor: not-allowed; }
-      .codex-plus-number-control { display: flex; align-items: center; justify-content: flex-end; min-width: 92px; align-self: center; }
-      .codex-plus-number-input {
+      .alunixa-x-width-input:disabled { opacity: .55; cursor: not-allowed; }
+      .alunixa-x-number-control { display: flex; align-items: center; justify-content: flex-end; min-width: 92px; align-self: center; }
+      .alunixa-x-number-input {
         width: 82px;
         height: 30px;
         box-sizing: border-box;
@@ -1235,20 +1235,20 @@
         font: 600 13px system-ui, sans-serif;
         padding: 0 8px;
       }
-      .codex-plus-number-input:focus { border-color: #a855f7; outline: 2px solid rgba(168,85,247,.18); }
-      .codex-plus-number-input:disabled { opacity: .55; cursor: not-allowed; }
-      .codex-plus-restart-status { color: #fbbf24; font-size: 12px; line-height: 1.4; }
-      .codex-plus-service-tier-control { display: grid; gap: 6px; min-width: 316px; justify-items: end; align-self: center; }
-      .codex-plus-service-tier-status { color: #a1a1aa; font-size: 12px; line-height: 1.3; text-align: right; }
-      .codex-plus-service-tier-status[data-status="ok"] { color: #34d399; }
-      .codex-plus-service-tier-status[data-status="failed"] { color: #f87171; }
-      .codex-plus-service-tier-status[data-status="unsupported"] { color: #fbbf24; }
-      .codex-plus-service-tier-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-      .codex-plus-service-tier-thread-actions { opacity: .88; align-items: center; }
-      .codex-plus-service-tier-thread-label { color: #a1a1aa; font: 12px/1.2 system-ui, sans-serif; white-space: nowrap; }
-      .codex-plus-service-tier-button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 5px 8px; white-space: nowrap; }
-      .codex-plus-service-tier-button[data-active="true"] { border-color: #10a37f; background: rgba(16,163,127,.22); color: #6ee7b7; }
-      .codex-plus-service-tier-button:disabled { opacity: .55; cursor: not-allowed; }
+      .alunixa-x-number-input:focus { border-color: #a855f7; outline: 2px solid rgba(168,85,247,.18); }
+      .alunixa-x-number-input:disabled { opacity: .55; cursor: not-allowed; }
+      .alunixa-x-restart-status { color: #fbbf24; font-size: 12px; line-height: 1.4; }
+      .alunixa-x-service-tier-control { display: grid; gap: 6px; min-width: 316px; justify-items: end; align-self: center; }
+      .alunixa-x-service-tier-status { color: #a1a1aa; font-size: 12px; line-height: 1.3; text-align: right; }
+      .alunixa-x-service-tier-status[data-status="ok"] { color: #34d399; }
+      .alunixa-x-service-tier-status[data-status="failed"] { color: #f87171; }
+      .alunixa-x-service-tier-status[data-status="unsupported"] { color: #fbbf24; }
+      .alunixa-x-service-tier-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+      .alunixa-x-service-tier-thread-actions { opacity: .88; align-items: center; }
+      .alunixa-x-service-tier-thread-label { color: #a1a1aa; font: 12px/1.2 system-ui, sans-serif; white-space: nowrap; }
+      .alunixa-x-service-tier-button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 5px 8px; white-space: nowrap; }
+      .alunixa-x-service-tier-button[data-active="true"] { border-color: #10a37f; background: rgba(16,163,127,.22); color: #6ee7b7; }
+      .alunixa-x-service-tier-button:disabled { opacity: .55; cursor: not-allowed; }
       .${codexServiceTierBadgeClass} {
         display: inline-flex;
         align-items: center;
@@ -1272,19 +1272,19 @@
       .${codexServiceTierBadgeClass}[data-tier="failed"] { border-color: rgba(248,113,113,.42); background: rgba(248,113,113,.12); color: #fca5a5; }
       .${codexServiceTierBadgeClass}[data-tier="unsupported"] { border-color: rgba(251,191,36,.48); background: rgba(251,191,36,.13); color: #fbbf24; }
       .${codexServiceTierBadgeClass}[data-disabled="true"] { cursor: not-allowed; opacity: .78; }
-      .codex-plus-about { color: #a1a1aa; line-height: 1.5; }
-      .codex-plus-tabs { display: flex; gap: 8px; padding: 0 20px 6px; flex: 0 0 auto; }
-      .codex-plus-tab-button { border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: transparent; color: #d1d5db; font: 12px system-ui, sans-serif; padding: 5px 10px; }
-      .codex-plus-tab-button[data-active="true"] { background: #10a37f; color: white; border-color: #10a37f; }
-      .codex-plus-panel[hidden] { display: none; }
-      .codex-plus-action-button,
-      .codex-plus-issue-button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
-      .codex-plus-worktree-actions {
+      .alunixa-x-about { color: #a1a1aa; line-height: 1.5; }
+      .alunixa-x-tabs { display: flex; gap: 8px; padding: 0 20px 6px; flex: 0 0 auto; }
+      .alunixa-x-tab-button { border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: transparent; color: #d1d5db; font: 12px system-ui, sans-serif; padding: 5px 10px; }
+      .alunixa-x-tab-button[data-active="true"] { background: #10a37f; color: white; border-color: #10a37f; }
+      .alunixa-x-panel[hidden] { display: none; }
+      .alunixa-x-action-button,
+      .alunixa-x-issue-button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
+      .alunixa-x-worktree-actions {
         display: inline-flex;
         align-items: center;
         gap: 8px;
       }
-      .codex-plus-form-field {
+      .alunixa-x-form-field {
         display: grid;
         gap: 4px;
         margin-top: 10px;
@@ -1292,7 +1292,7 @@
         font: 12px system-ui, sans-serif;
         text-align: left;
       }
-      .codex-plus-form-field input {
+      .alunixa-x-form-field input {
         width: min(520px, 72vw);
         border: 1px solid rgba(255,255,255,.18);
         border-radius: 8px;
@@ -1301,70 +1301,70 @@
         padding: 8px 10px;
         font: 13px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
-      .codex-plus-form-message {
+      .alunixa-x-form-message {
         min-height: 18px;
         margin-top: 10px;
         color: #a1a1aa;
         font: 12px system-ui, sans-serif;
         text-align: left;
       }
-      .codex-plus-form-message[data-status="ok"] { color: #34d399; }
-      .codex-plus-form-message[data-status="failed"] { color: #f87171; }
-      .codex-plus-form-message[data-status="loading"] { color: #fbbf24; }
-      .codex-plus-backend-status { display: grid; gap: 4px; min-width: 132px; justify-items: end; }
-      .codex-plus-backend-label { color: #a1a1aa; font-size: 12px; }
-      .codex-plus-backend-label[data-status="ok"] { color: #34d399; }
-      .codex-plus-backend-label[data-status="failed"] { color: #f87171; }
-      .codex-plus-user-script-warning { margin-top: 4px; color: #fbbf24; font-size: 12px; }
-      .codex-plus-user-script-dirs { margin-top: 6px; color: #a1a1aa; font-size: 11px; line-height: 1.4; word-break: break-all; }
-      .codex-plus-user-script-list { margin-top: 8px; display: grid; gap: 6px; }
-      .codex-plus-user-script-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 6px 8px; }
-      .codex-plus-user-script-name { font-size: 12px; }
-      .codex-plus-user-script-meta { margin-top: 2px; color: #a1a1aa; font-size: 11px; }
-      .codex-plus-user-script-error { margin-top: 2px; color: #f87171; font-size: 11px; word-break: break-all; }
-      .codex-plus-user-script-actions { display: grid; justify-items: end; gap: 8px; min-width: 120px; }
-      .codex-plus-user-script-reload { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
-      .codex-plus-sponsor-text { color: #d1d5db; font-size: 13px; line-height: 1.55; margin: 4px 0 12px; }
-      .codex-plus-ad-section { display: grid; gap: 10px; margin-top: 12px; }
-      .codex-plus-ad-section:first-of-type { margin-top: 0; }
-      .codex-plus-ad-section-title { color: #f8fafc; font-size: 15px; margin: 0; }
-      .codex-plus-ad-list { display: grid; gap: 14px; }
-      .codex-plus-ad-card { border: 1px solid rgba(96,165,250,.26); border-radius: 16px; background: linear-gradient(135deg, rgba(37,99,235,.18), rgba(255,255,255,.05)); box-shadow: 0 14px 36px rgba(0,0,0,.22); }
-      .codex-plus-ad-image { display: block; width: calc(100% - 28px); aspect-ratio: 16 / 5; margin: 14px 14px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: #080808; object-fit: cover; }
-      .codex-plus-ad-content { padding: 14px; }
-      .codex-plus-ad-title { margin: 0; color: #f8fafc; font-size: 17px; line-height: 1.35; }
-      .codex-plus-ad-description { margin: 6px 0 10px; color: #dbeafe; font-size: 13px; line-height: 1.55; }
-      .codex-plus-ad-highlights { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-      .codex-plus-ad-highlights span { border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.08); color: #f3f4f6; font-size: 12px; padding: 4px 8px; }
-      .codex-plus-ad-link { display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; background: #2563eb; color: #ffffff; font-size: 13px; font-weight: 650; text-decoration: none; padding: 8px 12px; }
-      .codex-plus-ad-empty { border: 1px dashed rgba(255,255,255,.16); border-radius: 12px; color: #9ca3af; font-size: 13px; padding: 12px; text-align: center; }
-      .codex-plus-sponsor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-      .codex-plus-sponsor-card { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.04); text-align: center; }
-      .codex-plus-sponsor-card-title { color: #f3f4f6; font-size: 13px; margin-bottom: 8px; }
-      .codex-plus-sponsor-qr { display: block; width: 100%; max-width: 340px; border-radius: 8px; margin: 0 auto; background: white; }
-      html.codex-plus-performance-protection [data-testid="conversation-turn"] {
+      .alunixa-x-form-message[data-status="ok"] { color: #34d399; }
+      .alunixa-x-form-message[data-status="failed"] { color: #f87171; }
+      .alunixa-x-form-message[data-status="loading"] { color: #fbbf24; }
+      .alunixa-x-backend-status { display: grid; gap: 4px; min-width: 132px; justify-items: end; }
+      .alunixa-x-backend-label { color: #a1a1aa; font-size: 12px; }
+      .alunixa-x-backend-label[data-status="ok"] { color: #34d399; }
+      .alunixa-x-backend-label[data-status="failed"] { color: #f87171; }
+      .alunixa-x-user-script-warning { margin-top: 4px; color: #fbbf24; font-size: 12px; }
+      .alunixa-x-user-script-dirs { margin-top: 6px; color: #a1a1aa; font-size: 11px; line-height: 1.4; word-break: break-all; }
+      .alunixa-x-user-script-list { margin-top: 8px; display: grid; gap: 6px; }
+      .alunixa-x-user-script-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid rgba(255,255,255,.08); border-radius: 8px; padding: 6px 8px; }
+      .alunixa-x-user-script-name { font-size: 12px; }
+      .alunixa-x-user-script-meta { margin-top: 2px; color: #a1a1aa; font-size: 11px; }
+      .alunixa-x-user-script-error { margin-top: 2px; color: #f87171; font-size: 11px; word-break: break-all; }
+      .alunixa-x-user-script-actions { display: grid; justify-items: end; gap: 8px; min-width: 120px; }
+      .alunixa-x-user-script-reload { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; background: #3f3f46; color: #f3f4f6; font: 12px system-ui, sans-serif; padding: 6px 8px; }
+      .alunixa-x-sponsor-text { color: #d1d5db; font-size: 13px; line-height: 1.55; margin: 4px 0 12px; }
+      .alunixa-x-ad-section { display: grid; gap: 10px; margin-top: 12px; }
+      .alunixa-x-ad-section:first-of-type { margin-top: 0; }
+      .alunixa-x-ad-section-title { color: #f8fafc; font-size: 15px; margin: 0; }
+      .alunixa-x-ad-list { display: grid; gap: 14px; }
+      .alunixa-x-ad-card { border: 1px solid rgba(96,165,250,.26); border-radius: 16px; background: linear-gradient(135deg, rgba(37,99,235,.18), rgba(255,255,255,.05)); box-shadow: 0 14px 36px rgba(0,0,0,.22); }
+      .alunixa-x-ad-image { display: block; width: calc(100% - 28px); aspect-ratio: 16 / 5; margin: 14px 14px 0; border: 1px solid rgba(255,255,255,.14); border-radius: 10px; background: #080808; object-fit: cover; }
+      .alunixa-x-ad-content { padding: 14px; }
+      .alunixa-x-ad-title { margin: 0; color: #f8fafc; font-size: 17px; line-height: 1.35; }
+      .alunixa-x-ad-description { margin: 6px 0 10px; color: #dbeafe; font-size: 13px; line-height: 1.55; }
+      .alunixa-x-ad-highlights { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+      .alunixa-x-ad-highlights span { border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.08); color: #f3f4f6; font-size: 12px; padding: 4px 8px; }
+      .alunixa-x-ad-link { display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; background: #2563eb; color: #ffffff; font-size: 13px; font-weight: 650; text-decoration: none; padding: 8px 12px; }
+      .alunixa-x-ad-empty { border: 1px dashed rgba(255,255,255,.16); border-radius: 12px; color: #9ca3af; font-size: 13px; padding: 12px; text-align: center; }
+      .alunixa-x-sponsor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+      .alunixa-x-sponsor-card { border: 1px solid rgba(255,255,255,.1); border-radius: 12px; padding: 10px; background: rgba(255,255,255,.04); text-align: center; }
+      .alunixa-x-sponsor-card-title { color: #f3f4f6; font-size: 13px; margin-bottom: 8px; }
+      .alunixa-x-sponsor-qr { display: block; width: 100%; max-width: 340px; border-radius: 8px; margin: 0 auto; background: white; }
+      html.alunixa-x-performance-protection [data-testid="conversation-turn"] {
         content-visibility: auto;
         contain-intrinsic-size: auto 320px;
       }
-      html.codex-plus-performance-protection.codex-plus-thread-switching main *,
-      html.codex-plus-performance-protection.codex-plus-thread-switching .thread-scroll-container * {
+      html.alunixa-x-performance-protection.alunixa-x-thread-switching main *,
+      html.alunixa-x-performance-protection.alunixa-x-thread-switching .thread-scroll-container * {
         animation-duration: .001ms !important;
         animation-delay: 0s !important;
         transition-duration: .001ms !important;
         scroll-behavior: auto !important;
       }
-      html.codex-plus-performance-protection img[data-codex-plus-image-quarantined="true"] {
+      html.alunixa-x-performance-protection img[data-alunixa-x-image-quarantined="true"] {
         display: none !important;
       }
     `;
     document.documentElement.appendChild(style);
   }
 
-  function defaultCodexPlusSettings() {
+  function defaultAlunixaXSettings() {
     return { pluginMarketplaceUnlock: true, pluginAutoExpand: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, pasteFix: false, performanceProtection: true, projectMove: true, threadIdBadge: false, conversationView: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, zedRemoteOpen: true, upstreamWorktreeCreate: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false };
   }
 
-  const codexPlusBackendSettingMap = {
+  const alunixaXBackendSettingMap = {
     pluginMarketplaceUnlock: "codexAppPluginMarketplaceUnlock",
     pluginAutoExpand: "codexAppPluginAutoExpand",
     modelWhitelistUnlock: "codexAppModelWhitelistUnlock",
@@ -1383,21 +1383,21 @@
     pasteFix: "codexAppPasteFix",
     performanceProtection: "codexAppPerformanceProtection",
   };
-  const codexPlusBackendMappedSettings = new Set(Object.keys(codexPlusBackendSettingMap));
+  const alunixaXBackendMappedSettings = new Set(Object.keys(alunixaXBackendSettingMap));
 
-  function backendCodexPlusSettings() {
+  function backendAlunixaXSettings() {
     const settings = {};
-    Object.entries(codexPlusBackendSettingMap).forEach(([localKey, backendKey]) => {
-      if (typeof codexPlusBackendSettings[backendKey] === "boolean") {
-        settings[localKey] = codexPlusBackendSettings[backendKey];
+    Object.entries(alunixaXBackendSettingMap).forEach(([localKey, backendKey]) => {
+      if (typeof alunixaXBackendSettings[backendKey] === "boolean") {
+        settings[localKey] = alunixaXBackendSettings[backendKey];
       }
     });
     return settings;
   }
 
-  function codexPlusSettings() {
-    const relayPatchDisabled = codexPlusBackendSettings.launchMode === "relay";
-    if (codexPlusBackendSettings.enhancementsEnabled === false) {
+  function alunixaXSettings() {
+    const relayPatchDisabled = alunixaXBackendSettings.launchMode === "relay";
+    if (alunixaXBackendSettings.enhancementsEnabled === false) {
       return {
         pluginMarketplaceUnlock: false,
         pluginAutoExpand: false,
@@ -1420,14 +1420,14 @@
       };
     }
     try {
-      const settings = { ...defaultCodexPlusSettings(), ...JSON.parse(localStorage.getItem(codexPlusSettingsKey) || "{}"), ...backendCodexPlusSettings() };
+      const settings = { ...defaultAlunixaXSettings(), ...JSON.parse(localStorage.getItem(alunixaXSettingsKey) || "{}"), ...backendAlunixaXSettings() };
       if (relayPatchDisabled) {
         settings.pluginMarketplaceUnlock = false;
         settings.pluginAutoExpand = false;
       }
       return settings;
     } catch {
-      const settings = { ...defaultCodexPlusSettings(), ...backendCodexPlusSettings() };
+      const settings = { ...defaultAlunixaXSettings(), ...backendAlunixaXSettings() };
       if (relayPatchDisabled) {
         settings.pluginMarketplaceUnlock = false;
         settings.pluginAutoExpand = false;
@@ -1439,18 +1439,18 @@
   const codexPerformanceImageFailures = new Map();
 
   function codexPerformanceTransitionActive() {
-    return codexPlusSettings().performanceProtection &&
-      Number(window.__codexPlusPerformanceTransitionUntil || 0) > Date.now();
+    return alunixaXSettings().performanceProtection &&
+      Number(window.__alunixaXPerformanceTransitionUntil || 0) > Date.now();
   }
 
   function beginCodexPerformanceTransition() {
-    if (!codexPlusSettings().performanceProtection) return;
-    window.__codexPlusPerformanceTransitionUntil = Date.now() + 1400;
-    document.documentElement.classList.add("codex-plus-thread-switching");
-    clearTimeout(window.__codexPlusPerformanceTransitionTimer);
-    window.__codexPlusPerformanceTransitionTimer = setTimeout(() => {
-      document.documentElement.classList.remove("codex-plus-thread-switching");
-      window.__codexPlusPerformanceTransitionUntil = 0;
+    if (!alunixaXSettings().performanceProtection) return;
+    window.__alunixaXPerformanceTransitionUntil = Date.now() + 1400;
+    document.documentElement.classList.add("alunixa-x-thread-switching");
+    clearTimeout(window.__alunixaXPerformanceTransitionTimer);
+    window.__alunixaXPerformanceTransitionTimer = setTimeout(() => {
+      document.documentElement.classList.remove("alunixa-x-thread-switching");
+      window.__alunixaXPerformanceTransitionUntil = 0;
     }, 1400);
   }
 
@@ -1461,7 +1461,7 @@
   }
 
   function recordCodexPerformanceImageFailure(event) {
-    if (!codexPlusSettings().performanceProtection) return;
+    if (!alunixaXSettings().performanceProtection) return;
     const image = event?.target;
     if (!(image instanceof HTMLImageElement) || isExtensionUiNode(image)) return;
     const key = codexPerformanceImageKey(image);
@@ -1477,7 +1477,7 @@
     image.loading = "lazy";
     image.decoding = "async";
     if (count < 3) return;
-    image.dataset.codexPlusImageQuarantined = "true";
+    image.dataset.alunixaXImageQuarantined = "true";
     image.removeAttribute("srcset");
     image.removeAttribute("sizes");
     image.src = "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
@@ -1490,18 +1490,18 @@
   }
 
   function refreshCodexPerformanceProtection() {
-    const enabled = !!codexPlusSettings().performanceProtection;
-    document.documentElement.classList.toggle("codex-plus-performance-protection", enabled);
+    const enabled = !!alunixaXSettings().performanceProtection;
+    document.documentElement.classList.toggle("alunixa-x-performance-protection", enabled);
     if (!enabled) {
-      document.documentElement.classList.remove("codex-plus-thread-switching");
-      window.__codexPlusPerformanceTransitionUntil = 0;
+      document.documentElement.classList.remove("alunixa-x-thread-switching");
+      window.__alunixaXPerformanceTransitionUntil = 0;
     }
   }
 
   function installCodexPerformanceProtection() {
     refreshCodexPerformanceProtection();
-    if (window.__codexPlusPerformanceProtectionInstalled) return;
-    window.__codexPlusPerformanceProtectionInstalled = true;
+    if (window.__alunixaXPerformanceProtectionInstalled) return;
+    window.__alunixaXPerformanceProtectionInstalled = true;
     document.addEventListener("error", recordCodexPerformanceImageFailure, true);
     document.addEventListener("load", clearCodexPerformanceImageFailure, true);
     document.addEventListener("click", (event) => {
@@ -1511,8 +1511,8 @@
     window.addEventListener("hashchange", beginCodexPerformanceTransition);
   }
 
-  function setCodexPlusSetting(key, value) {
-    const backendKey = codexPlusBackendSettingMap[key];
+  function setAlunixaXSetting(key, value) {
+    const backendKey = alunixaXBackendSettingMap[key];
     if (backendKey) {
       if (key === "stepwise") syncStepwisePanel(value);
       void setBackendSetting(backendKey, value).then(() => {
@@ -1526,12 +1526,12 @@
     }
     let stored = {};
     try {
-      stored = JSON.parse(localStorage.getItem(codexPlusSettingsKey) || "{}");
+      stored = JSON.parse(localStorage.getItem(alunixaXSettingsKey) || "{}");
     } catch {
       stored = {};
     }
     const next = { ...stored, [key]: value };
-    localStorage.setItem(codexPlusSettingsKey, JSON.stringify(next));
+    localStorage.setItem(alunixaXSettingsKey, JSON.stringify(next));
     if (key === "threadScrollRestore" && !value) {
       clearTimeout(window.__codexThreadScrollSaveTimer);
       window.__codexThreadScrollSaveTimer = null;
@@ -1558,15 +1558,15 @@
       window.__codexPluginAutoExpandLastSignature = "";
     }
     if (key === "stepwise") syncStepwisePanel(value);
-    renderCodexPlusMenu();
+    renderAlunixaXMenu();
     scan();
   }
 
-  function syncStepwisePanel(enabled = codexPlusSettings().stepwise) {
+  function syncStepwisePanel(enabled = alunixaXSettings().stepwise) {
     try {
       window.__codexStepwisePanel?.syncSettings?.({ enabled: !!enabled });
     } catch (error) {
-      sendCodexPlusDiagnostic("stepwise_sync_failed", {
+      sendAlunixaXDiagnostic("stepwise_sync_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
@@ -1581,16 +1581,16 @@
   }
 
   function conversationViewWidth() {
-    const settingsWidth = normalizeConversationViewWidth(codexPlusSettings().conversationViewMaxWidth);
+    const settingsWidth = normalizeConversationViewWidth(alunixaXSettings().conversationViewMaxWidth);
     if (settingsWidth) return settingsWidth;
     const legacyWidth = normalizeConversationViewWidth(localStorage.getItem(conversationViewLegacyWidthKey));
     return legacyWidth || conversationViewDefaultWidth;
   }
 
   function refreshConversationViewControls() {
-    const enabled = !!codexPlusSettings().conversationView;
+    const enabled = !!alunixaXSettings().conversationView;
     const width = conversationViewWidth();
-    document.querySelectorAll("[data-codex-plus-conversation-view-width]").forEach((input) => {
+    document.querySelectorAll("[data-alunixa-x-conversation-view-width]").forEach((input) => {
       input.value = String(width);
       input.disabled = !enabled;
     });
@@ -1599,7 +1599,7 @@
   function setConversationViewWidth(value) {
     const width = normalizeConversationViewWidth(value);
     if (!width) return;
-    setCodexPlusSetting("conversationViewMaxWidth", width);
+    setAlunixaXSetting("conversationViewMaxWidth", width);
   }
 
   function normalizeSubAgentMaxThreads(value) {
@@ -1609,14 +1609,14 @@
   }
 
   function subAgentMaxThreadCount() {
-    return normalizeSubAgentMaxThreads(codexPlusBackendSettings.codexAppSubAgentMaxThreads);
+    return normalizeSubAgentMaxThreads(alunixaXBackendSettings.codexAppSubAgentMaxThreads);
   }
 
   function refreshSubAgentControls() {
     const value = subAgentMaxThreadCount();
-    document.querySelectorAll("[data-codex-plus-sub-agent-max-threads]").forEach((input) => {
+    document.querySelectorAll("[data-alunixa-x-sub-agent-max-threads]").forEach((input) => {
       input.value = String(value);
-      input.disabled = !codexPlusBackendSettingsLoaded;
+      input.disabled = !alunixaXBackendSettingsLoaded;
     });
   }
 
@@ -1624,10 +1624,10 @@
   let subAgentRestartMessage = "";
 
   function refreshSubAgentRestartControls() {
-    document.querySelectorAll("[data-codex-plus-sub-agent-restart-row]").forEach((row) => {
+    document.querySelectorAll("[data-alunixa-x-sub-agent-restart-row]").forEach((row) => {
       row.hidden = !subAgentRestartRequired;
     });
-    document.querySelectorAll("[data-codex-plus-sub-agent-restart-status]").forEach((status) => {
+    document.querySelectorAll("[data-alunixa-x-sub-agent-restart-status]").forEach((status) => {
       status.textContent = subAgentRestartMessage || "当前 Codex 需要重启后才能应用这个数量。";
     });
   }
@@ -1641,7 +1641,7 @@
       subAgentRestartMessage = "";
       refreshSubAgentRestartControls();
       showToast("Sub agent 数量保存失败", null);
-      sendCodexPlusDiagnostic("sub_agent_setting_save_failed", {
+      sendAlunixaXDiagnostic("sub_agent_setting_save_failed", {
         maxThreads: normalized,
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -1671,7 +1671,7 @@
       subAgentRestartRequired = true;
       subAgentRestartMessage = "配置已保存，但当前 Codex 未能热重载，需要重启后生效。";
       refreshSubAgentRestartControls();
-      sendCodexPlusDiagnostic("sub_agent_config_reload_failed", {
+      sendAlunixaXDiagnostic("sub_agent_config_reload_failed", {
         maxThreads: normalized,
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -1688,14 +1688,14 @@
   }
 
   async function restartCodexForPendingSettings() {
-    const button = document.querySelector("[data-codex-plus-restart-codex]");
+    const button = document.querySelector("[data-alunixa-x-restart-codex]");
     if (button) button.disabled = true;
     subAgentRestartMessage = "正在请求重启 Codex…";
     refreshSubAgentRestartControls();
     try {
-      const debugPort = Number(window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ || 0);
+      const debugPort = Number(window.__ALUNIXA_X_RUNTIME_DEBUG_PORT__ || 0);
       if (!Number.isInteger(debugPort) || debugPort <= 0) {
-        throw new Error("Codex++ runtime debug port is unavailable");
+        throw new Error("Alunixa X runtime debug port is unavailable");
       }
       await postJson("/codex/restart", {
         debugPort,
@@ -1705,20 +1705,20 @@
       refreshSubAgentRestartControls();
     } catch (error) {
       if (button) button.disabled = false;
-      subAgentRestartMessage = "重启请求失败，请在 Codex++ 管理器中重启 Codex。";
+      subAgentRestartMessage = "重启请求失败，请在 Alunixa X 管理器中重启 Codex。";
       refreshSubAgentRestartControls();
-      sendCodexPlusDiagnostic("sub_agent_restart_request_failed", {
+      sendAlunixaXDiagnostic("sub_agent_restart_request_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
     }
   }
 
-  function renderCodexPlusMenu() {
-    const settings = codexPlusSettings();
-    document.querySelectorAll(".codex-plus-toggle[data-codex-plus-setting]").forEach((button) => {
-      const key = button.getAttribute("data-codex-plus-setting");
-      const waitsForBackend = codexPlusBackendMappedSettings.has(key) && !codexPlusBackendSettingsLoaded;
+  function renderAlunixaXMenu() {
+    const settings = alunixaXSettings();
+    document.querySelectorAll(".alunixa-x-toggle[data-alunixa-x-setting]").forEach((button) => {
+      const key = button.getAttribute("data-alunixa-x-setting");
+      const waitsForBackend = alunixaXBackendMappedSettings.has(key) && !alunixaXBackendSettingsLoaded;
       button.dataset.enabled = String(!!settings[key]);
       button.dataset.pending = String(waitsForBackend);
       button.disabled = waitsForBackend || button.dataset.relayUnneeded === "true";
@@ -1729,8 +1729,8 @@
     refreshCodexServiceTierControls();
   }
 
-  let codexPlusBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads, codexAppSharedTerminal: false, codexAppSharedTerminalRetentionMinutes: 2 };
-  let codexPlusBackendSettingsSeq = 0;
+  let alunixaXBackendSettings = { providerSyncEnabled: false, enhancementsEnabled: true, launchMode: "patch", codexAppVersion: "", codexAppSubAgentMaxThreads: subAgentDefaultThreads, codexAppSharedTerminal: false, codexAppSharedTerminalRetentionMinutes: 2 };
+  let alunixaXBackendSettingsSeq = 0;
   const codexPluginLegacyEntryUnlockBeforeVersion = "26.601.2237";
   const codexPluginBridgeRequestUnlockFromVersion = "26.616.0";
   const codexPluginBroadCatalogKindsFromVersion = "26.803.0";
@@ -1759,18 +1759,18 @@
   }
 
   function codexPluginUnlockStrategy() {
-    const version = String(codexPlusBackendSettings.codexAppVersion || "").trim();
+    const version = String(alunixaXBackendSettings.codexAppVersion || "").trim();
     const comparison = compareCodexVersions(version, codexPluginLegacyEntryUnlockBeforeVersion);
     if (comparison == null) return "unknown";
     return comparison < 0 ? "legacy" : "modern";
   }
 
   function logCodexPluginUnlockStrategy(strategy) {
-    const codexAppVersion = String(codexPlusBackendSettings.codexAppVersion || "").trim();
+    const codexAppVersion = String(alunixaXBackendSettings.codexAppVersion || "").trim();
     const signature = `${strategy}:${codexAppVersion || "unknown"}`;
     if (window.__codexPluginUnlockStrategyLogged === signature) return;
     window.__codexPluginUnlockStrategyLogged = signature;
-    sendCodexPlusDiagnostic("plugin_unlock_strategy_selected", {
+    sendAlunixaXDiagnostic("plugin_unlock_strategy_selected", {
       strategy,
       codexAppVersion,
       cutoff: codexPluginLegacyEntryUnlockBeforeVersion,
@@ -1780,19 +1780,19 @@
   function codexPluginMarketplaceRequestPatchStrategy() {
     const pluginStrategy = codexPluginUnlockStrategy();
     if (pluginStrategy === "legacy") return "none";
-    const version = String(codexPlusBackendSettings.codexAppVersion || "").trim();
+    const version = String(alunixaXBackendSettings.codexAppVersion || "").trim();
     const comparison = compareCodexVersions(version, codexPluginBridgeRequestUnlockFromVersion);
     if (comparison == null) return "unknown";
     return comparison >= 0 ? "bridge" : "client";
   }
 
   function codexPluginUsesBroadCatalogKinds() {
-    const version = String(codexPlusBackendSettings.codexAppVersion || "").trim();
+    const version = String(alunixaXBackendSettings.codexAppVersion || "").trim();
     const comparison = compareCodexVersions(version, codexPluginBroadCatalogKindsFromVersion);
     return comparison != null && comparison >= 0;
   }
 
-  let codexPlusBackendSettingsLoaded = false;
+  let alunixaXBackendSettingsLoaded = false;
   let codexServiceTierState = {
     status: "loading",
     serviceTier: null,
@@ -2312,7 +2312,7 @@
   }
 
   function setCodexServiceTierControlMode(mode) {
-    if (codexPlusBackendStatus.status !== "ok") {
+    if (alunixaXBackendStatus.status !== "ok") {
       showToast("后端未连接，无法切换服务模式", null);
       refreshCodexServiceTierControls();
       return;
@@ -2348,7 +2348,7 @@
   }
 
   function syncCodexServiceTierEffectiveState() {
-    if (!codexPlusSettings().serviceTierControls) {
+    if (!alunixaXSettings().serviceTierControls) {
       codexServiceTierState = {
         ...codexServiceTierState,
         activeThreadId: "",
@@ -2387,8 +2387,8 @@
   }
 
   function codexServiceTierBadgeState() {
-    if (codexPlusBackendStatus.status === "checking") return { tier: "loading", label: "...", disabled: true, title: "服务模式：正在检查后端连接" };
-    if (codexPlusBackendStatus.status && codexPlusBackendStatus.status !== "ok") return { tier: "failed", label: "未连接", disabled: true, title: "服务模式：后端未连接，无法切换" };
+    if (alunixaXBackendStatus.status === "checking") return { tier: "loading", label: "...", disabled: true, title: "服务模式：正在检查后端连接" };
+    if (alunixaXBackendStatus.status && alunixaXBackendStatus.status !== "ok") return { tier: "failed", label: "未连接", disabled: true, title: "服务模式：后端未连接，无法切换" };
     if (codexServiceTierState.status === "loading") return { tier: "loading", label: "...", title: "服务模式：正在读取" };
     if (codexServiceTierState.status === "failed") return { tier: "failed", label: "?", title: "服务模式：读取失败" };
     const fastAvailability = codexServiceTierFastAvailability();
@@ -2421,9 +2421,9 @@
 
   function refreshCodexServiceTierControls() {
     syncCodexServiceTierEffectiveState();
-    const featureEnabled = !!codexPlusSettings().serviceTierControls;
-    const backendConnected = codexPlusBackendStatus.status === "ok";
-    const backendChecking = codexPlusBackendStatus.status === "checking";
+    const featureEnabled = !!alunixaXSettings().serviceTierControls;
+    const backendConnected = alunixaXBackendStatus.status === "ok";
+    const backendChecking = alunixaXBackendStatus.status === "checking";
     if (featureEnabled && backendConnected) codexServiceTierMaybeLoadModelCatalog();
     const fastAvailability = codexServiceTierFastAvailability();
     const fastDisabled = !featureEnabled || !backendConnected || codexServiceTierState.status === "loading" || !fastAvailability.supported;
@@ -2475,7 +2475,7 @@
   }
 
   async function loadCodexServiceTierState() {
-    if (!codexPlusSettings().serviceTierControls) {
+    if (!alunixaXSettings().serviceTierControls) {
       codexServiceTierState = { ...codexServiceTierState, status: "idle", message: "未启用" };
       refreshCodexServiceTierControls();
       return;
@@ -2496,7 +2496,7 @@
         status: "failed",
         message: "读取失败",
       };
-      sendCodexPlusDiagnostic("service_tier_read_failed", {
+      sendAlunixaXDiagnostic("service_tier_read_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
@@ -2506,7 +2506,7 @@
   }
 
   function setCodexThreadServiceTierMode(mode) {
-    if (codexPlusBackendStatus.status !== "ok") {
+    if (alunixaXBackendStatus.status !== "ok") {
       showToast("后端未连接，无法切换服务模式", null);
       refreshCodexServiceTierControls();
       return;
@@ -2529,7 +2529,7 @@
   }
 
   function toggleCodexServiceTierFromBadge() {
-    if (codexPlusBackendStatus.status !== "ok") {
+    if (alunixaXBackendStatus.status !== "ok") {
       showToast("后端未连接，无法切换服务模式", null);
       refreshCodexServiceTierControls();
       return;
@@ -2565,7 +2565,7 @@
           await settingStorage.s(setting, expected);
         }
       }
-      window.__codexPlusReasoningEffortSettingsSynced = true;
+      window.__alunixaXReasoningEffortSettingsSynced = true;
       scheduleCodexModelWhitelistRefresh();
     } catch (error) {
       try {
@@ -2582,14 +2582,14 @@
             });
           }
         }
-        window.__codexPlusReasoningEffortSettingsSynced = true;
+        window.__alunixaXReasoningEffortSettingsSynced = true;
         scheduleCodexModelWhitelistRefresh();
       } catch (fallbackError) {
         if (attempt < 60) {
           setTimeout(() => void syncCodexReasoningEffortSettings(attempt + 1), 250);
           return;
         }
-        sendCodexPlusDiagnostic("reasoning_effort_settings_sync_failed", {
+        sendAlunixaXDiagnostic("reasoning_effort_settings_sync_failed", {
           errorName: fallbackError?.name || error?.name || "",
           errorMessage: fallbackError?.message || error?.message || String(fallbackError || error),
         });
@@ -2636,7 +2636,7 @@
     codexLastRecordedModelSignature = signature;
     codexLastRecordedModelAt = now;
     void postJson("/model-selection/set", { model }).catch((error) => {
-      sendCodexPlusDiagnostic("model_selection_record_failed", {
+      sendAlunixaXDiagnostic("model_selection_record_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
@@ -2665,7 +2665,7 @@
   }
 
   function codexServiceTierOverrideForRequest(method, params, threadIdHint = "") {
-    if (!codexPlusSettings().serviceTierControls) return null;
+    if (!alunixaXSettings().serviceTierControls) return null;
     if (!codexServiceTierRequestMethods().has(method) || !params || typeof params !== "object") return null;
     const state = readThreadServiceTierState();
     const controlMode = normalizeCodexServiceTierControlMode(state.mode);
@@ -2707,7 +2707,7 @@
     if (Object.prototype.hasOwnProperty.call(nextParams, "service_tier") || override.fastBlocked) {
       nextParams.service_tier = override.serviceTier;
     }
-    sendCodexPlusDiagnostic("service_tier_request_override_applied", {
+    sendAlunixaXDiagnostic("service_tier_request_override_applied", {
       method,
       threadId: override.threadId || "",
       mode: override.mode,
@@ -2720,11 +2720,11 @@
   }
 
   function codexRemoteSessionProviderNormalizationEnabled() {
-    if (!codexPlusBackendSettings.relayProfilesEnabled) return false;
-    const profiles = Array.isArray(codexPlusBackendSettings.relayProfiles)
-      ? codexPlusBackendSettings.relayProfiles
+    if (!alunixaXBackendSettings.relayProfilesEnabled) return false;
+    const profiles = Array.isArray(alunixaXBackendSettings.relayProfiles)
+      ? alunixaXBackendSettings.relayProfiles
       : [];
-    const activeId = String(codexPlusBackendSettings.activeRelayId || "");
+    const activeId = String(alunixaXBackendSettings.activeRelayId || "");
     const profile = profiles.find((item) => String(item?.id || "") === activeId);
     if (!profile) return false;
     return String(profile.relayMode || "") === "official" && !!profile.officialMixApiKey;
@@ -2765,7 +2765,7 @@
     }
     const nextParams = { ...params, modelProvider: targetProvider };
     delete nextParams.model_provider;
-    sendCodexPlusDiagnostic("remote_session_provider_override_applied", {
+    sendAlunixaXDiagnostic("remote_session_provider_override_applied", {
       method,
       from: requestedProvider || "(missing)",
       to: targetProvider,
@@ -2824,7 +2824,7 @@
 
   function requestCodexRemoteSessionRecovery(threadId, attempt) {
     const payload = { thread_id: threadId };
-    const testHook = window.__CODEX_PLUS_TEST_REMOTE_RECOVERY__;
+    const testHook = window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__;
     const request = typeof testHook === "function"
       ? Promise.resolve(testHook(payload, attempt))
       : postJson("/remote-control-session/recover", payload);
@@ -2832,7 +2832,7 @@
       if (attempt === 0
         || result?.message === "Remote Control session recovery complete"
         || result?.message === "Remote Control session catalog recovery complete") {
-        sendCodexPlusDiagnostic("remote_session_recovery_requested", {
+        sendAlunixaXDiagnostic("remote_session_recovery_requested", {
           threadId,
           attempt,
           status: result?.status || "",
@@ -2844,7 +2844,7 @@
       return result;
     }).catch((error) => {
       if (attempt === 0) {
-        sendCodexPlusDiagnostic("remote_session_recovery_failed", {
+        sendAlunixaXDiagnostic("remote_session_recovery_failed", {
           threadId,
           attempt,
           errorName: error?.name || "",
@@ -2859,8 +2859,8 @@
     if (!codexRemoteSessionProviderNormalizationEnabled()) return false;
     const normalizedThreadId = String(threadId || "").trim();
     if (!normalizedThreadId || normalizedThreadId.length > 128 || isClientNewThreadId(normalizedThreadId)) return false;
-    window.__codexPlusRemoteSessionRecoveryPending = window.__codexPlusRemoteSessionRecoveryPending || new Map();
-    const pending = window.__codexPlusRemoteSessionRecoveryPending;
+    window.__alunixaXRemoteSessionRecoveryPending = window.__alunixaXRemoteSessionRecoveryPending || new Map();
+    const pending = window.__alunixaXRemoteSessionRecoveryPending;
     if (pending.has(normalizedThreadId)) return false;
     const retryOffsets = [100, 350, 800, 1600, 3000];
     const state = { timer: 0 };
@@ -2902,12 +2902,12 @@
   }
 
   function installCodexRemoteSessionRecoveryListener() {
-    if (window.__codexPlusRemoteSessionRecoveryInstalled === codexRemoteSessionRecoveryVersion) return true;
-    if (window.__codexPlusRemoteSessionRecoveryMessageHandler) {
-      window.removeEventListener("message", window.__codexPlusRemoteSessionRecoveryMessageHandler, true);
+    if (window.__alunixaXRemoteSessionRecoveryInstalled === codexRemoteSessionRecoveryVersion) return true;
+    if (window.__alunixaXRemoteSessionRecoveryMessageHandler) {
+      window.removeEventListener("message", window.__alunixaXRemoteSessionRecoveryMessageHandler, true);
     }
-    if (window.__codexPlusRemoteSessionRecoveryViewHandler) {
-      window.removeEventListener("codex-message-from-view", window.__codexPlusRemoteSessionRecoveryViewHandler, true);
+    if (window.__alunixaXRemoteSessionRecoveryViewHandler) {
+      window.removeEventListener("codex-message-from-view", window.__alunixaXRemoteSessionRecoveryViewHandler, true);
     }
     const messageHandler = (event) => {
       if (event?.source !== window) return false;
@@ -2916,12 +2916,12 @@
       return observeCodexRemoteSessionNotification(event?.data);
     };
     const viewHandler = (event) => observeCodexRemoteSessionNotification(event?.detail);
-    window.__codexPlusRemoteSessionRecoveryMessageHandler = messageHandler;
-    window.__codexPlusRemoteSessionRecoveryViewHandler = viewHandler;
+    window.__alunixaXRemoteSessionRecoveryMessageHandler = messageHandler;
+    window.__alunixaXRemoteSessionRecoveryViewHandler = viewHandler;
     window.addEventListener("message", messageHandler, true);
     window.addEventListener("codex-message-from-view", viewHandler, true);
-    window.__codexPlusRemoteSessionRecoveryInstalled = codexRemoteSessionRecoveryVersion;
-    sendCodexPlusDiagnostic("remote_session_recovery_listener_installed", {
+    window.__alunixaXRemoteSessionRecoveryInstalled = codexRemoteSessionRecoveryVersion;
+    sendAlunixaXDiagnostic("remote_session_recovery_listener_installed", {
       version: codexRemoteSessionRecoveryVersion,
     });
     return true;
@@ -2929,13 +2929,13 @@
 
   function installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix = "") {
     if (!dispatcher || typeof dispatcher.subscribe !== "function") return false;
-    if (window.__codexPlusRemoteSessionRecoveryDispatcher === dispatcher
-        && window.__codexPlusRemoteSessionRecoveryDispatcherVersion === codexRemoteSessionRecoveryVersion) {
+    if (window.__alunixaXRemoteSessionRecoveryDispatcher === dispatcher
+        && window.__alunixaXRemoteSessionRecoveryDispatcherVersion === codexRemoteSessionRecoveryVersion) {
       return true;
     }
-    if (typeof window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe === "function") {
+    if (typeof window.__alunixaXRemoteSessionRecoveryDispatcherUnsubscribe === "function") {
       try {
-        window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe();
+        window.__alunixaXRemoteSessionRecoveryDispatcherUnsubscribe();
       } catch {
       }
     }
@@ -2956,9 +2956,9 @@
       dispatcher.subscribe("thread/started", handler),
       dispatcher.subscribe("browser-sidebar-browser-use-state", browserUseHandler),
     ];
-    window.__codexPlusRemoteSessionRecoveryDispatcher = dispatcher;
-    window.__codexPlusRemoteSessionRecoveryDispatcherHandler = handler;
-    window.__codexPlusRemoteSessionRecoveryDispatcherUnsubscribe = () => {
+    window.__alunixaXRemoteSessionRecoveryDispatcher = dispatcher;
+    window.__alunixaXRemoteSessionRecoveryDispatcherHandler = handler;
+    window.__alunixaXRemoteSessionRecoveryDispatcherUnsubscribe = () => {
       for (const unsubscribe of unsubscribers) {
         if (typeof unsubscribe !== "function") continue;
         try {
@@ -2967,8 +2967,8 @@
         }
       }
     };
-    window.__codexPlusRemoteSessionRecoveryDispatcherVersion = codexRemoteSessionRecoveryVersion;
-    sendCodexPlusDiagnostic("remote_session_dispatcher_subscription_installed", { assetPrefix });
+    window.__alunixaXRemoteSessionRecoveryDispatcherVersion = codexRemoteSessionRecoveryVersion;
+    sendAlunixaXDiagnostic("remote_session_dispatcher_subscription_installed", { assetPrefix });
     return true;
   }
 
@@ -3034,7 +3034,7 @@
     const preferredModel = codexServiceTierCurrentModelName();
     if (!preferredModel) return params;
     const requestedModel = codexServiceTierModelFromValue(params);
-    const availableModels = codexPlusModelNames();
+    const availableModels = alunixaXModelNames();
     const requestedIsCurrent = requestedModel && availableModels.some((model) => model.toLowerCase() === requestedModel.toLowerCase());
     if (requestedIsCurrent) return params;
     const next = { ...params, model: preferredModel };
@@ -3066,26 +3066,26 @@
         const { dispatcher, assetPrefix } = await loadCodexDispatcher();
         if (dispatcher.__codexServiceTierOriginalDispatchMessage) {
           dispatcher.dispatchMessage = (type, payload) => {
-            return dispatchCodexPlusMessage(dispatcher, type, payload);
+            return dispatchAlunixaXMessage(dispatcher, type, payload);
           };
           window.__codexServiceTierRequestOverrideInstalled = codexDynamicModelPatchInstance;
           installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix);
-          sendCodexPlusDiagnostic("service_tier_dispatcher_patch_upgraded", { assetPrefix });
+          sendAlunixaXDiagnostic("service_tier_dispatcher_patch_upgraded", { assetPrefix });
           return;
         }
         dispatcher.__codexServiceTierOriginalDispatchMessage = dispatcher.dispatchMessage.bind(dispatcher);
         dispatcher.dispatchMessage = (type, payload) => {
-          return dispatchCodexPlusMessage(dispatcher, type, payload);
+          return dispatchAlunixaXMessage(dispatcher, type, payload);
         };
         window.__codexServiceTierRequestOverrideInstalled = codexDynamicModelPatchInstance;
         installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix);
-        sendCodexPlusDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
+        sendAlunixaXDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
       } catch (error) {
         if (attempt < 60) {
           setTimeout(() => installCodexServiceTierDispatcherPatch(attempt + 1), 250);
           return;
         }
-        sendCodexPlusDiagnostic("service_tier_dispatcher_patch_failed", {
+        sendAlunixaXDiagnostic("service_tier_dispatcher_patch_failed", {
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
         });
@@ -3095,9 +3095,9 @@
   }
 
   const codexSharedTerminalRuntimeVersion = "3";
-  const codexSharedTerminalRecordKey = "codexPlus.sharedTerminal.records.v1";
+  const codexSharedTerminalRecordKey = "alunixaX.sharedTerminal.records.v1";
 
-  function codexSharedTerminalRetentionMs(value = codexPlusBackendSettings.codexAppSharedTerminalRetentionMinutes) {
+  function codexSharedTerminalRetentionMs(value = alunixaXBackendSettings.codexAppSharedTerminalRetentionMinutes) {
     const parsed = value == null ? Number.NaN : Number(value);
     const minutes = Number.isFinite(parsed) ? Math.trunc(parsed) : 2;
     return Math.max(0, Math.min(5, minutes)) * 60 * 1000;
@@ -3155,8 +3155,8 @@
 
   function codexSharedTerminalWrappedCommand(command, shell, startMarker, doneMarker) {
     const shellName = String(shell || "").toLowerCase();
-    if (!codexPlusIsWindowsPlatform && !shellName.includes("powershell") && !shellName.includes("pwsh")) {
-      const script = `printf '%s\\n' '${startMarker}'; ${command}; __codex_plus_exit=$?; printf '\\n%s%s\\n' '${doneMarker}' "$__codex_plus_exit"`;
+    if (!alunixaXIsWindowsPlatform && !shellName.includes("powershell") && !shellName.includes("pwsh")) {
+      const script = `printf '%s\\n' '${startMarker}'; ${command}; __alunixa_x_exit=$?; printf '\\n%s%s\\n' '${doneMarker}' "$__alunixa_x_exit"`;
       const encoded = btoa(unescape(encodeURIComponent(script)));
       return `eval "$(printf '%s' '${encoded}' | base64 -d)"`;
     }
@@ -3167,17 +3167,17 @@
       "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
       `Write-Output '${startMarker}'`,
       `& '${child}' -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '${original}'`,
-      "$__codexPlusExit = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE }",
-      `Write-Output ([Environment]::NewLine + '${doneMarker}' + $__codexPlusExit)`,
+      "$__alunixaXExit = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE }",
+      `Write-Output ([Environment]::NewLine + '${doneMarker}' + $__alunixaXExit)`,
       "exit 0",
     ].join("; ");
     return `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${codexPowerShellEncodedCommand(orchestrator)}`;
   }
 
   function installCodexSharedTerminalRuntime() {
-    const enabled = codexPlusBackendSettings.enhancementsEnabled !== false && codexPlusBackendSettings.codexAppSharedTerminal === true;
-    const retentionMinutes = codexPlusBackendSettings.codexAppSharedTerminalRetentionMinutes;
-    const existing = window.__codexPlusSharedTerminalRuntime;
+    const enabled = alunixaXBackendSettings.enhancementsEnabled !== false && alunixaXBackendSettings.codexAppSharedTerminal === true;
+    const retentionMinutes = alunixaXBackendSettings.codexAppSharedTerminalRetentionMinutes;
+    const existing = window.__alunixaXSharedTerminalRuntime;
     if (existing?.version === codexSharedTerminalRuntimeVersion) {
       existing.setEnabled(enabled);
       existing.setRetentionMinutes(retentionMinutes);
@@ -3223,21 +3223,21 @@
       const terminalManager = codexTerminalManagerFromModule(module);
       if (!terminalManager) throw new Error("Codex terminal manager unavailable");
       state.manager = terminalManager;
-      if (!terminalManager.__codexPlusSharedTerminalOriginalWrite) {
-        terminalManager.__codexPlusSharedTerminalActivityListeners = new Set();
-        terminalManager.__codexPlusSharedTerminalEventListeners = new Set();
-        terminalManager.__codexPlusSharedTerminalOriginalWrite = terminalManager.write.bind(terminalManager);
-        terminalManager.__codexPlusSharedTerminalOriginalHandleHostEvent = terminalManager.handleHostEvent.bind(terminalManager);
+      if (!terminalManager.__alunixaXSharedTerminalOriginalWrite) {
+        terminalManager.__alunixaXSharedTerminalActivityListeners = new Set();
+        terminalManager.__alunixaXSharedTerminalEventListeners = new Set();
+        terminalManager.__alunixaXSharedTerminalOriginalWrite = terminalManager.write.bind(terminalManager);
+        terminalManager.__alunixaXSharedTerminalOriginalHandleHostEvent = terminalManager.handleHostEvent.bind(terminalManager);
         terminalManager.write = (sessionId, data) => {
-          terminalManager.__codexPlusSharedTerminalActivityListeners.forEach((listener) => listener(sessionId, data));
-          return terminalManager.__codexPlusSharedTerminalOriginalWrite(sessionId, data);
+          terminalManager.__alunixaXSharedTerminalActivityListeners.forEach((listener) => listener(sessionId, data));
+          return terminalManager.__alunixaXSharedTerminalOriginalWrite(sessionId, data);
         };
         terminalManager.handleHostEvent = (event) => {
-          terminalManager.__codexPlusSharedTerminalEventListeners.forEach((listener) => listener(event));
-          return terminalManager.__codexPlusSharedTerminalOriginalHandleHostEvent(event);
+          terminalManager.__alunixaXSharedTerminalEventListeners.forEach((listener) => listener(event));
+          return terminalManager.__alunixaXSharedTerminalOriginalHandleHostEvent(event);
         };
       }
-      terminalManager.__codexPlusSharedTerminalActivityListeners.add(activityListener);
+      terminalManager.__alunixaXSharedTerminalActivityListeners.add(activityListener);
       return terminalManager;
     };
 
@@ -3348,7 +3348,7 @@
     const subscribeRecord = (terminalManager, record) => {
       unsubscribeRecord(record);
       record.unsubscribe = terminalManager.subscribeToSessionSnapshot(record.sessionId, () => handleSnapshot(record));
-      record.rawEvents = typeof terminalManager.__codexPlusSharedTerminalEventListeners?.add === "function";
+      record.rawEvents = typeof terminalManager.__alunixaXSharedTerminalEventListeners?.add === "function";
       if (record.rawEvents) {
         record.rawEventListener = (event) => {
           if (!event || event.sessionId !== record.sessionId) return;
@@ -3370,7 +3370,7 @@
           if (record.busy && event.type === "exit") void finish(record, Number(event.code) || 1, "共享终端会话已退出");
           if (record.busy && event.type === "error") void finish(record, 1, event.message || "共享终端会话失败");
         };
-        terminalManager.__codexPlusSharedTerminalEventListeners.add(record.rawEventListener);
+        terminalManager.__alunixaXSharedTerminalEventListeners.add(record.rawEventListener);
       }
       handleSnapshot(record);
     };
@@ -3378,7 +3378,7 @@
     const unsubscribeRecord = (record) => {
       record.unsubscribe?.();
       record.unsubscribe = null;
-      if (record.rawEventListener) state.manager?.__codexPlusSharedTerminalEventListeners?.delete(record.rawEventListener);
+      if (record.rawEventListener) state.manager?.__alunixaXSharedTerminalEventListeners?.delete(record.rawEventListener);
       record.rawEventListener = null;
     };
 
@@ -3404,8 +3404,8 @@
         collected: "",
         lastBuffer: "",
         lastActivityAt: Date.now(),
-        startMarker: `__CODEX_PLUS_SHARED_START_${token}__`,
-        doneMarker: `__CODEX_PLUS_SHARED_DONE_${token}__:`,
+        startMarker: `__ALUNIXA_X_SHARED_START_${token}__`,
+        doneMarker: `__ALUNIXA_X_SHARED_DONE_${token}__:`,
         heartbeatTimer: null,
         closeTimer: null,
         unsubscribe: null,
@@ -3531,7 +3531,7 @@
       }
     };
 
-    window.__codexPlusSharedTerminalRuntime = {
+    window.__alunixaXSharedTerminalRuntime = {
       version: codexSharedTerminalRuntimeVersion,
       setEnabled(value) {
         if (state.disposed) return;
@@ -3554,7 +3554,7 @@
           clearTimeout(record.closeTimer);
           unsubscribeRecord(record);
         });
-        state.manager?.__codexPlusSharedTerminalActivityListeners?.delete(activityListener);
+        state.manager?.__alunixaXSharedTerminalActivityListeners?.delete(activityListener);
       },
       state: () => ({ enabled: state.enabled, activeRequests: state.activeRequests.size, sessions: state.records.size }),
     };
@@ -3562,8 +3562,8 @@
     void poll();
   }
 
-  if (window.__CODEX_PLUS_TEST_SHARED_TERMINAL__) {
-    window.__codexPlusSharedTerminalTest = {
+  if (window.__ALUNIXA_X_TEST_SHARED_TERMINAL__) {
+    window.__alunixaXSharedTerminalTest = {
       terminalManagerFromModule: codexTerminalManagerFromModule,
       stripControls: stripCodexTerminalControls,
       bufferDelta: codexTerminalBufferDelta,
@@ -3573,25 +3573,25 @@
   }
 
   async function loadBackendSettings() {
-    const seq = codexPlusBackendSettingsSeq;
+    const seq = alunixaXBackendSettingsSeq;
     try {
       const settings = await postJson("/settings/get", {});
       if (!settings || typeof settings !== "object" || (!("launchMode" in settings) && !("enhancementsEnabled" in settings) && !("providerSyncEnabled" in settings))) {
         throw new Error("invalid backend settings response");
       }
-      if (seq !== codexPlusBackendSettingsSeq) {
+      if (seq !== alunixaXBackendSettingsSeq) {
         return false;
       }
-      codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
-      codexPlusBackendSettingsLoaded = true;
+      alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
+      alunixaXBackendSettingsLoaded = true;
       if (codexRemoteSessionProviderNormalizationEnabled()) {
         void loadCodexModelCatalog();
       }
-      refreshCodexPlusBackendToggles();
+      refreshAlunixaXBackendToggles();
       installCodexSharedTerminalRuntime();
       return true;
     } catch (_) {
-      refreshCodexPlusBackendToggles();
+      refreshAlunixaXBackendToggles();
       return false;
     }
   }
@@ -3608,53 +3608,53 @@
   }
 
   async function setBackendSetting(key, value) {
-    const seq = ++codexPlusBackendSettingsSeq;
-    codexPlusBackendSettings = { ...codexPlusBackendSettings, [key]: value };
-    codexPlusBackendSettingsLoaded = true;
-    refreshCodexPlusBackendToggles();
+    const seq = ++alunixaXBackendSettingsSeq;
+    alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
+    alunixaXBackendSettingsLoaded = true;
+    refreshAlunixaXBackendToggles();
     installCodexSharedTerminalRuntime();
     try {
       const settings = await postJson("/settings/set", { [key]: value });
-      if (seq === codexPlusBackendSettingsSeq) {
-        codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
+      if (seq === alunixaXBackendSettingsSeq) {
+        alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
       }
     } finally {
-      refreshCodexPlusBackendToggles();
+      refreshAlunixaXBackendToggles();
       installCodexSharedTerminalRuntime();
     }
   }
 
-  function refreshCodexPlusBackendToggles() {
-    document.querySelectorAll(".codex-plus-toggle[data-codex-backend-setting]").forEach((button) => {
+  function refreshAlunixaXBackendToggles() {
+    document.querySelectorAll(".alunixa-x-toggle[data-codex-backend-setting]").forEach((button) => {
       const key = button.getAttribute("data-codex-backend-setting");
-      button.dataset.enabled = String(!!codexPlusBackendSettings[key]);
+      button.dataset.enabled = String(!!alunixaXBackendSettings[key]);
     });
     syncStepwisePanel();
     refreshCodexPerformanceProtection();
-    renderCodexPlusMenu();
+    renderAlunixaXMenu();
     scan();
   }
 
-  let codexPlusUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
-  let codexPlusBackendStatus = { status: "checking", message: "正在检查后端…" };
+  let alunixaXUserScripts = { enabled: true, builtin_dir: "", user_dir: "", scripts: [] };
+  let alunixaXBackendStatus = { status: "checking", message: "正在检查后端…" };
 
-  function setCodexPlusTriggerLabel(trigger) {
+  function setAlunixaXTriggerLabel(trigger) {
     if (!trigger) return;
-    let label = trigger.querySelector("[data-codex-plus-trigger-label]");
+    let label = trigger.querySelector("[data-alunixa-x-trigger-label]");
     if (!label) {
       label = document.createElement("span");
-      label.dataset.codexPlusTriggerLabel = "true";
+      label.dataset.alunixaXTriggerLabel = "true";
       trigger.appendChild(label);
     }
-    label.textContent = `Codex++ ${codexPlusVersion}`;
+    label.textContent = `Alunixa X ${alunixaXVersion}`;
   }
 
-  function ensureCodexPlusTriggerIndicator(trigger) {
+  function ensureAlunixaXTriggerIndicator(trigger) {
     if (!trigger) return null;
     let indicator = trigger.querySelector("[data-codex-backend-indicator]");
     if (!indicator) {
       indicator = document.createElement("span");
-      indicator.className = "codex-plus-backend-indicator";
+      indicator.className = "alunixa-x-backend-indicator";
       indicator.dataset.codexBackendIndicator = "true";
       trigger.prepend(indicator);
     }
@@ -3662,18 +3662,18 @@
   }
 
   function renderBackendStatus() {
-    const status = codexPlusBackendStatus.status || "failed";
-    if (codexPlusBackendStatus.version) {
-      codexPlusVersion = codexPlusBackendStatus.version;
-      document.querySelectorAll("[data-codex-plus-version]").forEach((node) => {
-        node.textContent = `Codex++ ${codexPlusVersion}`;
+    const status = alunixaXBackendStatus.status || "failed";
+    if (alunixaXBackendStatus.version) {
+      alunixaXVersion = alunixaXBackendStatus.version;
+      document.querySelectorAll("[data-alunixa-x-version]").forEach((node) => {
+        node.textContent = `Alunixa X ${alunixaXVersion}`;
       });
-      document.querySelectorAll(`#${codexPlusMenuId} button`).forEach(setCodexPlusTriggerLabel);
+      document.querySelectorAll(`#${alunixaXMenuId} button`).forEach(setAlunixaXTriggerLabel);
     }
     const label = document.querySelector("[data-codex-backend-status]");
     if (label) {
       label.dataset.status = status;
-      label.textContent = codexPlusBackendStatus.message || (status === "ok" ? "后端已连接" : "未连接");
+      label.textContent = alunixaXBackendStatus.message || (status === "ok" ? "后端已连接" : "未连接");
     }
     document.querySelectorAll("[data-codex-backend-indicator]").forEach((indicator) => {
       indicator.dataset.status = status;
@@ -3683,23 +3683,23 @@
   }
 
   function markBackendDisconnected(message = "后端连接已断开") {
-    codexPlusBackendStatus = { status: "failed", message };
+    alunixaXBackendStatus = { status: "failed", message };
     renderBackendStatus();
   }
 
   async function connectBackendStatusViaBridge() {
-    if (window.__codexPlusBackendBridgeStatusPromise) {
-      return window.__codexPlusBackendBridgeStatusPromise;
+    if (window.__alunixaXBackendBridgeStatusPromise) {
+      return window.__alunixaXBackendBridgeStatusPromise;
     }
     const request = (async () => {
-      if (codexPlusBackendStatus.status !== "ok") {
-        codexPlusBackendStatus = { status: "checking", message: "正在连接后端" };
+      if (alunixaXBackendStatus.status !== "ok") {
+        alunixaXBackendStatus = { status: "checking", message: "正在连接后端" };
         renderBackendStatus();
       }
       try {
         const nextStatus = await postJson("/backend/status", {});
         if (nextStatus?.status === "ok") {
-          codexPlusBackendStatus = nextStatus;
+          alunixaXBackendStatus = nextStatus;
           renderBackendStatus();
           return true;
         }
@@ -3710,9 +3710,9 @@
         return false;
       }
     })().finally(() => {
-      window.__codexPlusBackendBridgeStatusPromise = null;
+      window.__alunixaXBackendBridgeStatusPromise = null;
     });
-    window.__codexPlusBackendBridgeStatusPromise = request;
+    window.__alunixaXBackendBridgeStatusPromise = request;
     return request;
   }
 
@@ -3726,23 +3726,23 @@
   }
 
   function startBackendStatusPolling() {
-    window.clearInterval(window.__codexPlusBackendHeartbeat);
-    window.clearTimeout(window.__codexPlusBackendReconnectTimer);
-    window.__codexPlusBackendReconnectTimer = 0;
-    const socket = window.__codexPlusBackendSocket;
-    window.__codexPlusBackendSocket = null;
+    window.clearInterval(window.__alunixaXBackendHeartbeat);
+    window.clearTimeout(window.__alunixaXBackendReconnectTimer);
+    window.__alunixaXBackendReconnectTimer = 0;
+    const socket = window.__alunixaXBackendSocket;
+    window.__alunixaXBackendSocket = null;
     if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
     void connectBackendStatusViaBridge();
-    window.__codexPlusBackendHeartbeat = window.setInterval(() => {
+    window.__alunixaXBackendHeartbeat = window.setInterval(() => {
       if (document.visibilityState === "visible") void connectBackendStatusViaBridge();
     }, 3000);
-    if (window.__codexPlusBackendVisibilityHandler) {
-      document.removeEventListener("visibilitychange", window.__codexPlusBackendVisibilityHandler);
+    if (window.__alunixaXBackendVisibilityHandler) {
+      document.removeEventListener("visibilitychange", window.__alunixaXBackendVisibilityHandler);
     }
-    window.__codexPlusBackendVisibilityHandler = () => {
+    window.__alunixaXBackendVisibilityHandler = () => {
       if (document.visibilityState === "visible") void connectBackendStatusViaBridge();
     };
-    document.addEventListener("visibilitychange", window.__codexPlusBackendVisibilityHandler);
+    document.addEventListener("visibilitychange", window.__alunixaXBackendVisibilityHandler);
   }
 
   function userScriptStatusLabel(status) {
@@ -3751,23 +3751,23 @@
 
   function renderUserScripts() {
     const enabledToggle = document.querySelector("[data-codex-user-scripts-enabled]");
-    if (enabledToggle) enabledToggle.dataset.enabled = String(!!codexPlusUserScripts.enabled);
+    if (enabledToggle) enabledToggle.dataset.enabled = String(!!alunixaXUserScripts.enabled);
     const dirs = document.querySelector("[data-codex-user-script-dirs]");
-    if (dirs) dirs.textContent = `内置：${codexPlusUserScripts.builtin_dir || "未找到"}  用户：${codexPlusUserScripts.user_dir || "未找到"}`;
+    if (dirs) dirs.textContent = `内置：${alunixaXUserScripts.builtin_dir || "未找到"}  用户：${alunixaXUserScripts.user_dir || "未找到"}`;
     const list = document.querySelector("[data-codex-user-script-list]");
     if (!list) return;
-    if (!codexPlusUserScripts.scripts?.length) {
+    if (!alunixaXUserScripts.scripts?.length) {
       list.textContent = "未发现用户脚本。";
       return;
     }
-    list.innerHTML = codexPlusUserScripts.scripts.map((script) => `
-      <div class="codex-plus-user-script-item">
+    list.innerHTML = alunixaXUserScripts.scripts.map((script) => `
+      <div class="alunixa-x-user-script-item">
         <div>
-          <div class="codex-plus-user-script-name">${escapeHtml(script.name || script.key)}</div>
-          <div class="codex-plus-user-script-meta">${script.source === "builtin" ? "内置" : "用户"} · ${userScriptStatusLabel(script.status)}</div>
-          ${script.error ? `<div class="codex-plus-user-script-error">${escapeHtml(script.error)}</div>` : ""}
+          <div class="alunixa-x-user-script-name">${escapeHtml(script.name || script.key)}</div>
+          <div class="alunixa-x-user-script-meta">${script.source === "builtin" ? "内置" : "用户"} · ${userScriptStatusLabel(script.status)}</div>
+          ${script.error ? `<div class="alunixa-x-user-script-error">${escapeHtml(script.error)}</div>` : ""}
         </div>
-        <button type="button" class="codex-plus-toggle" data-codex-user-script-key="${escapeHtml(script.key)}" data-enabled="${String(!!script.enabled)}"><span></span></button>
+        <button type="button" class="alunixa-x-toggle" data-codex-user-script-key="${escapeHtml(script.key)}" data-enabled="${String(!!script.enabled)}"><span></span></button>
       </div>
     `).join("");
   }
@@ -3775,25 +3775,25 @@
   async function loadUserScripts(path = "/user-scripts/list", payload = {}) {
     const result = await postJson(path, payload);
     if (result?.scripts) {
-      codexPlusUserScripts = result;
+      alunixaXUserScripts = result;
       renderUserScripts();
     }
   }
 
-  const codexPlusAdsUrl = "/ads";
-  let codexPlusAds = [];
-  let codexPlusAdsLoaded = false;
+  const alunixaXAdsUrl = "/ads";
+  let alunixaXAds = [];
+  let alunixaXAdsLoaded = false;
 
-  function isCodexPlusAdExpired(ad) {
+  function isAlunixaXAdExpired(ad) {
     if (!ad.expires_at) return false;
     const expiresAt = Date.parse(ad.expires_at);
     return Number.isFinite(expiresAt) && expiresAt < Date.now();
   }
 
-  function normalizeCodexPlusAds(payload) {
+  function normalizeAlunixaXAds(payload) {
     if (!payload || !Array.isArray(payload.ads)) return [];
     return payload.ads.filter((ad) => {
-      return ad && ["sponsor", "normal"].includes(ad.type) && ad.title && ad.description && ad.url && !isCodexPlusAdExpired(ad);
+      return ad && ["sponsor", "normal"].includes(ad.type) && ad.title && ad.description && ad.url && !isAlunixaXAdExpired(ad);
     }).map((ad) => ({
       id: String(ad.id || ad.title),
       type: ad.type,
@@ -3806,40 +3806,40 @@
     }));
   }
 
-  function renderCodexPlusAdGroup(type, emptyText) {
-    const ads = codexPlusAds.filter((ad) => ad.type === type);
-    if (!ads.length) return `<div class="codex-plus-ad-empty">${escapeHtml(emptyText)}</div>`;
+  function renderAlunixaXAdGroup(type, emptyText) {
+    const ads = alunixaXAds.filter((ad) => ad.type === type);
+    if (!ads.length) return `<div class="alunixa-x-ad-empty">${escapeHtml(emptyText)}</div>`;
     return ads.map((ad) => `
-      <article class="codex-plus-ad-card">
-        ${ad.image ? `<img class="codex-plus-ad-image" src="${escapeHtml(ad.image)}" alt="">` : ""}
-        <div class="codex-plus-ad-content">
-          <h3 class="codex-plus-ad-title">${escapeHtml(ad.title)}</h3>
-          <p class="codex-plus-ad-description">${escapeHtml(ad.description)}</p>
-          <div class="codex-plus-ad-highlights">
+      <article class="alunixa-x-ad-card">
+        ${ad.image ? `<img class="alunixa-x-ad-image" src="${escapeHtml(ad.image)}" alt="">` : ""}
+        <div class="alunixa-x-ad-content">
+          <h3 class="alunixa-x-ad-title">${escapeHtml(ad.title)}</h3>
+          <p class="alunixa-x-ad-description">${escapeHtml(ad.description)}</p>
+          <div class="alunixa-x-ad-highlights">
             ${ad.highlights.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
           </div>
-          <a class="codex-plus-ad-link" href="${escapeHtml(ad.url)}" target="_blank" rel="noreferrer">访问 ${escapeHtml(new URL(ad.url).hostname)}</a>
+          <a class="alunixa-x-ad-link" href="${escapeHtml(ad.url)}" target="_blank" rel="noreferrer">访问 ${escapeHtml(new URL(ad.url).hostname)}</a>
         </div>
       </article>
     `).join("");
   }
 
-  function renderCodexPlusAds() {
-    if (!codexPlusAdsLoaded) return `<div class="codex-plus-ad-empty">推荐内容加载中…</div>`;
-    if (!codexPlusAds.length) return `<div class="codex-plus-ad-empty">暂无推荐内容。</div>`;
+  function renderAlunixaXAds() {
+    if (!alunixaXAdsLoaded) return `<div class="alunixa-x-ad-empty">推荐内容加载中…</div>`;
+    if (!alunixaXAds.length) return `<div class="alunixa-x-ad-empty">暂无推荐内容。</div>`;
     return `
-      <section class="codex-plus-ad-section">
-        <h3 class="codex-plus-ad-section-title">推荐内容</h3>
-        <div class="codex-plus-ad-list">${codexPlusAds.map((ad) => `
-      <article class="codex-plus-ad-card">
-        ${ad.image ? `<img class="codex-plus-ad-image" src="${escapeHtml(ad.image)}" alt="">` : ""}
-        <div class="codex-plus-ad-content">
-          <h3 class="codex-plus-ad-title">${escapeHtml(ad.title)}</h3>
-          <p class="codex-plus-ad-description">${escapeHtml(ad.description)}</p>
-          <div class="codex-plus-ad-highlights">
+      <section class="alunixa-x-ad-section">
+        <h3 class="alunixa-x-ad-section-title">推荐内容</h3>
+        <div class="alunixa-x-ad-list">${alunixaXAds.map((ad) => `
+      <article class="alunixa-x-ad-card">
+        ${ad.image ? `<img class="alunixa-x-ad-image" src="${escapeHtml(ad.image)}" alt="">` : ""}
+        <div class="alunixa-x-ad-content">
+          <h3 class="alunixa-x-ad-title">${escapeHtml(ad.title)}</h3>
+          <p class="alunixa-x-ad-description">${escapeHtml(ad.description)}</p>
+          <div class="alunixa-x-ad-highlights">
             ${ad.highlights.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
           </div>
-          <a class="codex-plus-ad-link" href="${escapeHtml(ad.url)}" target="_blank" rel="noreferrer">访问 ${escapeHtml(new URL(ad.url).hostname)}</a>
+          <a class="alunixa-x-ad-link" href="${escapeHtml(ad.url)}" target="_blank" rel="noreferrer">访问 ${escapeHtml(new URL(ad.url).hostname)}</a>
         </div>
       </article>
     `).join("")}</div>
@@ -3847,233 +3847,233 @@
     `;
   }
 
-  async function fetchCodexPlusAds() {
+  async function fetchAlunixaXAds() {
     try {
-      if (window.__CODEX_PLUS_LOCAL_ADS__ && Array.isArray(window.__CODEX_PLUS_LOCAL_ADS__.ads)) {
-        codexPlusAds = normalizeCodexPlusAds(window.__CODEX_PLUS_LOCAL_ADS__);
+      if (window.__ALUNIXA_X_LOCAL_ADS__ && Array.isArray(window.__ALUNIXA_X_LOCAL_ADS__.ads)) {
+        alunixaXAds = normalizeAlunixaXAds(window.__ALUNIXA_X_LOCAL_ADS__);
       } else {
-        const localPayload = await postJson(codexPlusAdsUrl, {});
-        codexPlusAds = normalizeCodexPlusAds(localPayload?.ads ? localPayload : localPayload?.payload);
+        const localPayload = await postJson(alunixaXAdsUrl, {});
+        alunixaXAds = normalizeAlunixaXAds(localPayload?.ads ? localPayload : localPayload?.payload);
       }
     } catch (error) {
-      sendCodexPlusDiagnostic("ads_fetch_failed", {
+      sendAlunixaXDiagnostic("ads_fetch_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
-      if (window.__CODEX_PLUS_LOCAL_ADS__ && Array.isArray(window.__CODEX_PLUS_LOCAL_ADS__.ads)) {
-        codexPlusAds = normalizeCodexPlusAds(window.__CODEX_PLUS_LOCAL_ADS__);
+      if (window.__ALUNIXA_X_LOCAL_ADS__ && Array.isArray(window.__ALUNIXA_X_LOCAL_ADS__.ads)) {
+        alunixaXAds = normalizeAlunixaXAds(window.__ALUNIXA_X_LOCAL_ADS__);
       } else {
-        codexPlusAds = [];
+        alunixaXAds = [];
       }
     } finally {
-      codexPlusAdsLoaded = true;
-      const panel = document.querySelector('[data-codex-plus-panel="sponsor"] .codex-plus-ad-remote');
-      if (panel) panel.innerHTML = renderCodexPlusAds();
+      alunixaXAdsLoaded = true;
+      const panel = document.querySelector('[data-alunixa-x-panel="sponsor"] .alunixa-x-ad-remote');
+      if (panel) panel.innerHTML = renderAlunixaXAds();
     }
   }
 
-  function selectCodexPlusTab(tab) {
-    document.querySelectorAll(".codex-plus-modal-content").forEach((modal) => {
-      modal.dataset.codexPlusActiveTab = tab;
+  function selectAlunixaXTab(tab) {
+    document.querySelectorAll(".alunixa-x-modal-content").forEach((modal) => {
+      modal.dataset.alunixaXActiveTab = tab;
     });
-    document.querySelectorAll("[data-codex-plus-tab]").forEach((button) => {
-      button.dataset.active = String(button.getAttribute("data-codex-plus-tab") === tab);
+    document.querySelectorAll("[data-alunixa-x-tab]").forEach((button) => {
+      button.dataset.active = String(button.getAttribute("data-alunixa-x-tab") === tab);
     });
-    document.querySelectorAll("[data-codex-plus-panel]").forEach((panel) => {
-      panel.hidden = panel.getAttribute("data-codex-plus-panel") !== tab;
+    document.querySelectorAll("[data-alunixa-x-panel]").forEach((panel) => {
+      panel.hidden = panel.getAttribute("data-alunixa-x-panel") !== tab;
     });
     if (tab === "userScripts") loadUserScripts();
   }
 
-  function openCodexPlusModal() {
-    document.querySelectorAll(".codex-plus-modal-overlay").forEach((node) => node.remove());
-    document.querySelectorAll('[data-codex-plus-dialog="true"]').forEach((node) => node.remove());
+  function openAlunixaXModal() {
+    document.querySelectorAll(".alunixa-x-modal-overlay").forEach((node) => node.remove());
+    document.querySelectorAll('[data-alunixa-x-dialog="true"]').forEach((node) => node.remove());
     const overlay = document.createElement("div");
-    overlay.className = "codex-plus-modal-overlay";
+    overlay.className = "alunixa-x-modal-overlay";
     overlay.innerHTML = `
-      <div class="codex-plus-modal-content" role="dialog" aria-modal="true" aria-label="Codex++">
-        <div class="codex-plus-modal-header">
-          <div class="codex-plus-modal-title"><span class="codex-plus-backend-indicator" data-codex-backend-indicator="true" data-status="checking"></span><span data-codex-plus-version="true">Codex++ ${codexPlusVersion}</span></div>
-          <button type="button" class="codex-plus-modal-close" aria-label="关闭">×</button>
+      <div class="alunixa-x-modal-content" role="dialog" aria-modal="true" aria-label="Alunixa X">
+        <div class="alunixa-x-modal-header">
+          <div class="alunixa-x-modal-title"><span class="alunixa-x-backend-indicator" data-codex-backend-indicator="true" data-status="checking"></span><span data-alunixa-x-version="true">Alunixa X ${alunixaXVersion}</span></div>
+          <button type="button" class="alunixa-x-modal-close" aria-label="关闭">×</button>
         </div>
-        <div class="codex-plus-tabs" role="tablist" aria-label="Codex++">
-          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="home" data-active="true">主页</button>
-          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="userScripts" data-active="false">用户脚本</button>
-          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="sponsor" data-active="false">推荐内容</button>
-          <button type="button" class="codex-plus-tab-button" data-codex-plus-tab="support" data-active="false">请作者喝咖啡</button>
+        <div class="alunixa-x-tabs" role="tablist" aria-label="Alunixa X">
+          <button type="button" class="alunixa-x-tab-button" data-alunixa-x-tab="home" data-active="true">主页</button>
+          <button type="button" class="alunixa-x-tab-button" data-alunixa-x-tab="userScripts" data-active="false">用户脚本</button>
+          <button type="button" class="alunixa-x-tab-button" data-alunixa-x-tab="sponsor" data-active="false">推荐内容</button>
+          <button type="button" class="alunixa-x-tab-button" data-alunixa-x-tab="support" data-active="false">请作者喝咖啡</button>
         </div>
-        <div class="codex-plus-modal-body">
-          <div class="codex-plus-panel" data-codex-plus-panel="home">
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">后端连接</div><div class="codex-plus-row-description">通过 CDP 长连接实时感知 launcher 后端状态。</div></div>
-              <div class="codex-plus-backend-status">
-                <div class="codex-plus-backend-label" data-codex-backend-status="true" data-status="checking">正在检查后端…</div>
+        <div class="alunixa-x-modal-body">
+          <div class="alunixa-x-panel" data-alunixa-x-panel="home">
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">后端连接</div><div class="alunixa-x-row-description">通过 CDP 长连接实时感知 launcher 后端状态。</div></div>
+              <div class="alunixa-x-backend-status">
+                <div class="alunixa-x-backend-label" data-codex-backend-status="true" data-status="checking">正在检查后端…</div>
               </div>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Codex增强</div><div class="codex-plus-row-description">关闭后停用删除、导出、移动、插件相关和菜单位置增强。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-backend-setting="enhancementsEnabled"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Codex增强</div><div class="alunixa-x-row-description">关闭后停用删除、导出、移动、插件相关和菜单位置增强。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-codex-backend-setting="enhancementsEnabled"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">插件市场解锁</div><div class="codex-plus-row-description">${codexPlusBackendSettings.launchMode === "relay" ? "兼容增强模式下无需开启；ChatGPT 登录态会保留官方插件市场。" : "API Key 模式下扩展插件市场请求，尽量显示完整插件列表。"}</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="pluginMarketplaceUnlock" ${codexPlusBackendSettings.launchMode === "relay" ? 'disabled data-relay-unneeded="true"' : ""}><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">插件市场解锁</div><div class="alunixa-x-row-description">${alunixaXBackendSettings.launchMode === "relay" ? "兼容增强模式下无需开启；ChatGPT 登录态会保留官方插件市场。" : "API Key 模式下扩展插件市场请求，尽量显示完整插件列表。"}</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="pluginMarketplaceUnlock" ${alunixaXBackendSettings.launchMode === "relay" ? 'disabled data-relay-unneeded="true"' : ""}><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">模型白名单解锁</div><div class="codex-plus-row-description">从环境变量和 Codex config.toml 中的中转站 /v1/models 拉取模型，并补进模型选择列表。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="modelWhitelistUnlock"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">模型白名单解锁</div><div class="alunixa-x-row-description">从环境变量和 Codex config.toml 中的中转站 /v1/models 拉取模型，并补进模型选择列表。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="modelWhitelistUnlock"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Fast 按钮</div><div class="codex-plus-row-description">显示服务模式切换按钮；Fast 仅支持 ${codexServiceTierFastModelListLabel()}，其他模型按 Standard 发送。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="serviceTierControls"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Fast 按钮</div><div class="alunixa-x-row-description">显示服务模式切换按钮；Fast 仅支持 ${codexServiceTierFastModelListLabel()}，其他模型按 Standard 发送。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="serviceTierControls"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Sub agent 数量</div><div class="codex-plus-row-description">设置 Codex 同时运行的 agent 线程上限，可填写 3 到 50。</div></div>
-              <div class="codex-plus-number-control">
-                <input class="codex-plus-number-input" data-codex-plus-sub-agent-max-threads="true" inputmode="numeric" min="${subAgentMinThreads}" max="${subAgentMaxThreads}" step="1" type="number" value="${subAgentMaxThreadCount()}">
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Sub agent 数量</div><div class="alunixa-x-row-description">设置 Codex 同时运行的 agent 线程上限，可填写 3 到 50。</div></div>
+              <div class="alunixa-x-number-control">
+                <input class="alunixa-x-number-input" data-alunixa-x-sub-agent-max-threads="true" inputmode="numeric" min="${subAgentMinThreads}" max="${subAgentMaxThreads}" step="1" type="number" value="${subAgentMaxThreadCount()}">
               </div>
             </div>
-            <div class="codex-plus-row" data-codex-plus-sub-agent-restart-row="true" hidden>
-              <div><div class="codex-plus-row-title">应用 Sub agent 配置</div><div class="codex-plus-restart-status" data-codex-plus-sub-agent-restart-status="true">当前 Codex 需要重启后才能应用这个数量。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-plus-restart-codex="true">重启 Codex</button>
+            <div class="alunixa-x-row" data-alunixa-x-sub-agent-restart-row="true" hidden>
+              <div><div class="alunixa-x-row-title">应用 Sub agent 配置</div><div class="alunixa-x-restart-status" data-alunixa-x-sub-agent-restart-status="true">当前 Codex 需要重启后才能应用这个数量。</div></div>
+              <button type="button" class="alunixa-x-action-button" data-alunixa-x-restart-codex="true">重启 Codex</button>
             </div>
-            ${codexPlusIsWindowsPlatform ? `<div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">桌宠跟随真实鼠标</div><div class="codex-plus-row-description">仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="petRealMouseLook"><span></span></button>
+            ${alunixaXIsWindowsPlatform ? `<div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">桌宠跟随真实鼠标</div><div class="alunixa-x-row-description">仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="petRealMouseLook"><span></span></button>
             </div>` : ""}
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Stepwise</div><div class="codex-plus-row-description">在当前 Codex 页面显示可拖动的下一步建议浮层，可在设置页配置模型和直接发送。启停后需重启 Codex++ 生效。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="stepwise"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Stepwise</div><div class="alunixa-x-row-description">在当前 Codex 页面显示可拖动的下一步建议浮层，可在设置页配置模型和直接发送。启停后需重启 Alunixa X 生效。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="stepwise"><span></span></button>
             </div>
-            <div class="codex-plus-row" data-codex-service-tier-controls="true">
-              <div><div class="codex-plus-row-title">服务模式</div><div class="codex-plus-row-description">继承使用 config.toml 的 service tier；全局模式覆盖全部 thread；自定义允许按 thread 覆盖。</div></div>
-              <div class="codex-plus-service-tier-control">
-                <div class="codex-plus-service-tier-status" data-codex-service-tier-status="true" data-status="loading">正在读取…</div>
-                <div class="codex-plus-service-tier-actions">
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-inherit="true">继承</button>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-standard="true">全局 Standard</button>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-fast="true">全局 Fast</button>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-custom="true">自定义</button>
+            <div class="alunixa-x-row" data-codex-service-tier-controls="true">
+              <div><div class="alunixa-x-row-title">服务模式</div><div class="alunixa-x-row-description">继承使用 config.toml 的 service tier；全局模式覆盖全部 thread；自定义允许按 thread 覆盖。</div></div>
+              <div class="alunixa-x-service-tier-control">
+                <div class="alunixa-x-service-tier-status" data-codex-service-tier-status="true" data-status="loading">正在读取…</div>
+                <div class="alunixa-x-service-tier-actions">
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-inherit="true">继承</button>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-standard="true">全局 Standard</button>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-fast="true">全局 Fast</button>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-custom="true">自定义</button>
                 </div>
-                <div class="codex-plus-service-tier-actions codex-plus-service-tier-thread-actions">
-                  <span class="codex-plus-service-tier-thread-label">当前 thread 覆盖</span>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-thread-inherit="true" title="当前 thread 不单独覆盖，继承 config.toml">继承</button>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-thread-standard="true" title="仅当前 thread 使用 Standard，并切到自定义模式">Standard</button>
-                  <button type="button" class="codex-plus-service-tier-button" data-codex-service-tier-thread-fast="true" title="仅当前 thread 使用 Fast，并切到自定义模式">Fast</button>
+                <div class="alunixa-x-service-tier-actions alunixa-x-service-tier-thread-actions">
+                  <span class="alunixa-x-service-tier-thread-label">当前 thread 覆盖</span>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-inherit="true" title="当前 thread 不单独覆盖，继承 config.toml">继承</button>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-standard="true" title="仅当前 thread 使用 Standard，并切到自定义模式">Standard</button>
+                  <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-fast="true" title="仅当前 thread 使用 Fast，并切到自定义模式">Fast</button>
                 </div>
               </div>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">会话删除</div><div class="codex-plus-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="sessionDelete"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">会话删除</div><div class="alunixa-x-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="sessionDelete"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Markdown 导出</div><div class="codex-plus-row-description">在会话列表显示导出按钮，按本地 rollout 导出带时间戳的 Markdown。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="markdownExport"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Markdown 导出</div><div class="alunixa-x-row-description">在会话列表显示导出按钮，按本地 rollout 导出带时间戳的 Markdown。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="markdownExport"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">粘贴修复</div><div class="codex-plus-row-description">从 Word 等富文本来源粘贴到 Codex composer 时只保留纯文本，避免被识别为图片/文件附件。需重启 Codex 才生效。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="pasteFix"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">粘贴修复</div><div class="alunixa-x-row-description">从 Word 等富文本来源粘贴到 Codex composer 时只保留纯文本，避免被识别为图片/文件附件。需重启 Codex 才生效。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="pasteFix"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">会话项目移动</div><div class="codex-plus-row-description">在会话列表悬停显示移动按钮，可移动到普通对话或其他本地项目。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="projectMove"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">会话项目移动</div><div class="alunixa-x-row-description">在会话列表悬停显示移动按钮，可移动到普通对话或其他本地项目。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="projectMove"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">会话 ID 标识</div><div class="codex-plus-row-description">在侧边栏会话标题前显示短 ID 和 UUIDv7 创建时间，方便定位历史会话。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="threadIdBadge"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">会话 ID 标识</div><div class="alunixa-x-row-description">在侧边栏会话标题前显示短 ID 和 UUIDv7 创建时间，方便定位历史会话。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="threadIdBadge"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">对话居中宽度</div><div class="codex-plus-row-description">开启后把主对话和输入框限制到固定最大宽度，适合大屏阅读。</div></div>
-              <div class="codex-plus-width-control">
-                <input class="codex-plus-width-input" data-codex-plus-conversation-view-width="true" min="${conversationViewMinWidth}" max="${conversationViewMaxAllowedWidth}" step="10" type="number" value="${conversationViewWidth()}">
-                <button type="button" class="codex-plus-toggle" data-codex-plus-setting="conversationView"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">对话居中宽度</div><div class="alunixa-x-row-description">开启后把主对话和输入框限制到固定最大宽度，适合大屏阅读。</div></div>
+              <div class="alunixa-x-width-control">
+                <input class="alunixa-x-width-input" data-alunixa-x-conversation-view-width="true" min="${conversationViewMinWidth}" max="${conversationViewMaxAllowedWidth}" step="10" type="number" value="${conversationViewWidth()}">
+                <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="conversationView"><span></span></button>
               </div>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">切换对话保留位置</div><div class="codex-plus-row-description">开启后在不同 thread 之间切换时恢复到上一次浏览位置，不再自动跳到底部。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="threadScrollRestore"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">切换对话保留位置</div><div class="alunixa-x-row-description">开启后在不同 thread 之间切换时恢复到上一次浏览位置，不再自动跳到底部。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="threadScrollRestore"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Zed Remote open</div><div class="codex-plus-row-description">Open supported remote SSH file references in Zed without patching Codex.app.</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="zedRemoteOpen"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Zed Remote open</div><div class="alunixa-x-row-description">Open supported remote SSH file references in Zed without patching Codex.app.</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="zedRemoteOpen"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Upstream worktree</div><div class="codex-plus-row-description">Create a Git worktree from a fresh upstream branch, equivalent to git worktree add -b branch path upstream/base.</div></div>
-              <div class="codex-plus-worktree-actions">
-                <button type="button" class="codex-plus-action-button" data-codex-upstream-worktree-open="true">创建</button>
-                <button type="button" class="codex-plus-toggle" data-codex-plus-setting="upstreamWorktreeCreate"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Upstream worktree</div><div class="alunixa-x-row-description">Create a Git worktree from a fresh upstream branch, equivalent to git worktree add -b branch path upstream/base.</div></div>
+              <div class="alunixa-x-worktree-actions">
+                <button type="button" class="alunixa-x-action-button" data-codex-upstream-worktree-open="true">创建</button>
+                <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="upstreamWorktreeCreate"><span></span></button>
               </div>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">历史会话修复</div><div class="codex-plus-row-description">切换官方登录、混合 API 或纯 API 后，让旧对话重新显示在当前模式下。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-backend-setting="providerSyncEnabled"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">历史会话修复</div><div class="alunixa-x-row-description">切换官方登录、混合 API 或纯 API 后，让旧对话重新显示在当前模式下。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-codex-backend-setting="providerSyncEnabled"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">页面增强模式</div><div class="codex-plus-row-description">${codexPlusBackendSettings.launchMode === "relay" ? "兼容增强：保留会话删除、导出、项目移动和用户脚本，仅关闭插件市场相关增强。" : "完整增强：加载插件市场、项目路径移动等全部页面能力。"}</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-open-manager="true">打开管理工具</button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">页面增强模式</div><div class="alunixa-x-row-description">${alunixaXBackendSettings.launchMode === "relay" ? "兼容增强：保留会话删除、导出、项目移动和用户脚本，仅关闭插件市场相关增强。" : "完整增强：加载插件市场、项目路径移动等全部页面能力。"}</div></div>
+              <button type="button" class="alunixa-x-action-button" data-codex-open-manager="true">打开管理工具</button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">原生菜单栏位置</div><div class="codex-plus-row-description">把 Codex++ 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
-              <button type="button" class="codex-plus-toggle" data-codex-plus-setting="nativeMenuPlacement"><span></span></button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">原生菜单栏位置</div><div class="alunixa-x-row-description">把 Alunixa X 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
+              <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="nativeMenuPlacement"><span></span></button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">打开 DevTools</div><div class="codex-plus-row-description">打开当前 Codex 页面开发者工具，方便查看用户脚本报错。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-open-devtools="true">打开 DevTools</button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">打开 DevTools</div><div class="alunixa-x-row-description">打开当前 Codex 页面开发者工具，方便查看用户脚本报错。</div></div>
+              <button type="button" class="alunixa-x-action-button" data-codex-open-devtools="true">打开 DevTools</button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">关于 Codex++</div><div class="codex-plus-about">Codex++ 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-codex-plus-build="true">${codexPlusBuild}</span><br>GitHub: <a href="https://github.com/Alunixa-Code/CodexPlusPlusPlus" target="_blank" rel="noreferrer">https://github.com/Alunixa-Code/CodexPlusPlusPlus</a></div></div>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">关于 Alunixa X</div><div class="alunixa-x-about">Alunixa X 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-alunixa-x-build="true">${alunixaXBuild}</span><br>GitHub: <a href="https://github.com/Alunixa-Code/Alunixa-X" target="_blank" rel="noreferrer">https://github.com/Alunixa-Code/Alunixa-X</a></div></div>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Discord 社区</div><div class="codex-plus-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-plus-discord="true">打开 Discord</button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Discord 社区</div><div class="alunixa-x-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>
+              <button type="button" class="alunixa-x-action-button" data-alunixa-x-discord="true">打开 Discord</button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">Telegram 频道</div><div class="codex-plus-row-description">加入 Telegram 获取更新消息和交流使用体验。</div></div>
-              <button type="button" class="codex-plus-action-button" data-codex-plus-telegram="true">打开 Telegram</button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">Telegram 频道</div><div class="alunixa-x-row-description">加入 Telegram 获取更新消息和交流使用体验。</div></div>
+              <button type="button" class="alunixa-x-action-button" data-alunixa-x-telegram="true">打开 Telegram</button>
             </div>
-            <div class="codex-plus-row">
-              <div><div class="codex-plus-row-title">提出问题</div><div class="codex-plus-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
-              <button type="button" class="codex-plus-issue-button" data-codex-plus-issue="true">提出问题</button>
+            <div class="alunixa-x-row">
+              <div><div class="alunixa-x-row-title">提出问题</div><div class="alunixa-x-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
+              <button type="button" class="alunixa-x-issue-button" data-alunixa-x-issue="true">提出问题</button>
             </div>
           </div>
-          <div class="codex-plus-panel" data-codex-plus-panel="userScripts" hidden>
-            <div class="codex-plus-row" data-codex-user-scripts-section="true">
+          <div class="alunixa-x-panel" data-alunixa-x-panel="userScripts" hidden>
+            <div class="alunixa-x-row" data-codex-user-scripts-section="true">
               <div>
-                <div class="codex-plus-row-title">用户脚本</div>
-                <div class="codex-plus-row-description">启用用户脚本：自动加载内置目录和用户配置目录中的 .js 文件。</div>
-                <div class="codex-plus-user-script-warning">禁用后需重载页面或重启 Codex++ 才能完全移除已执行效果。</div>
-                <div class="codex-plus-user-script-dirs" data-codex-user-script-dirs="true">正在读取脚本目录…</div>
-                <div class="codex-plus-user-script-list" data-codex-user-script-list="true">正在读取用户脚本…</div>
+                <div class="alunixa-x-row-title">用户脚本</div>
+                <div class="alunixa-x-row-description">启用用户脚本：自动加载内置目录和用户配置目录中的 .js 文件。</div>
+                <div class="alunixa-x-user-script-warning">禁用后需重载页面或重启 Alunixa X 才能完全移除已执行效果。</div>
+                <div class="alunixa-x-user-script-dirs" data-codex-user-script-dirs="true">正在读取脚本目录…</div>
+                <div class="alunixa-x-user-script-list" data-codex-user-script-list="true">正在读取用户脚本…</div>
               </div>
-              <div class="codex-plus-user-script-actions">
-                <button type="button" class="codex-plus-toggle" data-codex-user-scripts-enabled="true"><span></span></button>
-                <button type="button" class="codex-plus-user-script-reload" data-codex-user-scripts-reload="true">重新加载用户脚本</button>
+              <div class="alunixa-x-user-script-actions">
+                <button type="button" class="alunixa-x-toggle" data-codex-user-scripts-enabled="true"><span></span></button>
+                <button type="button" class="alunixa-x-user-script-reload" data-codex-user-scripts-reload="true">重新加载用户脚本</button>
               </div>
             </div>
           </div>
-          <div class="codex-plus-panel" data-codex-plus-panel="sponsor" hidden>
-            <div class="codex-plus-sponsor-text">本地推荐内容可在断网时完整显示图片、介绍和跳转按钮。</div>
-            <div class="codex-plus-ad-remote">
-              ${renderCodexPlusAds()}
+          <div class="alunixa-x-panel" data-alunixa-x-panel="sponsor" hidden>
+            <div class="alunixa-x-sponsor-text">本地推荐内容可在断网时完整显示图片、介绍和跳转按钮。</div>
+            <div class="alunixa-x-ad-remote">
+              ${renderAlunixaXAds()}
             </div>
           </div>
-          <div class="codex-plus-panel" data-codex-plus-panel="support" hidden>
-            <div class="codex-plus-sponsor-text">如果 Codex++ 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。</div>
-            <div class="codex-plus-sponsor-grid">
-              <div class="codex-plus-sponsor-card">
-                <div class="codex-plus-sponsor-card-title">支付宝</div>
-                <img class="codex-plus-sponsor-qr" src="${window.__CODEX_PLUS_SPONSOR_IMAGES__?.alipay || `${helperBase}/assets/sponsor-alipay.jpg`}" alt="支付宝赞赏码">
+          <div class="alunixa-x-panel" data-alunixa-x-panel="support" hidden>
+            <div class="alunixa-x-sponsor-text">如果 Alunixa X 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。</div>
+            <div class="alunixa-x-sponsor-grid">
+              <div class="alunixa-x-sponsor-card">
+                <div class="alunixa-x-sponsor-card-title">支付宝</div>
+                <img class="alunixa-x-sponsor-qr" src="${window.__ALUNIXA_X_SPONSOR_IMAGES__?.alipay || `${helperBase}/assets/sponsor-alipay.jpg`}" alt="支付宝赞赏码">
               </div>
-              <div class="codex-plus-sponsor-card">
-                <div class="codex-plus-sponsor-card-title">微信</div>
-                <img class="codex-plus-sponsor-qr" src="${window.__CODEX_PLUS_SPONSOR_IMAGES__?.wechat || `${helperBase}/assets/sponsor-wechat.jpg`}" alt="微信赞赏码">
+              <div class="alunixa-x-sponsor-card">
+                <div class="alunixa-x-sponsor-card-title">微信</div>
+                <img class="alunixa-x-sponsor-qr" src="${window.__ALUNIXA_X_SPONSOR_IMAGES__?.wechat || `${helperBase}/assets/sponsor-wechat.jpg`}" alt="微信赞赏码">
               </div>
             </div>
           </div>
         </div>
       </div>
     `;
-    const closeButton = overlay.querySelector(".codex-plus-modal-close");
+    const closeButton = overlay.querySelector(".alunixa-x-modal-close");
     closeButton?.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -4081,18 +4081,18 @@
     }, true);
     overlay.addEventListener("input", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
-      const widthInput = target?.closest("[data-codex-plus-conversation-view-width]");
+      const widthInput = target?.closest("[data-alunixa-x-conversation-view-width]");
       if (widthInput) setConversationViewWidth(widthInput.value);
     }, true);
     overlay.addEventListener("change", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
-      const widthInput = target?.closest("[data-codex-plus-conversation-view-width]");
+      const widthInput = target?.closest("[data-alunixa-x-conversation-view-width]");
       if (widthInput) {
         const width = normalizeConversationViewWidth(widthInput.value);
         widthInput.value = String(width || conversationViewWidth());
         setConversationViewWidth(widthInput.value);
       }
-      const subAgentInput = target?.closest("[data-codex-plus-sub-agent-max-threads]");
+      const subAgentInput = target?.closest("[data-alunixa-x-sub-agent-max-threads]");
       if (subAgentInput) {
         const value = normalizeSubAgentMaxThreads(subAgentInput.value);
         subAgentInput.value = String(value);
@@ -4101,13 +4101,13 @@
     }, true);
     overlay.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
-      if (event.target === overlay || target?.closest(".codex-plus-modal-close")) {
+      if (event.target === overlay || target?.closest(".alunixa-x-modal-close")) {
         overlay.remove();
         return;
       }
-      const tabButton = target?.closest("[data-codex-plus-tab]");
+      const tabButton = target?.closest("[data-alunixa-x-tab]");
       if (tabButton) {
-        selectCodexPlusTab(tabButton.getAttribute("data-codex-plus-tab"));
+        selectAlunixaXTab(tabButton.getAttribute("data-alunixa-x-tab"));
         return;
       }
       if (target?.closest("[data-codex-open-devtools]")) {
@@ -4118,21 +4118,21 @@
         openManagerFromCodex();
         return;
       }
-      if (target?.closest("[data-codex-plus-restart-codex]")) {
+      if (target?.closest("[data-alunixa-x-restart-codex]")) {
         void restartCodexForPendingSettings();
         return;
       }
-      if (target?.closest("[data-codex-plus-discord]")) {
+      if (target?.closest("[data-alunixa-x-discord]")) {
         window.open("", "_blank");
         return;
       }
-      if (target?.closest("[data-codex-plus-telegram]")) {
+      if (target?.closest("[data-alunixa-x-telegram]")) {
         window.open("", "_blank");
         return;
       }
-      const issueButton = target?.closest("[data-codex-plus-issue]");
+      const issueButton = target?.closest("[data-alunixa-x-issue]");
       if (issueButton) {
-        const issueUrl = "https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues";
+        const issueUrl = "https://github.com/Alunixa-Code/Alunixa-X/issues";
         window.open(issueUrl, "_blank");
         return;
       }
@@ -4179,39 +4179,39 @@
         return;
       }
       if (target?.closest("[data-codex-upstream-worktree-open]")) {
-        if (!codexPlusSettings().upstreamWorktreeCreate) {
+        if (!alunixaXSettings().upstreamWorktreeCreate) {
           showToast("Upstream worktree enhancement is disabled", null);
           return;
         }
         openUpstreamWorktreeDialog();
         return;
       }
-      const toggle = target?.closest("[data-codex-plus-setting]");
+      const toggle = target?.closest("[data-alunixa-x-setting]");
       if (toggle) {
         if (toggle.disabled || toggle.dataset.pending === "true") return;
-        const key = toggle.getAttribute("data-codex-plus-setting");
-        setCodexPlusSetting(key, !codexPlusSettings()[key]);
+        const key = toggle.getAttribute("data-alunixa-x-setting");
+        setAlunixaXSetting(key, !alunixaXSettings()[key]);
         return;
       }
       const backendToggle = target?.closest("[data-codex-backend-setting]");
       if (backendToggle) {
         const key = backendToggle.getAttribute("data-codex-backend-setting");
-        setBackendSetting(key, !codexPlusBackendSettings[key]);
+        setBackendSetting(key, !alunixaXBackendSettings[key]);
         return;
       }
     }, true);
     document.body.appendChild(overlay);
-    if (!codexPlusAdsLoaded) fetchCodexPlusAds();
-    selectCodexPlusTab("home");
-    renderCodexPlusMenu();
-    refreshCodexPlusBackendToggles();
+    if (!alunixaXAdsLoaded) fetchAlunixaXAds();
+    selectAlunixaXTab("home");
+    renderAlunixaXMenu();
+    refreshAlunixaXBackendToggles();
     renderBackendStatus();
     void loadCodexServiceTierState();
     loadUserScripts();
   }
 
   function findNativeMenuInsertionPoint() {
-    if (!codexPlusSettings().nativeMenuPlacement) return null;
+    if (!alunixaXSettings().nativeMenuPlacement) return null;
     const header = document.querySelector(selectors.appHeader);
     const isIconOnlyButton = (button) => String(button.className || "").includes("aspect-square");
     const menuBar = Array.from(header?.querySelectorAll?.(selectors.nativeMenuBar) || [])
@@ -4220,7 +4220,7 @@
         return !node.closest(".invisible") && rect.width > 0 && rect.height > 0;
       });
     if (menuBar) {
-      const buttons = Array.from(menuBar.querySelectorAll("button")).filter((button) => !button.closest(`#${codexPlusMenuId}`));
+      const buttons = Array.from(menuBar.querySelectorAll("button")).filter((button) => !button.closest(`#${alunixaXMenuId}`));
       if (buttons.length && buttons.every(isIconOnlyButton)) return null;
       const openLocationButton = buttons.find((button) => /^(打开位置|Open location)$/i.test(button.getAttribute("aria-label") || ""));
       const openLocationGroup = openLocationButton?.closest?.(".inline-flex.self-start.items-stretch.overflow-hidden.rounded-lg");
@@ -4234,7 +4234,7 @@
     }
     const contextSurface = header?.querySelector(selectors.headerContextMenuSurface);
     const buttons = Array.from(contextSurface?.querySelectorAll?.("button") || [])
-      .filter((button) => !button.closest(`#${codexPlusMenuId}`) && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0);
+      .filter((button) => !button.closest(`#${alunixaXMenuId}`) && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0);
     if (buttons.length && buttons.every(isIconOnlyButton)) return null;
     const nativeButton = buttons.find((button) => !button.parentElement?.classList?.contains("inline-flex")) || buttons[0];
     const parent = nativeButton?.parentElement;
@@ -4249,18 +4249,18 @@
     return { parent, before: nativeButton, nativeButtonClass: nativeButton.className || "" };
   }
 
-  function removeDuplicateCodexPlusMenus(keep) {
-    document.querySelectorAll(`#${codexPlusMenuId}, [data-codex-plus-menu="true"]`).forEach((node) => {
+  function removeDuplicateAlunixaXMenus(keep) {
+    document.querySelectorAll(`#${alunixaXMenuId}, [data-alunixa-x-menu="true"]`).forEach((node) => {
       if (node !== keep) node.remove();
     });
     Array.from(document.querySelectorAll("button")).forEach((button) => {
-      if ((button.textContent || "").trim() === `Codex++ ${codexPlusVersion}` && !button.closest(`#${codexPlusMenuId}`)) {
+      if ((button.textContent || "").trim() === `Alunixa X ${alunixaXVersion}` && !button.closest(`#${alunixaXMenuId}`)) {
         button.remove();
       }
     });
   }
 
-  function normalizeCodexPlusTriggerClassName(className) {
+  function normalizeAlunixaXTriggerClassName(className) {
     const classes = String(className || "").split(/\s+/).filter(Boolean);
     const incompatibleNativeGroupClasses = new Set(["gap-0", "rounded-l-none", "border-l-0", "pl-0.5", "pr-1.5"]);
     const hasIncompatibleNativeGroupClass = classes.some((name) => incompatibleNativeGroupClasses.has(name));
@@ -4273,22 +4273,22 @@
     return normalized.join(" ");
   }
 
-  function configureCodexPlusTrigger(menu, trigger, nativeButtonClass) {
+  function configureAlunixaXTrigger(menu, trigger, nativeButtonClass) {
     if (!trigger) return;
-    if (nativeButtonClass) trigger.className = normalizeCodexPlusTriggerClassName(nativeButtonClass);
-    if (!trigger.querySelector(".codex-plus-backend-indicator")) {
+    if (nativeButtonClass) trigger.className = normalizeAlunixaXTriggerClassName(nativeButtonClass);
+    if (!trigger.querySelector(".alunixa-x-backend-indicator")) {
       const indicator = document.createElement("span");
-      indicator.className = "codex-plus-backend-indicator";
+      indicator.className = "alunixa-x-backend-indicator";
       indicator.dataset.codexBackendIndicator = "true";
-      indicator.dataset.status = codexPlusBackendStatus.status || "checking";
+      indicator.dataset.status = alunixaXBackendStatus.status || "checking";
       trigger.prepend(indicator);
     }
-    if (trigger.dataset.codexPlusTriggerInstalled === "5") return;
-    trigger.dataset.codexPlusTriggerInstalled = "5";
+    if (trigger.dataset.alunixaXTriggerInstalled === "5") return;
+    trigger.dataset.alunixaXTriggerInstalled = "5";
     trigger.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openCodexPlusModal();
+      openAlunixaXModal();
     }, true);
   }
 
@@ -4313,7 +4313,7 @@
   }
 
   function isHeaderToolbarButton(button, header, rect) {
-    if (!button || button.closest?.(`#${codexPlusMenuId}`)) return false;
+    if (!button || button.closest?.(`#${alunixaXMenuId}`)) return false;
     if (!(rect.width > 0 && rect.height > 0 && rect.left > window.innerWidth / 2)) return false;
     const buttonCluster = button.closest(".ms-auto.flex.shrink-0.items-center");
     if (buttonCluster && header?.contains(buttonCluster)) return true;
@@ -4322,8 +4322,8 @@
     return !!button.closest?.('[class*="ms-auto"][class*="shrink-0"][class*="items-center"]');
   }
 
-  function updateFloatingCodexPlusMenuPosition(menu) {
-    if (!menu?.classList?.contains(codexPlusMenuFloatingClass)) return;
+  function updateFloatingAlunixaXMenuPosition(menu) {
+    if (!menu?.classList?.contains(alunixaXMenuFloatingClass)) return;
     const header = document.querySelector(selectors.appHeader);
     if (!header) return;
     const toolbarButtons = Array.from(header.querySelectorAll("button"))
@@ -4335,71 +4335,71 @@
       const measuredGap = toolbarButtons[1] ? toolbarButtons[1].rect.left - toolbarButtons[0].rect.right : 0;
       const styles = anchor.button.parentElement ? getComputedStyle(anchor.button.parentElement) : null;
       const gap = Math.max(numericCssValue(styles?.columnGap || styles?.gap), measuredGap, 0);
-      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${anchor.rect.top}px`);
-      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${anchor.rect.height}px`);
-      setCssPropIfChanged(menu, "--codex-plus-menu-right", `${Math.max(0, window.innerWidth - anchor.rect.left + gap)}px`);
+      setCssPropIfChanged(menu, "--alunixa-x-menu-top", `${anchor.rect.top}px`);
+      setCssPropIfChanged(menu, "--alunixa-x-menu-height", `${anchor.rect.height}px`);
+      setCssPropIfChanged(menu, "--alunixa-x-menu-right", `${Math.max(0, window.innerWidth - anchor.rect.left + gap)}px`);
       return;
     }
 
     const headerRect = header.getBoundingClientRect();
     if (headerRect.height) {
       const isApplicationMenuTopBar = header.matches?.('[class*="ApplicationMenuTopBar"]');
-      setCssPropIfChanged(menu, "--codex-plus-menu-top", `${isApplicationMenuTopBar ? Math.max(4, headerRect.top) : headerRect.top}px`);
-      setCssPropIfChanged(menu, "--codex-plus-menu-height", `${isApplicationMenuTopBar ? 28 : headerRect.height}px`);
+      setCssPropIfChanged(menu, "--alunixa-x-menu-top", `${isApplicationMenuTopBar ? Math.max(4, headerRect.top) : headerRect.top}px`);
+      setCssPropIfChanged(menu, "--alunixa-x-menu-height", `${isApplicationMenuTopBar ? 28 : headerRect.height}px`);
     }
-    menu.style.removeProperty("--codex-plus-menu-right");
+    menu.style.removeProperty("--alunixa-x-menu-right");
   }
 
-  function installCodexPlusMenu() {
-    const existing = document.getElementById(codexPlusMenuId);
-    removeDuplicateCodexPlusMenus(existing);
+  function installAlunixaXMenu() {
+    const existing = document.getElementById(alunixaXMenuId);
+    removeDuplicateAlunixaXMenus(existing);
     let insertionPoint = findNativeMenuInsertionPoint();
-    if (existing && existing.dataset.codexPlusMenuVersion !== "6") {
+    if (existing && existing.dataset.alunixaXMenuVersion !== "6") {
       existing.remove();
       insertionPoint = findNativeMenuInsertionPoint();
     } else if (existing && insertionPoint && existing.parentElement === insertionPoint.parent) {
-      configureCodexPlusTrigger(existing, existing.querySelector("button"), insertionPoint.nativeButtonClass);
+      configureAlunixaXTrigger(existing, existing.querySelector("button"), insertionPoint.nativeButtonClass);
       const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
       if (existing.nextSibling !== safeBefore) insertionPoint.parent.insertBefore(existing, safeBefore);
-      removeDuplicateCodexPlusMenus(existing);
+      removeDuplicateAlunixaXMenus(existing);
       return;
     } else if (existing && insertionPoint) {
-      configureCodexPlusTrigger(existing, existing.querySelector("button"), insertionPoint.nativeButtonClass);
+      configureAlunixaXTrigger(existing, existing.querySelector("button"), insertionPoint.nativeButtonClass);
       existing.className = "";
       const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
       insertionPoint.parent.insertBefore(existing, safeBefore);
-      removeDuplicateCodexPlusMenus(existing);
+      removeDuplicateAlunixaXMenus(existing);
       return;
     } else if (existing) {
-      configureCodexPlusTrigger(existing, existing.querySelector("button"), headerIconTextButtonClass);
-      existing.className = codexPlusMenuFloatingClass;
+      configureAlunixaXTrigger(existing, existing.querySelector("button"), headerIconTextButtonClass);
+      existing.className = alunixaXMenuFloatingClass;
       document.documentElement.appendChild(existing);
-      updateFloatingCodexPlusMenuPosition(existing);
-      removeDuplicateCodexPlusMenus(existing);
+      updateFloatingAlunixaXMenuPosition(existing);
+      removeDuplicateAlunixaXMenus(existing);
       return;
     }
     const menu = document.createElement("div");
-    menu.id = codexPlusMenuId;
-    menu.dataset.codexPlusMenu = "true";
-    menu.dataset.codexPlusMenuVersion = "6";
+    menu.id = alunixaXMenuId;
+    menu.dataset.alunixaXMenu = "true";
+    menu.dataset.alunixaXMenuVersion = "6";
     const trigger = document.createElement("button");
     trigger.type = "button";
-    const indicator = ensureCodexPlusTriggerIndicator(trigger);
-    if (indicator) indicator.dataset.status = codexPlusBackendStatus.status || "checking";
-    setCodexPlusTriggerLabel(trigger);
+    const indicator = ensureAlunixaXTriggerIndicator(trigger);
+    if (indicator) indicator.dataset.status = alunixaXBackendStatus.status || "checking";
+    setAlunixaXTriggerLabel(trigger);
     const nativeButtonClass = insertionPoint?.nativeButtonClass || headerIconTextButtonClass;
-    configureCodexPlusTrigger(menu, trigger, nativeButtonClass);
+    configureAlunixaXTrigger(menu, trigger, nativeButtonClass);
     menu.appendChild(trigger);
     if (insertionPoint) {
       menu.className = "";
       const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
       insertionPoint.parent.insertBefore(menu, safeBefore);
     } else {
-      menu.className = codexPlusMenuFloatingClass;
+      menu.className = alunixaXMenuFloatingClass;
       document.documentElement.appendChild(menu);
-      updateFloatingCodexPlusMenuPosition(menu);
+      updateFloatingAlunixaXMenuPosition(menu);
     }
-    removeDuplicateCodexPlusMenus(menu);
+    removeDuplicateAlunixaXMenus(menu);
   }
 
   const codexPluginRemoteOnlyMarketplaceKinds = new Set(["created-by-me-remote", "shared-with-me"]);
@@ -4440,7 +4440,7 @@
       && (!hadMarketplaceKinds || next.marketplaceKinds == null);
     const remoteCatalogUnavailable = window.__codexPluginMarketplaceRemoteCatalogUnavailable === true;
     if (broadCatalogRequest && !remoteCatalogUnavailable) {
-      sendCodexPlusDiagnostic("plugin_marketplace_request_expanded", {
+      sendAlunixaXDiagnostic("plugin_marketplace_request_expanded", {
         hadMarketplaceKinds,
         marketplaceKinds: hadMarketplaceKinds ? next.marketplaceKinds : null,
         broadCatalogPreserved: true,
@@ -4462,7 +4462,7 @@
       if (!nextKinds.includes("vertical")) nextKinds.push("vertical");
     }
     next.marketplaceKinds = Array.from(new Set(nextKinds));
-    sendCodexPlusDiagnostic("plugin_marketplace_request_expanded", {
+    sendAlunixaXDiagnostic("plugin_marketplace_request_expanded", {
       hadMarketplaceKinds,
       marketplaceKinds: next.marketplaceKinds,
       broadCatalogPreserved: false,
@@ -4475,16 +4475,16 @@
   }
 
   function displayNameForPluginMarketplaceName(name, fallback) {
-    if (name === "openai-bundled") return "OpenAI插件1(Codex++)";
-    if (name === "openai-curated") return "OpenAI插件2(Codex++)";
-    if (name === "openai-primary-runtime") return "OpenAI插件3(Codex++)";
-    if (name === "openai-api-curated") return "OpenAI插件4(Codex++)";
-    if (name === "openai-curated-remote") return "OpenAI插件5(Codex++)";
+    if (name === "openai-bundled") return "OpenAI插件1(Alunixa X)";
+    if (name === "openai-curated") return "OpenAI插件2(Alunixa X)";
+    if (name === "openai-primary-runtime") return "OpenAI插件3(Alunixa X)";
+    if (name === "openai-api-curated") return "OpenAI插件4(Alunixa X)";
+    if (name === "openai-curated-remote") return "OpenAI插件5(Alunixa X)";
     return fallback;
   }
 
   function patchPluginMarketplaceObject(marketplace) {
-    if (!marketplace || typeof marketplace !== "object" || marketplace.__codexPlusMarketplaceUnlockPatched) return false;
+    if (!marketplace || typeof marketplace !== "object" || marketplace.__alunixaXMarketplaceUnlockPatched) return false;
     const displayName = displayNameForPluginMarketplaceName(marketplace.name, marketplace.displayName || marketplace.title || marketplace.label || marketplace.name);
     if (!displayName || displayName === marketplace.name) return false;
     marketplace.displayName = displayName;
@@ -4501,7 +4501,7 @@
     } else {
       marketplace.interface = { displayName, name: displayName, title: displayName, label: displayName };
     }
-    marketplace.__codexPlusMarketplaceUnlockPatched = true;
+    marketplace.__alunixaXMarketplaceUnlockPatched = true;
     return true;
   }
 
@@ -4556,8 +4556,8 @@
     if (!result || typeof result !== "object" || !Array.isArray(result.marketplaces)) {
       return { addedMarketplaces: 0, addedPlugins: 0 };
     }
-    const localMarketplaces = Array.isArray(window.__CODEX_PLUS_PLUGIN_MARKETPLACES__)
-      ? window.__CODEX_PLUS_PLUGIN_MARKETPLACES__
+    const localMarketplaces = Array.isArray(window.__ALUNIXA_X_PLUGIN_MARKETPLACES__)
+      ? window.__ALUNIXA_X_PLUGIN_MARKETPLACES__
       : [];
     if (!localMarketplaces.length) return { addedMarketplaces: 0, addedPlugins: 0 };
     const byName = new Map();
@@ -4586,17 +4586,17 @@
       addedPlugins += Array.isArray(cloned.plugins) ? cloned.plugins.length : 0;
     });
     if (addedMarketplaces > 0 || addedPlugins > 0) {
-      sendCodexPlusDiagnostic("plugin_marketplace_local_merged", { addedMarketplaces, addedPlugins });
+      sendAlunixaXDiagnostic("plugin_marketplace_local_merged", { addedMarketplaces, addedPlugins });
     }
     return { addedMarketplaces, addedPlugins };
   }
 
   function restorePluginMarketplaceName(name) {
-    if (name === "codex-plus-openai-bundled") return "openai-bundled";
-    if (name === "codex-plus-openai-curated") return "openai-curated";
-    if (name === "codex-plus-openai-primary-runtime") return "openai-primary-runtime";
-    if (name === "codex-plus-openai-api-curated") return "openai-api-curated";
-    if (name === "codex-plus-openai-curated-remote") return "openai-curated-remote";
+    if (name === "alunixa-x-openai-bundled") return "openai-bundled";
+    if (name === "alunixa-x-openai-curated") return "openai-curated";
+    if (name === "alunixa-x-openai-primary-runtime") return "openai-primary-runtime";
+    if (name === "alunixa-x-openai-api-curated") return "openai-api-curated";
+    if (name === "alunixa-x-openai-curated-remote") return "openai-curated-remote";
     return name;
   }
 
@@ -4636,7 +4636,7 @@
   function installPluginBuildFlavorFilterPatch() {
     if (window.__codexPluginBuildFlavorFilterPatch === codexPluginMarketplaceUnlockVersion) return;
     if (pluginPatchDisabledInRelayMode()) return;
-    if (!codexPlusSettings().pluginMarketplaceUnlock) return;
+    if (!alunixaXSettings().pluginMarketplaceUnlock) return;
     const originalFilter = Array.prototype.__codexPluginBuildFlavorOriginalFilter || Array.prototype.filter;
     if (!Array.prototype.__codexPluginBuildFlavorOriginalFilter) {
       Object.defineProperty(Array.prototype, "__codexPluginBuildFlavorOriginalFilter", {
@@ -4651,11 +4651,11 @@
     }
     const patchedFilter = function codexPluginBuildFlavorFilterPatch(callback, thisArg) {
       if (isCodexPluginBuildFlavorFilter(callback, this)) {
-        sendCodexPlusDiagnostic("plugin_build_flavor_filter_bypassed", { pluginCount: this.length });
+        sendAlunixaXDiagnostic("plugin_build_flavor_filter_bypassed", { pluginCount: this.length });
         return Array.from(this);
       }
       if (isCodexPluginMarketplaceHiddenFilter(callback, this)) {
-        sendCodexPlusDiagnostic("plugin_marketplace_hidden_filter_bypassed", { marketplaceCount: this.length });
+        sendAlunixaXDiagnostic("plugin_marketplace_hidden_filter_bypassed", { marketplaceCount: this.length });
         return Array.from(this);
       }
       return originalFilter.call(this, callback, thisArg);
@@ -4663,7 +4663,7 @@
     patchedFilter.__codexPluginBuildFlavorPatched = codexPluginMarketplaceUnlockVersion;
     Array.prototype.filter = patchedFilter;
     window.__codexPluginBuildFlavorFilterPatch = codexPluginMarketplaceUnlockVersion;
-    sendCodexPlusDiagnostic("plugin_build_flavor_filter_patch_installed", {});
+    sendAlunixaXDiagnostic("plugin_build_flavor_filter_patch_installed", {});
   }
 
   function restorePluginMarketplaceRequestParams(params, method = "") {
@@ -4705,7 +4705,7 @@
           }
           if (patchPluginMarketplaceObject(marketplace)) patchedCount += 1;
         });
-        sendCodexPlusDiagnostic("plugin_marketplace_response_debug", {
+        sendAlunixaXDiagnostic("plugin_marketplace_response_debug", {
           marketplaces: result.marketplaces.map((marketplace) => ({
             name: marketplace?.name || "",
             path: marketplace?.path || null,
@@ -4718,10 +4718,10 @@
         });
       }
       if (patchedCount > 0) {
-        sendCodexPlusDiagnostic("plugin_marketplace_response_expanded", { patchedCount });
+        sendAlunixaXDiagnostic("plugin_marketplace_response_expanded", { patchedCount });
       }
     } catch (error) {
-      sendCodexPlusDiagnostic("plugin_marketplace_response_patch_failed", {
+      sendAlunixaXDiagnostic("plugin_marketplace_response_patch_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
@@ -4771,13 +4771,13 @@
   }
 
   function pluginAutoExpandButtonCandidates() {
-    if (!codexPlusSettings().pluginAutoExpand || !pluginAutoExpandPageLooksRelevant()) return [];
+    if (!alunixaXSettings().pluginAutoExpand || !pluginAutoExpandPageLooksRelevant()) return [];
     return Array.from(document.querySelectorAll('button, [role="button"]'))
       .filter(pluginAutoExpandVisibleElement)
       .filter((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true")
       .filter(pluginAutoExpandButtonLooksLikeMore)
       .filter(pluginAutoExpandButtonLooksScoped)
-      .filter((button) => !button.closest?.(`.${moreMenuClass}, #${codexPlusMenuId}, .codex-plus-modal-overlay`));
+      .filter((button) => !button.closest?.(`.${moreMenuClass}, #${alunixaXMenuId}, .alunixa-x-modal-overlay`));
   }
 
   function pluginAutoExpandSignature() {
@@ -4790,7 +4790,7 @@
   }
 
   function schedulePluginAutoExpand(force = false) {
-    if (!codexPlusSettings().pluginAutoExpand) return;
+    if (!alunixaXSettings().pluginAutoExpand) return;
     if (!force && !pluginAutoExpandPageLooksRelevant()) return;
     if (window.__codexPluginAutoExpandRunning && !force) return;
     clearTimeout(window.__codexPluginAutoExpandTimer);
@@ -4798,7 +4798,7 @@
   }
 
   function runPluginAutoExpand(force = false) {
-    if (!codexPlusSettings().pluginAutoExpand) return;
+    if (!alunixaXSettings().pluginAutoExpand) return;
     const currentSignature = pluginAutoExpandSignature();
     if (!force && !currentSignature) return;
     if (!force && currentSignature && currentSignature === window.__codexPluginAutoExpandLastSignature) return;
@@ -4806,7 +4806,7 @@
     window.__codexPluginAutoExpandRunning = true;
     window.__codexPluginAutoExpandClicks = 0;
     const clickNext = () => {
-      if (!codexPlusSettings().pluginAutoExpand) {
+      if (!alunixaXSettings().pluginAutoExpand) {
         window.__codexPluginAutoExpandRunning = false;
         return;
       }
@@ -4814,7 +4814,7 @@
       if (!button || window.__codexPluginAutoExpandClicks >= codexPluginAutoExpandMaxClicks) {
         window.__codexPluginAutoExpandRunning = false;
         if ((window.__codexPluginAutoExpandClicks || 0) > 0 || button) {
-          sendCodexPlusDiagnostic("plugin_auto_expand_finished", {
+          sendAlunixaXDiagnostic("plugin_auto_expand_finished", {
             version: codexPluginAutoExpandVersion,
             clicks: window.__codexPluginAutoExpandClicks || 0,
             exhausted: !!button,
@@ -4850,7 +4850,7 @@
 
   function markPluginMarketplaceRemoteCatalogUnavailable(error) {
     window.__codexPluginMarketplaceRemoteCatalogUnavailable = true;
-    sendCodexPlusDiagnostic("plugin_marketplace_remote_auth_fallback", {
+    sendAlunixaXDiagnostic("plugin_marketplace_remote_auth_fallback", {
       errorMessage: pluginMarketplaceErrorText(error),
       rememberedCwdCount: Array.isArray(window.__codexPluginMarketplaceLastCwds)
         ? window.__codexPluginMarketplaceLastCwds.length
@@ -4885,7 +4885,7 @@
       const requestProfile = pluginMarketplaceRequestProfile(restoredRequestParams);
       const requestParams = patchPluginMarketplaceRequestParams(requestMethod, restoredRequestParams);
       if (requestMethod === "install-plugin") {
-        sendCodexPlusDiagnostic("plugin_install_request_debug", {
+        sendAlunixaXDiagnostic("plugin_install_request_debug", {
           method: String(method || ""),
           requestMethod,
           originalMarketplacePath: params?.marketplacePath || null,
@@ -4907,7 +4907,7 @@
             : localPluginMarketplaceFallbackResult();
         }
         if (requestMethod === "install-plugin") {
-          sendCodexPlusDiagnostic("plugin_install_request_failed", {
+          sendAlunixaXDiagnostic("plugin_install_request_failed", {
             method: String(method || ""),
             requestMethod,
             requestMarketplacePath: requestParams?.marketplacePath || null,
@@ -4952,7 +4952,7 @@
       }
       if (requestParams === params) return message;
       if (requestMethod === "install-plugin") {
-        sendCodexPlusDiagnostic("plugin_install_request_debug", {
+        sendAlunixaXDiagnostic("plugin_install_request_debug", {
           method: message.url,
           requestMethod,
           originalMarketplacePath: params?.marketplacePath || null,
@@ -4983,7 +4983,7 @@
       }
       if (requestParams === message.request.params) return message;
       if (requestMethod === "install-plugin") {
-        sendCodexPlusDiagnostic("plugin_install_request_debug", {
+        sendAlunixaXDiagnostic("plugin_install_request_debug", {
           method: String(message.request.method || ""),
           requestMethod,
           originalMarketplacePath: message.request.params?.marketplacePath || null,
@@ -5032,7 +5032,7 @@
         data.bodyJsonString = JSON.stringify(result);
         return true;
       } catch (error) {
-        sendCodexPlusDiagnostic("plugin_marketplace_fetch_response_patch_failed", {
+        sendAlunixaXDiagnostic("plugin_marketplace_fetch_response_patch_failed", {
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
         });
@@ -5070,8 +5070,8 @@
     return true;
   }
 
-  if (window.__CODEX_PLUS_TEST_PLUGIN_MARKETPLACE__) {
-    window.__codexPlusPluginMarketplaceTest = {
+  if (window.__ALUNIXA_X_TEST_PLUGIN_MARKETPLACE__) {
+    window.__alunixaXPluginMarketplaceTest = {
       patchRequestParams: patchPluginMarketplaceRequestParams,
       patchRequestMessage: patchPluginMarketplaceRequestMessage,
       patchResponseData: patchPluginMarketplaceResponseData,
@@ -5080,7 +5080,7 @@
       remoteOnlyFallback: remoteOnlyPluginMarketplaceFallbackResult,
       requestProfile: pluginMarketplaceRequestProfile,
       setCodexAppVersion: (version) => {
-        codexPlusBackendSettings.codexAppVersion = String(version || "");
+        alunixaXBackendSettings.codexAppVersion = String(version || "");
       },
       remoteCatalogUnavailable: () => window.__codexPluginMarketplaceRemoteCatalogUnavailable === true,
       reset: () => {
@@ -5108,11 +5108,11 @@
   function installPluginMarketplaceBridgePatch() {
     if (window.__codexPluginMarketplaceBridgePatch === codexPluginMarketplaceUnlockVersion) return;
     if (pluginPatchDisabledInRelayMode()) return;
-    if (!codexPlusSettings().pluginMarketplaceUnlock) return;
+    if (!alunixaXSettings().pluginMarketplaceUnlock) return;
     installPluginMarketplaceWindowEventPatchOnly();
     const bridge = window.electronBridge;
     if (!bridge || typeof bridge.sendMessageFromView !== "function") {
-      sendCodexPlusDiagnostic("plugin_marketplace_bridge_patch_not_found", {});
+      sendAlunixaXDiagnostic("plugin_marketplace_bridge_patch_not_found", {});
       return;
     }
     if (!bridge.__codexPluginMarketplaceOriginalSendMessageFromView) {
@@ -5122,7 +5122,7 @@
         try {
           nextMessage = patchPluginMarketplaceRequestMessage(message);
         } catch (error) {
-          sendCodexPlusDiagnostic("plugin_marketplace_bridge_request_patch_failed", {
+          sendAlunixaXDiagnostic("plugin_marketplace_bridge_request_patch_failed", {
             errorName: error?.name || "",
             errorMessage: error?.message || String(error),
           });
@@ -5132,13 +5132,13 @@
     }
     bridge.__codexPluginMarketplaceBridgePatch = codexPluginMarketplaceUnlockVersion;
     window.__codexPluginMarketplaceBridgePatch = codexPluginMarketplaceUnlockVersion;
-    sendCodexPlusDiagnostic("plugin_marketplace_bridge_patch_installed", {});
+    sendAlunixaXDiagnostic("plugin_marketplace_bridge_patch_installed", {});
   }
 
   function installPluginMarketplaceWindowEventPatchOnly() {
     if (window.__codexPluginMarketplaceWindowEventPatch === codexPluginMarketplaceUnlockVersion) return;
     if (pluginPatchDisabledInRelayMode()) return;
-    if (!codexPlusSettings().pluginMarketplaceUnlock) return;
+    if (!alunixaXSettings().pluginMarketplaceUnlock) return;
     const originalDispatchEvent = window.__codexPluginMarketplaceOriginalDispatchEvent || window.dispatchEvent;
     if (!window.__codexPluginMarketplaceOriginalDispatchEvent) {
       window.__codexPluginMarketplaceOriginalDispatchEvent = originalDispatchEvent;
@@ -5154,7 +5154,7 @@
           }
           if (event?.type === "message") patchPluginMarketplaceResponseData(event.data);
         } catch (error) {
-          sendCodexPlusDiagnostic("plugin_marketplace_dispatch_event_patch_failed", {
+          sendAlunixaXDiagnostic("plugin_marketplace_dispatch_event_patch_failed", {
             errorName: error?.name || "",
             errorMessage: error?.message || String(error),
           });
@@ -5168,7 +5168,7 @@
         try {
           patchPluginMarketplaceResponseData(event?.data);
         } catch (error) {
-          sendCodexPlusDiagnostic("plugin_marketplace_response_message_patch_failed", {
+          sendAlunixaXDiagnostic("plugin_marketplace_response_message_patch_failed", {
             errorName: error?.name || "",
             errorMessage: error?.message || String(error),
           });
@@ -5181,7 +5181,7 @@
   function installPluginMarketplaceRequestPatch() {
     if (window.__codexPluginMarketplaceUnlockInstalled === codexPluginMarketplaceUnlockVersion) return;
     if (pluginPatchDisabledInRelayMode()) return;
-    if (!codexPlusSettings().pluginMarketplaceUnlock) return;
+    if (!alunixaXSettings().pluginMarketplaceUnlock) return;
     const patch = async () => {
       try {
         const { modules, candidates, sources, discovery } = await loadAppServerRequestCandidates();
@@ -5191,7 +5191,7 @@
         }
         if (patchedCount > 0) {
           window.__codexPluginMarketplaceUnlockInstalled = codexPluginMarketplaceUnlockVersion;
-          sendCodexPlusDiagnostic("plugin_marketplace_request_patch_installed", {
+          sendAlunixaXDiagnostic("plugin_marketplace_request_patch_installed", {
             candidateCount: candidates.length,
             patchedCount,
             moduleCount: modules.length,
@@ -5199,7 +5199,7 @@
             discovery,
           });
         } else {
-          sendCodexPlusDiagnostic("plugin_marketplace_request_patch_not_found", {
+          sendAlunixaXDiagnostic("plugin_marketplace_request_patch_not_found", {
             moduleCount: modules.length,
             candidateCount: candidates.length,
             sources,
@@ -5207,7 +5207,7 @@
           });
         }
       } catch (error) {
-        sendCodexPlusDiagnostic("plugin_marketplace_request_patch_failed", {
+        sendAlunixaXDiagnostic("plugin_marketplace_request_patch_failed", {
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
         });
@@ -5217,7 +5217,7 @@
   }
 
   function pluginPatchDisabledInRelayMode() {
-    return !codexPlusBackendSettingsLoaded || codexPlusBackendSettings.launchMode === "relay";
+    return !alunixaXBackendSettingsLoaded || alunixaXBackendSettings.launchMode === "relay";
   }
 
   function clearPluginPatchArtifacts() {
@@ -5325,8 +5325,8 @@
     return { session_id: sessionId, title };
   }
 
-  if (window.__CODEX_PLUS_TEST_SESSION_REF__) {
-    window.__codexPlusSessionRefTest = {
+  if (window.__ALUNIXA_X_TEST_SESSION_REF__) {
+    window.__alunixaXSessionRefTest = {
       fromRow: sessionRefFromRow,
     };
   }
@@ -5427,7 +5427,7 @@
   }
 
   function refreshThreadIdBadges() {
-    if (!codexPlusSettings().threadIdBadge) {
+    if (!alunixaXSettings().threadIdBadge) {
       if (threadIdBadgeActive) {
         removeThreadIdBadges();
         threadIdBadgeActive = false;
@@ -5438,7 +5438,7 @@
     sessionRows().forEach(installThreadIdBadge);
   }
 
-  function codexPlusDiagnosticPayload(event, detail) {
+  function alunixaXDiagnosticPayload(event, detail) {
     return {
       event,
       detail: detail || {},
@@ -5450,11 +5450,11 @@
     };
   }
 
-  function sendCodexPlusDiagnostic(event, detail) {
-    const payload = codexPlusDiagnosticPayload(event, detail);
-    if (window.__CODEX_PLUS_TEST_SERVICE_TIER__) {
-      window.__codexPlusServiceTierTestDiagnostics = window.__codexPlusServiceTierTestDiagnostics || [];
-      window.__codexPlusServiceTierTestDiagnostics.push(payload);
+  function sendAlunixaXDiagnostic(event, detail) {
+    const payload = alunixaXDiagnosticPayload(event, detail);
+    if (window.__ALUNIXA_X_TEST_SERVICE_TIER__) {
+      window.__alunixaXServiceTierTestDiagnostics = window.__alunixaXServiceTierTestDiagnostics || [];
+      window.__alunixaXServiceTierTestDiagnostics.push(payload);
       return;
     }
     if (window.__codexSessionDeleteBridge) {
@@ -5475,9 +5475,9 @@
     }).catch(() => {});
   }
 
-  sendCodexPlusDiagnostic("script_loaded", {
-    version: codexPlusVersion,
-    build: codexPlusBuild,
+  sendAlunixaXDiagnostic("script_loaded", {
+    version: alunixaXVersion,
+    build: alunixaXBuild,
   });
 
   function locationThreadId() {
@@ -5696,7 +5696,7 @@
   function shouldBlockThreadScrollAutobottom(scroller, top) {
     const runtime = threadScrollRuntime();
     const lock = currentThreadScrollRestoreLock();
-    if (!lock || !codexPlusSettings().threadScrollRestore) return false;
+    if (!lock || !alunixaXSettings().threadScrollRestore) return false;
     const guardScroller = threadScrollGuardScroller(scroller);
     if (runtime.applyingRestore || !guardScroller) return false;
     const targetTop = threadScrollTargetTop(guardScroller, lock.targetTop);
@@ -5822,13 +5822,13 @@
     }
     runtime.activeScroller = scroller;
     runtime.scrollListenerUsesWindow = nextUsesWindow;
-    if (!scroller || !codexPlusSettings().threadScrollRestore) return;
+    if (!scroller || !alunixaXSettings().threadScrollRestore) return;
     const target = nextUsesWindow ? window : scroller;
     target.addEventListener("scroll", runtime.scrollListener, true);
   }
 
   function saveThreadScrollPositionNow(sessionId = threadScrollRuntime().activeSessionId, scroller = threadScrollRuntime().activeScroller) {
-    if (!codexPlusSettings().threadScrollRestore) return;
+    if (!alunixaXSettings().threadScrollRestore) return;
     const runtime = threadScrollRuntime();
     const key = validThreadScrollSessionKey(sessionId);
     if (!key || !scroller) return;
@@ -5849,7 +5849,7 @@
   }
 
   function scheduleThreadScrollSave() {
-    if (!codexPlusSettings().threadScrollRestore || window.__codexThreadScrollSaveTimer) return;
+    if (!alunixaXSettings().threadScrollRestore || window.__codexThreadScrollSaveTimer) return;
     window.__codexThreadScrollSaveTimer = setTimeout(() => {
       window.__codexThreadScrollSaveTimer = null;
       saveThreadScrollPositionNow();
@@ -5859,7 +5859,7 @@
   function restoreThreadScrollPosition(sessionId) {
     const runtime = threadScrollRuntime();
     const key = validThreadScrollSessionKey(sessionId);
-    if (!codexPlusSettings().threadScrollRestore || !key || runtime.activeSessionId !== key || userScrollIntentActive() || threadScrollRestoreCancelledForSession(key)) return;
+    if (!alunixaXSettings().threadScrollRestore || !key || runtime.activeSessionId !== key || userScrollIntentActive() || threadScrollRestoreCancelledForSession(key)) return;
     const lock = activeThreadScrollRestoreLock(key);
     const entry = lock || readThreadScrollEntries()[key];
     if (!entry) return;
@@ -5886,7 +5886,7 @@
   function scheduleThreadScrollRestore(sessionId) {
     clearThreadScrollRestoreTimers();
     const key = validThreadScrollSessionKey(sessionId);
-    if (!codexPlusSettings().threadScrollRestore || !key || userScrollIntentActive() || threadScrollRestoreCancelledForSession(key)) return;
+    if (!alunixaXSettings().threadScrollRestore || !key || userScrollIntentActive() || threadScrollRestoreCancelledForSession(key)) return;
     const entry = readThreadScrollEntries()[key];
     if (!entry) {
       clearThreadScrollRestoreLock();
@@ -5906,7 +5906,7 @@
     const currentRef = currentSessionRef();
     const nextSessionId = validThreadScrollSessionKey(currentRef.session_id);
     if (!nextSessionId) return;
-    if (!codexPlusSettings().threadScrollRestore) {
+    if (!alunixaXSettings().threadScrollRestore) {
       bindThreadScrollListener(null);
       clearThreadScrollRestoreTimers();
       clearThreadScrollRestoreLock();
@@ -5945,7 +5945,7 @@
   }
 
   function captureThreadScrollNavigation(targetSessionId) {
-    if (!codexPlusSettings().threadScrollRestore) return;
+    if (!alunixaXSettings().threadScrollRestore) return;
     const runtime = threadScrollRuntime();
     const targetKey = validThreadScrollSessionKey(targetSessionId);
     const sessionChanged = !!targetKey && targetKey !== runtime.activeSessionId;
@@ -5977,7 +5977,7 @@
   }
 
   function markThreadScrollUserIntent(event) {
-    if (!codexPlusSettings().threadScrollRestore || !eventTargetsActiveThreadScroller(event)) return;
+    if (!alunixaXSettings().threadScrollRestore || !eventTargetsActiveThreadScroller(event)) return;
     cancelThreadScrollRestoreForUserIntent();
   }
 
@@ -6028,19 +6028,19 @@
     document.removeEventListener("click", window.__codexThreadScrollClickNavigationHandler, true);
     document.removeEventListener("keydown", window.__codexThreadScrollKeyboardHandler, true);
     const navigationHandler = (event) => {
-      if (!codexPlusSettings().threadScrollRestore) return;
+      if (!alunixaXSettings().threadScrollRestore) return;
       const row = event.target?.closest?.(selectors.sidebarThread);
       if (!row) return;
       window.__codexThreadScrollHandlers?.captureNavigation?.(sessionRefFromRow(row).session_id);
     };
     const clickHandler = (event) => {
-      if (!codexPlusSettings().threadScrollRestore) return;
+      if (!alunixaXSettings().threadScrollRestore) return;
       const row = event.target?.closest?.(selectors.sidebarThread);
       if (!row) return;
       window.__codexThreadScrollHandlers?.captureNavigation?.(sessionRefFromRow(row).session_id);
     };
     const keyboardHandler = (event) => {
-      if (!codexPlusSettings().threadScrollRestore) return;
+      if (!alunixaXSettings().threadScrollRestore) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       const row = event.target?.closest?.(selectors.sidebarThread);
       if (!row) return;
@@ -6107,14 +6107,14 @@
       ]);
     }
     if (!window.__codexSessionDeleteBridge) {
-      sendCodexPlusDiagnostic("bridge_missing_for_route", { path });
+      sendAlunixaXDiagnostic("bridge_missing_for_route", { path });
       return { status: "failed", message: "桥接不可用，请重启启动器" };
     }
     try {
       if (path === "/backend/status") {
         const bridgeStatus = await bridgeWithBackendTimeout(path, payload);
         if (bridgeStatus?.status !== "ok") {
-          sendCodexPlusDiagnostic("backend_status_verification_failed", {
+          sendAlunixaXDiagnostic("backend_status_verification_failed", {
             path,
             message: bridgeStatus?.message || "",
             bridgeStatus: bridgeStatus?.status || "",
@@ -6126,7 +6126,7 @@
       }
       return await window.__codexSessionDeleteBridge(path, payload);
     } catch (error) {
-      sendCodexPlusDiagnostic("bridge_call_failed", {
+      sendAlunixaXDiagnostic("bridge_call_failed", {
         path,
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -6249,7 +6249,7 @@
   function codexProjectlessMainWindowEnabled() {
     return codexProjectlessMainWindowState.loaded
       && codexProjectlessMainWindowState.enabled
-      && codexPlusBackendSettings.enhancementsEnabled !== false;
+      && alunixaXBackendSettings.enhancementsEnabled !== false;
   }
 
   function clearCodexProjectlessMainWindowTimers() {
@@ -6319,7 +6319,7 @@
       const options = String(prompt || "").trim() ? { prompt: String(prompt).trim() } : {};
       const context = await factory(["~"], options);
       if (!codexProjectlessContextValid(context)) throw new Error("Codex projectless-thread 返回了无效目录");
-      sendCodexPlusDiagnostic("projectless_context_factory_resolved", { assetPrefix });
+      sendAlunixaXDiagnostic("projectless_context_factory_resolved", { assetPrefix });
       return {
         cwd: context.cwd,
         projectlessOutputDirectory: context.projectlessOutputDirectory,
@@ -6423,7 +6423,7 @@
       || !params.projectlessOutputDirectory.trim();
   }
 
-  function dispatchCodexPlusMessage(dispatcher, type, payload) {
+  function dispatchAlunixaXMessage(dispatcher, type, payload) {
     const originalMessage = { ...(payload || {}), type };
     const dispatch = (message) => {
       const dynamicModelMessage = codexDynamicModelRequestOverride(message);
@@ -6443,14 +6443,14 @@
         return dispatch(originalMessage);
       }
       const message = applyCodexProjectlessRequestOverride(originalMessage, context);
-      sendCodexPlusDiagnostic("projectless_thread_start_overridden", {
+      sendAlunixaXDiagnostic("projectless_thread_start_overridden", {
         type: String(type || ""),
         workspaceRootCount: context.workspaceRoots.length,
         hasOutputDirectory: !!context.projectlessOutputDirectory,
       });
       return dispatch(message);
     }).catch((error) => {
-      sendCodexPlusDiagnostic("projectless_thread_start_override_failed", {
+      sendAlunixaXDiagnostic("projectless_thread_start_override_failed", {
         type: String(type || ""),
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -6490,7 +6490,7 @@
       state: { focusComposerNonce: Date.now() },
     });
     codexProjectlessMainWindowState.homeRouteRevision = revision;
-    sendCodexPlusDiagnostic("projectless_main_window_home_route_cleared", {
+    sendAlunixaXDiagnostic("projectless_main_window_home_route_cleared", {
       source: String(source || "runtime"),
     });
     return true;
@@ -6506,7 +6506,7 @@
       if (revision != null && revision !== codexProjectlessMainWindowState.revision) return false;
       if (!Array.isArray(activeRoots) || activeRoots.length > 0) {
         await setCodexGlobalState("active-workspace-roots", []);
-        sendCodexPlusDiagnostic("projectless_main_window_runtime_prepared", {
+        sendAlunixaXDiagnostic("projectless_main_window_runtime_prepared", {
           source: String(source || "runtime"),
           previousRootCount: Array.isArray(activeRoots) ? activeRoots.length : activeRoots == null ? 0 : 1,
         });
@@ -6517,7 +6517,7 @@
         revision == null ? codexProjectlessMainWindowState.revision : revision
       )) changed = true;
     } catch (error) {
-      sendCodexPlusDiagnostic("projectless_main_window_runtime_failed", {
+      sendAlunixaXDiagnostic("projectless_main_window_runtime_failed", {
         source: String(source || "runtime"),
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -6635,15 +6635,15 @@
         setTimeout(() => void loadCodexProjectlessMainWindowSetting(attempt + 1), 250);
         return;
       }
-      sendCodexPlusDiagnostic("projectless_main_window_setting_failed", {
+      sendAlunixaXDiagnostic("projectless_main_window_setting_failed", {
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
       });
     }
   }
 
-  if (window.__CODEX_PLUS_TEST_PROJECTLESS__) {
-    window.__codexPlusProjectlessTest = {
+  if (window.__ALUNIXA_X_TEST_PROJECTLESS__) {
+    window.__alunixaXProjectlessTest = {
       triggerKind: codexProjectlessMainWindowTriggerKind,
       setEnabled: (enabled) => {
         codexProjectlessMainWindowState.loaded = true;
@@ -6664,7 +6664,7 @@
         codexProjectlessMainWindowState.draftContext = context;
         codexProjectlessMainWindowState.contextPromise = null;
       },
-      dispatchMessage: dispatchCodexPlusMessage,
+      dispatchMessage: dispatchAlunixaXMessage,
       state: () => ({ ...codexProjectlessMainWindowState }),
     };
   }
@@ -6683,29 +6683,29 @@
   let codexModelCatalogRequestSeq = 0;
   let codexModelWhitelistRefreshTimer = 0;
   let codexModelWhitelistRefreshUntil = 0;
-  const codexPlusModelListRequestIds = new Set();
+  const alunixaXModelListRequestIds = new Set();
   let codexNativeModelNames = new Set(
-    uniqueValues(Array.isArray(window.__codexPlusNativeModelNames)
-      ? window.__codexPlusNativeModelNames
+    uniqueValues(Array.isArray(window.__alunixaXNativeModelNames)
+      ? window.__alunixaXNativeModelNames
       : []).map((model) => model.toLowerCase()),
   );
   let codexRetiredManagedModelNames = new Set(
-    uniqueValues(Array.isArray(window.__codexPlusRetiredManagedModelNames)
-      ? window.__codexPlusRetiredManagedModelNames
+    uniqueValues(Array.isArray(window.__alunixaXRetiredManagedModelNames)
+      ? window.__alunixaXRetiredManagedModelNames
       : []).map((model) => model.toLowerCase()),
   );
 
-  if (window.__CODEX_PLUS_TEST_SERVICE_TIER__) {
-    window.__codexPlusServiceTierTest = {
+  if (window.__ALUNIXA_X_TEST_SERVICE_TIER__) {
+    window.__alunixaXServiceTierTest = {
       applyServiceTierOverride: (method, params, threadIdHint = "") => applyCodexServiceTierRequestOverride(method, params, threadIdHint),
       applyProviderOverride: (method, params) => applyCodexRemoteSessionProviderOverride(method, params),
       remoteSessionStartedThreadId: (value) => codexRemoteSessionStartedThreadId(value),
       observeRemoteSessionNotification: (value) => observeCodexRemoteSessionNotification(value),
       requestOverride: (message) => codexServiceTierRequestOverride(message),
-      diagnostics: () => [...(window.__codexPlusServiceTierTestDiagnostics || [])],
+      diagnostics: () => [...(window.__alunixaXServiceTierTestDiagnostics || [])],
       currentModelName: () => codexServiceTierCurrentModelName(),
       fastAvailability: (modelName = codexServiceTierCurrentModelName()) => codexServiceTierFastAvailability(modelName),
-      modelDescriptor: (modelName) => codexPlusModelDescriptor(modelName),
+      modelDescriptor: (modelName) => alunixaXModelDescriptor(modelName),
       setModelCatalog: (catalog = {}) => {
         codexModelCatalog = {
           status: "ok",
@@ -6724,8 +6724,8 @@
         codexModelCatalogPromise = null;
       },
       setBackendSettings: (settings = {}) => {
-        codexPlusBackendSettings = { ...codexPlusBackendSettings, ...settings };
-        codexPlusBackendSettingsLoaded = true;
+        alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
+        alunixaXBackendSettingsLoaded = true;
       },
       setServiceTierState: (state = {}) => {
         codexServiceTierState = { ...codexServiceTierState, ...state };
@@ -6751,17 +6751,17 @@
       setManagedModelTracking: (previousModels = [], nativeModels = []) => {
         updateCodexManagedModelTracking(previousModels);
         codexNativeModelNames = new Set(uniqueValues(nativeModels).map((model) => model.toLowerCase()));
-        window.__codexPlusNativeModelNames = [...codexNativeModelNames];
+        window.__alunixaXNativeModelNames = [...codexNativeModelNames];
       },
     };
     return;
   }
 
-  function codexPlusModelUnlockEnabled() {
-    return !!codexPlusSettings().modelWhitelistUnlock;
+  function alunixaXModelUnlockEnabled() {
+    return !!alunixaXSettings().modelWhitelistUnlock;
   }
 
-  function codexPlusModelNames() {
+  function alunixaXModelNames() {
     return uniqueValues([
       codexModelCatalog.model,
       codexModelCatalog.default_model,
@@ -6769,34 +6769,34 @@
     ]);
   }
 
-  function codexPlusModelNameKey(value) {
+  function alunixaXModelNameKey(value) {
     return String(value || "").trim().toLowerCase();
   }
 
-  function codexPlusCurrentModelNameKeys() {
-    return new Set(codexPlusModelNames().map(codexPlusModelNameKey));
+  function alunixaXCurrentModelNameKeys() {
+    return new Set(alunixaXModelNames().map(alunixaXModelNameKey));
   }
 
   function updateCodexManagedModelTracking(previousModels = []) {
-    const currentNames = codexPlusModelNames();
-    const currentKeys = new Set(currentNames.map(codexPlusModelNameKey));
-    const persisted = Array.isArray(window.__codexPlusManagedModelNames)
-      ? window.__codexPlusManagedModelNames
+    const currentNames = alunixaXModelNames();
+    const currentKeys = new Set(currentNames.map(alunixaXModelNameKey));
+    const persisted = Array.isArray(window.__alunixaXManagedModelNames)
+      ? window.__alunixaXManagedModelNames
       : [];
     uniqueValues([...persisted, ...previousModels]).forEach((modelName) => {
-      const key = codexPlusModelNameKey(modelName);
+      const key = alunixaXModelNameKey(modelName);
       if (key && !currentKeys.has(key)) codexRetiredManagedModelNames.add(key);
     });
     currentKeys.forEach((key) => codexRetiredManagedModelNames.delete(key));
-    window.__codexPlusManagedModelNames = [...currentNames];
-    window.__codexPlusRetiredManagedModelNames = [...codexRetiredManagedModelNames];
+    window.__alunixaXManagedModelNames = [...currentNames];
+    window.__alunixaXRetiredManagedModelNames = [...codexRetiredManagedModelNames];
   }
 
-  function codexPlusShouldRemoveRetiredModel(modelName) {
-    const key = codexPlusModelNameKey(modelName);
+  function alunixaXShouldRemoveRetiredModel(modelName) {
+    const key = alunixaXModelNameKey(modelName);
     return !!key
       && codexRetiredManagedModelNames.has(key)
-      && !codexPlusCurrentModelNameKeys().has(key)
+      && !alunixaXCurrentModelNameKeys().has(key)
       && !codexNativeModelNames.has(key);
   }
 
@@ -6907,7 +6907,7 @@
                   if (nextCatalog.status === "not_configured" || nextCatalog.status === "failed") {
                     nextCatalog.status = "ok";
                   }
-                  sendCodexPlusDiagnostic("model_catalog_fallback_applied", {
+                  sendAlunixaXDiagnostic("model_catalog_fallback_applied", {
                     count: extraModels.length,
                     customCount: customModels.length,
                     profileId: profile.id || "",
@@ -6917,13 +6917,13 @@
               }
             }
           } catch (fallbackError) {
-            sendCodexPlusDiagnostic("model_catalog_fallback_error", { error: String(fallbackError?.message || fallbackError) });
+            sendAlunixaXDiagnostic("model_catalog_fallback_error", { error: String(fallbackError?.message || fallbackError) });
           }
         }
         if (requestSeq !== codexModelCatalogRequestSeq) return codexModelCatalog;
         codexModelCatalog = applyPreferredModelToCatalog(nextCatalog);
         codexModelCatalogLoadedAt = Date.now();
-        renderCodexPlusMenu();
+        renderAlunixaXMenu();
         scheduleCodexModelWhitelistRefresh();
         return codexModelCatalog;
       })
@@ -6940,7 +6940,7 @@
     return codexModelCatalogPromise;
   }
 
-  function codexPlusModelMetadata(modelName) {
+  function alunixaXModelMetadata(modelName) {
     const metadata = codexModelCatalog.modelMetadata || codexModelCatalog.model_metadata;
     const normalizedName = codexServiceTierModelFromValue(modelName).trim();
     if (!metadata || typeof metadata !== "object" || !normalizedName) return null;
@@ -6967,15 +6967,15 @@
   }
 
   function modelReasoningEfforts(modelName) {
-    const supported = codexPlusModelMetadata(modelName)?.supportedReasoningEfforts;
+    const supported = alunixaXModelMetadata(modelName)?.supportedReasoningEfforts;
     if (Array.isArray(supported) && supported.length > 0) {
       return supported.map((entry) => ({ ...entry }));
     }
     return ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort, description: `${reasoningEffort} effort` }));
   }
 
-  function applyCodexPlusModelMetadata(descriptor, modelName) {
-    const metadata = codexPlusModelMetadata(modelName);
+  function applyAlunixaXModelMetadata(descriptor, modelName) {
+    const metadata = alunixaXModelMetadata(modelName);
     if (!descriptor || !metadata) return false;
     let changed = false;
     for (const key of ["displayName", "description", "defaultReasoningEffort"]) {
@@ -6994,13 +6994,13 @@
     return changed;
   }
 
-  function codexPlusModelDetail(modelName) {
+  function alunixaXModelDetail(modelName) {
     const details = Array.isArray(codexModelCatalog.model_details) ? codexModelCatalog.model_details : [];
     return details.find((item) => item && (item.model === modelName || item.slug === modelName)) || null;
   }
 
-  function applyCodexPlusModelRuntimeMetadata(target, modelName) {
-    const detail = codexPlusModelDetail(modelName);
+  function applyAlunixaXModelRuntimeMetadata(target, modelName) {
+    const detail = alunixaXModelDetail(modelName);
     if (!target || !detail) return false;
     let changed = false;
     const contextWindow = Number(detail.context_window);
@@ -7023,8 +7023,8 @@
     return changed;
   }
 
-  function codexPlusModelDescriptor(modelName) {
-    const metadata = codexPlusModelMetadata(modelName);
+  function alunixaXModelDescriptor(modelName) {
+    const metadata = alunixaXModelMetadata(modelName);
     const descriptor = {
       model: modelName,
       id: modelName,
@@ -7036,9 +7036,9 @@
       isDefault: (codexModelCatalog.default_model || codexModelCatalog.model) === modelName,
       defaultReasoningEffort: metadata?.defaultReasoningEffort || "medium",
       supportedReasoningEfforts: modelReasoningEfforts(modelName),
-      __codexPlusManagedModel: true,
+      __alunixaXManagedModel: true,
     };
-    applyCodexPlusModelRuntimeMetadata(descriptor, modelName);
+    applyAlunixaXModelRuntimeMetadata(descriptor, modelName);
     return descriptor;
   }
 
@@ -7054,13 +7054,13 @@
 
   function patchModelNameArray(models) {
     if (!stringArrayLooksPatchable(models)) return false;
-    const customModels = codexPlusModelNames();
+    const customModels = alunixaXModelNames();
     if (!customModels.length && !codexRetiredManagedModelNames.size) return false;
-    const customKeys = new Set(customModels.map(codexPlusModelNameKey));
+    const customKeys = new Set(customModels.map(alunixaXModelNameKey));
     const next = [
       ...customModels,
-      ...models.filter((modelName) => !customKeys.has(codexPlusModelNameKey(modelName))
-        && !codexPlusShouldRemoveRetiredModel(modelName)),
+      ...models.filter((modelName) => !customKeys.has(alunixaXModelNameKey(modelName))
+        && !alunixaXShouldRemoveRetiredModel(modelName)),
     ];
     if (models.length === next.length && models.every((modelName, index) => modelName === next[index])) return false;
     models.splice(0, models.length, ...next);
@@ -7069,27 +7069,27 @@
 
   function patchModelArray(models, allowEmpty = false) {
     if (!modelArrayLooksPatchable(models, allowEmpty)) return false;
-    const customModels = codexPlusModelNames();
+    const customModels = alunixaXModelNames();
     if (!customModels.length && !codexRetiredManagedModelNames.size) return false;
-    const customKeys = new Set(customModels.map(codexPlusModelNameKey));
+    const customKeys = new Set(customModels.map(alunixaXModelNameKey));
     let changed = false;
-    const existing = new Map(models.map((item) => [codexPlusModelNameKey(item.model), item]));
+    const existing = new Map(models.map((item) => [alunixaXModelNameKey(item.model), item]));
     const customDescriptors = customModels.map((modelName) => {
-      const item = existing.get(codexPlusModelNameKey(modelName));
+      const item = existing.get(alunixaXModelNameKey(modelName));
       if (item) {
         if (item.hidden !== false) {
           item.hidden = false;
           changed = true;
         }
-        if (applyCodexPlusModelMetadata(item, item.model)) changed = true;
-        if (applyCodexPlusModelRuntimeMetadata(item, item.model)) changed = true;
+        if (applyAlunixaXModelMetadata(item, item.model)) changed = true;
+        if (applyAlunixaXModelRuntimeMetadata(item, item.model)) changed = true;
         return item;
       }
       changed = true;
-      return codexPlusModelDescriptor(modelName);
+      return alunixaXModelDescriptor(modelName);
     });
-    const remainder = models.filter((item) => !customKeys.has(codexPlusModelNameKey(item.model))
-      && !codexPlusShouldRemoveRetiredModel(item.model));
+    const remainder = models.filter((item) => !customKeys.has(alunixaXModelNameKey(item.model))
+      && !alunixaXShouldRemoveRetiredModel(item.model));
     const next = [...customDescriptors, ...remainder];
     if (models.length !== next.length || models.some((item, index) => item !== next[index])) changed = true;
     if (changed) models.splice(0, models.length, ...next);
@@ -7105,14 +7105,14 @@
     const descriptor = descriptorArrays
       .flat()
       .find((item) => item && typeof item === "object"
-        && codexPlusModelNameKey(item.model) === codexPlusModelNameKey(preferredModel))
-      || codexPlusModelDescriptor(preferredModel);
+        && alunixaXModelNameKey(item.model) === alunixaXModelNameKey(preferredModel))
+      || alunixaXModelDescriptor(preferredModel);
     const assignSelection = (key) => {
       if (!Object.prototype.hasOwnProperty.call(value, key)) return;
       const current = value[key];
       const next = current && typeof current === "object" ? descriptor : preferredModel;
       const currentName = codexServiceTierModelFromValue(current);
-      if (codexPlusModelNameKey(currentName) === codexPlusModelNameKey(preferredModel)) return;
+      if (alunixaXModelNameKey(currentName) === alunixaXModelNameKey(preferredModel)) return;
       value[key] = next;
       changed = true;
     };
@@ -7127,7 +7127,7 @@
         || "defaultModel" in value
         || "default_model" in value);
     if (looksLikeModelSelection
-        && codexPlusModelNameKey(value.model) !== codexPlusModelNameKey(preferredModel)) {
+        && alunixaXModelNameKey(value.model) !== alunixaXModelNameKey(preferredModel)) {
       value.model = preferredModel;
       changed = true;
     }
@@ -7147,10 +7147,10 @@
     if (patchModelArray(value.message?.result?.data)) changed = true;
     if (patchModelArray(value.message?.result?.models)) changed = true;
     if (patchPreferredModelSelection(value)) changed = true;
-    const names = codexPlusModelNames();
+    const names = alunixaXModelNames();
     if (value.availableModels instanceof Set) {
       const next = new Set([...names, ...Array.from(value.availableModels)
-        .filter((name) => !codexPlusShouldRemoveRetiredModel(name))]);
+        .filter((name) => !alunixaXShouldRemoveRetiredModel(name))]);
       if (next.size !== value.availableModels.size
           || Array.from(next).some((name) => !value.availableModels.has(name))) {
         value.availableModels.clear();
@@ -7160,7 +7160,7 @@
     }
     if (value.available_models instanceof Set) {
       const next = new Set([...names, ...Array.from(value.available_models)
-        .filter((name) => !codexPlusShouldRemoveRetiredModel(name))]);
+        .filter((name) => !alunixaXShouldRemoveRetiredModel(name))]);
       if (next.size !== value.available_models.size
           || Array.from(next).some((name) => !value.available_models.has(name))) {
         value.available_models.clear();
@@ -7181,7 +7181,7 @@
       if (value.hidden_models.length !== before) changed = true;
     }
     if (value.defaultModel == null && names.length > 0) {
-      value.defaultModel = codexPlusModelDescriptor(names[0]);
+      value.defaultModel = alunixaXModelDescriptor(names[0]);
       changed = true;
     } else if (typeof value.defaultModel === "string" && names.includes(value.defaultModel) && value.model == null) {
       value.model = value.defaultModel;
@@ -7191,44 +7191,44 @@
   }
 
   async function patchModelJsonResponse(payload) {
-    if (!codexPlusModelUnlockEnabled()) return payload;
-    if (!codexPlusModelNames().length) await loadCodexModelCatalog();
+    if (!alunixaXModelUnlockEnabled()) return payload;
+    if (!alunixaXModelNames().length) await loadCodexModelCatalog();
     if (!payload || typeof payload !== "object") return payload;
     try {
       patchModelContainer(payload);
       patchObjectGraphForModels(payload, new WeakSet(), 0);
     } catch (error) {
-      window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-      window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+      window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+      window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
     }
     return payload;
   }
 
   function installModelJsonResponsePatch() {
-    if (window.__codexPlusModelJsonResponsePatchInstalled === codexDynamicModelPatchInstance) return;
-    window.__codexPlusModelJsonResponsePatchInstalled = codexDynamicModelPatchInstance;
-    window.__codexPlusModelJsonResponseOriginals = window.__codexPlusModelJsonResponseOriginals || {};
-    const originals = window.__codexPlusModelJsonResponseOriginals;
+    if (window.__alunixaXModelJsonResponsePatchInstalled === codexDynamicModelPatchInstance) return;
+    window.__alunixaXModelJsonResponsePatchInstalled = codexDynamicModelPatchInstance;
+    window.__alunixaXModelJsonResponseOriginals = window.__alunixaXModelJsonResponseOriginals || {};
+    const originals = window.__alunixaXModelJsonResponseOriginals;
     originals.responseJson = originals.responseJson || Response.prototype.json;
     if (typeof originals.responseJson !== "function") return;
-    Response.prototype.json = async function codexPlusPatchedResponseJson(...args) {
+    Response.prototype.json = async function alunixaXPatchedResponseJson(...args) {
       const payload = await originals.responseJson.apply(this, args);
       return await patchModelJsonResponse(payload);
     };
   }
 
   function patchStatsigModelDynamicConfig(config) {
-    const names = codexPlusModelNames();
+    const names = alunixaXModelNames();
     const value = config?.value;
     if ((!names.length && !codexRetiredManagedModelNames.size)
         || !value
         || typeof value !== "object") return config;
     const originalAvailableModels = Array.isArray(value.available_models) ? value.available_models : [];
-    const nameKeys = new Set(names.map(codexPlusModelNameKey));
+    const nameKeys = new Set(names.map(alunixaXModelNameKey));
     const availableModels = [
       ...names,
-      ...originalAvailableModels.filter((name) => !nameKeys.has(codexPlusModelNameKey(name))
-        && !codexPlusShouldRemoveRetiredModel(name)),
+      ...originalAvailableModels.filter((name) => !nameKeys.has(alunixaXModelNameKey(name))
+        && !alunixaXShouldRemoveRetiredModel(name)),
     ];
     const changed = originalAvailableModels.length !== availableModels.length
       || originalAvailableModels.some((name, index) => name !== availableModels[index]);
@@ -7236,7 +7236,7 @@
       ...value,
       available_models: availableModels,
       default_model: names[0]
-        || (codexPlusShouldRemoveRetiredModel(value.default_model)
+        || (alunixaXShouldRemoveRetiredModel(value.default_model)
           ? availableModels[0] || null
           : value.default_model),
     };
@@ -7258,21 +7258,21 @@
   }
 
   function patchStatsigModelWhitelist() {
-    const signature = codexPlusModelNames().join("\n");
+    const signature = alunixaXModelNames().join("\n");
     statsigClients().forEach((client) => {
       if (typeof client.getDynamicConfig !== "function") return;
-      if (client.__codexPlusModelWhitelistPatched !== codexDynamicModelPatchInstance) {
+      if (client.__alunixaXModelWhitelistPatched !== codexDynamicModelPatchInstance) {
         const originalGetDynamicConfig = client.getDynamicConfig.bind(client);
         client.getDynamicConfig = (name, options) => {
           const result = originalGetDynamicConfig(name, options);
           return patchStatsigModelDynamicConfig(result);
         };
-        client.__codexPlusModelWhitelistPatched = codexDynamicModelPatchInstance;
+        client.__alunixaXModelWhitelistPatched = codexDynamicModelPatchInstance;
       }
       try {
         patchStatsigModelDynamicConfig(client.getDynamicConfig("107580212", { disableExposureLog: true }));
-        if (signature && client.__codexPlusModelWhitelistSignature !== signature) {
-          client.__codexPlusModelWhitelistSignature = signature;
+        if (signature && client.__alunixaXModelWhitelistSignature !== signature) {
+          client.__alunixaXModelWhitelistSignature = signature;
           if (typeof client.$emt === "function") client.$emt({ name: "values_updated" });
         }
       } catch {
@@ -7316,8 +7316,8 @@
   }
 
   function shouldScheduleReactModelStatePatch(mutations) {
-    if (!codexPlusModelUnlockEnabled()
-        || (!codexPlusModelNames().length && !codexRetiredManagedModelNames.size)) return false;
+    if (!alunixaXModelUnlockEnabled()
+        || (!alunixaXModelNames().length && !codexRetiredManagedModelNames.size)) return false;
     if (!mutations) return false;
     const selector = "[role='menu'], [role='dialog'], [role='listbox'], [data-radix-popper-content-wrapper]";
     return mutations.some((mutation) => [...mutation.addedNodes].some((node) => {
@@ -7327,12 +7327,12 @@
   }
 
   function schedulePatchReactModelState() {
-    if (window.__codexPlusReactModelStatePatchPending) return;
-    window.__codexPlusReactModelStatePatchPending = true;
-    clearTimeout(window.__codexPlusReactModelStatePatchTimer);
-    window.__codexPlusReactModelStatePatchTimer = setTimeout(() => {
-      window.__codexPlusReactModelStatePatchPending = false;
-      window.__codexPlusReactModelStatePatchTimer = null;
+    if (window.__alunixaXReactModelStatePatchPending) return;
+    window.__alunixaXReactModelStatePatchPending = true;
+    clearTimeout(window.__alunixaXReactModelStatePatchTimer);
+    window.__alunixaXReactModelStatePatchTimer = setTimeout(() => {
+      window.__alunixaXReactModelStatePatchPending = false;
+      window.__alunixaXReactModelStatePatchTimer = null;
       patchReactModelState();
     }, 120);
   }
@@ -7350,20 +7350,20 @@
   }
 
   function patchAppServerModelMessages() {
-    if (window.__codexPlusModelMessagePatchInstalled === codexDynamicModelPatchInstance) return;
-    window.__codexPlusModelMessagePatchInstalled = codexDynamicModelPatchInstance;
+    if (window.__alunixaXModelMessagePatchInstalled === codexDynamicModelPatchInstance) return;
+    window.__alunixaXModelMessagePatchInstalled = codexDynamicModelPatchInstance;
     const previousDispatchEvent = window.dispatchEvent;
-    window.dispatchEvent = function patchedCodexPlusDispatchEvent(event) {
+    window.dispatchEvent = function patchedAlunixaXDispatchEvent(event) {
       try {
         const detail = event?.detail;
         const request = detail?.request;
         if (event?.type === "codex-message-from-view" && detail?.type === "mcp-request" && request?.method === "model/list") {
           request.params = { ...(request.params || {}), includeHidden: true };
-          if (request.id != null) codexPlusModelListRequestIds.add(String(request.id));
+          if (request.id != null) alunixaXModelListRequestIds.add(String(request.id));
         }
       } catch (error) {
-        window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-        window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+        window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+        window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
       }
       const result = previousDispatchEvent.call(this, event);
       try {
@@ -7371,8 +7371,8 @@
         // current patch last removes any provider models retained by them.
         if (event?.type === "message") patchMcpModelResponseData(event.data);
       } catch (error) {
-        window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-        window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+        window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+        window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
       }
       return result;
     };
@@ -7381,8 +7381,8 @@
       try {
         patchMcpModelResponseData(event?.data);
       } catch (error) {
-        window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-        window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+        window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+        window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
       }
     }, true);
   }
@@ -7391,8 +7391,8 @@
     if (data?.type !== "mcp-response") return false;
     const message = data.message || data.response;
     const requestId = message?.id != null ? String(message.id) : "";
-    if (codexPlusModelListRequestIds.size > 0 && !codexPlusModelListRequestIds.has(requestId)) return false;
-    codexPlusModelListRequestIds.delete(requestId);
+    if (alunixaXModelListRequestIds.size > 0 && !alunixaXModelListRequestIds.has(requestId)) return false;
+    alunixaXModelListRequestIds.delete(requestId);
     return patchModelContainer(data) || patchModelContainer(message) || patchModelContainer(message?.result) || patchModelContainer(message?.result?.data);
   }
 
@@ -7415,13 +7415,13 @@
       if (Array.isArray(result?.models)) patchModelArray(result.models, true);
       patchModelContainer(result);
       patchObjectGraphForModels(result, new WeakSet(), 0);
-      sendCodexPlusDiagnostic("model_app_server_result_patched", {
+      sendAlunixaXDiagnostic("model_app_server_result_patched", {
         method,
         modelCount: Array.isArray(result?.data) ? result.data.length : Array.isArray(result?.models) ? result.models.length : Array.isArray(result) ? result.length : null,
       });
     } catch (error) {
-      window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-      window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+      window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+      window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
     }
     return result;
   }
@@ -7480,10 +7480,10 @@
 
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
-    if (client.__codexPlusModelRequestPatch === codexDynamicModelPatchInstance) return true;
-    const originalSendRequest = client.__codexPlusModelOriginalSendRequest || client.sendRequest.bind(client);
-    client.__codexPlusModelOriginalSendRequest = originalSendRequest;
-    client.sendRequest = async function codexPlusModelPatchedSendRequest(method, params, options) {
+    if (client.__alunixaXModelRequestPatch === codexDynamicModelPatchInstance) return true;
+    const originalSendRequest = client.__alunixaXModelOriginalSendRequest || client.sendRequest.bind(client);
+    client.__alunixaXModelOriginalSendRequest = originalSendRequest;
+    client.sendRequest = async function alunixaXModelPatchedSendRequest(method, params, options) {
       let nextParams = params;
       if (codexProjectlessAppServerRequestNeedsOverride(method, params)) {
         const revision = codexProjectlessMainWindowState.revision;
@@ -7492,14 +7492,14 @@
           if (revision === codexProjectlessMainWindowState.revision
               && codexProjectlessMainWindowShouldEnforce()) {
             nextParams = applyCodexProjectlessAppServerRequestOverride(method, params, context);
-            sendCodexPlusDiagnostic("projectless_app_server_start_overridden", {
+            sendAlunixaXDiagnostic("projectless_app_server_start_overridden", {
               method: String(method || ""),
               workspaceRootCount: context.workspaceRoots.length,
               hasOutputDirectory: !!context.projectlessOutputDirectory,
             });
           }
         } catch (error) {
-          sendCodexPlusDiagnostic("projectless_app_server_start_override_failed", {
+          sendAlunixaXDiagnostic("projectless_app_server_start_override_failed", {
             method: String(method || ""),
             errorName: error?.name || "",
             errorMessage: error?.message || String(error),
@@ -7518,11 +7518,11 @@
       nextParams = applyCodexRemoteSessionProviderOverride(requestMethod, nextParams);
       nextParams = applyCodexDynamicModelRequestOverride(requestMethod, nextParams);
       const result = await originalSendRequest(method, nextParams, options);
-      if (!codexPlusModelUnlockEnabled()) return result;
-      if (!codexPlusModelNames().length) await loadCodexModelCatalog();
+      if (!alunixaXModelUnlockEnabled()) return result;
+      if (!alunixaXModelNames().length) await loadCodexModelCatalog();
       return patchAppServerModelResult(requestMethod, result);
     };
-    client.__codexPlusModelRequestPatch = codexDynamicModelPatchInstance;
+    client.__alunixaXModelRequestPatch = codexDynamicModelPatchInstance;
     return true;
   }
 
@@ -7553,7 +7553,7 @@
     // config / React state / response JSON patch) keep injecting the custom
     // models on their own.
     if (appServerModelRequestPatchMissCount === 1) {
-      sendCodexPlusDiagnostic(event, detail);
+      sendAlunixaXDiagnostic(event, detail);
     }
     if (codexRemoteSessionProviderNormalizationEnabled()) {
       scheduleAppServerModelRequestPatchRetry();
@@ -7561,7 +7561,7 @@
     }
     if (appServerModelRequestPatchMissCount >= appServerModelRequestPatchMaxMisses && !appServerModelRequestPatchDisabled) {
       appServerModelRequestPatchDisabled = true;
-      sendCodexPlusDiagnostic("model_app_server_request_patch_skipped", {
+      sendAlunixaXDiagnostic("model_app_server_request_patch_skipped", {
         misses: appServerModelRequestPatchMissCount,
         lastEvent: event,
       });
@@ -7569,7 +7569,7 @@
   }
 
   function installAppServerModelRequestPatch() {
-    if (window.__codexPlusAppServerModelRequestPatchInstalled === codexDynamicModelPatchInstance) return;
+    if (window.__alunixaXAppServerModelRequestPatchInstalled === codexDynamicModelPatchInstance) return;
     if (appServerModelRequestPatchDisabled) return;
     if (appServerModelRequestPatchPromise) return;
     const patch = async () => {
@@ -7589,8 +7589,8 @@
           clearTimeout(appServerModelRequestPatchRetryTimer);
           appServerModelRequestPatchRetryTimer = 0;
           appServerModelRequestPatchMissCount = 0;
-          window.__codexPlusAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
-          sendCodexPlusDiagnostic("model_app_server_request_patch_installed", {
+          window.__alunixaXAppServerModelRequestPatchInstalled = codexDynamicModelPatchInstance;
+          sendAlunixaXDiagnostic("model_app_server_request_patch_installed", {
             moduleCount: modules.length,
             candidateCount: candidates.length,
             patchedCount,
@@ -7619,35 +7619,35 @@
   }
 
   function ensureCodexModelWhitelistInstalls() {
-    if (codexPlusModelUnlockEnabled()
-        || (codexPlusBackendSettingsLoaded && codexRemoteSessionProviderNormalizationEnabled())) {
+    if (alunixaXModelUnlockEnabled()
+        || (alunixaXBackendSettingsLoaded && codexRemoteSessionProviderNormalizationEnabled())) {
       installAppServerModelRequestPatch();
     }
-    if (!codexPlusModelUnlockEnabled()) return;
+    if (!alunixaXModelUnlockEnabled()) return;
     installModelJsonResponsePatch();
     patchAppServerModelMessages();
   }
 
   function runCodexModelWhitelistRefreshPass() {
-    if (!codexPlusModelUnlockEnabled()
-        || (!codexPlusModelNames().length && !codexRetiredManagedModelNames.size)) return false;
+    if (!alunixaXModelUnlockEnabled()
+        || (!alunixaXModelNames().length && !codexRetiredManagedModelNames.size)) return false;
     let changed = false;
     try {
       patchStatsigModelWhitelist();
       if (patchReactModelState()) changed = true;
       installAppServerModelRequestPatch();
     } catch (error) {
-      window.__codexPlusModelPatchFailures = window.__codexPlusModelPatchFailures || [];
-      window.__codexPlusModelPatchFailures.push(String(error?.stack || error));
+      window.__alunixaXModelPatchFailures = window.__alunixaXModelPatchFailures || [];
+      window.__alunixaXModelPatchFailures.push(String(error?.stack || error));
     }
     return changed;
   }
 
   function scheduleCodexModelWhitelistRefresh(durationMs = 2500) {
-    if (!codexPlusModelUnlockEnabled()) return;
+    if (!alunixaXModelUnlockEnabled()) return;
     codexModelWhitelistRefreshUntil = Math.max(codexModelWhitelistRefreshUntil, Date.now() + durationMs);
     if (codexModelWhitelistRefreshTimer) return;
-    sendCodexPlusDiagnostic("model_whitelist_refresh_scheduled", { durationMs });
+    sendAlunixaXDiagnostic("model_whitelist_refresh_scheduled", { durationMs });
     const tick = () => {
       codexModelWhitelistRefreshTimer = 0;
       runCodexModelWhitelistRefreshPass();
@@ -7683,19 +7683,19 @@
 
   async function installCodexStartupModelInjection() {
     const settingsLoaded = await loadBackendSettingsForStartup();
-    if (!settingsLoaded) throw new Error("Codex++ startup settings could not be loaded");
+    if (!settingsLoaded) throw new Error("Alunixa X startup settings could not be loaded");
     const catalog = await loadCodexModelCatalog(true);
     if (!catalog || catalog.status === "failed") {
-      throw new Error(String(catalog?.message || "Codex++ startup model catalog failed"));
+      throw new Error(String(catalog?.message || "Alunixa X startup model catalog failed"));
     }
-    const expectedModels = configuredProviderModelNames(codexPlusBackendSettings);
-    const actualModels = codexPlusModelNames();
-    const actualKeys = new Set(actualModels.map(codexPlusModelNameKey));
-    const missingModels = expectedModels.filter((model) => !actualKeys.has(codexPlusModelNameKey(model)));
+    const expectedModels = configuredProviderModelNames(alunixaXBackendSettings);
+    const actualModels = alunixaXModelNames();
+    const actualKeys = new Set(actualModels.map(alunixaXModelNameKey));
+    const missingModels = expectedModels.filter((model) => !actualKeys.has(alunixaXModelNameKey(model)));
     if (missingModels.length > 0) {
-      throw new Error(`Codex++ startup model catalog is missing: ${missingModels.join(", ")}`);
+      throw new Error(`Alunixa X startup model catalog is missing: ${missingModels.join(", ")}`);
     }
-    if (codexPlusModelUnlockEnabled()) {
+    if (alunixaXModelUnlockEnabled()) {
       ensureCodexModelWhitelistInstalls();
       patchStatsigModelWhitelist();
       patchReactModelState();
@@ -7703,24 +7703,24 @@
     }
     const result = {
       status: "ok",
-      debugPort: Number(window.__CODEX_PLUS_RUNTIME_DEBUG_PORT__ || 0),
+      debugPort: Number(window.__ALUNIXA_X_RUNTIME_DEBUG_PORT__ || 0),
       helperPort: helperPortFromBase(),
       selectedModel: codexServiceTierCurrentModelName(),
       providerName: String(catalog.provider_name || catalog.model_provider || ""),
       models: actualModels,
       expectedModels,
-      modelUnlockEnabled: codexPlusModelUnlockEnabled(),
-      responsePatchInstalled: window.__codexPlusModelJsonResponsePatchInstalled === codexDynamicModelPatchInstance,
-      messagePatchInstalled: window.__codexPlusModelMessagePatchInstalled === codexDynamicModelPatchInstance,
+      modelUnlockEnabled: alunixaXModelUnlockEnabled(),
+      responsePatchInstalled: window.__alunixaXModelJsonResponsePatchInstalled === codexDynamicModelPatchInstance,
+      messagePatchInstalled: window.__alunixaXModelMessagePatchInstalled === codexDynamicModelPatchInstance,
     };
-    window.__codexPlusManagedModelNames = [...actualModels];
-    sendCodexPlusDiagnostic("startup_model_injection_ready", result);
+    window.__alunixaXManagedModelNames = [...actualModels];
+    sendAlunixaXDiagnostic("startup_model_injection_ready", result);
     return result;
   }
 
   function patchCodexModelWhitelist() {
     ensureCodexModelWhitelistInstalls();
-    if (!codexPlusModelNames().length && !codexRetiredManagedModelNames.size) {
+    if (!alunixaXModelNames().length && !codexRetiredManagedModelNames.size) {
       loadCodexModelCatalog();
       return;
     }
@@ -7729,7 +7729,7 @@
 
   function refreshCodexModelWhitelistFromScan(mutations) {
     ensureCodexModelWhitelistInstalls();
-    if (!codexPlusModelNames().length && !codexRetiredManagedModelNames.size) {
+    if (!alunixaXModelNames().length && !codexRetiredManagedModelNames.size) {
       loadCodexModelCatalog();
       return;
     }
@@ -8297,7 +8297,7 @@
   }
 
   function applyProjectMoveProjection() {
-    if (!codexPlusSettings().projectMove) return;
+    if (!alunixaXSettings().projectMove) return;
     const projection = readProjectMoveProjection();
     const targetRowsById = new Map();
     const settledRefs = [];
@@ -8352,7 +8352,7 @@
   }
 
   function scheduleProjectMoveProjection() {
-    if (!codexPlusSettings().projectMove || window.__codexProjectMoveProjectionTimer) return;
+    if (!alunixaXSettings().projectMove || window.__codexProjectMoveProjectionTimer) return;
     window.__codexProjectMoveProjectionTimer = setTimeout(() => {
       if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
       window.__codexProjectMoveProjectionTimer = null;
@@ -8439,7 +8439,7 @@
   }
 
   async function applyChatsSortCorrection() {
-    if (!codexPlusSettings().projectMove || chatsSortInFlight) return;
+    if (!alunixaXSettings().projectMove || chatsSortInFlight) return;
     const rows = visibleChatsRows();
     if (rows.length < 2) return;
     const refs = rows.map(sessionRefFromRow).filter((ref) => ref.session_id);
@@ -8477,7 +8477,7 @@
   }
 
   function scheduleChatsSortCorrection(delay = chatsSortRefreshIntervalMs) {
-    if (!codexPlusSettings().projectMove || window.__codexProjectMoveChatsSortTimer) return;
+    if (!alunixaXSettings().projectMove || window.__codexProjectMoveChatsSortTimer) return;
     window.__codexProjectMoveChatsSortTimer = setTimeout(() => {
       if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
       window.__codexProjectMoveChatsSortTimer = null;
@@ -9181,7 +9181,7 @@
   }
 
   async function injectUpstreamBranchOptions() {
-    if (!codexPlusSettings().upstreamWorktreeCreate) {
+    if (!alunixaXSettings().upstreamWorktreeCreate) {
       removeUpstreamBranchOptions();
       return;
     }
@@ -9299,7 +9299,7 @@
       if (result?.status !== "ok") throw new Error(result?.message || "prepare failed");
       writePreparedUpstreamBranchSelection(selection, result);
     }).catch((error) => {
-      sendCodexPlusDiagnostic("upstream_branch_prepare_failed", {
+      sendAlunixaXDiagnostic("upstream_branch_prepare_failed", {
         label: selection.label || "",
         errorName: error?.name || "",
         errorMessage: error?.message || String(error),
@@ -9338,7 +9338,7 @@
     const selection = readUpstreamBranchSelection();
     const request = payload?.request;
     const sourceRef = upstreamQualifiedSourceRef(selection);
-    if (!codexPlusSettings().upstreamWorktreeCreate || !sourceRef) return payload;
+    if (!alunixaXSettings().upstreamWorktreeCreate || !sourceRef) return payload;
     if (!pendingWorktreeRequestMatchesSelection(request, selection)) return payload;
     if (request?.startingState?.type !== "branch") return payload;
     if (request.startingState.branchName === sourceRef) return payload;
@@ -9347,7 +9347,7 @@
       startingState: { ...request.startingState, branchName: sourceRef },
     };
     prepareUpstreamBranchSelection(selection);
-    sendCodexPlusDiagnostic("upstream_pending_worktree_override_applied", {
+    sendAlunixaXDiagnostic("upstream_pending_worktree_override_applied", {
       label: selection.label || "",
       sourceRef,
       sourceWorkspaceRoot: request.sourceWorkspaceRoot || "",
@@ -9373,7 +9373,7 @@
         }
         window.__codexUpstreamPendingWorktreeDispatcherPatch = patchVersion;
       } catch (error) {
-        sendCodexPlusDiagnostic("upstream_pending_worktree_patch_failed", {
+        sendAlunixaXDiagnostic("upstream_pending_worktree_patch_failed", {
           errorName: error?.name || "",
           errorMessage: error?.message || String(error),
         });
@@ -9426,13 +9426,13 @@
   }
 
   async function handleUpstreamWorktreeNativeCreate(event) {
-    if (!codexPlusSettings().upstreamWorktreeCreate) return false;
+    if (!alunixaXSettings().upstreamWorktreeCreate) return false;
     const target = event.target instanceof Element ? event.target : event.target?.parentElement;
     const trigger = target?.closest?.("[data-codex-worktree-create], [data-worktree-create]");
     if (!trigger) return false;
     const payload = upstreamWorktreePayloadFromSelection(trigger) || upstreamWorktreeNativePayloadFromElement(trigger);
     if (!payload) {
-      showToast("无法安全识别 Codex 原生 worktree 表单，请使用 Codex++ 菜单创建。", null);
+      showToast("无法安全识别 Codex 原生 worktree 表单，请使用 Alunixa X 菜单创建。", null);
       return false;
     }
     event.preventDefault();
@@ -9520,12 +9520,12 @@
       <div class="codex-delete-confirm-content" role="dialog" aria-modal="true" aria-label="Create upstream worktree">
         <div class="codex-delete-confirm-title">Create from upstream</div>
         <div class="codex-delete-confirm-message">等价于 git worktree add -b branch path upstream/base。创建前会先 fetch 远端分支。</div>
-        <label class="codex-plus-form-field">仓库路径<input data-codex-upstream-worktree-field="repoPath" type="text" placeholder="/path/to/repo"></label>
-        <label class="codex-plus-form-field">新分支名<input data-codex-upstream-worktree-field="branchName" type="text" placeholder="feature/my-task"></label>
-        <label class="codex-plus-form-field">Worktree 路径<input data-codex-upstream-worktree-field="worktreePath" type="text" placeholder="/path/to/worktrees/my-task"></label>
-        <label class="codex-plus-form-field">Remote<input data-codex-upstream-worktree-field="remote" type="text" value="upstream"></label>
-        <label class="codex-plus-form-field">Base branch<input data-codex-upstream-worktree-field="baseBranch" type="text" value="main"></label>
-        <div class="codex-plus-form-message" data-codex-upstream-worktree-message>填写仓库路径后会自动读取 remote 和当前分支。</div>
+        <label class="alunixa-x-form-field">仓库路径<input data-codex-upstream-worktree-field="repoPath" type="text" placeholder="/path/to/repo"></label>
+        <label class="alunixa-x-form-field">新分支名<input data-codex-upstream-worktree-field="branchName" type="text" placeholder="feature/my-task"></label>
+        <label class="alunixa-x-form-field">Worktree 路径<input data-codex-upstream-worktree-field="worktreePath" type="text" placeholder="/path/to/worktrees/my-task"></label>
+        <label class="alunixa-x-form-field">Remote<input data-codex-upstream-worktree-field="remote" type="text" value="upstream"></label>
+        <label class="alunixa-x-form-field">Base branch<input data-codex-upstream-worktree-field="baseBranch" type="text" value="main"></label>
+        <div class="alunixa-x-form-message" data-codex-upstream-worktree-message>填写仓库路径后会自动读取 remote 和当前分支。</div>
         <div class="codex-delete-confirm-actions">
           <button type="button" data-codex-upstream-worktree-cancel="true">取消</button>
           <button type="button" data-codex-upstream-worktree-defaults="true">读取默认值</button>
@@ -10044,7 +10044,7 @@
 
   function nativeSessionActionMenuScopes() {
     return [...document.querySelectorAll('[role="menu"]')]
-      .filter((menu) => !menu.matches(`.${moreMenuClass}, .${codexPlusMenuFloatingClass}, #${codexPlusMenuId}`));
+      .filter((menu) => !menu.matches(`.${moreMenuClass}, .${alunixaXMenuFloatingClass}, #${alunixaXMenuId}`));
   }
 
   function looksLikeNativeSessionActionMenu(menu) {
@@ -10197,7 +10197,7 @@
   }
 
   function attachButton(row) {
-    const settings = codexPlusSettings();
+    const settings = alunixaXSettings();
     const existingGroup = actionGroupFromRow(row);
     const existingDeleteButton = existingGroup?.querySelector(`.${buttonClass}`);
     const existingMoreButton = existingGroup?.querySelector(`.${moreButtonClass}`);
@@ -10250,7 +10250,7 @@
           openProjectMoveMenuForRow(row, moreButton, ref, event);
         }));
       }
-      const sessionCopyItem = createSessionMoreMenuItem("原地复制会话 - Codex++", "⧉", activateSessionCopyMenuItem);
+      const sessionCopyItem = createSessionMoreMenuItem("原地复制会话 - Alunixa X", "⧉", activateSessionCopyMenuItem);
       sessionCopyItem.__codexSessionCopyRow = row;
       moreMenu.appendChild(sessionCopyItem);
       const sessionAutoRenameItem = createSessionMoreMenuItem("自动重命名当前会话", "✦", activateSessionAutoRenameMenuItem);
@@ -10360,7 +10360,7 @@
   }
 
   function attachArchivedPageDeleteButton(row) {
-    const settings = codexPlusSettings();
+    const settings = alunixaXSettings();
     row.querySelectorAll("[data-codex-archive-row-action]").forEach((button) => button.remove());
     row.dataset.codexArchiveDeleteRow = "false";
     if (!settings.sessionDelete && !settings.markdownExport) return;
@@ -10639,7 +10639,7 @@
   }
 
   function installCodexServiceTierBadge() {
-    if (!codexPlusSettings().serviceTierControls) {
+    if (!alunixaXSettings().serviceTierControls) {
       removeCodexServiceTierBadges();
       return;
     }
@@ -10685,51 +10685,51 @@
       transform: el.style.transform || "",
       boxSizing: el.style.boxSizing || "",
     };
-    if (!("codexPlusConversationViewOriginalWidth" in el.dataset)) el.dataset.codexPlusConversationViewOriginalWidth = original.width;
-    if (!("codexPlusConversationViewOriginalMaxWidth" in el.dataset)) el.dataset.codexPlusConversationViewOriginalMaxWidth = original.maxWidth;
-    if (!("codexPlusConversationViewOriginalMarginLeft" in el.dataset)) el.dataset.codexPlusConversationViewOriginalMarginLeft = original.marginLeft;
-    if (!("codexPlusConversationViewOriginalMarginRight" in el.dataset)) el.dataset.codexPlusConversationViewOriginalMarginRight = original.marginRight;
-    if (!("codexPlusConversationViewOriginalLeft" in el.dataset)) el.dataset.codexPlusConversationViewOriginalLeft = original.left;
-    if (!("codexPlusConversationViewOriginalTransform" in el.dataset)) el.dataset.codexPlusConversationViewOriginalTransform = original.transform;
-    if (!("codexPlusConversationViewOriginalBoxSizing" in el.dataset)) el.dataset.codexPlusConversationViewOriginalBoxSizing = original.boxSizing;
+    if (!("alunixaXConversationViewOriginalWidth" in el.dataset)) el.dataset.alunixaXConversationViewOriginalWidth = original.width;
+    if (!("alunixaXConversationViewOriginalMaxWidth" in el.dataset)) el.dataset.alunixaXConversationViewOriginalMaxWidth = original.maxWidth;
+    if (!("alunixaXConversationViewOriginalMarginLeft" in el.dataset)) el.dataset.alunixaXConversationViewOriginalMarginLeft = original.marginLeft;
+    if (!("alunixaXConversationViewOriginalMarginRight" in el.dataset)) el.dataset.alunixaXConversationViewOriginalMarginRight = original.marginRight;
+    if (!("alunixaXConversationViewOriginalLeft" in el.dataset)) el.dataset.alunixaXConversationViewOriginalLeft = original.left;
+    if (!("alunixaXConversationViewOriginalTransform" in el.dataset)) el.dataset.alunixaXConversationViewOriginalTransform = original.transform;
+    if (!("alunixaXConversationViewOriginalBoxSizing" in el.dataset)) el.dataset.alunixaXConversationViewOriginalBoxSizing = original.boxSizing;
   }
 
   function conversationViewRestoreElement(el) {
     if (!el) return;
-    if ("codexPlusConversationViewOriginalWidth" in el.dataset) {
-      el.style.width = el.dataset.codexPlusConversationViewOriginalWidth;
-      delete el.dataset.codexPlusConversationViewOriginalWidth;
+    if ("alunixaXConversationViewOriginalWidth" in el.dataset) {
+      el.style.width = el.dataset.alunixaXConversationViewOriginalWidth;
+      delete el.dataset.alunixaXConversationViewOriginalWidth;
     }
-    if ("codexPlusConversationViewOriginalMaxWidth" in el.dataset) {
-      el.style.maxWidth = el.dataset.codexPlusConversationViewOriginalMaxWidth;
-      delete el.dataset.codexPlusConversationViewOriginalMaxWidth;
+    if ("alunixaXConversationViewOriginalMaxWidth" in el.dataset) {
+      el.style.maxWidth = el.dataset.alunixaXConversationViewOriginalMaxWidth;
+      delete el.dataset.alunixaXConversationViewOriginalMaxWidth;
     }
-    if ("codexPlusConversationViewOriginalMarginLeft" in el.dataset) {
-      el.style.marginLeft = el.dataset.codexPlusConversationViewOriginalMarginLeft;
-      delete el.dataset.codexPlusConversationViewOriginalMarginLeft;
+    if ("alunixaXConversationViewOriginalMarginLeft" in el.dataset) {
+      el.style.marginLeft = el.dataset.alunixaXConversationViewOriginalMarginLeft;
+      delete el.dataset.alunixaXConversationViewOriginalMarginLeft;
     }
-    if ("codexPlusConversationViewOriginalMarginRight" in el.dataset) {
-      el.style.marginRight = el.dataset.codexPlusConversationViewOriginalMarginRight;
-      delete el.dataset.codexPlusConversationViewOriginalMarginRight;
+    if ("alunixaXConversationViewOriginalMarginRight" in el.dataset) {
+      el.style.marginRight = el.dataset.alunixaXConversationViewOriginalMarginRight;
+      delete el.dataset.alunixaXConversationViewOriginalMarginRight;
     }
-    if ("codexPlusConversationViewOriginalLeft" in el.dataset) {
-      el.style.left = el.dataset.codexPlusConversationViewOriginalLeft;
-      delete el.dataset.codexPlusConversationViewOriginalLeft;
+    if ("alunixaXConversationViewOriginalLeft" in el.dataset) {
+      el.style.left = el.dataset.alunixaXConversationViewOriginalLeft;
+      delete el.dataset.alunixaXConversationViewOriginalLeft;
     }
-    if ("codexPlusConversationViewOriginalTransform" in el.dataset) {
-      el.style.transform = el.dataset.codexPlusConversationViewOriginalTransform;
-      delete el.dataset.codexPlusConversationViewOriginalTransform;
+    if ("alunixaXConversationViewOriginalTransform" in el.dataset) {
+      el.style.transform = el.dataset.alunixaXConversationViewOriginalTransform;
+      delete el.dataset.alunixaXConversationViewOriginalTransform;
     }
-    if ("codexPlusConversationViewOriginalBoxSizing" in el.dataset) {
-      el.style.boxSizing = el.dataset.codexPlusConversationViewOriginalBoxSizing;
-      delete el.dataset.codexPlusConversationViewOriginalBoxSizing;
+    if ("alunixaXConversationViewOriginalBoxSizing" in el.dataset) {
+      el.style.boxSizing = el.dataset.alunixaXConversationViewOriginalBoxSizing;
+      delete el.dataset.alunixaXConversationViewOriginalBoxSizing;
     }
   }
 
   function conversationViewResetOwnOffset(el) {
     if (!el) return;
-    const originalTransform = el.dataset.codexPlusConversationViewOriginalTransform || "";
-    const originalLeft = el.dataset.codexPlusConversationViewOriginalLeft || "";
+    const originalTransform = el.dataset.alunixaXConversationViewOriginalTransform || "";
+    const originalLeft = el.dataset.alunixaXConversationViewOriginalLeft || "";
     if (el.style.left !== originalLeft) el.style.left = originalLeft;
     if (el.style.transform !== originalTransform) el.style.transform = originalTransform;
     const transform = String(el.style.transform || "").trim();
@@ -10801,7 +10801,7 @@
   }
 
   function conversationViewAlignNow() {
-    if (!codexPlusSettings().conversationView) return;
+    if (!alunixaXSettings().conversationView) return;
     conversationViewResolveTargets();
     conversationViewAlignElement(conversationViewState.contentEl);
     conversationViewAlignElement(conversationViewState.composerEl);
@@ -10838,7 +10838,7 @@
     conversationViewState.composerEl = null;
   }
 
-  window.__codexPlusConversationViewCleanup = cleanupConversationView;
+  window.__alunixaXConversationViewCleanup = cleanupConversationView;
 
   function ensureConversationViewRuntime() {
     if (conversationViewState.ro && conversationViewState.mo && conversationViewState.pollId) return;
@@ -10857,7 +10857,7 @@
   }
 
   function refreshConversationView() {
-    if (!codexPlusSettings().conversationView) {
+    if (!alunixaXSettings().conversationView) {
       cleanupConversationView();
       return;
     }
@@ -10870,14 +10870,14 @@
     installCodexPerformanceProtection();
     installCodexServiceTierDispatcherPatch();
     installCodexRemoteSessionRecoveryListener();
-    if (window.__codexPlusRemoteSessionRecoveryDispatcher) {
+    if (window.__alunixaXRemoteSessionRecoveryDispatcher) {
       installCodexRemoteSessionDispatcherSubscription(
-        window.__codexPlusRemoteSessionRecoveryDispatcher,
+        window.__alunixaXRemoteSessionRecoveryDispatcher,
         "existing-renderer"
       );
     }
     installCodexProjectlessNewTaskButtons();
-    installCodexPlusMenu();
+    installAlunixaXMenu();
     localizeCodexMenus();
     startBackendStatusPolling();
     installDeleteButtonEventDelegation();
@@ -10990,7 +10990,7 @@
   }
 
   function zedRemoteOpenStrategy() {
-    const strategy = zedRemoteString(codexPlusBackendSettings.zedRemoteOpenStrategy);
+    const strategy = zedRemoteString(alunixaXBackendSettings.zedRemoteOpenStrategy);
     return ["addToFocusedWorkspace", "reuseWindow", "newWindow", "default"].includes(strategy)
       ? strategy
       : "addToFocusedWorkspace";
@@ -11192,7 +11192,7 @@
   }
 
   function zedRemoteContext(scope = document) {
-    const settings = codexPlusSettings();
+    const settings = alunixaXSettings();
     if (!settings.zedRemoteOpen) return null;
     const now = Date.now();
     if (zedRemoteContextCache.scope === scope && now - zedRemoteContextCache.at < zedRemoteContextCacheTtlMs) {
@@ -11292,7 +11292,7 @@
     nextRequest = {
       ...nextRequest,
       strategy: nextRequest.strategy || zedRemoteOpenStrategy(),
-      remember: codexPlusBackendSettings.zedRemoteProjectRegistryEnabled !== false,
+      remember: alunixaXBackendSettings.zedRemoteProjectRegistryEnabled !== false,
     };
     try {
       const result = await postJson("/zed-remote/open", nextRequest);
@@ -11367,7 +11367,7 @@
   }
 
   async function activateZedRemoteOpenInMenuItem(event) {
-    if (!codexPlusSettings().zedRemoteOpen) return;
+    if (!alunixaXSettings().zedRemoteOpen) return;
     if (event?.type === "keydown" && !["Enter", " "].includes(event.key)) return;
     const scope = event?.currentTarget?.closest?.('[role="menu"], [data-radix-popper-content-wrapper]') || event?.currentTarget || document;
     event.preventDefault();
@@ -11408,7 +11408,7 @@
 
   function refreshZedRemoteOpenInMenus(scope = document) {
     removeZedRemoteOpenInMenuItems(scope);
-    if (!codexPlusSettings().zedRemoteOpen) return;
+    if (!alunixaXSettings().zedRemoteOpen) return;
     const fallbackPayload = zedRemoteCurrentFallbackPayload();
     zedRemoteOpenInMenuScopes(scope).forEach((menu) => {
       if (!(menu instanceof HTMLElement) || isExtensionUiNode(menu)) return;
@@ -11428,7 +11428,7 @@
   }
 
   async function refreshZedRemoteOpenControls(scope = document) {
-    if (!codexPlusSettings().zedRemoteOpen) {
+    if (!alunixaXSettings().zedRemoteOpen) {
       removeZedRemoteButtons();
       removeZedRemoteOpenInMenuItems();
       return;
@@ -11458,7 +11458,7 @@
   }
 
   function shouldRefreshZedRemoteMenus(mutations) {
-    if (!codexPlusSettings().zedRemoteOpen) return false;
+    if (!alunixaXSettings().zedRemoteOpen) return false;
     if (!mutations) return true;
     return mutations.some((mutation) => {
       const target = mutation.target;
@@ -11483,7 +11483,7 @@
       clearPluginPatchArtifacts();
     } else {
       const pluginUnlockStrategy = codexPluginUnlockStrategy();
-      const settings = codexPlusSettings();
+      const settings = alunixaXSettings();
       logCodexPluginUnlockStrategy(pluginUnlockStrategy);
       if ((pluginUnlockStrategy === "modern" || pluginUnlockStrategy === "unknown") && settings.pluginMarketplaceUnlock) {
         const marketplaceRequestPatchStrategy = codexPluginMarketplaceRequestPatchStrategy();
@@ -11532,7 +11532,7 @@
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-plus-modal-overlay, .${projectMoveOverlayClass}, .${codexServiceTierBadgeClass}, .codex-zed-remote-button, .codex-zed-remote-toast, #codex-plus-menu`);
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .alunixa-x-modal-overlay, .${projectMoveOverlayClass}, .${codexServiceTierBadgeClass}, .codex-zed-remote-button, .codex-zed-remote-toast, #alunixa-x-menu`);
   }
 
   function scanRelevantSelector() {
@@ -11608,18 +11608,18 @@
   }
 
   void syncCodexReasoningEffortSettings();
-  window.__codexPlusStartupModelInjection = installCodexStartupModelInjection().catch((error) => {
+  window.__alunixaXStartupModelInjection = installCodexStartupModelInjection().catch((error) => {
     const result = {
       status: "failed",
       message: String(error?.message || error),
       models: [],
       expectedModels: [],
     };
-    sendCodexPlusDiagnostic("startup_model_injection_failed", result);
+    sendAlunixaXDiagnostic("startup_model_injection_failed", result);
     return result;
   });
   installCodexProjectlessMainWindowProtection();
-  if (!window.__CODEX_PLUS_TEST_PROJECTLESS__) void loadCodexProjectlessMainWindowSetting();
+  if (!window.__ALUNIXA_X_TEST_PROJECTLESS__) void loadCodexProjectlessMainWindowSetting();
   installUpstreamBranchDropdownAdapter();
   installUpstreamWorktreeNativeAdapter();
   scan();
@@ -11627,21 +11627,21 @@
   window.__codexProjectMoveReadProjection = readProjectMoveProjection;
   window.__codexProjectMoveTargets = projectMoveTargets;
   window.__codexProjectMoveSortChats = applyChatsSortCorrection;
-  window.removeEventListener("resize", window.__codexPlusResizeHandler);
-  let codexPlusResizeRafId = 0;
-  window.__codexPlusResizeHandler = () => {
-    cancelAnimationFrame(codexPlusResizeRafId);
-    codexPlusResizeRafId = requestAnimationFrame(() => {
+  window.removeEventListener("resize", window.__alunixaXResizeHandler);
+  let alunixaXResizeRafId = 0;
+  window.__alunixaXResizeHandler = () => {
+    cancelAnimationFrame(alunixaXResizeRafId);
+    alunixaXResizeRafId = requestAnimationFrame(() => {
       sessionRows().forEach((row) => {
         const group = actionGroupFromRow(row);
         if (group) delete group.dataset.codexActionLayoutStable;
       });
       syncActionGroupsLayout();
-      updateFloatingCodexPlusMenuPosition(document.getElementById(codexPlusMenuId));
+      updateFloatingAlunixaXMenuPosition(document.getElementById(alunixaXMenuId));
       runScanStep(refreshConversationView);
     });
   };
-  window.addEventListener("resize", window.__codexPlusResizeHandler);
+  window.addEventListener("resize", window.__alunixaXResizeHandler);
   window.__codexSessionDeleteObserver?.disconnect();
   window.__codexSessionDeleteObserver = new MutationObserver(scheduleScan);
   window.__codexSessionDeleteObserver.observe(document.body || document.documentElement, {
@@ -11652,14 +11652,14 @@
   });
 })();
 
-// === 粘贴修复 (CodexPlusPlus 页面增强) ===
-// 控制开关：window.__CODEX_PLUS_PASTE_FIX__ = { enabled: <bool> }
-// 由 CodexPlusPlus 在启动时根据 settings.codexAppPasteFix 注入。
+// === 粘贴修复 (AlunixaX 页面增强) ===
+// 控制开关：window.__ALUNIXA_X_PASTE_FIX__ = { enabled: <bool> }
+// 由 AlunixaX 在启动时根据 settings.codexAppPasteFix 注入。
 // 关闭时不进入 if 体，行为与原 Codex 完全一致；开启时在 document 捕获阶段
 // 拦截 paste，若 text/plain 非空则阻止默认行为并调用 execCommand('insertText')
 // 插入纯文本，避免 Codex 把 Word 复制的内容识别为附件。
 // SENTINEL 保证多次执行（页面刷新、脚本重注入）只装一次 handler。
-if (window.__CODEX_PLUS_PASTE_FIX__ && window.__CODEX_PLUS_PASTE_FIX__.enabled === true) {
+if (window.__ALUNIXA_X_PASTE_FIX__ && window.__ALUNIXA_X_PASTE_FIX__.enabled === true) {
   (() => {
     const SENTINEL = '__codexPasteFixInstalled__';
     if (window[SENTINEL]) return;

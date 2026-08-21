@@ -1,179 +1,96 @@
-# Codex++
+<p align="center">
+  <img src="assets/brand/alunixa-x-icon.png" alt="Alunixa X" width="148">
+</p>
+
+<h1 align="center">Alunixa X</h1>
+
+<p align="center"><strong>AI Agent Control System</strong></p>
+
+<p align="center">Connect models, providers, tools, automation, integrations, and the Codex desktop runtime on one control rail.</p>
 
 <p align="center">
-  <img src="docs/images/codex-plus-plus.png" alt="Codex++ icon" width="160">
+  <a href="README.md">中文</a> · English
 </p>
 
 <p align="center">
-  <a href="README.md">中文</a> | English
+  <img alt="Release" src="https://img.shields.io/github/v/release/Alunixa-Code/Alunixa-X">
+  <img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Alunixa-Code/Alunixa-X/pr-build.yml?branch=main">
+  <img alt="License" src="https://img.shields.io/github/license/Alunixa-Code/Alunixa-X">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-2024-111827">
+  <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2.x-43DCFF">
 </p>
 
 <p align="center">
-  <img alt="Release" src="https://img.shields.io/github/v/release/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="Stars" src="https://img.shields.io/github/stars/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="License" src="https://img.shields.io/github/license/Alunixa-Code/CodexPlusPlusPlus">
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-orange">
-  <img alt="Tauri" src="https://img.shields.io/badge/tauri-2.x-24C8DB">
+  <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
-Codex++ is an external launcher and manager for the OpenAI Codex / ChatGPT desktop app. It uses the Chromium DevTools Protocol and a local helper for provider switching, protocol conversion, session management, and UI enhancements without modifying the official app's `app.asar` or installation files.
+## What is Alunixa X
 
-## Quick Start
+Alunixa X is a cross-platform control system for desktop AI agents. The current release focuses on OpenAI Codex / ChatGPT Desktop and adds a unified external launcher, CDP bridge, local helper, protocol proxy, and management interface without replacing the official renderer or patching `app.asar`.
 
-Download the latest installer from [GitHub Releases](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/latest):
-
-- Windows: `CodexPlusPlus-*-windows-x64-setup.exe`
-- macOS Intel: `CodexPlusPlus-*-macos-x64.dmg`
-- macOS Apple Silicon: `CodexPlusPlus-*-macos-arm64.dmg`
-
-Project home: [Alunixa-Code/CodexPlusPlusPlus](https://github.com/Alunixa-Code/CodexPlusPlusPlus). Report issues through [GitHub Issues](https://github.com/Alunixa-Code/CodexPlusPlusPlus/issues).
-
-After installation, two entry points are available:
-
-- `Codex++`: silently starts the official desktop app with saved provider settings and enhancements.
-- `Codex++ Manager`: manages providers, models, tools, sessions, enhancements, scripts, updates, and diagnostics.
-
-For first-time setup, open the manager, verify the detected app path, configure a provider and optional enhancements, then launch through `Codex++`. The Windows installer creates Desktop and Start Menu shortcuts. The macOS DMG installs `/Applications/Codex++.app` and `/Applications/Codex++ 管理工具.app`.
-
-## Community and Support
-
-Join the Codex++ community (QQ group: 830629290) to report issues, share feedback, or suggest features.
-
-WeChat: <a href="https://docs.qq.com/doc/DQ2VOanZTTFZJcUpZ#">get the latest group QR code</a>.
-
-<img src="docs/images/discussion-group-qr.jpg" alt="Codex++ WeChat group QR code" width="260">
-
-
-Friendly link: <a href="https://linux.do">LINUX DO</a>
-
-If Codex++ helps you, you can support its continued maintenance.
-
-<p align="center">
-  <img src="assets/images/sponsor-alipay.jpg" alt="Alipay donation QR code" width="220">
-  <img src="assets/images/sponsor-wechat.jpg" alt="WeChat donation QR code" width="220">
-</p>
-
-## Current Features
-
-| Area | Capabilities |
-| --- | --- |
-| Provider configuration | Official login, official login plus API, pure API, and aggregate providers; Responses / Chat Completions; model tests, model discovery, Provider Doctor, cc-switch and deep-link imports |
-| Models and context | Per-model context windows, auto-compact limits, `model_catalog_json`, shared config, and per-provider MCP, Skill, and Plugin selection |
-| Session management | Local session scanning, bulk deletion, Markdown export, token usage history, Provider metadata sync, and backups |
-| Codex enhancements | Plugin marketplace and model whitelist handling, session actions, paste fix, Chinese locale, fast startup, conversation width and scroll restore, service-tier controls, Goals, Stepwise, and image overlay |
-| Development workflow | Project move, Upstream worktree creation, thread IDs, and Zed Remote project discovery and opening |
-| Scripts and maintenance | User script installation and toggles, app detection, shortcuts, Watcher, environment cleanup, logs, diagnostics, health checks, and Release updates |
-
-Every UI enhancement is independently configurable. Disabling the global enhancement switch still leaves Codex++ available as a provider and launch manager.
-
-## Provider Modes
-
-Official login, mixed API, and pure API are stored and switched separately:
-
-| Mode | Purpose | Authentication boundary |
-| --- | --- | --- |
-| Official login | Use only the official ChatGPT / Codex account | Removes custom providers and API keys while preserving official login state |
-| Official login + API | Keep official account features and plugins while routing model requests to a compatible API | Stores the key as a provider bearer token, not in pure API `auth.json` |
-| Pure API | Use a custom Base URL and key without an official account | Maintains independent `config.toml` and API-key auth without mixing official credentials |
-| Aggregate provider | Route across multiple ordinary API providers | Supports failover, conversation round-robin, request round-robin, and weighted round-robin |
-
-Each provider can configure Responses or Chat Completions, model lists, a test model, User-Agent, context windows, auto-compact limits, and enabled MCP servers, Skills, and Plugins. Chat Completions can be converted locally into the Responses protocol used by Codex.
-
-Per-model windows accept values such as `1M`, `200K`, or plain integers. Codex++ generates a dedicated `model_catalog_json` for Codex.
-
-Provider switching saves the current profile before applying the target profile. Real API keys remain local and should never be posted in logs, screenshots, or issues.
-
-## Codex Enhancements
-
-- Session delete, bulk delete, Markdown export, and project move actions.
-- Plugin marketplace unlock, plugin auto-expand, and model whitelist handling.
-- Plain-text paste, forced Chinese locale, startup acceleration, and native menu localization.
-- Conversation width, scroll restoration, thread IDs, service-tier controls, and Goals.
-- Stepwise suggestions with a separate API, model, item count, and timeout.
-- Upstream worktrees, Zed Remote, custom image overlays, and user scripts.
-
-Settings that depend on renderer injection generally require saving and restarting Codex++.
-
-## Updates and Packages
-
-Codex++ publishes installers through GitHub Releases. Windows builds an NSIS installer, while macOS builds separate Intel x64 and Apple Silicon arm64 DMGs.
-
-The manager's About page can check and start updates. When the silent launcher finds a new version, it opens the manager directly on the update prompt.
-
-## Data Locations
-
-- Codex config: `~/.codex/config.toml`
-- Codex auth state: `~/.codex/auth.json`
-- Codex local database: prefers `~/.codex/sqlite/*.db`, falls back to legacy `~/.codex/state_5.sqlite`
-- Codex++ state and logs: `~/.codex-session-delete/`
-- Provider Sync backups: `~/.codex/backups_state/provider-sync`
-
-## FAQ
-
-### The Codex++ menu does not appear
-
-Launch through the `Codex++` entry instead of opening the official app directly. Check the detected app path, launch status, and diagnostic logs in the manager's Maintenance and About pages.
-
-### Requests fail after switching providers
-
-Run the model test or Provider Doctor from the provider detail page. Verify that the protocol, Base URL, key, and test model match. Pure API and official-login-plus-API use different authentication locations; do not manually copy `auth.json` between them.
-
-### How is Upstream worktree different from Codex native creation?
-
-Codex++ updates the remote branch first, then creates the worktree as if you ran:
-
-```bash
-git worktree add -b <new-branch> <worktree-path> upstream/<base-branch>
+```text
+Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop runtime
 ```
 
-The new worktree starts from the fresh remote tracking branch instead of the local HEAD used by the current session. If Codex++ cannot safely recognize the current Codex version's native worktree form, use the Codex++ menu entry and enter the repository path, branch name, worktree path, remote, and base branch manually.
+## Highlights
 
-### macOS says the app cannot be opened or is damaged
+| Surface | Capabilities |
+| --- | --- |
+| Agent Rail | Continuous provider, model, tool, Codex, and runtime status on the overview screen |
+| Provider network | Official, mixed API, pure API, aggregate rotation, per-model routing, Provider Doctor |
+| Model catalog | Per-model context windows, auto-compaction token limits, reasoning levels, image handling |
+| Full endpoint proxy | `/v1/**` HTTP, SSE, binary, multipart, large bodies, and Realtime WebSocket |
+| Image tool | Standalone `image_gen` MCP for generation, edits, multiple inputs, masks, and local outputs |
+| Agent capabilities | Shared terminal, session operations, export, project move, Stepwise, memory, Goals, and scripts |
+| Connections | Remote Control, personal WeChat, Zed Remote, and existing-session recovery |
+| Extensions | MCP, Skills, Plugins, script marketplace, and DreamSkin themes |
+| Operations | Startup injection, fail-closed validation, Watcher, diagnostics, updates, and installers |
 
-Unsigned and unnotarized builds may be blocked by Gatekeeper. Allow the app in System Settings -> Privacy & Security. For formal distribution, configure Apple Developer ID signing and notarization.
+## Install
 
-### Does it support Intel Macs?
+Download a platform build from [GitHub Releases](https://github.com/Alunixa-Code/Alunixa-X/releases/latest):
 
-Yes. Releases provide both `macos-x64.dmg` and `macos-arm64.dmg`. Intel Macs should use the x64 package, while Apple Silicon Macs should use the arm64 package.
+- Windows: `Alunixa-X-*-windows-x64-setup.exe`
+- macOS Intel: `Alunixa-X-*-macos-x64.dmg`
+- macOS Apple Silicon: `Alunixa-X-*-macos-arm64.dmg`
+
+The installer creates two entries:
+
+- **Alunixa X** opens the main control system.
+- **Alunixa X Launch** starts Codex Desktop with the saved provider and agent configuration.
+
+## Privacy
+
+Configuration, credentials, session indexes, and diagnostics are local by default. Future recommendations, anonymous usage metrics, and online catalogs will ship with visible controls and documentation. They are not intended to collect prompts, conversations, file contents, API keys, or terminal output.
 
 ## Development
 
-```bash
-cd apps/codex-plus-manager
+```powershell
+cd apps/alunixa-x-manager
 npm ci
+npm test
 npm run check
 npm run vite:build
 
 cd ../..
 cargo fmt --all -- --check
-cargo test
+cargo test --workspace -- --test-threads=1
 cargo build --release
 ```
 
-Project structure:
+## Project
 
-```text
-apps/
-  codex-plus-launcher/          Silent launcher
-  codex-plus-manager/           Tauri manager
-assets/inject/
-  renderer-inject.js            Enhancement script injected into Codex
-crates/
-  codex-plus-core/              Launch, injection, config, update, install, bridge
-  codex-plus-data/              Session data, export, Provider Sync
-scripts/installer/
-  windows/CodexPlusPlus.nsi     Windows NSIS installer
-  macos/package-dmg.sh          macOS DMG packager
-```
+- Repository: https://github.com/Alunixa-Code/Alunixa-X
+- Issues: https://github.com/Alunixa-Code/Alunixa-X/issues
+- Discussions: https://github.com/Alunixa-Code/Alunixa-X/discussions
 
-## License
+<p align="center">
+  <img src="assets/images/sponsor-alipay.jpg" alt="Alipay donation QR code" width="210">
+  <img src="assets/images/sponsor-wechat.jpg" alt="WeChat donation QR code" width="210">
+</p>
 
-Copyright (C) 2026 BigPizzaV3
+## License and compatibility
 
-CodexPlusPlus is licensed under the [GNU Affero General Public License v3.0](LICENSE), SPDX identifier `AGPL-3.0-only`. Modified versions that are distributed or offered to users over a network must provide the corresponding source code as required by AGPLv3.
+Alunixa X is distributed under the [GNU Affero General Public License v3.0](LICENSE), SPDX `AGPL-3.0-only`. It contains code evolved from CodexPlusPlus and its contributor history; the original copyright and license notices remain in effect. New Alunixa X work is maintained by Alunixa-Code.
 
-The license covers CodexPlusPlus code only. It does not grant rights to OpenAI, ChatGPT, Codex trademarks, application assets, or other third-party content.
-
-## Compatibility
-
-Codex++ depends on the official desktop app's page structure, CDP behavior, and local data formats. Official app updates may require injection updates. Keep backups before changing provider configuration or local session data.
+Alunixa X is an independent third-party project. It is not affiliated with OpenAI and does not grant rights to OpenAI, ChatGPT, Codex, or other third-party trademarks or assets.

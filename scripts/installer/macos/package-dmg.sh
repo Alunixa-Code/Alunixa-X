@@ -7,16 +7,16 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 DIST="$ROOT/dist/macos"
 STAGE="$DIST/stage"
 BINARY_DIR="${BINARY_DIR:-$ROOT/target/release}"
-DMG="$DIST/CodexPlusPlus-${VERSION}-macos-${ARCH}.dmg"
-ICON_SOURCE="$ROOT/apps/codex-plus-manager/src-tauri/icons/icon.png"
-ICON_NAME="codex-plus-plus.icns"
+DMG="$DIST/Alunixa-X-${VERSION}-macos-${ARCH}.dmg"
+ICON_SOURCE="$ROOT/apps/alunixa-x-manager/src-tauri/icons/icon.png"
+ICON_NAME="alunixa-x.icns"
 ICON_ICNS="$DIST/$ICON_NAME"
 
 rm -rf "$DIST"
 mkdir -p "$STAGE"
 
 prepare_icon() {
-  local iconset="$DIST/codex-plus-plus.iconset"
+  local iconset="$DIST/alunixa-x.iconset"
   rm -rf "$iconset"
   mkdir -p "$iconset"
 
@@ -121,24 +121,24 @@ verify_app() {
 }
 
 prepare_icon
-create_app "Codex++" "CodexPlusPlus" "$BINARY_DIR/codex-plus-plus" "com.bigpizzav3.codexplusplus" "true"
-create_app "Codex++ 管理工具" "CodexPlusPlusManager" "$BINARY_DIR/codex-plus-plus-manager" "com.bigpizzav3.codexplusplus.manager" "false"
-if [ ! -x "$BINARY_DIR/codex-plus-imagegen-mcp" ]; then
-  echo "error: imagegen MCP companion not found or not executable: $BINARY_DIR/codex-plus-imagegen-mcp" >&2
+create_app "Alunixa X Launch" "AlunixaXLauncher" "$BINARY_DIR/alunixa-x" "io.github.alunixacode.alunixax.launcher" "true"
+create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-manager" "io.github.alunixacode.alunixax" "false"
+if [ ! -x "$BINARY_DIR/alunixa-x-imagegen-mcp" ]; then
+  echo "error: imagegen MCP companion not found or not executable: $BINARY_DIR/alunixa-x-imagegen-mcp" >&2
   exit 1
 fi
-cp "$BINARY_DIR/codex-plus-imagegen-mcp" "$STAGE/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"
-chmod +x "$STAGE/Codex++.app/Contents/MacOS/codex-plus-imagegen-mcp"
+cp "$BINARY_DIR/alunixa-x-imagegen-mcp" "$STAGE/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
+chmod +x "$STAGE/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
 
-sign_app "$STAGE/Codex++.app"
-sign_app "$STAGE/Codex++ 管理工具.app"
+sign_app "$STAGE/Alunixa X Launch.app"
+sign_app "$STAGE/Alunixa X.app"
 
-verify_app "$STAGE/Codex++.app"
-verify_app "$STAGE/Codex++ 管理工具.app"
+verify_app "$STAGE/Alunixa X Launch.app"
+verify_app "$STAGE/Alunixa X.app"
 
 ln -s /Applications "$STAGE/Applications"
 
-DMG_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-plus-plus-dmg.XXXXXX")"
+DMG_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alunixa-x-dmg.XXXXXX")"
 DMG_WORK_PATH="$DMG_WORK_DIR/$(basename "$DMG")"
 DMG_CREATED=false
 
@@ -150,7 +150,7 @@ cleanup_dmg_work_dir() {
 trap cleanup_dmg_work_dir EXIT
 
 for attempt in 1 2 3; do
-  if hdiutil create -volname "Codex++" -srcfolder "$STAGE" -ov -format UDZO "$DMG_WORK_PATH"; then
+  if hdiutil create -volname "Alunixa X" -srcfolder "$STAGE" -ov -format UDZO "$DMG_WORK_PATH"; then
     mv "$DMG_WORK_PATH" "$DMG"
     DMG_CREATED=true
     break

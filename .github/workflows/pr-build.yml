@@ -32,19 +32,19 @@ jobs:
         run: choco install nsis -y
 
       - name: Install frontend dependencies
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm install --package-lock=false
 
       - name: Frontend tests
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm test
 
       - name: TypeScript check
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm run check
 
       - name: Build frontend
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
       - name: Rust tests
@@ -57,9 +57,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist/windows/app | Out-Null
-          Copy-Item target/release/codex-plus-plus.exe dist/windows/app/
-          Copy-Item target/release/codex-plus-imagegen-mcp.exe dist/windows/app/
-          Copy-Item target/release/codex-plus-plus-manager.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x-imagegen-mcp.exe dist/windows/app/
+          Copy-Item target/release/alunixa-x-manager.exe dist/windows/app/
 
       - name: Build Windows installer
         shell: pwsh
@@ -74,20 +74,20 @@ jobs:
             $makensis = "makensis"
           }
           Push-Location scripts/installer/windows
-          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" CodexPlusPlus.nsi
+          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" AlunixaX.nsi
           Pop-Location
 
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
         with:
-          name: codex-plus-plus-windows-binaries
+          name: alunixa-x-windows-binaries
           path: dist/windows/app/*
           if-no-files-found: error
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: codex-plus-plus-windows-installer
+          name: alunixa-x-windows-installer
           path: dist/windows/*.exe
           if-no-files-found: error
 
@@ -119,11 +119,11 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install frontend dependencies
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm install --package-lock=false
 
       - name: Build frontend
-        working-directory: apps/codex-plus-manager
+        working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
       - name: Build release binaries
@@ -144,7 +144,7 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Codex++.app" "dist/macos/stage/Codex++ 管理工具.app"; do
+          for app in "dist/macos/stage/Alunixa X Launch.app" "dist/macos/stage/Alunixa X.app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
@@ -156,6 +156,6 @@ jobs:
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: codex-plus-plus-macos-${{ matrix.arch }}-dmg
+          name: alunixa-x-macos-${{ matrix.arch }}-dmg
           path: dist/macos/*.dmg
           if-no-files-found: error
