@@ -28,6 +28,10 @@
 
 Alunixa X is a cross-platform control system for desktop AI agents. The current release focuses on OpenAI Codex / ChatGPT Desktop and adds a unified external launcher, CDP bridge, local helper, protocol proxy, and management interface without replacing the official renderer or patching `app.asar`.
 
+<p align="center">
+  <img src="docs/images/alunixa-x-dashboard.png" alt="Alunixa X Agent Rail dashboard" width="1000">
+</p>
+
 ```text
 Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop runtime
 ```

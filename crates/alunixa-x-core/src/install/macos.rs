@@ -13,9 +13,9 @@ pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBund
     let install_root = install_root_or_default(options);
     let display_name = if manager { MANAGER_NAME } else { SILENT_NAME };
     let executable_name = if manager {
-        "AlunixaXManager"
-    } else {
         "AlunixaX"
+    } else {
+        "AlunixaXLauncher"
     };
     let binary = if manager {
         MANAGER_BINARY
@@ -193,9 +193,15 @@ fn executable_name_from_plist(plist: &str) -> String {
 
 fn info_plist(display_name: &str, executable_name: &str, identifier_suffix: &str) -> String {
     let version = crate::version::VERSION;
-    let dream_skin_url_type = if identifier_suffix.is_empty() {
+    let url_types = if identifier_suffix.is_empty() {
         r#"  <key>CFBundleURLTypes</key>
   <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Alunixa X Provider Import</string>
+      <key>CFBundleURLSchemes</key>
+      <array><string>alunixax</string></array>
+    </dict>
     <dict>
       <key>CFBundleURLName</key>
       <string>DreamSkin Community Theme</string>
@@ -232,7 +238,7 @@ fn info_plist(display_name: &str, executable_name: &str, identifier_suffix: &str
   <true/>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
-{dream_skin_url_type}
+{url_types}
 </dict>
 </plist>"#
     )

@@ -28,6 +28,10 @@
 
 Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点连接 OpenAI Codex / ChatGPT Desktop，在不替换官方应用原始渲染器和 `app.asar` 的前提下，通过外部启动器、CDP、本地 helper 与协议代理提供统一管理能力。
 
+<p align="center">
+  <img src="docs/images/alunixa-x-dashboard.png" alt="Alunixa X Agent Rail 控制台" width="1000">
+</p>
+
 它不是简单的模型切换器，也不是一套只会改配置文件的皮肤。Alunixa X 把下面这些链路放进同一个桌面界面：
 
 ```text

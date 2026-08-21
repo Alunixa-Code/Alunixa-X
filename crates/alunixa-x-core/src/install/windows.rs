@@ -61,7 +61,7 @@ pub fn build_windows_entrypoint_plan(options: &InstallOptions) -> WindowsEntrypo
         uninstall_command,
         quiet_uninstall_command,
         uninstall_key: "AlunixaX".to_string(),
-        legacy_uninstall_key: "Alunixa X".to_string(),
+        legacy_uninstall_key: "AlunixaXLegacy".to_string(),
         remove_owned_data: options.remove_owned_data,
     }
 }

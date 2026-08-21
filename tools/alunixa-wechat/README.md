@@ -6,7 +6,7 @@
 微信 iLink -> 长轮询收消息 -> codex app-server -> sendmessage 发回微信
 ```
 
-它是独立工具，不会修改 Alunixa X 管理工具、Codex 配置或桌面注入逻辑。
+它是独立工具，不会修改 Alunixa X、Codex 配置或桌面注入逻辑。
 
 ## 安全默认值
 
@@ -76,4 +76,4 @@ python tools/codex-wechat/codex_wechat.py run --config tools/codex-wechat/config
 - 这是 PoC，`app-server` 后端会按微信用户复用一个临时 thread；重启脚本后上下文会丢失。
 - 图片、文件、视频暂时只会转成文字占位说明，尚未下载并传给 Codex。
 - 微信长回复会按 `max_reply_chars` 分段发送。
-- 后续如果要产品化，建议把 thread 映射持久化，并接进 Alunixa X 管理工具。
+- 后续如果要产品化，建议把 thread 映射持久化，并接进 Alunixa X。

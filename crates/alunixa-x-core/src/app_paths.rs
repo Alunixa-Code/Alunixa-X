@@ -236,7 +236,7 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    // 拒绝把 Alunixa X 管理工具安装目录误当成 Codex 桌面应用
+    // 拒绝把 Alunixa X 安装目录误当成 Codex 桌面应用
     if is_alunixa_x_plus_path(path) {
         return None;
     }

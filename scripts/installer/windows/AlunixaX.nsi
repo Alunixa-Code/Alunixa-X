@@ -48,12 +48,12 @@ Section "Install"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\Alunixa X" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "DisplayName" "Alunixa X"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "Publisher" "Alunixa-Code"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "DisplayIcon" "$INSTDIR\alunixa-x-manager.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X" "UninstallString" "$INSTDIR\uninstall.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayName" "Alunixa X"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "Publisher" "Alunixa-Code"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayIcon" "$INSTDIR\alunixa-x-manager.exe"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "UninstallString" "$INSTDIR\uninstall.exe"
 SectionEnd
 
 Section "Uninstall"
@@ -77,7 +77,7 @@ Section "Uninstall"
   Delete "$INSTDIR\uninstall.exe"
   RMDir "$INSTDIR"
 
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX"
   DeleteRegKey HKCU "Software\Alunixa X"
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AlunixaXManager"
 SectionEnd

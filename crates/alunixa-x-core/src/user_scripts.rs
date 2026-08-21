@@ -503,7 +503,7 @@ mod runtime_status_tests {
         let targets = vec![
             target(
                 "manager",
-                "Alunixa X 管理工具",
+                "Alunixa X",
                 "http://127.0.0.1:1420/",
                 "ws://manager",
             ),

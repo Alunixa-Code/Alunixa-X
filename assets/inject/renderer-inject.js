@@ -1705,7 +1705,7 @@
       refreshSubAgentRestartControls();
     } catch (error) {
       if (button) button.disabled = false;
-      subAgentRestartMessage = "重启请求失败，请在 Alunixa X 管理器中重启 Codex。";
+      subAgentRestartMessage = "重启请求失败，请在 Alunixa X 中重启 Codex。";
       refreshSubAgentRestartControls();
       sendAlunixaXDiagnostic("sub_agent_restart_request_failed", {
         errorName: error?.name || "",

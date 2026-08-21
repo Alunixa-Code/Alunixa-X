@@ -670,7 +670,7 @@ impl AppServerClient {
                 "initialize",
                 Some(json!({
                     "clientInfo": {
-                        "name": "Alunixa X Manager",
+                        "name": "Alunixa X",
                         "title": "Alunixa X",
                         "version": crate::version::VERSION
                     },

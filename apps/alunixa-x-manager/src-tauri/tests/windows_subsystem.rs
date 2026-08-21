@@ -65,10 +65,11 @@ fn manager_close_minimizes_to_tray_without_confirmation() {
 }
 
 #[test]
-fn manager_queues_codexplusplus_provider_urls_for_confirmation_on_startup() {
+fn manager_queues_alunixax_and_legacy_provider_urls_for_confirmation_on_startup() {
     let main_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
         .expect("read manager main.rs");
 
+    assert!(main_rs.contains("alunixax://"));
     assert!(main_rs.contains("codexplusplus://"));
     assert!(main_rs.contains("provider_import::save_pending_provider_import_from_url"));
     assert!(!main_rs.contains("provider_import::import_provider_from_url"));
@@ -147,7 +148,7 @@ fn windows_binaries_request_administrator_privileges() {
 }
 
 #[test]
-fn windows_entrypoints_register_codexplusplus_url_protocol() {
+fn windows_entrypoints_register_alunixax_url_protocol_and_remove_legacy_registration() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let windows_install = manifest_dir
         .parent()
@@ -158,6 +159,7 @@ fn windows_entrypoints_register_codexplusplus_url_protocol() {
     let windows_install =
         std::fs::read_to_string(&windows_install).expect("read windows install source");
 
+    assert!(windows_install.contains("Software\\Classes\\alunixax"));
     assert!(windows_install.contains("Software\\Classes\\codexplusplus"));
     assert!(windows_install.contains("Software\\Classes\\dreamskin"));
     assert!(windows_install.contains("URL Protocol"));
@@ -189,15 +191,15 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains("<key>LSUIElement</key>"));
     assert!(script.contains("ARCH=\"${2:-$(uname -m)}\""));
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
-    assert!(script.contains("AlunixaX-${VERSION}-macos-${ARCH}.dmg"));
+    assert!(script.contains("Alunixa-X-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x\" \"io.github.alunixacode.alunixax\" \"true\""
+        "create_app \"Alunixa X Launch\" \"AlunixaXLauncher\" \"$BINARY_DIR/alunixa-x\" \"io.github.alunixacode.alunixax.launcher\" \"true\""
     ));
     assert!(script.contains(
-        "create_app \"Alunixa X 管理工具\" \"AlunixaXManager\" \"$BINARY_DIR/alunixa-x-manager\" \"io.github.alunixacode.alunixax.manager\" \"false\""
+        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-manager\" \"io.github.alunixacode.alunixax\" \"false\""
     ));
     assert!(script.contains("$BINARY_DIR/alunixa-x-imagegen-mcp"));
-    assert!(script.contains("Alunixa X.app/Contents/MacOS/alunixa-x-imagegen-mcp"));
+    assert!(script.contains("Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"));
 }
 
 #[test]

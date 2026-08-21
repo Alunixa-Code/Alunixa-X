@@ -2241,9 +2241,9 @@ pub fn set_manager_autostart_enabled(
     match alunixa_x_core::autostart::set_manager_autostart_enabled(enabled) {
         Ok(status) => ok(
             if enabled {
-                "已启用开机时启动 Alunixa X 管理器。"
+                "已启用开机时启动 Alunixa X。"
             } else {
-                "已关闭开机时启动 Alunixa X 管理器。"
+                "已关闭开机时启动 Alunixa X。"
             },
             status,
         ),

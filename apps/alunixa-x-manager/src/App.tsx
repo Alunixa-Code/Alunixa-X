@@ -5451,8 +5451,8 @@ function MaintenanceScreen({
         <CardContent>
           <div className="status-table">
             <StatusRow title={t("Codex 应用")} status={overview?.codex_app.status} path={overview?.codex_app.path} />
-            <StatusRow title={t("静默启动入口")} status={overview?.silent_shortcut.status} path={overview?.silent_shortcut.path} />
-            <StatusRow title={t("管理控制台入口")} status={overview?.management_shortcut.status} path={overview?.management_shortcut.path} />
+            <StatusRow title={t("Agent 启动入口")} status={overview?.silent_shortcut.status} path={overview?.silent_shortcut.path} />
+            <StatusRow title={t("Alunixa X 主入口")} status={overview?.management_shortcut.status} path={overview?.management_shortcut.path} />
             <StatusRow title={t("Watcher 自动接管")} status={watcher?.enabled ? "ok" : "disabled"} path={watcher?.disabled_flag} />
           </div>
           <Toolbar>
@@ -5680,7 +5680,7 @@ function SettingsScreen({
               type="checkbox"
             />
             <span>
-              <strong>{t("开机时启动 Alunixa X 管理器")}</strong>
+              <strong>{t("开机时启动 Alunixa X")}</strong>
               <small>
                 {autostart?.supported
                   ? t("写入当前用户开机启动项，登录后仅显示托盘。")
@@ -8912,16 +8912,16 @@ function healthItems(overview: OverviewResult | null) {
       detail: overview?.codex_app.path || t("尚未检查 Codex 应用路径。"),
     },
     {
-      title: t("静默启动入口"),
+      title: t("Agent 启动入口"),
       status: overview?.silent_shortcut.status ?? "not_checked",
       ok: overview?.silent_shortcut.status === "installed",
-      detail: overview?.silent_shortcut.path || t("缺少 Alunixa X 静默启动快捷方式时可在安装维护页修复。"),
+      detail: overview?.silent_shortcut.path || t("缺少 Alunixa X Launch 快捷方式时可在安装维护页修复。"),
     },
     {
-      title: t("管理工具入口"),
+      title: t("Alunixa X 主入口"),
       status: overview?.management_shortcut.status ?? "not_checked",
       ok: overview?.management_shortcut.status === "installed",
-      detail: overview?.management_shortcut.path || t("缺少管理工具快捷方式时可在安装维护页修复。"),
+      detail: overview?.management_shortcut.path || t("缺少 Alunixa X 主入口快捷方式时可在安装维护页修复。"),
     },
   ];
 }

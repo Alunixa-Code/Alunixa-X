@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default permissions for the Alunixa X Manager main window. Grants the dialog plugin's default permission set so the file/folder picker can be opened from settings (fixes #345).",
+  "description": "Default permissions for the Alunixa X main window. Grants the dialog plugin's default permission set so the file/folder picker can be opened from settings.",
   "windows": ["main"],
   "permissions": [
     "core:default",

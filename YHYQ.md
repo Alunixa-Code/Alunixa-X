@@ -810,3 +810,8 @@
 - 前端阶段验证通过：`41/41` 合约测试、TypeScript、i18n plain `836/836`、template `76/76`、品牌保护和 Vite 生产构建成功；产物 JS `590.73 kB`、gzip `180.73 kB`，只有既有单 chunk 大小提示喵~
 - Rust `cargo check --workspace --all-targets` 通过，当前尚未执行完整 workspace 测试、安装包构建、UI 截图验收或 GitHub Actions/Release，这些将在下一阶段继续完成喵~
 - 全过程没有启动、重启、连接或操作当前 Codex、当前任务、helper 或 CDP，UI 验收将使用独立 Vite/Playwright 页面，不触碰现有服务喵~
+- 品牌迁移后继续完成安装入口语义收敛：主界面只显示 `Alunixa X`，后台启动入口显示 `Alunixa X Launch`；Windows 快捷方式、NSIS 卸载项、macOS App 名称、Bundle ID、DMG/ZIP/Setup 文件名和 `alunixax://` 协议均同步更新，并保留旧 `codexplusplus://` 仅用于兼容既有导入链接喵~
+- macOS 主应用现在注册 `alunixax://` 和 `dreamskin://` 两种 URL scheme，后台 Launch App 使用独立 bundle；Windows 安装/卸载同时管理新协议并清理旧协议注册喵~
+- 已使用独立 Vite + Playwright 预览验证 UI，没有启动或连接 Codex：页面标题和 ALUNIXA X 品牌正确、Agent Rail 为 5 个节点、无水平溢出、浏览器页面异常为 0；预览图保存到 `docs/images/alunixa-x-dashboard.png` 并写入中英文 README 喵~
+- 最新前端验证再次通过 `41/41`、TypeScript、i18n plain `835/835`、template `76/76`、品牌保护和生产构建；Vite 产物 JS `590.73 kB`、gzip `180.73 kB`，仅有既有 chunk 大小提示喵~
+- Rust 定向验证通过：installer/updater `12/12 + 12/12`、Windows/发行契约 `23/23`、`cargo check --workspace --all-targets` 和 Rust formatter均成功；完整本地 workspace 执行因 Windows 在 core unit test 链接后即时缺失 EXE 而未能启动该单元测试二进制，编译本身成功，后续由 GitHub Actions 标准 Windows runner执行权威全量测试喵~

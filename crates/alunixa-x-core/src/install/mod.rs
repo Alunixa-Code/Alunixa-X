@@ -330,7 +330,7 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
             return Some(macos_preferred_bundle_binary(
                 exe,
                 SILENT_BINARY,
-                "AlunixaX",
+                "AlunixaXLauncher",
             ));
         }
         let macos = applications_dir
@@ -342,7 +342,7 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
                 .join(SILENT_BINARY)
                 .exists()
                 .then(|| macos.join(SILENT_BINARY))
-                .unwrap_or_else(|| macos.join("AlunixaX")),
+                .unwrap_or_else(|| macos.join("AlunixaXLauncher")),
         );
     }
     if binary == MANAGER_BINARY {
@@ -350,7 +350,7 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
             return Some(macos_preferred_bundle_binary(
                 exe,
                 MANAGER_BINARY,
-                "AlunixaXManager",
+                "AlunixaX",
             ));
         }
         let macos = applications_dir
@@ -362,7 +362,7 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
                 .join(MANAGER_BINARY)
                 .exists()
                 .then(|| macos.join(MANAGER_BINARY))
-                .unwrap_or_else(|| macos.join("AlunixaXManager")),
+                .unwrap_or_else(|| macos.join("AlunixaX")),
         );
     }
     None
