@@ -1528,6 +1528,32 @@ pub fn list_local_sessions(
 }
 
 #[tauri::command]
+pub fn dashboard_usage_analytics() -> CommandResult<alunixa_x_data::DashboardUsageAnalytics> {
+    let sessions = list_local_sessions(Some(ListLocalSessionsRequest {
+        offset: 0,
+        limit: MAX_LOCAL_SESSIONS_PAGE_SIZE,
+    }));
+    let analytics = alunixa_x_data::summarize_local_session_usage(
+        &sessions.payload.sessions,
+        MAX_LOCAL_SESSIONS_PAGE_SIZE,
+    );
+    if sessions.status == "failed" {
+        failed(
+            &format!("已生成部分使用统计；{}", sessions.message),
+            analytics,
+        )
+    } else {
+        ok(
+            &format!(
+                "已统计 {} 个会话、{} 个模型调用回合。",
+                analytics.sessions_scanned, analytics.turns
+            ),
+            analytics,
+        )
+    }
+}
+
+#[tauri::command]
 pub fn list_zed_remote_projects() -> CommandResult<ZedRemoteProjectsPayload> {
     let result = alunixa_x_core::zed_remote::list_zed_remote_projects_response(&json!({}));
     if result.get("status").and_then(Value::as_str) == Some("ok") {

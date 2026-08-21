@@ -1,7 +1,7 @@
 use alunixa_x_core::models::{DeleteStatus, SessionRef};
 use alunixa_x_data::{
-    BackupStore, SQLiteStorageAdapter, delete_local_from_paths,
-    move_codex_thread_workspace_from_paths,
+    BackupStore, LocalSession, SQLiteStorageAdapter, delete_local_from_paths,
+    move_codex_thread_workspace_from_paths, summarize_local_session_usage,
 };
 use rusqlite::Connection;
 use serde_json::json;
@@ -11,6 +11,48 @@ use tempfile::tempdir;
 
 fn session(id: &str, title: &str) -> SessionRef {
     SessionRef::new(id, title).unwrap()
+}
+
+#[test]
+fn dashboard_usage_summary_aggregates_tokens_cache_context_and_models() {
+    let dir = tempdir().unwrap();
+    let rollout = dir.path().join("rollout.jsonl");
+    fs::write(
+        &rollout,
+        concat!(
+            "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"t1\",\"model\":\"gpt-alpha\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":1000,\"cached_input_tokens\":400,\"output_tokens\":100,\"total_tokens\":1100},\"total_token_usage\":{\"total_tokens\":3000},\"model_context_window\":10000}}}\n",
+            "{\"type\":\"turn_context\",\"payload\":{\"turn_id\":\"t2\",\"model\":\"gpt-beta\"}}\n",
+            "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":2000,\"cached_input_tokens\":1100,\"output_tokens\":200,\"total_tokens\":2200},\"total_token_usage\":{\"total_tokens\":8000},\"model_context_window\":10000}}}\n"
+        ),
+    )
+    .unwrap();
+    let sessions = vec![LocalSession {
+        id: "local:session".to_string(),
+        title: "Usage".to_string(),
+        cwd: String::new(),
+        model_provider: "fallback".to_string(),
+        archived: false,
+        updated_at_ms: Some(1),
+        rollout_path: rollout.to_string_lossy().to_string(),
+        db_path: String::new(),
+    }];
+
+    let result = summarize_local_session_usage(&sessions, 100);
+
+    assert_eq!(result.sessions_scanned, 1);
+    assert_eq!(result.turns, 2);
+    assert_eq!(result.input_tokens, 3000);
+    assert_eq!(result.output_tokens, 300);
+    assert_eq!(result.cached_tokens, 1500);
+    assert_eq!(result.total_tokens, 3300);
+    assert_eq!(result.context_used, 8000);
+    assert_eq!(result.context_limit, 10000);
+    assert!((result.cache_hit_rate - 0.5).abs() < f64::EPSILON);
+    assert!((result.context_usage_rate - 0.8).abs() < f64::EPSILON);
+    assert_eq!(result.model_usage.len(), 2);
+    assert_eq!(result.model_usage[0].turns, 1);
+    assert_eq!(result.model_usage[1].turns, 1);
 }
 
 fn create_supported_db(path: &Path) {

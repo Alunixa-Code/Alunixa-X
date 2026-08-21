@@ -826,3 +826,9 @@
 - 第二次权威主分支 Actions `32480249963` 中 macOS x64/arm64 再次全部成功，Windows 在前端 `40/41` 时停止；失败来自 `dream-skin.test.ts` 仍错误要求固定第三方 renderer 使用 Alunixa X DOM marker，而恢复后的字节精确快照按设计使用历史 `data-codex-plus-dream-surface` 标记喵~
 - 已将前端契约改为明确验证第三方快照的历史 DOM marker，并写下注释说明该资源不得原地重品牌；产品自己的 Alunixa X runtime、UI 和安装资源仍继续使用新品牌标识喵~
 - 修正后的前端测试 `41/41` 通过，确保不是删除断言或绕过测试，而是同时锁定第三方快照完整性与 Alunixa X 产品品牌边界喵~
+- 用户要求在首页中间区域新增使用统计，包括 Token 使用率、缓存命中率、模型使用频率和饼图等可视化；本轮从提交 `0c8ff78` 建立修改前检查点，并取消正在运行的旧 UI 构建，避免对已过时版本继续浪费 Actions喵~
+- 首页现新增 `Usage Intelligence` 区域：Token 使用率和缓存命中率使用双环形图，模型使用频率使用多段饼图与 Top 4/其他图例，Token 构成使用输入/输出/缓存三条进度条，并显示累计 Token、调用回合和扫描会话数喵~
+- 统计来源为最近 100 个本地会话的 rollout：按 turn ID 合并增量 `token_count`、读取 `turn_context` 模型名、累计输入/输出/缓存 Token，并使用最近会话最后一条有效记录计算当前上下文占用率；没有数据时显示明确零值而不伪造示例喵~
+- 新增 `dashboard_usage_analytics` Tauri 命令、data 聚合结构和真实临时 rollout 回归测试，验证 `3000` 输入、`300` 输出、`1500` 缓存、`3300` 总 Token、`50%` 缓存命中与 `80%` 上下文占用计算喵~
+- 更新后的独立 Vite/Playwright 预览通过：2 个使用率环形图、1 个模型频率饼图、3 条 Token 构成条均存在，无水平溢出、页面异常为 0；新预览图已更新至 `docs/images/alunixa-x-dashboard.png` 喵~
+- 最新验证通过前端 `42/42`、TypeScript、i18n plain `847/847`、template `79/79`、品牌保护、Rust formatter、数据统计专项和 `cargo check --workspace --all-targets`；没有启动、连接或读取当前运行中的 Codex/Helper/CDP，统计测试只使用隔离临时 rollout喵~

@@ -4,7 +4,7 @@ use rusqlite::types::{ToSqlOutput, Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, ToSql};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -89,6 +89,212 @@ pub struct LocalSession {
     pub updated_at_ms: Option<i64>,
     pub rollout_path: String,
     pub db_path: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageShare {
+    pub model: String,
+    pub turns: u64,
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardUsageAnalytics {
+    pub sessions_scanned: usize,
+    pub turns: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub total_tokens: u64,
+    pub context_used: u64,
+    pub context_limit: u64,
+    pub cache_hit_rate: f64,
+    pub context_usage_rate: f64,
+    pub model_usage: Vec<ModelUsageShare>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RolloutUsageSample {
+    model: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: u64,
+    total_tokens: u64,
+    context_used: u64,
+    context_limit: u64,
+}
+
+pub fn summarize_local_session_usage(
+    sessions: &[LocalSession],
+    max_sessions: usize,
+) -> DashboardUsageAnalytics {
+    let mut analytics = DashboardUsageAnalytics::default();
+    let mut model_usage = BTreeMap::<String, (u64, u64)>::new();
+    let mut latest_context_recorded = false;
+
+    for session in sessions.iter().take(max_sessions) {
+        let rollout_path = Path::new(&session.rollout_path);
+        if !rollout_path.is_file() {
+            continue;
+        }
+        let Ok(samples) = read_rollout_usage_samples(rollout_path, &session.model_provider) else {
+            continue;
+        };
+        analytics.sessions_scanned += 1;
+        if !latest_context_recorded {
+            if let Some(sample) = samples.last().filter(|sample| sample.context_limit > 0) {
+                analytics.context_used = sample.context_used;
+                analytics.context_limit = sample.context_limit;
+                latest_context_recorded = true;
+            }
+        }
+        for sample in samples {
+            analytics.turns += 1;
+            analytics.input_tokens = analytics.input_tokens.saturating_add(sample.input_tokens);
+            analytics.output_tokens = analytics.output_tokens.saturating_add(sample.output_tokens);
+            analytics.cached_tokens = analytics.cached_tokens.saturating_add(sample.cached_tokens);
+            analytics.total_tokens = analytics.total_tokens.saturating_add(sample.total_tokens);
+            let model = if sample.model.trim().is_empty() {
+                "未记录模型".to_string()
+            } else {
+                sample.model
+            };
+            let entry = model_usage.entry(model).or_default();
+            entry.0 = entry.0.saturating_add(1);
+            entry.1 = entry.1.saturating_add(sample.total_tokens);
+        }
+    }
+
+    analytics.cache_hit_rate = ratio(analytics.cached_tokens, analytics.input_tokens);
+    analytics.context_usage_rate = ratio(analytics.context_used, analytics.context_limit);
+    let mut models = model_usage
+        .into_iter()
+        .map(|(model, (turns, tokens))| ModelUsageShare {
+            model,
+            turns,
+            tokens,
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| {
+        right
+            .turns
+            .cmp(&left.turns)
+            .then_with(|| right.tokens.cmp(&left.tokens))
+            .then_with(|| left.model.cmp(&right.model))
+    });
+    analytics.model_usage = models;
+    analytics
+}
+
+fn ratio(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        0.0
+    } else {
+        (numerator as f64 / denominator as f64).clamp(0.0, 1.0)
+    }
+}
+
+fn read_rollout_usage_samples(
+    rollout_path: &Path,
+    fallback_model: &str,
+) -> anyhow::Result<Vec<RolloutUsageSample>> {
+    let reader = BufReader::new(File::open(rollout_path)?);
+    let mut current_turn = String::new();
+    let mut current_model = fallback_model.to_string();
+    let mut anonymous_index = 0_u64;
+    let mut samples = HashMap::<String, RolloutUsageSample>::new();
+    let mut order = Vec::<String>::new();
+
+    for line in reader.lines() {
+        let line = line?;
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let kind = value
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if kind == "turn_context" {
+            let payload = value.get("payload").unwrap_or(&Value::Null);
+            current_turn = payload
+                .get("turn_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if let Some(model) = payload
+                .get("model")
+                .or_else(|| payload.get("model_slug"))
+                .or_else(|| payload.pointer("/settings/model"))
+                .and_then(Value::as_str)
+                .filter(|model| !model.trim().is_empty())
+            {
+                current_model = model.to_string();
+            }
+            continue;
+        }
+        if kind != "event_msg" {
+            continue;
+        }
+        let Some(payload) = value.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(Value::as_str) != Some("token_count") {
+            continue;
+        }
+        let Some(info) = payload.get("info") else {
+            continue;
+        };
+        let last = info.get("last_token_usage");
+        let total = info.get("total_token_usage");
+        let input_tokens = token_value(last, "input_tokens");
+        let output_tokens = token_value(last, "output_tokens");
+        let cached_tokens = token_value(last, "cached_input_tokens");
+        let total_tokens =
+            token_value(last, "total_tokens").max(input_tokens.saturating_add(output_tokens));
+        let context_used = token_value(total, "total_tokens").max(total_tokens);
+        let context_limit = info
+            .get("model_context_window")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if input_tokens == 0 && output_tokens == 0 && total_tokens == 0 && context_used == 0 {
+            continue;
+        }
+        let key = if current_turn.is_empty() {
+            anonymous_index = anonymous_index.saturating_add(1);
+            format!("event-{anonymous_index}")
+        } else {
+            current_turn.clone()
+        };
+        if !samples.contains_key(&key) {
+            order.push(key.clone());
+        }
+        samples.insert(
+            key,
+            RolloutUsageSample {
+                model: current_model.clone(),
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+                total_tokens,
+                context_used,
+                context_limit,
+            },
+        );
+    }
+
+    Ok(order
+        .into_iter()
+        .filter_map(|key| samples.remove(&key))
+        .collect())
+}
+
+fn token_value(usage: Option<&Value>, key: &str) -> u64 {
+    usage
+        .and_then(|usage| usage.get(key))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]

@@ -2,6 +2,8 @@
 
 - Codex++ 独立产品分支正式更名为 **Alunixa X**，仓库、应用标题、安装包、进程、Bundle ID、协议、更新源、文档和注入界面统一迁移到 `Alunixa-Code/Alunixa-X` 喵~
 - 管理器重做为 Alunixa X 深海控制面：新增 Agent Rail 运行轨道、链路就绪度、模型/工具/运行时总览、独立品牌导航和响应式桌面布局喵~
+- 首页新增 Usage Intelligence 使用统计：从最近 100 个本地会话 rollout 聚合 Token 上下文占用率、缓存命中率、输入/输出/缓存构成、累计 Token、调用回合和模型使用频率，并用环形饼图与进度条展示喵~
+- 使用统计只读取本地 token_count 与 turn_context 记录，不上传提示词、对话正文、文件内容、API Key 或终端输出；同一回合的增量 token_count 只保留最后一次，避免重复累计喵~
 - 新增 Alunixa X `AX` 轨道图标、横向字标和社交预览图，Windows ICO、Tauri PNG、macOS DMG 图标和 launcher 资源统一使用新视觉喵~
 - 主应用入口统一为 `Alunixa X`，后台接管入口为 `Alunixa X Launch`；二进制统一为 `alunixa-x`、`alunixa-x-manager` 和 `alunixa-x-imagegen-mcp` 喵~
 - 新仓库继续保留 CodexPlusPlus 及其他第三方代码的 AGPL、版权和兼容性说明，不把第三方商标或上游历史改写为 Alunixa X 所有喵~

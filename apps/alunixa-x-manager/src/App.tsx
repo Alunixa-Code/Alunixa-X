@@ -495,6 +495,24 @@ type LocalSessionsResult = CommandResult<{
   hasMore: boolean;
 }>;
 
+type DashboardUsageResult = CommandResult<{
+  sessionsScanned: number;
+  turns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  contextUsed: number;
+  contextLimit: number;
+  cacheHitRate: number;
+  contextUsageRate: number;
+  modelUsage: Array<{
+    model: string;
+    turns: number;
+    tokens: number;
+  }>;
+}>;
+
 type RolloutImageBackupSummary = {
   id: string;
   createdAt: string;
@@ -1064,6 +1082,7 @@ export function App() {
   const [ccsProviders, setCcsProviders] = useState<CcsProvidersResult | null>(null);
   const [pendingProviderImport, setPendingProviderImport] = useState<ProviderImportRequest | null>(null);
   const [localSessions, setLocalSessions] = useState<LocalSessionsResult | null>(null);
+  const [dashboardUsage, setDashboardUsage] = useState<DashboardUsageResult | null>(null);
   const [rolloutImageCleanup, setRolloutImageCleanup] = useState<RolloutImageCleanupResult | null>(null);
   const [rolloutImageCleanupBusy, setRolloutImageCleanupBusy] = useState(false);
   const [zedRemoteProjects, setZedRemoteProjects] = useState<ZedRemoteProjectsResult | null>(null);
@@ -1328,6 +1347,12 @@ export function App() {
       setLocalSessions(result);
       if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("会话管理"), result, { silentSuccess: true });
     }
+    return result;
+  };
+
+  const refreshDashboardUsage = async () => {
+    const result = await run(() => call<DashboardUsageResult>("dashboard_usage_analytics"));
+    if (result) setDashboardUsage(result);
     return result;
   };
 
@@ -1694,7 +1719,9 @@ export function App() {
 
   const navigate = async (next: Route) => {
     setRoute(next);
-    if (next === "overview") await refreshOverview(true);
+    if (next === "overview") {
+      await Promise.all([refreshOverview(true), refreshDashboardUsage()]);
+    }
     if (next === "relay") {
       await refreshSettings(true);
       await refreshRelay(true);
@@ -2841,6 +2868,7 @@ export function App() {
         void checkUpdate(true);
       }
       await refreshOverview(true);
+      await refreshDashboardUsage();
       await refreshSettings(true);
       await refreshRelay(true);
       await refreshEnvConflicts(true);
@@ -3140,6 +3168,7 @@ export function App() {
             <OverviewScreen
               overview={overview}
               settings={settingsForm}
+              usage={dashboardUsage}
               pluginMarketplaceProgress={pluginMarketplaceProgress}
               actions={actions}
             />
@@ -3420,11 +3449,13 @@ type Actions = {
 function OverviewScreen({
   overview,
   settings,
+  usage,
   pluginMarketplaceProgress,
   actions,
 }: {
   overview: OverviewResult | null;
   settings: BackendSettings;
+  usage: DashboardUsageResult | null;
   pluginMarketplaceProgress: TaskProgress;
   actions: Actions;
 }) {
@@ -3499,6 +3530,8 @@ function OverviewScreen({
         </div>
       </section>
 
+      <UsageAnalyticsPanel usage={usage} />
+
       <div className="overview-grid">
         <Panel className="ax-status-panel">
           <CardHead title={t("系统检查")} detail={t("只显示需要马上关注的桌面运行条件")} />
@@ -3543,6 +3576,126 @@ function OverviewScreen({
       </div>
     </div>
   );
+}
+
+const usageChartColors = ["#46ddff", "#9277ff", "#55d6a9", "#ffb85c", "#ff6b91"];
+
+function UsageAnalyticsPanel({ usage }: { usage: DashboardUsageResult | null }) {
+  const contextRate = clampRatio(usage?.contextUsageRate ?? 0);
+  const cacheRate = clampRatio(usage?.cacheHitRate ?? 0);
+  const modelRows = collapseModelUsage(usage?.modelUsage ?? []);
+  const modelTurns = modelRows.reduce((sum, item) => sum + item.turns, 0);
+  const modelGradient = modelUsageGradient(modelRows);
+  return (
+    <section className="usage-intelligence">
+      <div className="usage-intelligence-head">
+        <div>
+          <span>USAGE INTELLIGENCE</span>
+          <h3>{t("Token 与模型使用统计")}</h3>
+          <p>{tf("基于最近 {0} 个本地会话的 rollout 记录", [usage?.sessionsScanned ?? 0])}</p>
+        </div>
+        <div className="usage-total">
+          <span>{t("累计 Token")}</span>
+          <strong>{formatCompactTokenCount(usage?.totalTokens ?? 0)}</strong>
+          <small>{tf("{0} 个调用回合", [usage?.turns ?? 0])}</small>
+        </div>
+      </div>
+      <div className="usage-chart-grid">
+        <UsageDonut
+          color="var(--usage-cyan)"
+          detail={`${formatCompactTokenCount(usage?.contextUsed ?? 0)} / ${formatCompactTokenCount(usage?.contextLimit ?? 0)}`}
+          label={t("Token 使用率")}
+          rate={contextRate}
+        />
+        <UsageDonut
+          color="var(--usage-violet)"
+          detail={tf("缓存 {0}", [formatCompactTokenCount(usage?.cachedTokens ?? 0)])}
+          label={t("缓存命中率")}
+          rate={cacheRate}
+        />
+        <div className="model-frequency-chart">
+          <div className="model-frequency-donut" style={{ background: modelGradient }}>
+            <div><strong>{modelTurns}</strong><span>{t("模型回合")}</span></div>
+          </div>
+          <div className="model-frequency-copy">
+            <span className="usage-chart-label">{t("模型使用频率")}</span>
+            <div className="model-frequency-legend">
+              {modelRows.length ? modelRows.map((item, index) => (
+                <div key={item.model}>
+                  <i style={{ background: usageChartColors[index % usageChartColors.length] }} />
+                  <span title={item.model}>{item.model}</span>
+                  <strong>{modelTurns ? Math.round((item.turns / modelTurns) * 100) : 0}%</strong>
+                </div>
+              )) : <small>{t("暂无模型使用记录")}</small>}
+            </div>
+          </div>
+        </div>
+        <div className="token-mix-chart">
+          <span className="usage-chart-label">{t("Token 构成")}</span>
+          <TokenMixRow color="#46ddff" label={t("输入")} total={usage?.totalTokens ?? 0} value={usage?.inputTokens ?? 0} />
+          <TokenMixRow color="#9277ff" label={t("输出")} total={usage?.totalTokens ?? 0} value={usage?.outputTokens ?? 0} />
+          <TokenMixRow color="#55d6a9" label={t("缓存")} total={usage?.inputTokens ?? 0} value={usage?.cachedTokens ?? 0} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function UsageDonut({ label, detail, rate, color }: { label: string; detail: string; rate: number; color: string }) {
+  const percent = Math.round(rate * 100);
+  return (
+    <div className="usage-donut-card">
+      <div className="usage-donut" style={{ "--usage-rate": rate, "--usage-color": color } as CSSProperties}>
+        <div><strong>{percent}%</strong><span>{label}</span></div>
+      </div>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function TokenMixRow({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
+  const rate = total > 0 ? Math.min(1, value / total) : 0;
+  return (
+    <div className="token-mix-row">
+      <div><span>{label}</span><strong>{formatCompactTokenCount(value)}</strong></div>
+      <div className="token-mix-track"><i style={{ width: `${Math.max(rate * 100, value ? 3 : 0)}%`, background: color }} /></div>
+    </div>
+  );
+}
+
+function collapseModelUsage(items: DashboardUsageResult["modelUsage"]) {
+  const visible = items.slice(0, 4).map((item) => ({ ...item }));
+  if (items.length > 4) {
+    visible.push({
+      model: t("其他模型"),
+      turns: items.slice(4).reduce((sum, item) => sum + item.turns, 0),
+      tokens: items.slice(4).reduce((sum, item) => sum + item.tokens, 0),
+    });
+  }
+  return visible;
+}
+
+function modelUsageGradient(items: DashboardUsageResult["modelUsage"]) {
+  const total = items.reduce((sum, item) => sum + item.turns, 0);
+  if (!total) return "conic-gradient(hsl(var(--border)) 0 100%)";
+  let cursor = 0;
+  const stops = items.map((item, index) => {
+    const start = cursor;
+    cursor += (item.turns / total) * 100;
+    return `${usageChartColors[index % usageChartColors.length]} ${start}% ${cursor}%`;
+  });
+  return `conic-gradient(${stops.join(", ")})`;
+}
+
+function clampRatio(value: number) {
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+}
+
+function formatCompactTokenCount(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 100_000 ? 0 : 1)}K`;
+  return String(Math.round(value));
 }
 
 function DreamSkinScreen({

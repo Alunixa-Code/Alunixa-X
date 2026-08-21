@@ -82,6 +82,7 @@ pub fn run() {
             commands::confirm_pending_provider_import,
             commands::dismiss_pending_provider_import,
             commands::list_local_sessions,
+            commands::dashboard_usage_analytics,
             commands::list_zed_remote_projects,
             commands::open_zed_remote,
             commands::forget_zed_remote_project,
