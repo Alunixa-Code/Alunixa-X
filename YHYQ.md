@@ -819,3 +819,7 @@
 - GitHub 仓库简介、Homepage 和 Topics 已完成：简介明确为跨平台 AI Agent Control System，Homepage 指向 Releases，Topics 包含 `ai-agent`、`codex`、`desktop`、`mcp`、`model-router`、`openai`、`rust` 与 `tauri` 喵~
 - 新仓库 Actions 已启用且三份 workflow 均为 active；首次建仓推送未生成 run，因此本记录提交作为默认分支第二次推送触发正式主分支构建，若仍未自动触发则使用 workflow_dispatch 执行同一权威流程喵~
 - 本地 Rust `target`、前端 `node_modules`/`dist` 与 `.tmp` 已按绝对路径校验后删除，工作树清理完成喵~
+- 新仓库首个权威主分支 Actions `32478701485` 中 macOS x64/arm64 的前端、release 二进制、DMG、包结构验证和上传全部成功；Windows 的品牌、前端、TypeScript 以及绝大多数 Rust 测试通过，但 `upstream_theme_assets` 检测到品牌批量迁移误改了 7 个必须与第三方上游保持字节一致的 DreamSkin renderer/CSS 资源，因此 Windows job 在正式打包前停止喵~
+- 根因不是产品 UI 或 Alunixa X 品牌代码失败，而是 `assets/inject/upstream/**` 属于固定第三方兼容快照，不应参与品牌替换；现已从旧稳定仓库精确恢复这 7 个上游资源，保留其原始字节、许可证与哈希喵~
+- 修复后 `upstream_theme_assets` 专项 `1/1` 通过，恢复动作不改变 Alunixa X 主界面、图标、安装包、仓库链接或用户可见产品品牌喵~
+- 为避免重复消耗 Actions，首次自动生成的旧提交 run 和误判未触发后手动生成的 workflow_dispatch run 均已请求取消，只保留最新 main push 作为后续权威构建喵~

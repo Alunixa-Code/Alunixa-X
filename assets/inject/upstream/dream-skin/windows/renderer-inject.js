@@ -289,9 +289,9 @@
     const root = document.documentElement;
     root?.classList.remove(...ROOT_CLASSES);
     for (const property of ROOT_PROPERTIES) root?.style.removeProperty(property);
-    document.querySelectorAll('main[data-alunixa-x-dream-surface="true"]').forEach((node) => {
+    document.querySelectorAll('main[data-codex-plus-dream-surface="true"]').forEach((node) => {
       node.classList.remove("main-surface");
-      node.removeAttribute("data-alunixa-x-dream-surface");
+      node.removeAttribute("data-codex-plus-dream-surface");
     });
     document.querySelectorAll(".dream-home").forEach((node) => {
       node.classList.remove("dream-home");
@@ -311,7 +311,7 @@
     const modern = document.querySelector('main[class*="MainContentSurface"], main[class*="_MainContentSurface_"]');
     if (!modern) return null;
     modern.classList.add("main-surface");
-    modern.setAttribute("data-alunixa-x-dream-surface", "true");
+    modern.setAttribute("data-codex-plus-dream-surface", "true");
     return modern;
   };
 
