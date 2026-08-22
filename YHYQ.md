@@ -961,3 +961,5 @@
 - launcher 协商专项现 `4/4` 通过，包含纯事件判定、正常流早放行、不完整块等待和真实 chunked 读取；协议修复精确回归 `1/1` 同时通过喵~
 - 发行版本已从 `1.0.3` 精确提升为 `1.0.4`，覆盖 Cargo workspace/四个本地 package lock、前端 package/lock 与 Tauri 配置，第三方依赖版本未被批量替换喵~
 - CHANGELOG 新增 `1.0.4` 章节，明确记录 1.0.3 的首事件盲区、真实三事件顺序、厂商前导缓冲、正常标准事件早放行、LF/CRLF/分块支持和 64 KiB 上限喵~
+- `v1.0.4` 元数据更新后的最终本地验收已完成：前端 `43/43`、TypeScript、Vite 生产构建、settings `42/42`、launcher 协商 `4/4`、协议代理 `69/69`、i18n plain `851/851`、template `80/80`、品牌保护、Rust formatter、`cargo check --workspace --all-targets`、差异空白与 Git 状态全部通过喵~
+- 最终 workspace check 于 2026-08-22 完成，耗时约 1 分 55 秒；当前分支在清理前相对 `origin/main` 领先 5 个功能提交，工作树无未提交 tracked 变更喵~
