@@ -108,6 +108,16 @@ describe("model-windows helpers", () => {
     assert.match(source, /saveSettingsValue\(next, true\)/);
   });
 
+  it("Responses ID 协商默认关闭并作为 Agent 能力即时保存", () => {
+    const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /codexAppResponsesIdNegotiation: false/);
+    assert.match(source, /title=\{t\("Responses ID 自动协商"\)\}/);
+    assert.match(source, /checked=\{form\.codexAppResponsesIdNegotiation\}/);
+    assert.match(source, /setPersistedEnhanceFlag\("codexAppResponsesIdNegotiation", value\)/);
+    assert.match(source, /invalid_id_prefix/);
+  });
+
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {
     assert.strictEqual(
       modelWindowsMapToText("a\nb\nc", '{"a":"1M","c":"200K"}'),

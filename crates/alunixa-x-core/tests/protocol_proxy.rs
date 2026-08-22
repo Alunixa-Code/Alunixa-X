@@ -2488,7 +2488,7 @@ async fn model_route_uses_target_responses_provider_without_mutating_request() {
 }
 
 #[tokio::test]
-async fn direct_responses_repairs_cross_typed_tool_item_id_prefixes() {
+async fn direct_responses_preserves_item_ids_until_upstream_reports_an_error() {
     let target = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -2534,16 +2534,10 @@ async fn direct_responses_repairs_cross_typed_tool_item_id_prefixes() {
     assert_eq!(result.status_code, 200);
     let (_, upstream_body) = target_server.await.unwrap();
 
-    assert_eq!(
-        upstream_body["input"][0]["id"],
-        "fc_01a0257d-d256-7d93-b048-b22fba274c2d"
-    );
+    assert_eq!(upstream_body["input"][0], request["input"][0]);
     assert_eq!(upstream_body["input"][0]["call_id"], "call_compat");
     assert_eq!(upstream_body["input"][0]["output"], "completed");
-    assert_eq!(
-        upstream_body["input"][1]["id"],
-        "fc_01a0257d-d256-7d93-b048-b22fba274c2e"
-    );
+    assert_eq!(upstream_body["input"][1], request["input"][1]);
     assert_eq!(upstream_body["input"][2], request["input"][2]);
     assert_eq!(upstream_body["input"][3], request["input"][3]);
 }

@@ -189,6 +189,7 @@ type BackendSettings = {
   codexAppFastStartup: boolean;
   codexAppDisableAutoUpdate: boolean;
   codexAppDisableWss: boolean;
+  codexAppResponsesIdNegotiation: boolean;
   codexAppSharedTerminal: boolean;
   codexAppSharedTerminalRetentionMinutes: number;
   codexAppAiShell: CodexAiShell;
@@ -950,6 +951,7 @@ const defaultSettings: BackendSettings = {
   codexAppFastStartup: false,
   codexAppDisableAutoUpdate: false,
   codexAppDisableWss: false,
+  codexAppResponsesIdNegotiation: false,
   codexAppSharedTerminal: false,
   codexAppSharedTerminalRetentionMinutes: 2,
   codexAppAiShell: "pwsh",
@@ -4931,6 +4933,15 @@ function EnhanceScreen({
             <FeatureGroup title="Stepwise" detail={t("基于当前对话生成下一步建议，使用独立 API 配置。")}>
               <FeatureToggle title="Stepwise" detail={t("在 Codex 页面显示可拖动的后续建议浮层；建议由单独配置的 Stepwise API 生成。启停后需重启 Alunixa X 生效。")} checked={form.codexAppStepwiseEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseEnabled", value)} />
               <FeatureToggle title={t("Stepwise 直接发送")} detail={t("点击建议后自动发送；关闭时只填入输入框。")} checked={form.codexAppStepwiseDirectSend} disabled={!masterEnabled || !form.codexAppStepwiseEnabled} onChange={(value) => setEnhanceFlag("codexAppStepwiseDirectSend", value)} />
+            </FeatureGroup>
+            <FeatureGroup title={t("上游协议协商")} detail={t("仅在供应商明确拒绝 Responses 工具 ID 时按其错误提示协商兼容格式。")}>
+              <FeatureToggle
+                title={t("Responses ID 自动协商")}
+                detail={t("默认关闭。开启后仍先原样发送；只有上游返回 invalid_id_prefix 并明确给出期望前缀时，才只改写相关 ID 并自动重试一次。未出现错误时请求完全不变，保存后立即用于后续请求。")}
+                checked={form.codexAppResponsesIdNegotiation}
+                disabled={!masterEnabled}
+                onChange={(value) => setPersistedEnhanceFlag("codexAppResponsesIdNegotiation", value)}
+              />
             </FeatureGroup>
             <FeatureGroup title={t("记忆检索")} detail={t("从本地 Codex 记忆中检索与当前提示相关的片段。")}>
               <FeatureToggle

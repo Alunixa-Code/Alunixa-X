@@ -928,3 +928,7 @@
 - 更关键的兼容结论是：`custom_tool_call_output + ctco_` 同样返回 `response.failed`，保持 item 类型不变、仅把 ID 改成 `fc_` 后返回 `response.completed`；因此不需要也不应把 custom item 强行改成 function item喵~
 - 将“Expected an ID that begins with fc”等错误文字作为额外用户消息反馈给上游仍然返回 `response.failed`，因为参数校验发生在模型读取消息之前；可行的“让上游自己给答案”方式是解析它在结构化错误中给出的 expected prefix，由代理据此改写并重试喵~
 - 首次五路 `Invoke-WebRequest` 因成功 SSE 流保持连接超过工具 30 秒窗口而没有产出结论，随后单路缓冲测试也在 18 秒超时；最终改用 `HttpClient + ResponseHeadersRead` 逐行读取 SSE，在看到 `response.completed/failed` 后立即停止，五项均在约 1.2 至 2.7 秒内得出明确结果喵~
+- 已根据真实上游测试将兼容策略改造成 Agent 能力可选项 `codexAppResponsesIdNegotiation`，默认关闭，并在 Agent 能力页新增“上游协议协商 / Responses ID 自动协商”开关喵~
+- 开关使用即时持久化保存；关闭时 Responses SSE 恢复完全原样透传，不缓冲、不解析、不改写、不重试。开启时也先发送完全原始请求，只有首个上游 SSE 错误明确包含 `invalid_id_prefix`、被拒绝完整 ID 和 expected prefix 时，才只改相关 ID 并自动重试一次喵~
+- 已删除 `v1.0.2` 的请求发送前主动前缀规范化，正常供应商和未报错请求不再被提前修改；`call_id`、item 类型、output、消息和顺序始终不因协商而改变喵~
+- 设置后端新增默认值、增量更新合并和持久化回归，前端新增默认值、中文说明、英文翻译与源码契约回归；关闭总增强开关时该协商能力也不会生效喵~

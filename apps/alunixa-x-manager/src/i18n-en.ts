@@ -289,6 +289,12 @@ export const EN_PLAIN: Record<string, string> = {
     "Release the terminal as soon as the command result is returned, or keep it for 1 to 5 minutes after the last input or output.",
   "释放时间": "Release time",
   "立即释放": "Release immediately",
+  "上游协议协商": "Upstream protocol negotiation",
+  "仅在供应商明确拒绝 Responses 工具 ID 时按其错误提示协商兼容格式。":
+    "Negotiate a compatible format only when the provider explicitly rejects a Responses tool item ID.",
+  "Responses ID 自动协商": "Automatic Responses ID negotiation",
+  "默认关闭。开启后仍先原样发送；只有上游返回 invalid_id_prefix 并明确给出期望前缀时，才只改写相关 ID 并自动重试一次。未出现错误时请求完全不变，保存后立即用于后续请求。":
+    "Off by default. When enabled, the original request is still sent first. Only an invalid_id_prefix response with an explicit expected prefix triggers an ID-only rewrite and one automatic retry. Requests remain unchanged when no error occurs, and saving applies to subsequent requests immediately.",
   "记忆检索": "Memory retrieval",
   "从本地 Codex 记忆中检索与当前提示相关的片段。":
     "Retrieve local Codex memory fragments relevant to the current prompt.",

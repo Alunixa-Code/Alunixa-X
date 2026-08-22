@@ -1945,6 +1945,33 @@ async fn handle_protocol_proxy_connection(
     }
     if upstream.is_stream {
         if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
+            let negotiation_enabled = SettingsStore::default()
+                .load()
+                .map(|settings| {
+                    settings.enhancements_enabled && settings.codex_app_responses_id_negotiation
+                })
+                .unwrap_or(false);
+            if !negotiation_enabled {
+                write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8")
+                    .await?;
+                let mut bytes_stream = upstream.response.bytes_stream();
+                while let Some(chunk) = bytes_stream.next().await {
+                    if let Ok(bytes) = chunk {
+                        stream.write_all(&bytes).await?;
+                    } else {
+                        break;
+                    }
+                }
+                log_helper_response(
+                    "helper.protocol_proxy_stream_ok",
+                    method,
+                    path,
+                    "200 OK",
+                    remote_addr_text,
+                );
+                stream.shutdown().await?;
+                return Ok(());
+            }
             let mut upstream_response = upstream.response;
             let mut prefix = read_responses_stream_prefix(&mut upstream_response).await?;
             let mut retry_applied = false;
