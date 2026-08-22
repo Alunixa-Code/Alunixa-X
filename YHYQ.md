@@ -1021,3 +1021,5 @@ ode_modules、dist 三个目录均不存在喵~
 - Image Gen 过滤器兼容 LF、CRLF、任意网络分块和最高 64 MiB 单事件；对顶层 `response.image_generation_call.*` 同时统一 event header、JSON type 与 status，对 `response.output_item.done` 中的嵌套 item 只修正 item status喵~
 - Alunixa X 管理 imagegen MCP 配置时现会迁移删除已知旧产品 server ID `codex-plus-imagegen` 及其 env 子表，同时保留所有用户自建 MCP server；启用或关闭 Alunixa imagegen 都不会留下旧产品重复入口喵~
 - 修复后的专项验证通过：晚到协商 `5/5`、Image Gen SSE `3/3`、精确 ID 修复 `1/1`、MCP 配置迁移 `1/1`，Rust formatter 与差异空白检查通过；验证均使用隔离 SSE/JSON、临时 HTTP server 和临时 config，没有操作当前 Codex/Helper/CDP喵~
+- 修复版本已从 `1.0.4` 精确提升为 `1.0.5`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包与 Tauri 配置；第三方依赖自身的同号版本未被批量替换喵~
+- CHANGELOG 新增 `1.0.5` 章节，明确记录 1.0.4 晚到失败盲区、created/in_progress 缓冲、精确单 ID 改写、重试结果复核、Image Gen completed 修正与旧 imagegen MCP 迁移喵~

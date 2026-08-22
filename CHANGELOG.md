@@ -1,3 +1,14 @@
+## 1.0.5 - 2026-08-22
+
+- 修复 `v1.0.4` 仍可能在 `Reconnecting 5/5` 后返回同一 `invalid_id_prefix` 的问题：真实供应商会先发送 `response.created` 与 `response.in_progress`，随后才进行 typed input 校验；旧判定在 created 后过早透传，导致晚到的 `response.failed` 无法再协商喵~
+- Responses 协商现在把 `response.created`、`response.queued`、`response.in_progress` 视为生命周期前导事件，继续缓冲到实际输出事件、成功终态、失败终态或 64 KiB 上限；真实 HTTP chunked 回归覆盖 `vendor metadata → created → in_progress → failed`喵~
+- 上游点名一个完整 ID 时只修正该 ID，不再把请求内所有同来源 `ctco_` 一起改成 `fc_`；同一请求中其他合法 custom-tool 输出、`call_id`、output、类型、消息和顺序保持不变喵~
+- 单次协商重试后的前导流会再次检查 `invalid_id_prefix`；若上游仍拒绝，记录明确的 `retry_still_invalid_id_prefix`，不再把失败重试误记为成功喵~
+- 修复 Image Gen 已返回有效 PNG Base64 result、但 item status 仍为 `generating` 时页面只显示工具卡片而不展示图片的问题；Responses SSE 兼容过滤器会把已带 result 的 malformed image generation item/event 修正为 `completed`喵~
+- Image Gen 状态修正兼容 LF、CRLF、任意网络分块和最高 64 MiB 单事件；同时统一顶层 image generation event header、JSON type/status，并保留 Base64 result 原值，普通 Responses SSE、无 result 的生成中事件和 `[DONE]` 不变喵~
+- 启动时迁移删除已知旧产品 MCP server `codex-plus-imagegen`，避免它与 `alunixa-x-imagegen` 同时注册、生成重复工具和残留 companion 进程；所有用户自建 MCP server 继续保留喵~
+- 新增晚到 SSE 失败 `5/5`、Image Gen SSE `3/3`、精确 ID 修复和 legacy MCP 迁移回归，并继续使用隔离 SSE/JSON、临时 HTTP server 与临时 config 验证，不操作当前 Codex/Helper/CDP喵~
+
 ## 1.0.4 - 2026-08-22
 
 - 修复 `v1.0.3` 的 SSE 前导事件盲区：真实 9527 错误在 `codex.rate_limits` 和 `codex.response.metadata` 两个厂商事件之后，第三个 `response.failed` 事件才包含 `invalid_id_prefix`，旧版只读取首个事件会过早透传而错过协商喵~
