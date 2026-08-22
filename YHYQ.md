@@ -1059,3 +1059,5 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 - 修复后，非成功 Responses HTTP body 也会在启用 Agent 能力开关时解析同样的严格 ID/expected-prefix 结构，生成一次精确重试；当前 `fc_04066... -> ctc_04066...` 只改写被点名 custom call，关联 `ctco_` output 与其他 `fc_` item 保持原样喵~
 - 新增 HTTP JSON `fc_ -> ctc_` 精确回归；首次测试失败精确揭露 parser 仍只接受 `invalid_id_prefix` literal，随后放宽为“literal 或完整 Invalid+Expected 结构”后，HTTP 回归和原 SSE `ctco_ -> fc_` 回归均通过喵~
 - 修复版本已精确提升为 `1.0.6`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包与 Tauri 配置；CHANGELOG 明确记录 HTTP JSON 前缀协商和真实 `fc_ -> ctc_` custom call 修复喵~
+- `v1.0.6` 本地核心验证通过：协议代理 `70/70`（新增 HTTP JSON `fc_ -> ctc_` 精确回归）、core lib `271/271`、`cargo check -p alunixa-x-core`、Rust formatter 与差异空白检查通过喵~
+- 验证继续只使用隔离测试；当前运行中的 Alunixa X 1.0.5、Codex、Helper、CDP 与供应商请求均未被重启、替换或作为测试目标喵~
