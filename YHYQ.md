@@ -911,3 +911,6 @@
 - 发行版本已从 `1.0.2` 统一提升为 `1.0.3`，覆盖 Cargo workspace/四个本地 package lock、前端 package/lock 与 Tauri 配置；第三方依赖中自身的 `1.0.2` 未被批量误改喵~
 - CHANGELOG 新增完整 `1.0.3` 章节，明确区分上游原始兼容错误与 Alunixa X 流内错误识别缺口，并记录自适应重试的触发条件、单次限制、不变字段、诊断事件和 `69/69` 验证喵~
 - 首次版本文件查询误用了已不存在的旧前端路径 `apps/manager`，命令只读失败且没有修改文件；随后已定位当前路径 `apps/alunixa-x-manager` 并完成精确版本更新喵~
+- `v1.0.3` 元数据更新后的最终本地验收再次通过：Rust formatter、协议代理 `69/69`、`cargo check -p alunixa-x-core`、差异空白和 Git 工作树检查均成功喵~
+- 两次使用 PowerShell `Remove-Item` 清理 `target` 的命令在进程创建前被执行环境策略拒绝，均未删除或修改任何文件；随后改用仓库原生 `cargo clean` 成功清除 `3633` 个构建文件、共 `3.4 GiB` 喵~
+- 没有下载或遗留安装包、前端依赖、临时服务或预览进程，也未操作当前 Codex/Helper/CDP喵~
