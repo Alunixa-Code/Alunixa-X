@@ -881,3 +881,11 @@
 - 只读核对用户报错来源 rollout 后确认该 ID 原始记录确实是 `custom_tool_call_output`：`id=ctco_01a0257d-d256-7d93-b048-b22fba274c2d`、`call_id=call_FT0NDedZTdo4G1AOCZgvaJGC`；失败发生在后续请求重建/上游校验阶段，上游却按 function item 要求 `fc` 前缀，与跨类型前缀不一致根因吻合喵~
 - `v1.0.2` 已统一写入 Cargo workspace/lock、前端 package/lock 与 Tauri 配置，CHANGELOG 已详细记录 typed item 前缀修复范围和不变边界喵~
 - `v1.0.2` 下协议代理完整专项再次 `68/68` 通过，`cargo check -p alunixa-x-core`、Rust formatter、差异空白和版本一致性通过；未使用当前 Codex 发真实请求做测试喵~
+- `v1.0.2` 主分支权威 Actions `32555069184` 全部成功：Windows 完成品牌保护、前端测试、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 和资产上传，macOS x64/arm64 的前端、release 二进制、DMG、结构验证和上传也全部成功喵~
+- `v1.0.2` 正式 Release workflow `32556613437` 全部成功：版本/品牌校验、Windows x64、macOS x64、macOS arm64、六项资产验证和 `Publish GitHub Release` 均完成喵~
+- 自动发行说明已替换为 1908 字符详细中文说明，完整记录错误样本、typed item 根因、前缀映射、保留字段、不影响范围、脱敏诊断、测试和安装方式喵~
+- `v1.0.2` 已核验为 latest、非草稿、非预发布，六项发行资产全部为 `uploaded`，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.2` 喵~
+- Windows Setup 为 `20,779,375` 字节，SHA-256 `e366b5c1277f0cb95f96f608dcf978cc6eaa7d8ce89c251deca9d5ebfc31d8cf`；Windows ZIP 为 `26,518,786` 字节，SHA-256 `46a3dec926db58e0cef90cff3402793b39c55b1f29678ea6a75988ee3f2297e5` 喵~
+- macOS x64 DMG 为 `33,558,801` 字节，SHA-256 `aee81f242144b28fc14a11a7de67d6cf385a715adf2aaf64fd87e6fd81ea2b64`；x64 ZIP 为 `28,023,079` 字节，SHA-256 `40304c7dc57d78389128ab493922bc7cc0c04f37e26612b001232336dc374420` 喵~
+- macOS arm64 DMG 为 `32,295,325` 字节，SHA-256 `2e477d1d32a2aa0d571528aaf695cfed52161208c0e0f19029ac82039afddf3f`；arm64 ZIP 为 `27,445,969` 字节，SHA-256 `a3628450fbaca18abe4de6f66d26b77a73ce20910034a9456b9f2fc5c3b8c13a` 喵~
+- 本地 Release notes 临时文件、Rust `target`、前端 `node_modules`/`dist` 和 `.tmp` 已全部删除，工作树只保留本次发布记录喵~
