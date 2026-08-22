@@ -999,3 +999,17 @@ ode_modules、dist 三个目录均不存在喵~
 - 清理 runner 临时目录时，首个 Node 安全检查因 `%TEMP%` 使用 8.3 短路径、而允许目录使用长路径而拒绝后续两个 notes 文件，runner 目录已安全删除；随后改用同一 `%TEMP%` 解析基准删除两个精确 notes 文件并验证均不存在喵~
 - 三个 ephemeral runner 均已自动注销，repository runner 列表为空；临时 runner、`_work`、下载 ZIP、诊断日志、Release notes、Rust `target`、前端 `node_modules` 和 `dist` 全部不存在喵~
 - GitHub 仓库当前 queued 与 in-progress Actions 均为空，没有重复或仍在运行的构建/发布任务喵~
+
+## 2026-08-22 · v1.0.4 仍出现晚到 ID 错误与 Image Gen 不显示
+
+- 用户安装并运行 `v1.0.4` 后再次报告 `stream disconnected before completion: [ApiIdParam] [input[17].id] [invalid_id_prefix]`，仍点名 `ctco_01a02899-0ede-7f42-b692-ba57cffb9823` 并要求 `fc` 前缀，同时截图显示 Image Gen 工具已经生成结果但界面没有展示图片喵~
+- 截图一确认 Image Gen 卡片执行约 1 分 57 秒，助手文字声称图片已展示在上方，但实际卡片上方没有图片；截图二确认同一个旧 `ctco_...` ID 在 `Reconnecting 5/5` 后仍作为最终流错误返回喵~
+- 本轮继续不启动、重启、连接或修改当前 Codex、Helper、CDP 与 Alunixa X 进程，只读核对已安装二进制、设置、诊断日志、Codex rollout、MCP 配置和生成图片目录；所有产品验证将使用隔离 SSE/JSON 样本和 GitHub Actions喵~
+- 第一次组合只读命令因尝试覆盖 PowerShell 只读常量 `$HOME` 立即失败，没有读取后续内容、修改文件或影响进程；随后改用 `$userHome` 完成同一只读排查喵~
+- 已确认当前正在运行的 `D:\AlunixaX\alunixa-x.exe`、管理器与 imagegen MCP 文件版本均为 `1.0.4`，设置中 `enhancementsEnabled=true` 且 `codexAppResponsesIdNegotiation=true`，因此不是旧版本、功能未开启或设置未保存喵~
+- 诊断日志确认 `v1.0.4` 的协商确实多次触发，存在 `protocol_proxy.responses_item_id_prefix_retry` 与 `helper.protocol_proxy_stream_retry_ok`；但最终同一 `1,319,248` 字节请求被 Codex 在约 37 秒内连续重连六次，代理均直接记录普通 `stream_ok`，没有进入协商，最终 rollout 在 2026-08-22 19:56:28 返回原始 `invalid_id_prefix`喵~
+- 根因一已定位：`responses_stream_prefix_is_decidable` 把任意 `response.*` 事件都视为可以立即放行；该供应商会先发送 `response.created/response.in_progress`，随后才发送参数校验失败，因此 1.0.4 仍可能在错误到达前过早透传喵~
+- 根因二已定位：当前修复函数在一个 ID 被上游点名后，会把请求内所有同来源前缀 ID 一起改写；日志中的 changedItemCount 从 1 增长到 6，这会误改与错误无关的合法 custom-tool 输出，应改为只修改上游明确拒绝的完整 ID喵~
+- Image Gen rollout 只读核对确认生成本身成功：`image_generation_call` 含有效 PNG Base64 `result`，但 item 的 `status` 仍为 `generating`，Codex 因没有看到 completed 状态而只显示工具卡片、不渲染图片喵~
+- 当前 `~/.codex/config.toml` 同时启用了旧 `[mcp_servers.codex-plus-imagegen]` 与新 `[mcp_servers.alunixa-x-imagegen]`，Codex app-server 下也同时存在两组 companion 进程；Alunixa X 启用自己的 imagegen 时应只清理这一已知旧产品 ID，继续保留所有用户自建 MCP server喵~
+- 后续补丁将同时完成四项修复：生命周期前导事件继续缓冲到真实输出或终态、只改写被拒绝的精确 ID、把带有效 result 的 malformed image_generation_call 状态修正为 completed、迁移移除旧 codex-plus-imagegen 配置喵~
