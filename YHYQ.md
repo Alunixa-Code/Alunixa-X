@@ -966,3 +966,11 @@
 - 1.0.4 本地构建残留已按绝对路径安全清理：Removed 7662 files, 6.1GiB total；前端 
 ode_modules 与 dist 均已删除，并确认 Rust 	arget、
 ode_modules、dist 三个目录均不存在喵~
+- `v1.0.4` 代码提交 `12e42d0617682cdabafa568bd5dda555abb166b1` 的唯一主分支 Actions `32567542700` 已全部成功：Windows 完成品牌保护、前端 `43/43`、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 与资产上传；macOS x64/arm64 完成前端、release 二进制、DMG、结构验证与上传喵~
+- 创建 `v1.0.4` 标签时发现本地残留了一个未推送、指向 2026-05-09 旧提交 `c85ef2f` 的同名轻量标签；GitHub API确认远端既无该标签也无该 Release 后，已删除本地残留标签，并把正式 annotated tag 精确创建在已通过 Actions 的 `12e42d0` 提交上再推送喵~
+- 标签触发的正式 Release workflow `32569135745` 中，版本与品牌校验成功，但 Windows x64、macOS x64、macOS arm64 在执行任何步骤前被 GitHub 平台立即拒绝；check-run 注解明确原因为账户近期付款失败或 Actions spending limit 不足，不是代码、测试、版本、runner 脚本或资产构建失败喵~
+- 为避免重复消耗 Windows/macOS runner、也不伪造构建结果，Release workflow 新增可选 `reuse_run_id` 恢复路径：只允许复用同仓库、名称为 `PR build artifacts`、push 事件、状态 completed、结论 success 且 `head_sha` 与 Release tag commit 完全一致的权威构建喵~
+- 复用路径仍由 GitHub Actions 发布，并严格核验四个原始构建 artifact；Windows 三个 PE32+ 二进制重新打 ZIP，并在 Ubuntu runner 使用同一 NSIS 脚本和正式 `1.0.4` 版本重新封装 setup，避免直接改名主分支构建中 `0.0.0-run` 版本的临时 installer喵~
+- macOS x64/arm64 的已签名 DMG 保持原字节，仅重命名为正式版本；原始三个 Mach-O 二进制从对应 DMG 中提取、校验 `x86_64/arm64` 架构、恢复可执行位并按既有 `app-x64/app-arm64` 结构生成 ZIP，最终仍要求且只允许六项正式资产喵~
+- 已下载成功 Actions 的 x64 DMG 到独立临时目录做只读结构确认，确认 DMG 内同时包含 launcher、imagegen MCP 与 manager 三个目标二进制；检查完成后临时目录已删除，未连接或操作当前 Codex/Helper/CDP喵~
+- 复用发布路径不改变正常 tag 发布：未填写 `reuse_run_id` 时仍按原流程使用 Windows 与两种 macOS runner 全量重建；只有手工 workflow_dispatch 明确传入成功 run ID 时才走严格校验后的恢复发布喵~
