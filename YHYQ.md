@@ -963,3 +963,6 @@
 - CHANGELOG 新增 `1.0.4` 章节，明确记录 1.0.3 的首事件盲区、真实三事件顺序、厂商前导缓冲、正常标准事件早放行、LF/CRLF/分块支持和 64 KiB 上限喵~
 - `v1.0.4` 元数据更新后的最终本地验收已完成：前端 `43/43`、TypeScript、Vite 生产构建、settings `42/42`、launcher 协商 `4/4`、协议代理 `69/69`、i18n plain `851/851`、template `80/80`、品牌保护、Rust formatter、`cargo check --workspace --all-targets`、差异空白与 Git 状态全部通过喵~
 - 最终 workspace check 于 2026-08-22 完成，耗时约 1 分 55 秒；当前分支在清理前相对 `origin/main` 领先 5 个功能提交，工作树无未提交 tracked 变更喵~
+- 1.0.4 本地构建残留已按绝对路径安全清理：Removed 7662 files, 6.1GiB total；前端 
+ode_modules 与 dist 均已删除，并确认 Rust 	arget、
+ode_modules、dist 三个目录均不存在喵~
