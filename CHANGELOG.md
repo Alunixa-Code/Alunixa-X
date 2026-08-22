@@ -1,3 +1,10 @@
+## 1.0.6 - 2026-08-22
+
+- 修复 `v1.0.5` 只协商 HTTP 200 SSE 内 `invalid_id_prefix`、但第三方上游改为以 HTTP 非成功 JSON `invalid_request_error` 返回同一 ID 兼容信息时直接把错误回传给 Codex的问题喵~
+- 非成功 Responses HTTP body 现在同样读取严格的 `Invalid 'input[n].id'` 加 `Expected an ID that begins with` 协商结构，不再依赖错误文本必须包含 literal `invalid_id_prefix`喵~
+- 覆盖本次真实 `custom_tool_call.id=fc_04066...` 被上游要求 `ctc_` 的情况：仅把被点名 call 改为 `ctc_04066...`，保留同 `call_id` 的 `ctco_` output、其他 `fc_` item、类型、output 和顺序喵~
+- HTTP 直接错误协商与原有 HTTP 200 SSE 协商共用同一前缀白名单、完整 ID 存在性检查、精确单项改写和最多一次重试边界；新增 HTTP JSON `fc_ -> ctc_` 回归并保留 SSE `ctco_ -> fc_` 回归喵~
+
 ## 1.0.5 - 2026-08-22
 
 - 修复 `v1.0.4` 仍可能在 `Reconnecting 5/5` 后返回同一 `invalid_id_prefix` 的问题：真实供应商会先发送 `response.created` 与 `response.in_progress`，随后才进行 typed input 校验；旧判定在 created 后过早透传，导致晚到的 `response.failed` 无法再协商喵~
