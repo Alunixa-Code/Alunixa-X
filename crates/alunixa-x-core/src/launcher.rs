@@ -1944,18 +1944,70 @@ async fn handle_protocol_proxy_connection(
         return Ok(());
     }
     if upstream.is_stream {
-        write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
         if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
-            let mut bytes_stream = upstream.response.bytes_stream();
-            while let Some(chunk) = bytes_stream.next().await {
-                if let Ok(bytes) = chunk {
-                    stream.write_all(&bytes).await?;
-                } else {
-                    break;
+            let mut upstream_response = upstream.response;
+            let mut prefix = read_responses_stream_prefix(&mut upstream_response).await?;
+            let mut retry_applied = false;
+            if let Some(repair) =
+                crate::protocol_proxy::repair_responses_item_ids_for_upstream_error(
+                    request_body,
+                    &String::from_utf8_lossy(&prefix),
+                )
+            {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "protocol_proxy.responses_item_id_prefix_retry",
+                    serde_json::json!({
+                        "sourcePrefix": repair.source_prefix,
+                        "expectedPrefix": repair.expected_prefix,
+                        "changedItemCount": repair.changed_count
+                    }),
+                );
+                match crate::protocol_proxy::open_responses_proxy_request_for_path(
+                    &repair.body,
+                    request_user_agent,
+                    path,
+                )
+                .await
+                {
+                    Ok(retry)
+                        if retry.is_success()
+                            && retry.is_stream
+                            && retry.wire_api
+                                == crate::protocol_proxy::UpstreamWireApi::Responses =>
+                    {
+                        upstream_response = retry.response;
+                        prefix = read_responses_stream_prefix(&mut upstream_response).await?;
+                        retry_applied = true;
+                    }
+                    Ok(_) => {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.responses_item_id_prefix_retry_rejected",
+                            serde_json::json!({ "reason": "unexpected_retry_response" }),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.responses_item_id_prefix_retry_failed",
+                            serde_json::json!({
+                                "error": error.to_string().chars().take(512).collect::<String>()
+                            }),
+                        );
+                    }
                 }
             }
+            write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
+            if !prefix.is_empty() {
+                stream.write_all(&prefix).await?;
+            }
+            while let Some(bytes) = upstream_response.chunk().await? {
+                stream.write_all(&bytes).await?;
+            }
             log_helper_response(
-                "helper.protocol_proxy_stream_ok",
+                if retry_applied {
+                    "helper.protocol_proxy_stream_retry_ok"
+                } else {
+                    "helper.protocol_proxy_stream_ok"
+                },
                 method,
                 path,
                 "200 OK",
@@ -1964,6 +2016,7 @@ async fn handle_protocol_proxy_connection(
             stream.shutdown().await?;
             return Ok(());
         }
+        write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
         let fallback_request = serde_json::json!({});
         let original_request = request_json.as_ref().unwrap_or(&fallback_request);
         let mut converter = crate::protocol_proxy::UpstreamSseToResponsesConverter::with_request(
@@ -2104,6 +2157,28 @@ async fn handle_protocol_proxy_connection(
     );
     stream.shutdown().await?;
     Ok(())
+}
+
+const RESPONSES_STREAM_PREFIX_LIMIT: usize = 64 * 1024;
+
+async fn read_responses_stream_prefix(response: &mut reqwest::Response) -> anyhow::Result<Vec<u8>> {
+    let mut prefix = Vec::new();
+    while prefix.len() < RESPONSES_STREAM_PREFIX_LIMIT {
+        let Some(chunk) = response
+            .chunk()
+            .await
+            .context("读取 Responses 上游流首段失败")?
+        else {
+            break;
+        };
+        prefix.extend_from_slice(&chunk);
+        if prefix.windows(2).any(|window| window == b"\n\n")
+            || prefix.windows(4).any(|window| window == b"\r\n\r\n")
+        {
+            break;
+        }
+    }
+    Ok(prefix)
 }
 async fn handle_chat_completions_proxy_connection(
     stream: &mut tokio::net::TcpStream,

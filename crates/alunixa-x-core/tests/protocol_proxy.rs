@@ -11,11 +11,67 @@ use alunixa_x_core::protocol_proxy::{
     open_responses_proxy_request_with_settings,
     open_responses_proxy_request_with_settings_for_path,
     open_transparent_proxy_request_with_settings, open_transparent_websocket_request_with_settings,
-    responses_error_from_upstream, responses_to_anthropic_messages, responses_to_chat_completions,
-    responses_to_completions, responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
+    repair_responses_item_ids_for_upstream_error, responses_error_from_upstream,
+    responses_to_anthropic_messages, responses_to_chat_completions, responses_to_completions,
+    responses_to_gemini_generate_content, sanitized_endpoint_for_tests,
     send_upstream_request_with_header_timeout, transparent_api_url, upstream_header_timeout,
     upstream_http_client, upstream_stream_header_timeout,
 };
+
+#[test]
+fn responses_stream_error_repairs_the_rejected_custom_output_family_once() {
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {
+                "type": "custom_tool_call_output",
+                "id": "ctco_01a02899-0ede-7f42-b692-ba57cffb9823",
+                "call_id": "call_H46ChXiuy7nmhwmwt6QBK24n",
+                "output": "Script failed"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "id": "ctco_second",
+                "call_id": "call_second",
+                "output": "second"
+            },
+            {
+                "type": "custom_tool_call",
+                "id": "ctc_keep",
+                "call_id": "call_keep",
+                "name": "exec",
+                "input": "echo ok"
+            }
+        ],
+        "stream": true
+    });
+    let upstream_error = "event: error\ndata: {\"error\":{\"message\":\"[ApiIdParam] [input[17].id] [invalid_id_prefix] Invalid 'input[17].id': 'ctco_01a02899-0ede-7f42-b692-ba57cffb9823'. Expected an ID that begins with 'fc'.\"}}\n\n";
+
+    let repaired =
+        repair_responses_item_ids_for_upstream_error(&request.to_string(), upstream_error)
+            .expect("the explicit upstream prefix error should be repairable");
+    let body: serde_json::Value = serde_json::from_str(&repaired.body).unwrap();
+
+    assert_eq!(repaired.source_prefix, "ctco_");
+    assert_eq!(repaired.expected_prefix, "fc_");
+    assert_eq!(repaired.changed_count, 2);
+    assert_eq!(
+        body["input"][0]["id"],
+        "fc_01a02899-0ede-7f42-b692-ba57cffb9823"
+    );
+    assert_eq!(body["input"][1]["id"], "fc_second");
+    assert_eq!(body["input"][2], request["input"][2]);
+    assert_eq!(body["input"][0]["call_id"], request["input"][0]["call_id"]);
+    assert_eq!(body["input"][0]["output"], request["input"][0]["output"]);
+
+    assert!(
+        repair_responses_item_ids_for_upstream_error(
+            &request.to_string(),
+            "unrelated upstream failure"
+        )
+        .is_none()
+    );
+}
 use alunixa_x_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
     RelayMode, RelayModelRoute, RelayProfile, RelayProtocol,
@@ -2486,7 +2542,7 @@ async fn direct_responses_repairs_cross_typed_tool_item_id_prefixes() {
     assert_eq!(upstream_body["input"][0]["output"], "completed");
     assert_eq!(
         upstream_body["input"][1]["id"],
-        "ctco_01a0257d-d256-7d93-b048-b22fba274c2e"
+        "fc_01a0257d-d256-7d93-b048-b22fba274c2e"
     );
     assert_eq!(upstream_body["input"][2], request["input"][2]);
     assert_eq!(upstream_body["input"][3], request["input"][3]);

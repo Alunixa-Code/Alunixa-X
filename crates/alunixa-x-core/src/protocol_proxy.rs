@@ -2351,8 +2351,10 @@ fn normalize_responses_typed_item_ids(body: &mut Value) -> usize {
         };
         let expected_prefix = match item_type {
             "function_call" | "function_call_output" => "fc_",
-            "custom_tool_call" => "ctc_",
-            "custom_tool_call_output" => "ctco_",
+            // Codex itself emits ctc_/ctco_ for custom tools.  Do not force an
+            // fc_ id back to the custom family here: an upstream may have
+            // explicitly requested fc_ and the adaptive retry must survive the
+            // second pass through this function.
             _ => continue,
         };
         let Some(id) = item.get("id").and_then(Value::as_str) else {
@@ -2371,6 +2373,97 @@ fn normalize_responses_typed_item_ids(body: &mut Value) -> usize {
         changed += 1;
     }
     changed
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponsesItemIdRetryRepair {
+    pub body: String,
+    pub changed_count: usize,
+    pub source_prefix: &'static str,
+    pub expected_prefix: &'static str,
+}
+
+/// Some third-party Responses implementations return HTTP 200 and only report an
+/// item-id schema mismatch inside the SSE body.  Codex may legitimately emit the
+/// custom-tool families (`ctc_` / `ctco_`), while those implementations ask for
+/// the function-call family (`fc_`).  Repair only after the upstream explicitly
+/// names the rejected id and expected family, and keep every other request field
+/// byte-for-byte equivalent after JSON decoding/encoding.
+pub fn repair_responses_item_ids_for_upstream_error(
+    request_body: &str,
+    upstream_error: &str,
+) -> Option<ResponsesItemIdRetryRepair> {
+    if !upstream_error.contains("invalid_id_prefix") {
+        return None;
+    }
+    let invalid_tail = upstream_error.split_once("Invalid 'input[")?.1;
+    let invalid_id = invalid_tail.split_once("': '")?.1.split_once('\'')?.0;
+    let expected_raw = upstream_error
+        .split_once("Expected an ID that begins with '")?
+        .1
+        .split_once('\'')?
+        .0;
+    let expected_prefix = canonical_response_tool_item_prefix(expected_raw)?;
+    let source_prefix = response_tool_item_id_prefix(invalid_id)?;
+    if source_prefix == expected_prefix {
+        return None;
+    }
+
+    let mut request: Value = serde_json::from_str(request_body).ok()?;
+    let items = request.get_mut("input")?.as_array_mut()?;
+    if !items.iter().any(|item| {
+        item.get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id == invalid_id)
+    }) {
+        return None;
+    }
+
+    let mut changed_count = 0;
+    for item in items {
+        let Some(item) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(id) = item.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(suffix) = id
+            .strip_prefix(source_prefix)
+            .filter(|suffix| !suffix.is_empty())
+        else {
+            continue;
+        };
+        item.insert(
+            "id".to_string(),
+            Value::String(format!("{expected_prefix}{suffix}")),
+        );
+        changed_count += 1;
+    }
+    if changed_count == 0 {
+        return None;
+    }
+
+    Some(ResponsesItemIdRetryRepair {
+        body: serde_json::to_string(&request).ok()?,
+        changed_count,
+        source_prefix,
+        expected_prefix,
+    })
+}
+
+fn canonical_response_tool_item_prefix(prefix: &str) -> Option<&'static str> {
+    match prefix.trim().trim_end_matches('_') {
+        "fc" => Some("fc_"),
+        "ctc" => Some("ctc_"),
+        "ctco" => Some("ctco_"),
+        _ => None,
+    }
+}
+
+fn response_tool_item_id_prefix(id: &str) -> Option<&'static str> {
+    ["ctco_", "ctc_", "fc_"]
+        .into_iter()
+        .find(|prefix| id.starts_with(prefix))
 }
 
 fn response_tool_item_id_suffix(id: &str) -> Option<&str> {

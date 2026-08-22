@@ -900,3 +900,9 @@
 - Alunixa X 日志确认对应时段请求经过 `/v1/responses` 和自定义供应商 `9527 / gpt-5.6-sol / Responses`，上游先返回 HTTP 200 SSE，随后才在流内发出 `invalid_id_prefix`；当前 helper 把 Responses SSE 原样透传并将任何 HTTP 200 都记为 stream_ok，因此上一版既无法识别流内验证失败，也无法自动重试喵~
 - `v1.0.2` 的发送前规范化只修复 `type` 与 ID 前缀已经互相矛盾的条目；合法 `custom_tool_call_output + ctco_` 按设计保持不变。供应商 9527 对当前 Codex custom-tool 历史不完整兼容，错误地要求 function-call 的 `fc_` 家族，所以该错误的原始触发点在上游兼容实现，而 Alunixa X 作为兼容代理仍缺少按上游明确错误自适应重试的兜底喵~
 - 首次只读探测命令曾因 PowerShell 管道语法错误立即退出且没有修改任何文件或进程，随后已用修正后的只读命令完成版本、日志、代码发送路径与 rollout 核对喵~
+- 已实现仅在第三方 Responses 上游以 HTTP 200 SSE 明确返回 `invalid_id_prefix` 时触发的一次性自适应重试：helper 会先缓冲首个 SSE 事件，不再把流内参数校验失败直接当作成功透传喵~
+- 自适应修复从错误文本中同时提取被拒绝的真实 ID 和上游明确要求的目标家族，只允许 `fc_ / ctc_ / ctco_` 三种已知前缀；确认该 ID 确实存在于当前请求后，才修正同一来源家族并重发一次，防止无关错误或恶意文本触发请求改写喵~
+- 针对本次 `custom_tool_call_output + ctco_` 场景，第一次请求保持 Codex 原生合法表示；只有供应商 9527 明确要求 `fc` 后，重试请求才将该历史中的 `ctco_` 输出 ID 改成 `fc_`，`call_id`、output、工具类型、消息、顺序和其他工具家族保持不变喵~
+- 调整发送前常规规范化，使其继续修正错误的 function item ID，但不再把自适应重试后、由上游明确要求的 custom item `fc_` 反向恢复成 `ctco_`；正常支持 custom-tool 的上游不会触发重试，因此仍收到 Codex 原始 `ctc_/ctco_` 喵~
+- 新增脱敏事件 `protocol_proxy.responses_item_id_prefix_retry`、`retry_failed`、`retry_rejected` 和成功事件 `helper.protocol_proxy_stream_retry_ok`，只记录前缀、修改数量和截断错误，不记录请求正文、工具输出或凭据喵~
+- 新增使用本次真实 ID 的回归测试，覆盖同家族多个输出同步修正、`call_id`/output 保留、其他 custom call 不变以及无关错误不触发修复喵~
