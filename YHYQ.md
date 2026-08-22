@@ -946,3 +946,11 @@
 - Windows Setup 为 `20,719,231` 字节，SHA-256 `bbb61584a638436a8f98fc899f0bd0478036a261115a1940bacfe5bfa11bd4e0`；Windows ZIP 为 `26,436,592` 字节，SHA-256 `97700ab70ea998f7ff955cd1a6b05df2ffaf2069a97886778e1dfe6c1dbaa291` 喵~
 - macOS x64 DMG 为 `33,542,289` 字节，SHA-256 `a855ed9ca324876e145609ffedca6ea72de34798dd602c193811ab9b103dc84b`；x64 ZIP 为 `28,013,410` 字节，SHA-256 `f8bf6e1fe165d50b227fabbd327f32fd2da0fa4a388eac97909066531325219d` 喵~
 - macOS arm64 DMG 为 `32,342,133` 字节，SHA-256 `b8541c7c5ae05e69981f46fb42153d2d5b5b7d3e2756ef2d4b2fff605483c2c7`；arm64 ZIP 为 `27,452,754` 字节，SHA-256 `094e3ecb28045c23d3fb22ce64b208c9d4cd4e277615a31e63fb98cf91235e5e` 喵~
+
+## 2026-08-22 · Responses 协商 SSE 前导事件补丁
+
+- 在 `v1.0.3` 发布后的最后真实协议顺序核验中，随机构造的 `ctc_ + ctco_` custom pair 本次正常完成，说明上游行为取决于真实历史 ID 家族组合，不能用任意 custom pair 代替用户原始样本喵~
+- 只读核对用户真实 rollout 后确认调用项是 `type=custom_tool_call + id=fc_04066...`，输出项是 `type=custom_tool_call_output + id=ctco_01a02899...`；该跨家族组合正是 9527 要求输出改为 `fc_` 的实际场景喵~
+- 使用用户真实调用/输出 ID 形态的独立最小请求复现成功，HTTP 200 SSE 事件顺序为 `codex.rate_limits`、`codex.response.metadata`、`response.failed`，`invalid_id_prefix` 位于第三个事件，明确要求 `ctco_... -> fc` 喵~
+- 因 `v1.0.3` 只缓冲首个 SSE 事件，它会在厂商 rate-limit 事件后过早开始透传，无法捕获第三个事件的真实错误；本轮将扩展为跳过允许的厂商前导事件，直到完整 `response.*` 正常开始、完整失败事件、命中错误或达到大小上限后再决定喵~
+- 已建立修改前检查点；后续将发布 `v1.0.4` 替代不完整的 `v1.0.3`，不会宣称 1.0.3 已解决真实样本喵~
