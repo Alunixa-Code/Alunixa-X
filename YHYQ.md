@@ -974,3 +974,9 @@ ode_modules、dist 三个目录均不存在喵~
 - macOS x64/arm64 的已签名 DMG 保持原字节，仅重命名为正式版本；原始三个 Mach-O 二进制从对应 DMG 中提取、校验 `x86_64/arm64` 架构、恢复可执行位并按既有 `app-x64/app-arm64` 结构生成 ZIP，最终仍要求且只允许六项正式资产喵~
 - 已下载成功 Actions 的 x64 DMG 到独立临时目录做只读结构确认，确认 DMG 内同时包含 launcher、imagegen MCP 与 manager 三个目标二进制；检查完成后临时目录已删除，未连接或操作当前 Codex/Helper/CDP喵~
 - 复用发布路径不改变正常 tag 发布：未填写 `reuse_run_id` 时仍按原流程使用 Windows 与两种 macOS runner 全量重建；只有手工 workflow_dispatch 明确传入成功 run ID 时才走严格校验后的恢复发布喵~
+- 第一次手工调用复用恢复流程时，`gh workflow run` 在提交请求前因 GitHub GraphQL 网络连接超时而退出，未创建 Actions；随后改用 GitHub REST workflow dispatch 精确提交一次，生成 run `32569535226`喵~
+- `32569535226` 的 Ubuntu `verify-version` 同样在任何步骤执行前被 GitHub 拒绝，check-run 注解仍明确为账户付款失败或 spending limit，不是复用工作流的 YAML、条件、脚本或校验失败；这证明当前 GitHub-hosted Windows、macOS 与 Ubuntu runner 均被账户级计费状态阻断喵~
+- 为在不重复编译、不操作当前 Codex 的前提下完成发行，新增独立的紧急恢复 workflow `release-recovery-self-hosted.yml`，只接受手工 dispatch，并固定要求带有 `self-hosted + Windows + X64 + alunixa-release` 标签的临时 runner喵~
+- 自托管恢复 workflow 会重新校验 tag 格式、Cargo/前端/Tauri 的 `1.0.4` 版本一致性、本地品牌保护，以及源 Actions `32567542700` 的 workflow 名称、push 事件、completed/success 结论和 tag commit SHA 完全一致，任一不满足即拒绝发行喵~
+- 恢复流程只重新封装已经由成功 GitHub Actions 编译的三平台二进制：Windows 使用本机 NSIS 按正式 `1.0.4` 重新生成 installer；macOS DMG 保持原字节，ZIP 中三个 Mach-O 文件校验 CPU 类型并写入 Unix `0755` 权限；最后只允许六项非空资产并输出 SHA-256 后由该 GitHub Actions job 创建 Release喵~
+- 新 workflow 的 YAML 已由 PyYAML 成功解析，四段 PowerShell run 脚本已通过 PowerShell AST parser 静态语法检查，`git diff --check` 通过；未执行产品、未连接当前 Codex/Helper/CDP，也未启动任何常驻服务喵~
