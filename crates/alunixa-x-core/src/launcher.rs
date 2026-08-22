@@ -1954,14 +1954,9 @@ async fn handle_protocol_proxy_connection(
             if !negotiation_enabled {
                 write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8")
                     .await?;
-                let mut bytes_stream = upstream.response.bytes_stream();
-                while let Some(chunk) = bytes_stream.next().await {
-                    if let Ok(bytes) = chunk {
-                        stream.write_all(&bytes).await?;
-                    } else {
-                        break;
-                    }
-                }
+                let normalized_images =
+                    forward_responses_sse_stream(stream, upstream.response, Vec::new()).await?;
+                log_responses_image_status_normalization(normalized_images);
                 log_helper_response(
                     "helper.protocol_proxy_stream_ok",
                     method,
@@ -2004,7 +1999,14 @@ async fn handle_protocol_proxy_connection(
                     {
                         upstream_response = retry.response;
                         prefix = read_responses_stream_prefix(&mut upstream_response).await?;
-                        retry_applied = true;
+                        if String::from_utf8_lossy(&prefix).contains("invalid_id_prefix") {
+                            let _ = crate::diagnostic_log::append_diagnostic_log(
+                                "protocol_proxy.responses_item_id_prefix_retry_rejected",
+                                serde_json::json!({ "reason": "retry_still_invalid_id_prefix" }),
+                            );
+                        } else {
+                            retry_applied = true;
+                        }
                     }
                     Ok(_) => {
                         let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -2023,12 +2025,9 @@ async fn handle_protocol_proxy_connection(
                 }
             }
             write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
-            if !prefix.is_empty() {
-                stream.write_all(&prefix).await?;
-            }
-            while let Some(bytes) = upstream_response.chunk().await? {
-                stream.write_all(&bytes).await?;
-            }
+            let normalized_images =
+                forward_responses_sse_stream(stream, upstream_response, prefix).await?;
+            log_responses_image_status_normalization(normalized_images);
             log_helper_response(
                 if retry_applied {
                     "helper.protocol_proxy_stream_retry_ok"
@@ -2187,6 +2186,7 @@ async fn handle_protocol_proxy_connection(
 }
 
 const RESPONSES_STREAM_PREFIX_LIMIT: usize = 64 * 1024;
+const RESPONSES_SSE_COMPAT_EVENT_LIMIT: usize = 64 * 1024 * 1024;
 
 async fn read_responses_stream_prefix(response: &mut reqwest::Response) -> anyhow::Result<Vec<u8>> {
     let mut prefix = Vec::new();
@@ -2222,15 +2222,229 @@ fn responses_stream_prefix_is_decidable(prefix: &[u8]) -> bool {
             .lines()
             .find_map(|line| line.strip_prefix("event:"))
             .map(str::trim)
-            .unwrap_or("");
-        // Providers may prepend vendor metadata such as codex.rate_limits and
-        // codex.response.metadata. Keep buffering those, but stop as soon as
-        // the actual Responses lifecycle starts or a complete failure arrives.
+            .map(str::to_string)
+            .or_else(|| {
+                block.lines().find_map(|line| {
+                    let data = line.strip_prefix("data:")?.trim();
+                    serde_json::from_str::<serde_json::Value>(data)
+                        .ok()?
+                        .get("type")?
+                        .as_str()
+                        .map(str::to_string)
+                })
+            })
+            .unwrap_or_default();
+        // Some providers validate typed input only after emitting
+        // response.created / response.in_progress. Keep buffering those
+        // lifecycle-only events; release once actual output begins or a
+        // terminal response event arrives.
+        if matches!(
+            event.as_str(),
+            "response.created" | "response.queued" | "response.in_progress"
+        ) {
+            continue;
+        }
         if event.starts_with("response.") {
             return true;
         }
     }
     false
+}
+
+#[derive(Default)]
+struct ResponsesSseCompatibilityFilter {
+    pending: Vec<u8>,
+}
+
+impl ResponsesSseCompatibilityFilter {
+    fn push_bytes(&mut self, bytes: &[u8]) -> (Vec<u8>, usize) {
+        self.pending.extend_from_slice(bytes);
+        if self.pending.len() > RESPONSES_SSE_COMPAT_EVENT_LIMIT {
+            return (std::mem::take(&mut self.pending), 0);
+        }
+
+        let mut output = Vec::new();
+        let mut normalized = 0;
+        while let Some(end) = responses_sse_block_end(&self.pending) {
+            let block = self.pending.drain(..end).collect::<Vec<_>>();
+            let (block, changed) = normalize_responses_sse_block(&block);
+            output.extend_from_slice(&block);
+            normalized += changed;
+        }
+        (output, normalized)
+    }
+
+    fn finish(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.pending)
+    }
+}
+
+fn responses_sse_block_end(bytes: &[u8]) -> Option<usize> {
+    let lf = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| index + 2);
+    let crlf = bytes
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| index + 4);
+    match (lf, crlf) {
+        (Some(lf), Some(crlf)) => Some(lf.min(crlf)),
+        (Some(lf), None) => Some(lf),
+        (None, Some(crlf)) => Some(crlf),
+        (None, None) => None,
+    }
+}
+
+fn normalize_responses_sse_block(block: &[u8]) -> (Vec<u8>, usize) {
+    let Ok(text) = std::str::from_utf8(block) else {
+        return (block.to_vec(), 0);
+    };
+    let (body, event_end, line_end) = if let Some(body) = text.strip_suffix("\r\n\r\n") {
+        (body, "\r\n\r\n", "\r\n")
+    } else if let Some(body) = text.strip_suffix("\n\n") {
+        (body, "\n\n", "\n")
+    } else {
+        return (block.to_vec(), 0);
+    };
+
+    let mut changed = 0;
+    let mut completed_image_event = false;
+    let mut lines = Vec::new();
+    for line in body.split(line_end) {
+        let Some(data) = line.strip_prefix("data:") else {
+            lines.push(line.to_string());
+            continue;
+        };
+        let data = data.trim_start();
+        if data.is_empty() || data == "[DONE]" || !data.contains("image_generation_call") {
+            lines.push(line.to_string());
+            continue;
+        }
+        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) else {
+            lines.push(line.to_string());
+            continue;
+        };
+        let normalized = normalize_image_generation_status(&mut value);
+        if normalized == 0 {
+            lines.push(line.to_string());
+            continue;
+        }
+        changed += normalized;
+        completed_image_event |= value.get("type").and_then(serde_json::Value::as_str)
+            == Some("response.image_generation_call.completed");
+        lines.push(format!("data: {}", value));
+    }
+    if changed == 0 {
+        return (block.to_vec(), 0);
+    }
+    if completed_image_event {
+        for line in &mut lines {
+            if line
+                .strip_prefix("event:")
+                .is_some_and(|event| event.trim().starts_with("response.image_generation_call."))
+            {
+                *line = "event: response.image_generation_call.completed".to_string();
+            }
+        }
+    }
+    (
+        format!("{}{event_end}", lines.join(line_end)).into_bytes(),
+        changed,
+    )
+}
+
+fn normalize_image_generation_status(value: &mut serde_json::Value) -> usize {
+    let mut changed = 0;
+    match value {
+        serde_json::Value::Object(object) => {
+            let has_result = object
+                .get("result")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|result| !result.trim().is_empty());
+            let item_type = object
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string);
+            if has_result && item_type.as_deref() == Some("image_generation_call") {
+                let completed =
+                    object.get("status").and_then(serde_json::Value::as_str) == Some("completed");
+                if !completed {
+                    object.insert("status".to_string(), serde_json::json!("completed"));
+                    changed += 1;
+                }
+            }
+            if has_result
+                && item_type
+                    .as_deref()
+                    .is_some_and(|event| event.starts_with("response.image_generation_call."))
+            {
+                if item_type.as_deref() != Some("response.image_generation_call.completed") {
+                    object.insert(
+                        "type".to_string(),
+                        serde_json::json!("response.image_generation_call.completed"),
+                    );
+                    changed += 1;
+                }
+                let completed =
+                    object.get("status").and_then(serde_json::Value::as_str) == Some("completed");
+                if !completed {
+                    object.insert("status".to_string(), serde_json::json!("completed"));
+                    changed += 1;
+                }
+            }
+            for child in object.values_mut() {
+                changed += normalize_image_generation_status(child);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                changed += normalize_image_generation_status(item);
+            }
+        }
+        _ => {}
+    }
+    changed
+}
+
+async fn forward_responses_sse_stream(
+    stream: &mut tokio::net::TcpStream,
+    response: reqwest::Response,
+    initial: Vec<u8>,
+) -> anyhow::Result<usize> {
+    let mut filter = ResponsesSseCompatibilityFilter::default();
+    let mut normalized = 0;
+    let (output, changed) = filter.push_bytes(&initial);
+    normalized += changed;
+    if !output.is_empty() {
+        stream.write_all(&output).await?;
+    }
+    let mut bytes_stream = response.bytes_stream();
+    while let Some(chunk) = bytes_stream.next().await {
+        let Ok(bytes) = chunk else {
+            break;
+        };
+        let (output, changed) = filter.push_bytes(&bytes);
+        normalized += changed;
+        if !output.is_empty() {
+            stream.write_all(&output).await?;
+        }
+    }
+    let tail = filter.finish();
+    if !tail.is_empty() {
+        stream.write_all(&tail).await?;
+    }
+    Ok(normalized)
+}
+
+fn log_responses_image_status_normalization(normalized: usize) {
+    if normalized == 0 {
+        return;
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.responses_image_generation_status_completed",
+        serde_json::json!({ "normalizedItemCount": normalized }),
+    );
 }
 async fn handle_chat_completions_proxy_connection(
     stream: &mut tokio::net::TcpStream,
@@ -3976,13 +4190,38 @@ mod tests {
     }
 
     #[test]
-    fn responses_negotiation_releases_normal_stream_at_first_response_event() {
+    fn responses_negotiation_keeps_lifecycle_only_events_until_output_begins() {
         let mut prefix = b"event: codex.rate_limits\ndata: {}\n\n".to_vec();
         prefix.extend_from_slice(
             b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
         );
+        assert!(!responses_stream_prefix_is_decidable(&prefix));
 
+        prefix.extend_from_slice(
+            b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
+        );
+        assert!(!responses_stream_prefix_is_decidable(&prefix));
+
+        prefix.extend_from_slice(
+            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\"}\n\n",
+        );
         assert!(responses_stream_prefix_is_decidable(&prefix));
+    }
+
+    #[test]
+    fn responses_negotiation_catches_failure_after_created_and_in_progress() {
+        let mut prefix =
+            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n".to_vec();
+        prefix.extend_from_slice(
+            b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
+        );
+        assert!(!responses_stream_prefix_is_decidable(&prefix));
+
+        prefix.extend_from_slice(
+            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"error\":{\"message\":\"[invalid_id_prefix] Invalid 'input[17].id': 'ctco_real'. Expected an ID that begins with 'fc'.\"}}\n\n",
+        );
+        assert!(responses_stream_prefix_is_decidable(&prefix));
+        assert!(String::from_utf8_lossy(&prefix).contains("ctco_real"));
     }
 
     #[test]
@@ -4014,6 +4253,9 @@ mod tests {
             for event in [
                 b"event: codex.rate_limits\ndata: {}\n\n".as_slice(),
                 b"event: codex.response.metadata\ndata: {}\n\n".as_slice(),
+                b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n".as_slice(),
+                b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n"
+                    .as_slice(),
                 b"event: response.failed\ndata: {\"error\":{\"message\":\"invalid_id_prefix\"}}\n\n"
                     .as_slice(),
             ] {
@@ -4039,9 +4281,53 @@ mod tests {
 
         assert!(text.contains("codex.rate_limits"));
         assert!(text.contains("codex.response.metadata"));
+        assert!(text.contains("response.created"));
+        assert!(text.contains("response.in_progress"));
         assert!(text.contains("response.failed"));
         assert!(text.contains("invalid_id_prefix"));
         server.await.unwrap();
+    }
+
+    #[test]
+    fn responses_image_generation_result_is_marked_completed() {
+        let block = b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"id\":\"ig_real\",\"status\":\"generating\",\"result\":\"iVBORw0KGgo=\"}}\n\n";
+
+        let (normalized, changed) = normalize_responses_sse_block(block);
+        let text = String::from_utf8(normalized).unwrap();
+
+        assert_eq!(changed, 1);
+        assert!(text.contains("\"status\":\"completed\""));
+        assert!(text.contains("iVBORw0KGgo="));
+        assert!(!text.contains("\"status\":\"generating\""));
+    }
+
+    #[test]
+    fn responses_image_generation_without_result_stays_unchanged() {
+        let block = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"image_generation_call\",\"id\":\"ig_real\",\"status\":\"generating\"}}\n\n";
+
+        let (normalized, changed) = normalize_responses_sse_block(block);
+
+        assert_eq!(changed, 0);
+        assert_eq!(normalized, block);
+    }
+
+    #[test]
+    fn responses_image_generation_filter_handles_chunked_crlf_event() {
+        let event = b"event: response.image_generation_call.in_progress\r\ndata: {\"type\":\"response.image_generation_call.in_progress\",\"result\":\"iVBORw0KGgo=\"}\r\n\r\n";
+        let split = event.len() / 2;
+        let mut filter = ResponsesSseCompatibilityFilter::default();
+
+        let (first, first_changed) = filter.push_bytes(&event[..split]);
+        assert!(first.is_empty());
+        assert_eq!(first_changed, 0);
+
+        let (second, second_changed) = filter.push_bytes(&event[split..]);
+        let text = String::from_utf8(second).unwrap();
+        assert_eq!(second_changed, 2);
+        assert!(text.contains("event: response.image_generation_call.completed"));
+        assert!(text.contains("response.image_generation_call.completed"));
+        assert!(text.contains("\"status\":\"completed\""));
+        assert!(filter.finish().is_empty());
     }
 
     #[test]

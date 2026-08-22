@@ -1013,3 +1013,11 @@ ode_modules、dist 三个目录均不存在喵~
 - Image Gen rollout 只读核对确认生成本身成功：`image_generation_call` 含有效 PNG Base64 `result`，但 item 的 `status` 仍为 `generating`，Codex 因没有看到 completed 状态而只显示工具卡片、不渲染图片喵~
 - 当前 `~/.codex/config.toml` 同时启用了旧 `[mcp_servers.codex-plus-imagegen]` 与新 `[mcp_servers.alunixa-x-imagegen]`，Codex app-server 下也同时存在两组 companion 进程；Alunixa X 启用自己的 imagegen 时应只清理这一已知旧产品 ID，继续保留所有用户自建 MCP server喵~
 - 后续补丁将同时完成四项修复：生命周期前导事件继续缓冲到真实输出或终态、只改写被拒绝的精确 ID、把带有效 result 的 malformed image_generation_call 状态修正为 completed、迁移移除旧 codex-plus-imagegen 配置喵~
+- 第一轮 Rust 专项编译在新增 Image Gen SSE 递归规范化函数中触发借用检查错误：先借用了 `object.type` 的 `&str`，随后又修改同一 object；该编译失败没有运行产品或修改运行态，已通过先复制 type 字符串再修改对象解决喵~
+- ID 协商现不再在上游只点名一个 ID 时批量替换全部 `ctco_`；只对错误文字中完整匹配的被拒绝 ID 改写前缀，同一请求中第二个合法 `ctco_`、`call_id`、output 和其他 item 保持原样喵~
+- SSE 前导判定现继续缓冲 `response.created`、`response.queued` 与 `response.in_progress`，直到实际输出事件、成功终态、失败终态或 64 KiB 保护上限；新增纯事件和真实 HTTP chunked 回归覆盖 `vendor metadata → created → in_progress → failed`喵~
+- 自动重试后的前导流会再次检查 `invalid_id_prefix`；如果单次重试仍被上游拒绝，记录 `retry_still_invalid_id_prefix`，不再把失败响应误记为 `stream_retry_ok`喵~
+- 新增 Responses SSE Image Gen 兼容过滤器：只在完整 SSE JSON 事件中发现 `image_generation_call` 已带非空 result、但 status/type 仍停留 generating/in_progress 时，修正为 completed；普通事件、无 result 的生成中事件、非 JSON 与 `[DONE]` 保持原字节喵~
+- Image Gen 过滤器兼容 LF、CRLF、任意网络分块和最高 64 MiB 单事件；对顶层 `response.image_generation_call.*` 同时统一 event header、JSON type 与 status，对 `response.output_item.done` 中的嵌套 item 只修正 item status喵~
+- Alunixa X 管理 imagegen MCP 配置时现会迁移删除已知旧产品 server ID `codex-plus-imagegen` 及其 env 子表，同时保留所有用户自建 MCP server；启用或关闭 Alunixa imagegen 都不会留下旧产品重复入口喵~
+- 修复后的专项验证通过：晚到协商 `5/5`、Image Gen SSE `3/3`、精确 ID 修复 `1/1`、MCP 配置迁移 `1/1`，Rust formatter 与差异空白检查通过；验证均使用隔离 SSE/JSON、临时 HTTP server 和临时 config，没有操作当前 Codex/Helper/CDP喵~

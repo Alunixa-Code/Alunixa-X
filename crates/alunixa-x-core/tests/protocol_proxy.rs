@@ -54,12 +54,12 @@ fn responses_stream_error_repairs_the_rejected_custom_output_family_once() {
 
     assert_eq!(repaired.source_prefix, "ctco_");
     assert_eq!(repaired.expected_prefix, "fc_");
-    assert_eq!(repaired.changed_count, 2);
+    assert_eq!(repaired.changed_count, 1);
     assert_eq!(
         body["input"][0]["id"],
         "fc_01a02899-0ede-7f42-b692-ba57cffb9823"
     );
-    assert_eq!(body["input"][1]["id"], "fc_second");
+    assert_eq!(body["input"][1], request["input"][1]);
     assert_eq!(body["input"][2], request["input"][2]);
     assert_eq!(body["input"][0]["call_id"], request["input"][0]["call_id"]);
     assert_eq!(body["input"][0]["output"], request["input"][0]["output"]);

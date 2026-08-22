@@ -2378,6 +2378,9 @@ pub fn repair_responses_item_ids_for_upstream_error(
         let Some(id) = item.get("id").and_then(Value::as_str) else {
             continue;
         };
+        if id != invalid_id {
+            continue;
+        }
         let Some(suffix) = id
             .strip_prefix(source_prefix)
             .filter(|suffix| !suffix.is_empty())
@@ -2389,6 +2392,7 @@ pub fn repair_responses_item_ids_for_upstream_error(
             Value::String(format!("{expected_prefix}{suffix}")),
         );
         changed_count += 1;
+        break;
     }
     if changed_count == 0 {
         return None;

@@ -13,6 +13,7 @@ const LEGACY_RELAY_PROVIDERS: &[&str] = &["AlunixaX", "CodexPP"];
 const CC_SWITCH_MODEL_CATALOG_FILENAME: &str = "cc-switch-model-catalog.json";
 const CHAT_UPSTREAM_BASE_URL_KEY: &str = "alunixa_x_chat_base_url";
 const ALUNIXA_X_IMAGEGEN_MCP_SERVER_ID: &str = "alunixa-x-imagegen";
+const LEGACY_IMAGEGEN_MCP_SERVER_IDS: &[&str] = &["codex-plus-imagegen"];
 const PROVIDER_SPECIFIC_COMMON_ROOT_KEYS: &[&str] = &[
     "model",
     "model_provider",
@@ -169,6 +170,11 @@ pub fn set_codex_imagegen_mcp_in_home(
         }
     };
     let mut doc = parse_toml_document(&existing)?;
+    if let Some(servers) = table_mut_if_exists(&mut doc, "mcp_servers") {
+        for legacy_id in LEGACY_IMAGEGEN_MCP_SERVER_IDS {
+            servers.remove(legacy_id);
+        }
+    }
     if enabled {
         let command = imagegen_mcp_path
             .to_str()
@@ -184,11 +190,13 @@ pub fn set_codex_imagegen_mcp_in_home(
         env["ALUNIXA_X_HELPER_URL"] = toml_edit::value(format!("http://127.0.0.1:{helper_port}"));
         server["env"] = Item::Table(env);
         servers[ALUNIXA_X_IMAGEGEN_MCP_SERVER_ID] = Item::Table(server);
-    } else if let Some(servers) = table_mut_if_exists(&mut doc, "mcp_servers") {
-        servers.remove(ALUNIXA_X_IMAGEGEN_MCP_SERVER_ID);
-        if servers.is_empty() {
-            doc.as_table_mut().remove("mcp_servers");
+    } else {
+        if let Some(servers) = table_mut_if_exists(&mut doc, "mcp_servers") {
+            servers.remove(ALUNIXA_X_IMAGEGEN_MCP_SERVER_ID);
         }
+    }
+    if table_mut_if_exists(&mut doc, "mcp_servers").is_some_and(|servers| servers.is_empty()) {
+        doc.as_table_mut().remove("mcp_servers");
     }
     let updated = ensure_trailing_newline(doc.to_string());
     if updated == normalize_config_text_for_write(&existing) {

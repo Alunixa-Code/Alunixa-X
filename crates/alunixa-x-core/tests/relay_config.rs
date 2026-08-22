@@ -1524,7 +1524,7 @@ fn imagegen_mcp_config_is_managed_without_touching_user_servers() {
     let config_path = temp.path().join("config.toml");
     std::fs::write(
         &config_path,
-        "model = \"gpt-5\"\n\n[mcp_servers.user-server]\ncommand = \"user-mcp\"\n",
+        "model = \"gpt-5\"\n\n[mcp_servers.user-server]\ncommand = \"user-mcp\"\n\n[mcp_servers.codex-plus-imagegen]\ncommand = \"legacy-imagegen\"\n\n[mcp_servers.codex-plus-imagegen.env]\nCODEX_PLUS_HELPER_URL = \"http://127.0.0.1:57321\"\n",
     )
     .unwrap();
     let imagegen_mcp = if cfg!(windows) {
@@ -1539,6 +1539,8 @@ fn imagegen_mcp_config_is_managed_without_touching_user_servers() {
     let enabled = std::fs::read_to_string(&config_path).unwrap();
     assert!(enabled.contains("[mcp_servers.user-server]"));
     assert!(enabled.contains("[mcp_servers.alunixa-x-imagegen]"));
+    assert!(!enabled.contains("codex-plus-imagegen"));
+    assert!(!enabled.contains("legacy-imagegen"));
     assert!(enabled.contains("alunixa-x-imagegen-mcp"));
     assert!(!enabled.contains("args ="));
     assert!(enabled.contains("http://127.0.0.1:57321"));
