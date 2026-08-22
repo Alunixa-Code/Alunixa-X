@@ -1036,3 +1036,15 @@ ode_modules、dist 三个目录均不存在喵~
 ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三个目录均不存在喵~
 - 首次组合清理命令在 `cargo clean` 删除 Rust target 后超过工具等待窗口，后续 Node 清理与日志提交没有执行；状态复核确认没有遗留 cargo clean 进程，随后单独完成前端清理喵~
 - `v1.0.5` 本地 Rust `target`、前端 `node_modules` 与 `dist` 已全部删除，并验证三个目录均不存在喵~
+- 个人公开 fork 的 `Build and publish release` run `32573545101` 已成功完成版本/品牌校验、Windows x64、macOS x64、macOS arm64 和临时 fork Release；它证明在组织计费状态未知时仍具备备用三平台 CI 路径喵~
+- 推送正式仓库 `v1.0.5` 标签后，Alunixa-Code 组织的 GitHub-hosted runner 已恢复可用，因此没有调用 self-hosted 或 fork 资产恢复；正式原仓库 Release workflow `32574050712` 自己完成了三平台重新构建与发布喵~
+- `32574050712` 全部成功：verify-version、Windows x64、macOS x64、macOS arm64、六项资产下载/验证和 `Publish GitHub Release` 均为 success，tag commit 精确为 `1a29129a4be5004ec74184abfb7657c8c5f2586c`喵~
+- `v1.0.5` 已发布为 latest、非草稿、非预发布，地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.5`；详细发行说明记录晚到 ID 根因、精确单 ID 改写、Image Gen completed 修复、重复 MCP 迁移、验证矩阵和升级步骤喵~
+- `v1.0.4` 发行说明顶部已增加 superseded 通知，明确 created/in_progress 晚到错误与 Image Gen generating 状态问题已由 `v1.0.5` 修复喵~
+- `v1.0.5` Windows Setup 为 `20,721,325` 字节，SHA-256 `8f07fb2be3a604a7316fa8af13b9fde10f51587cb89d13c821dd4a754b9f9c88`；Windows ZIP 为 `26,441,845` 字节，SHA-256 `998e67d768739871d73fd60c17fcdb0d7040d064fb7e455537b5b66f0929c012`喵~
+- `v1.0.5` macOS x64 DMG 为 `33,546,662` 字节，SHA-256 `ab07dcb2505df500f5f81d32b3fd29f0a60fe8bd21a8e0fe19b544bfba617499`；x64 ZIP 为 `28,043,373` 字节，SHA-256 `1397b0293bde306b8d7bc248561a10eb33b370be89db3d16cf381d21b0e68e02`喵~
+- `v1.0.5` macOS arm64 DMG 为 `32,270,584` 字节，SHA-256 `efb7e9c21334bb82b32155c76d972749ce98cfc8cf7f3dd24cadc4c5b55dcdb8`；arm64 ZIP 为 `27,451,401` 字节，SHA-256 `a4d0301eaae75ad7ea19d31d692bfec9414a58071879dfc0c4ef0421ce0e395f`喵~
+- 删除临时 CI fork 时 GitHub API 返回 403，明确要求当前 gh 认证额外具备 `delete_repo` scope；没有请求交互式扩权，也没有使用其他凭据强删，随后把该 fork 设为 archived、关闭 Actions、写明正式仓库地址并移除本地 remote，避免继续触发或被误当更新源喵~
+- 第一次 archive PATCH 因 GitHub API 网络连接超时失败，随后在有界三次网络重试内成功；临时 Release notes 已删除，本地 `target`、`node_modules`、`dist` 均不存在喵~
+- 正式代码、标签、更新源、Release 和 latest 状态始终位于 `Alunixa-Code/Alunixa-X`，临时 fork 没有进入产品配置、README、更新器或发行说明喵~
+- 全过程没有停止、重启、连接、替换或测试当前正在运行的 Codex、Alunixa X helper、CDP 与 Image Gen companion；用户安装 `v1.0.5` 后需完整退出旧进程并通过 Alunixa X 启动一次以加载新二进制和 MCP 迁移喵~
