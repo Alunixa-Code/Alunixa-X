@@ -983,3 +983,7 @@ ode_modules、dist 三个目录均不存在喵~
 - 第一次临时 self-hosted recovery Actions `32569812620` 已实际接入 GitHub 并在临时 Windows runner 上执行；它不是计费阻断，而是在版本校验阶段精确暴露 PowerShell 7 对含空字符串属性名的 `package-lock.json` 使用普通 `ConvertFrom-Json` 会报错喵~
 - 已将 package-lock 读取改为 `ConvertFrom-Json -AsHashtable`，通过 `$packageLock['packages']['']` 安全访问 npm lockfile 的根包条目，并继续同时校验顶层与根包版本均为 `1.0.4`喵~
 - 修复后已直接用仓库真实 package-lock 验证顶层与空键根包版本读取成功，四段 workflow PowerShell 脚本再次通过 AST 语法解析，差异空白检查通过喵~
+- 第二次临时 self-hosted recovery Actions `32570030714` 已通过 tag/版本/品牌/源 run 校验、四类 artifact 下载、Windows PE 检查、ZIP 和正式 `1.0.4` NSIS installer 生成，在读取 Mach-O magic 常量时失败喵~
+- 根因是 PowerShell 将十六进制字面量 `0xFEEDFACF` 先解释为负的 Int32，再显式转换为 UInt32 时抛出越界；二进制本身没有异常喵~
+- 已改用 `[Convert]::ToUInt32('FEEDFACF', 16)` 构造无符号 Mach-O 64 magic，并对 Actions 实际下载/解出的 x64 与 arm64 launcher 做只读字节核验：两者 magic 均为 `0xFEEDFACF`，CPU 分别为 `0x01000007` 与 `0x0100000C`，全部与预期一致喵~
+- 修正后的 workflow YAML 与四段 PowerShell 再次通过静态解析和差异空白检查；没有执行三个产品二进制，只读取 Actions 构建资产的文件头喵~

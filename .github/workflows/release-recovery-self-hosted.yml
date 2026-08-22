@@ -181,7 +181,8 @@ jobs:
             }
             $magic = [BitConverter]::ToUInt32($bytes, 0)
             $cpu = [BitConverter]::ToUInt32($bytes, 4)
-            if ($magic -ne [uint32]0xFEEDFACF -or $cpu -ne $ExpectedCpu) {
+            $machO64Magic = [Convert]::ToUInt32('FEEDFACF', 16)
+            if ($magic -ne $machO64Magic -or $cpu -ne $ExpectedCpu) {
               throw "Mach-O architecture mismatch: $Path"
             }
           }
