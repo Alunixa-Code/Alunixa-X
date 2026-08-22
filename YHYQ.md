@@ -906,3 +906,5 @@
 - 调整发送前常规规范化，使其继续修正错误的 function item ID，但不再把自适应重试后、由上游明确要求的 custom item `fc_` 反向恢复成 `ctco_`；正常支持 custom-tool 的上游不会触发重试，因此仍收到 Codex 原始 `ctc_/ctco_` 喵~
 - 新增脱敏事件 `protocol_proxy.responses_item_id_prefix_retry`、`retry_failed`、`retry_rejected` 和成功事件 `helper.protocol_proxy_stream_retry_ok`，只记录前缀、修改数量和截断错误，不记录请求正文、工具输出或凭据喵~
 - 新增使用本次真实 ID 的回归测试，覆盖同家族多个输出同步修正、`call_id`/output 保留、其他 custom call 不变以及无关错误不触发修复喵~
+- 隔离验证已通过：本次真实 ID 的精确回归 `1/1`、上一版跨类型前缀回归 `1/1`、协议代理完整专项 `69/69` 和 `cargo check -p alunixa-x-core` 均成功喵~
+- 验证只使用本地静态 JSON、隔离测试服务器和 Rust 编译，不向 9527 或任何真实供应商发送测试请求，也未启动、重启、连接或操作当前 Codex/Helper/CDP喵~
