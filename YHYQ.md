@@ -872,3 +872,9 @@
 - 已确认问题位于 Responses typed Items 的工具历史兼容边界：Codex 新版会产生 custom tool call/output ID，而部分 Responses 上游或转换链路按 function call 校验 ID；后续将只修正不匹配的 typed item ID/类型，不改 `call_id`、工具输出、消息正文或官方原生支持的合法项喵~
 - 官方 Responses 文档确认 `function_call` 与 `function_call_output` 通过原始 `call_id` 关联，Responses 输入是 typed Items；本轮将增加请求发送前的结构化规范化和回归测试喵~
 - 本轮继续不启动、重启、连接或操作当前 Codex/Helper/CDP，只使用静态请求样本、隔离 HTTP 测试和 GitHub Actions 验证喵~
+- 根因已定位为 typed Responses input item 的 `type` 与 `id` 前缀跨家族不一致：报错样本是 `function_call_output` 携带 `ctco_...`，而该上游按 function-call item 校验并要求 `fc_...`，因此在流式请求真正开始前被拒绝喵~
+- Responses 直连发送前现结构化检查 `input` 数组，只处理四种工具 typed item：`function_call/function_call_output -> fc_`、`custom_tool_call -> ctc_`、`custom_tool_call_output -> ctco_`；仅当现有 ID 来自已知工具前缀且与类型不一致时替换前缀，原 UUID 后缀、`call_id`、output、arguments、消息和其他 typed item 全部保持不变喵~
+- 修复同时覆盖普通 Responses、单模型 Responses 路由、自定义模型 Responses 和 `/responses/compact`，因为它们共用同一 `upstream_request_parts` 直连入口；Chat/Completions/Anthropic/Gemini 转换路径不受影响喵~
+- 新增脱敏诊断事件 `protocol_proxy.responses_item_id_prefix_normalized`，只记录供应商 ID/名称和修正数量，不记录工具输出、请求正文或凭据喵~
+- 新增精确回归复现 `ctco_01a0257d-d256-7d93-b048-b22fba274c2d` 出现在 `function_call_output.id` 的场景，验证上游实际收到 `fc_...`，且 `call_id`/output 不变；同时验证反向 custom output 修正、合法 `fc_` 和普通 message 完全不变喵~
+- 协议代理完整专项 `68/68` 全部通过；随后 workspace check 仅因本地前端 `dist` 已按发布清理而被 Tauri build macro 阻止，没有出现 Rust 编译错误，最终全工作区由 GitHub Actions 标准构建执行喵~

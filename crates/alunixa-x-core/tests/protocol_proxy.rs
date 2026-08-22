@@ -2432,6 +2432,67 @@ async fn model_route_uses_target_responses_provider_without_mutating_request() {
 }
 
 #[tokio::test]
+async fn direct_responses_repairs_cross_typed_tool_item_id_prefixes() {
+    let target = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let target_addr = target.local_addr().unwrap();
+    let target_server = tokio::spawn(capture_json_request_once(target));
+    let request = json!({
+        "model": "gpt-5.6-luna",
+        "input": [
+            {
+                "type": "function_call_output",
+                "id": "ctco_01a0257d-d256-7d93-b048-b22fba274c2d",
+                "call_id": "call_compat",
+                "output": "completed"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "id": "fc_01a0257d-d256-7d93-b048-b22fba274c2e",
+                "call_id": "call_custom",
+                "output": "patched"
+            },
+            {
+                "type": "function_call",
+                "id": "fc_existing",
+                "call_id": "call_existing",
+                "name": "lookup",
+                "arguments": "{}"
+            },
+            {
+                "type": "message",
+                "id": "msg_existing",
+                "role": "user",
+                "content": "continue"
+            }
+        ],
+        "stream": true
+    });
+    let result = open_responses_proxy_request_with_settings(
+        &request.to_string(),
+        transparent_proxy_settings(format!("http://{target_addr}/v1")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status_code, 200);
+    let (_, upstream_body) = target_server.await.unwrap();
+
+    assert_eq!(
+        upstream_body["input"][0]["id"],
+        "fc_01a0257d-d256-7d93-b048-b22fba274c2d"
+    );
+    assert_eq!(upstream_body["input"][0]["call_id"], "call_compat");
+    assert_eq!(upstream_body["input"][0]["output"], "completed");
+    assert_eq!(
+        upstream_body["input"][1]["id"],
+        "ctco_01a0257d-d256-7d93-b048-b22fba274c2e"
+    );
+    assert_eq!(upstream_body["input"][2], request["input"][2]);
+    assert_eq!(upstream_body["input"][3], request["input"][3]);
+}
+
+#[tokio::test]
 async fn model_route_can_rewrite_only_the_target_model_name() {
     let target = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await

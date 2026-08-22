@@ -2271,6 +2271,17 @@ async fn upstream_request_parts(
     match relay.protocol {
         RelayProtocol::Responses => {
             let mut body = request_json;
+            let normalized_item_ids = normalize_responses_typed_item_ids(&mut body);
+            if normalized_item_ids > 0 {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "protocol_proxy.responses_item_id_prefix_normalized",
+                    json!({
+                        "relayId": relay.id,
+                        "relayName": relay.name,
+                        "normalizedItemCount": normalized_item_ids
+                    }),
+                );
+            }
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
                 responses_url(&relay.base_url),
@@ -2324,6 +2335,49 @@ async fn upstream_request_parts(
             ))
         }
     }
+}
+
+fn normalize_responses_typed_item_ids(body: &mut Value) -> usize {
+    let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) else {
+        return 0;
+    };
+    let mut changed = 0;
+    for item in items {
+        let Some(item) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        let expected_prefix = match item_type {
+            "function_call" | "function_call_output" => "fc_",
+            "custom_tool_call" => "ctc_",
+            "custom_tool_call_output" => "ctco_",
+            _ => continue,
+        };
+        let Some(id) = item.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if id.starts_with(expected_prefix) {
+            continue;
+        }
+        let Some(suffix) = response_tool_item_id_suffix(id) else {
+            continue;
+        };
+        item.insert(
+            "id".to_string(),
+            Value::String(format!("{expected_prefix}{suffix}")),
+        );
+        changed += 1;
+    }
+    changed
+}
+
+fn response_tool_item_id_suffix(id: &str) -> Option<&str> {
+    ["ctco_", "ctc_", "fc_"]
+        .into_iter()
+        .find_map(|prefix| id.strip_prefix(prefix))
+        .filter(|suffix| !suffix.is_empty())
 }
 
 #[doc(hidden)]
