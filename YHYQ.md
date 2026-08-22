@@ -1026,3 +1026,9 @@ ode_modules、dist 三个目录均不存在喵~
 - `v1.0.5` 完整本地验证已通过：core lib `271/271`、协议代理 `69/69`、relay config `117/117`、前端 `43/43`、TypeScript、Vite 生产构建、i18n plain `851/851`、template `80/80`、品牌保护、Rust formatter、`cargo check --workspace --all-targets` 与差异空白检查全部成功喵~
 - Vite 产物 JS 为 `596.78 kB`、gzip `182.93 kB`，只有既有单 chunk 大小提示；`npm ci` 仍报告 4 个既有依赖漏洞（3 high、1 low），本轮未为无关依赖执行破坏性自动升级喵~
 - 当前原仓库为 PUBLIC，但 Alunixa-Code 组织的 GitHub-hosted Actions 在上一版本已被账户付款或 spending limit 状态阻断；为继续获得 Windows、macOS x64、macOS arm64 的真实 GitHub Actions 构建，将只使用公开源码的个人 fork 作为临时 CI 执行来源，正式代码、标签、更新源与 Release 仍保留在 `Alunixa-Code/Alunixa-X`喵~
+- 首次尝试用 `gh repo fork` 创建 CI fork 时错误组合了显式仓库参数与不受支持的 `--remote=false`，命令在创建前退出且没有修改远端；随后改用 GitHub REST forks API 成功创建公开 fork `Alunixa/Alunixa-X`，其 parent 精确为正式仓库喵~
+- fork 初次只推送 CI 分支与 `v1.0.5` 标签后，GitHub workflow API 仍为空且未触发 Actions；确认原因是 fork 默认分支尚未接收一次推送以注册 workflow，随后把带 `[skip ci]` 的验证记录提交推到 fork main，只注册 workflow、不产生重复主分支构建喵~
+- fork 中四个 workflow 已显示 active，并已手工 dispatch 唯一一条 `Build and publish release` run `32573545101`；它检出精确 `v1.0.5` tag commit `1a29129a4be5004ec74184abfb7657c8c5f2586c`，不会把 fork main 的日志提交打入产品二进制喵~
+- 原仓库紧急 self-hosted recovery workflow 已扩展为两种互斥来源：原仓库成功 PR build run，或原仓库的公开 fork Release；fork 模式必须验证 public fork 关系、tag 递归解析后的 commit SHA、非草稿/非预发布状态、六项精确资产名、uploaded 状态和 GitHub SHA-256 digest喵~
+- fork Release 恢复模式只下载已经由 fork GitHub-hosted Windows/macOS Actions 构建并发布的六项资产，不在 self-hosted runner 重新编译或重新封装；最终仍由原仓库 GitHub Actions 验证并发布正式 Release喵~
+- 扩展后的 workflow YAML 已由 PyYAML 解析，五段 PowerShell run 脚本通过 PowerShell AST 静态语法检查，差异空白检查通过喵~

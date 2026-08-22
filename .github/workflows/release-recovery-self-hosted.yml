@@ -9,7 +9,18 @@ on:
         type: string
       reuse_run_id:
         description: Successful PR build artifacts run ID for the same tag commit
-        required: true
+        required: false
+        default: ""
+        type: string
+      source_repository:
+        description: Optional public fork containing a completed release for the same tag commit
+        required: false
+        default: ""
+        type: string
+      source_tag:
+        description: Release tag in source_repository, normally identical to tag
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -37,6 +48,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
           REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
         run: |
           $ErrorActionPreference = "Stop"
           if ($env:RELEASE_TAG -notmatch '^[vV][0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$') {
@@ -65,19 +78,69 @@ jobs:
           }
 
           $tagSha = (git rev-parse HEAD).Trim()
-          $sourceRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:REUSE_RUN_ID" | ConvertFrom-Json
-          if ($sourceRun.name -ne 'PR build artifacts' -or
-              $sourceRun.event -ne 'push' -or
-              $sourceRun.status -ne 'completed' -or
-              $sourceRun.conclusion -ne 'success' -or
-              $sourceRun.head_sha -ne $tagSha) {
-            throw "Source Actions run is not a successful PR build for tag commit $tagSha"
+          $hasRun = -not [string]::IsNullOrWhiteSpace($env:REUSE_RUN_ID)
+          $hasRelease = -not [string]::IsNullOrWhiteSpace($env:SOURCE_REPOSITORY)
+          if ($hasRun -eq $hasRelease) {
+            throw "Provide exactly one source: reuse_run_id or source_repository/source_tag"
+          }
+
+          if ($hasRun) {
+            $sourceRun = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$env:REUSE_RUN_ID" | ConvertFrom-Json
+            if ($sourceRun.name -ne 'PR build artifacts' -or
+                $sourceRun.event -ne 'push' -or
+                $sourceRun.status -ne 'completed' -or
+                $sourceRun.conclusion -ne 'success' -or
+                $sourceRun.head_sha -ne $tagSha) {
+              throw "Source Actions run is not a successful PR build for tag commit $tagSha"
+            }
+            "RECOVERY_SOURCE_MODE=run" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          } else {
+            if ([string]::IsNullOrWhiteSpace($env:SOURCE_TAG)) {
+              throw "source_tag is required with source_repository"
+            }
+            $sourceRepo = gh api "repos/$env:SOURCE_REPOSITORY" | ConvertFrom-Json
+            if (-not $sourceRepo.fork -or
+                $sourceRepo.private -or
+                $sourceRepo.parent.full_name -ne $env:GITHUB_REPOSITORY) {
+              throw "Source repository must be a public fork of $env:GITHUB_REPOSITORY"
+            }
+
+            $tagRef = gh api "repos/$env:SOURCE_REPOSITORY/git/ref/tags/$env:SOURCE_TAG" | ConvertFrom-Json
+            $tagObject = $tagRef.object
+            for ($depth = 0; $depth -lt 4 -and $tagObject.type -eq 'tag'; $depth++) {
+              $tagObject = (gh api "repos/$env:SOURCE_REPOSITORY/git/tags/$($tagObject.sha)" | ConvertFrom-Json).object
+            }
+            if ($tagObject.type -ne 'commit' -or $tagObject.sha -ne $tagSha) {
+              throw "Source release tag does not resolve to original tag commit $tagSha"
+            }
+
+            $sourceRelease = gh api "repos/$env:SOURCE_REPOSITORY/releases/tags/$env:SOURCE_TAG" | ConvertFrom-Json
+            $expectedNames = @(
+              "Alunixa-X-$version-windows-x64-setup.exe",
+              "Alunixa-X-$version-windows-x64.zip",
+              "Alunixa-X-$version-macos-x64.dmg",
+              "Alunixa-X-$version-macos-x64.zip",
+              "Alunixa-X-$version-macos-arm64.dmg",
+              "Alunixa-X-$version-macos-arm64.zip"
+            ) | Sort-Object
+            $actualNames = @($sourceRelease.assets | ForEach-Object name | Sort-Object)
+            if ($sourceRelease.draft -or
+                $sourceRelease.prerelease -or
+                $actualNames.Count -ne 6 -or
+                (Compare-Object $expectedNames $actualNames) -or
+                @($sourceRelease.assets | Where-Object { $_.state -ne 'uploaded' -or $_.digest -notmatch '^sha256:' }).Count -ne 0) {
+              throw "Source release is incomplete or not authoritative"
+            }
+            "RECOVERY_SOURCE_MODE=release" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+            "RECOVERY_SOURCE_REPOSITORY=$env:SOURCE_REPOSITORY" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+            "RECOVERY_SOURCE_TAG=$env:SOURCE_TAG" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           }
 
           "VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           "TAG_SHA=$tagSha" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 
       - name: Download authoritative build artifacts
+        if: ${{ inputs.reuse_run_id != '' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -101,6 +164,7 @@ jobs:
           }
 
       - name: Repackage six versioned release assets
+        if: ${{ inputs.reuse_run_id != '' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -256,6 +320,21 @@ jobs:
 
           Package-MacAssets -Arch x64 -ExpectedCpu ([uint32]0x01000007)
           Package-MacAssets -Arch arm64 -ExpectedCpu ([uint32]0x0100000C)
+
+      - name: Download verified public-fork release assets
+        if: ${{ inputs.source_repository != '' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force dist/release | Out-Null
+          gh release download $env:RECOVERY_SOURCE_TAG `
+            --repo $env:RECOVERY_SOURCE_REPOSITORY `
+            --dir dist/release
+          if ($LASTEXITCODE -ne 0) {
+            throw "Source release asset download failed"
+          }
 
       - name: Verify and publish GitHub Release
         shell: pwsh
