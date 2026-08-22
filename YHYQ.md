@@ -1064,3 +1064,5 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 - 用户要求继续完成 `v1.0.6` 构建与发行；恢复后未创建新 Actions，而是查询已有唯一权威主分支 run `32575925932`喵~
 - `32575925932` 已全部成功：Windows 完成品牌保护、前端测试、TypeScript、生产构建、完整 Rust tests、release 二进制、NSIS 与资产上传；macOS x64/arm64 完成前端、release 二进制、DMG、结构验证与上传喵~
 - 该成功 run 对应提交 `1d737fbcea07646cb050c9b4421936bb2b3ed427`，后续正式 `v1.0.6` 标签将精确指向该已验证提交，不打在带 `[skip ci]` 的后续日志提交上喵~
+- 1.0.6 本地构建残留已清理：Removed 4281 files, 4.4GiB total；前端 
+ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目录均不存在喵~
