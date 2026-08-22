@@ -1034,3 +1034,5 @@ ode_modules、dist 三个目录均不存在喵~
 - 扩展后的 workflow YAML 已由 PyYAML 解析，五段 PowerShell run 脚本通过 PowerShell AST 静态语法检查，差异空白检查通过喵~
 - 1.0.5 本地构建残留已清理：Removed 10760 files, 9.8GiB total；前端 
 ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三个目录均不存在喵~
+- 首次组合清理命令在 `cargo clean` 删除 Rust target 后超过工具等待窗口，后续 Node 清理与日志提交没有执行；状态复核确认没有遗留 cargo clean 进程，随后单独完成前端清理喵~
+- `v1.0.5` 本地 Rust `target`、前端 `node_modules` 与 `dist` 已全部删除，并验证三个目录均不存在喵~
