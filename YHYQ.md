@@ -937,3 +937,12 @@
 - Vite 产物 JS 为 `596.78 kB`、gzip `182.93 kB`，仅有既有单 chunk 大小提示；`npm ci` 报告 4 个既有依赖漏洞（3 high、1 low），本轮未为无关依赖执行破坏性自动升级喵~
 - CHANGELOG 已按最终可选设计重写 `1.0.3`：记录默认关闭、关闭时零改写、开启后先原样请求、只依据上游 expected prefix 协商、仅改 ID、单次重试、即时生效和真实 9527 测试矩阵喵~
 - 本地验证完成后已清理 Rust `target`（`6729` 个文件、`3.9 GiB`）、前端 `node_modules` 和 `dist`；Node 清理脚本先解析父目录并验证目标路径位于 `D:\Cursor\AlunixaX` 内，再删除两个精确目录喵~
+- 最终主分支权威 Actions `32564313505` 对提交 `f558d01a62f0391ed1318445fae751fbe4aa9c83` 全部成功：Windows 完成品牌保护、前端 `43/43`、TypeScript、生产构建、完整 Rust workspace tests、release 二进制、NSIS 和上传；macOS x64/arm64 完成前端、release 二进制、DMG、包结构验证和上传喵~
+- 创建标签前第一次 release 存在性检查错误地把外部 `gh` 非零退出当作未抛异常后的成功，因此误报“release already exists”并在创建标签前退出；第二次检查又对空标签输出调用 `.Trim()` 导致 null 异常，同样未创建标签或更改远端；第三次使用 `$LASTEXITCODE` 和安全字符串处理后成功创建并推送 `v1.0.3` 喵~
+- `v1.0.3` 正式 Release workflow `32565876412` 全部成功：版本和品牌校验、Windows x64、macOS x64、macOS arm64、六项资产验证与 `Publish GitHub Release` 均完成喵~
+- 自动生成的发行说明已替换为 2559 字符详细中文说明，完整记录根因、默认关闭开关、关闭时零改写、开启后的协商时序、真实 9527 验证、最小修改边界、测试和使用方法喵~
+- 首次发行信息查询请求了当前 `gh release view --json` 不支持的 `isLatest` 字段，发行说明编辑已在该查询前成功；随后改用 GitHub Releases API 验证 latest 状态和完整资产 digest喵~
+- `v1.0.3` 已核验为 latest、非草稿、非预发布，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.3`，六项资产均为 uploaded喵~
+- Windows Setup 为 `20,719,231` 字节，SHA-256 `bbb61584a638436a8f98fc899f0bd0478036a261115a1940bacfe5bfa11bd4e0`；Windows ZIP 为 `26,436,592` 字节，SHA-256 `97700ab70ea998f7ff955cd1a6b05df2ffaf2069a97886778e1dfe6c1dbaa291` 喵~
+- macOS x64 DMG 为 `33,542,289` 字节，SHA-256 `a855ed9ca324876e145609ffedca6ea72de34798dd602c193811ab9b103dc84b`；x64 ZIP 为 `28,013,410` 字节，SHA-256 `f8bf6e1fe165d50b227fabbd327f32fd2da0fa4a388eac97909066531325219d` 喵~
+- macOS arm64 DMG 为 `32,342,133` 字节，SHA-256 `b8541c7c5ae05e69981f46fb42153d2d5b5b7d3e2756ef2d4b2fff605483c2c7`；arm64 ZIP 为 `27,452,754` 字节，SHA-256 `094e3ecb28045c23d3fb22ce64b208c9d4cd4e277615a31e63fb98cf91235e5e` 喵~
