@@ -865,3 +865,10 @@
 - macOS arm64 DMG 为 `32,295,809` 字节，SHA-256 `aa6d4b9a66e4f61053def7f1df6c82dd8d2889e70b8e80aa939265625e8ab525`；arm64 ZIP 为 `27,445,501` 字节，SHA-256 `27ed87ce741cab02ba0031a434203c944aeab4f6f442ffce6301e22095e4bd32` 喵~
 - 本地 Rust `target`、前端 `dist`、临时 `.tmp`/`.tmp-release`、Playwright mock 和临时依赖目录已清理；用于断网验证的 `node_modules` junction 只删除了链接，来源依赖目录仍存在且未被修改喵~
 - 全过程未启动、重启、连接或操作当前 Codex、当前任务、helper 或 CDP，UI 验证只使用隔离 Vite 页面和 mock 状态喵~
+
+## 2026-08-22
+
+- 用户报告 Alunixa X 请求流会出现 `stream disconnected before completion: [ApiIdParam] [input[8].id] [invalid_id_prefix]`，请求中的 `ctco_...` ID 被上游要求使用 `fc` 前缀，导致工具执行后的下一轮 Responses 请求中断喵~
+- 已确认问题位于 Responses typed Items 的工具历史兼容边界：Codex 新版会产生 custom tool call/output ID，而部分 Responses 上游或转换链路按 function call 校验 ID；后续将只修正不匹配的 typed item ID/类型，不改 `call_id`、工具输出、消息正文或官方原生支持的合法项喵~
+- 官方 Responses 文档确认 `function_call` 与 `function_call_output` 通过原始 `call_id` 关联，Responses 输入是 typed Items；本轮将增加请求发送前的结构化规范化和回归测试喵~
+- 本轮继续不启动、重启、连接或操作当前 Codex/Helper/CDP，只使用静态请求样本、隔离 HTTP 测试和 GitHub Actions 验证喵~
