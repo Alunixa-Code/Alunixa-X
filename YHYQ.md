@@ -959,3 +959,5 @@
 - 新增三项 launcher 单元回归，精确覆盖用户真实三事件顺序、正常 `response.created` 放行和不完整失败块不提前决定喵~
 - 新增真实 HTTP chunked SSE 隔离回归服务器，分三个网络 chunk 依次发送 `codex.rate_limits`、`codex.response.metadata` 和含 `invalid_id_prefix` 的 `response.failed`；读取器确认会跨越两个厂商前导事件并把完整失败块交给协商层喵~
 - launcher 协商专项现 `4/4` 通过，包含纯事件判定、正常流早放行、不完整块等待和真实 chunked 读取；协议修复精确回归 `1/1` 同时通过喵~
+- 发行版本已从 `1.0.3` 精确提升为 `1.0.4`，覆盖 Cargo workspace/四个本地 package lock、前端 package/lock 与 Tauri 配置，第三方依赖版本未被批量替换喵~
+- CHANGELOG 新增 `1.0.4` 章节，明确记录 1.0.3 的首事件盲区、真实三事件顺序、厂商前导缓冲、正常标准事件早放行、LF/CRLF/分块支持和 64 KiB 上限喵~

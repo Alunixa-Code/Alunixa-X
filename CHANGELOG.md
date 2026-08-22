@@ -1,3 +1,12 @@
+## 1.0.4 - 2026-08-22
+
+- 修复 `v1.0.3` 的 SSE 前导事件盲区：真实 9527 错误在 `codex.rate_limits` 和 `codex.response.metadata` 两个厂商事件之后，第三个 `response.failed` 事件才包含 `invalid_id_prefix`，旧版只读取首个事件会过早透传而错过协商喵~
+- 开启“Responses ID 自动协商”后，Alunixa X 现在会继续缓冲允许的厂商前导事件，直到看到完整 `response.*` 生命周期事件、完整失败事件、明确前缀错误或达到 64 KiB 上限再决定；关闭开关时仍完全原样透传喵~
+- 正常流在首个 `response.created`、`response.in_progress` 或其他标准 Responses 事件完成后立即释放已缓冲内容，不等待整次生成结束，保持正常流式体验喵~
+- 失败流会把厂商元数据和完整 `response.failed` 一起保留给协商解析，因此能读取真实错误要求的 `ctco_ -> fc_`，只改 ID 并自动重试一次喵~
+- SSE 判定兼容 LF、CRLF 和网络分块，不完整事件块不会被提前当作可决定结果；64 KiB 硬上限防止异常供应商无限堆积前导数据喵~
+- 使用用户真实历史形态复现：`custom_tool_call.id=fc_...`、`custom_tool_call_output.id=ctco_...` 时，9527 依次返回 `codex.rate_limits`、`codex.response.metadata`、`response.failed`，第三事件明确要求输出 ID 以 `fc` 开头喵~
+- 新增 chunked HTTP 隔离服务器与三项纯判定回归，launcher 协商专项 `4/4` 通过；继续保留 `v1.0.3` 的默认关闭开关、零错误零改写、expected-prefix 白名单和单次重试边界喵~
 ## 1.0.3 - 2026-08-22
 
 - 修复 `v1.0.2` 后仍可能出现的 `stream disconnected before completion`：当前 Codex 合法产生 `custom_tool_call_output + ctco_`，但部分第三方 Responses 实现会在 HTTP 200 SSE 流内错误要求 `fc_`，导致工具输出回传后的下一轮请求中断喵~
