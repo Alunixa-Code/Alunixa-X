@@ -1881,76 +1881,138 @@ async fn handle_protocol_proxy_connection(
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
     let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
-    let upstream = match crate::protocol_proxy::open_responses_proxy_request_for_path(
-        request_body,
-        request_user_agent,
-        path,
-    )
-    .await
+    let mut upstream = Some(
+        match crate::protocol_proxy::open_responses_proxy_request_for_path(
+            request_body,
+            request_user_agent,
+            path,
+        )
+        .await
+        {
+            Ok(upstream) => upstream,
+            Err(error) => {
+                log_proxy_open_failure(
+                    "helper.protocol_proxy_open_failed",
+                    method,
+                    path,
+                    remote_addr_text.as_deref(),
+                    request_json
+                        .as_ref()
+                        .and_then(|request| request.get("model"))
+                        .and_then(serde_json::Value::as_str),
+                    &error,
+                );
+                let body = serde_json::to_vec(
+                    &serde_json::json!({                     "status": "failed",                     "message": error.to_string()                 }),
+                )?;
+                write_http_response(
+                    stream,
+                    "502 Bad Gateway",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+                .await?;
+                log_helper_response(
+                    "helper.protocol_proxy_failed",
+                    method,
+                    path,
+                    "502 Bad Gateway",
+                    remote_addr_text,
+                );
+                stream.shutdown().await?;
+                return Ok(());
+            }
+        },
+    );
+    if !upstream
+        .as_ref()
+        .is_some_and(|response| response.is_success())
     {
-        Ok(upstream) => upstream,
-        Err(error) => {
-            log_proxy_open_failure(
-                "helper.protocol_proxy_open_failed",
-                method,
-                path,
-                remote_addr_text.as_deref(),
-                request_json
-                    .as_ref()
-                    .and_then(|request| request.get("model"))
-                    .and_then(serde_json::Value::as_str),
-                &error,
+        let failed = upstream
+            .take()
+            .expect("Responses upstream response should exist before handling failure");
+        let status = failed.status();
+        let failed_status_code = failed.status_code;
+        let upstream_content_type = failed.content_type.clone();
+        let upstream_body = failed.response.bytes().await?.to_vec();
+        let negotiation_enabled = responses_id_negotiation_enabled();
+        if failed.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses
+            && negotiation_enabled
+        {
+            if let Some(repair) =
+                crate::protocol_proxy::repair_responses_item_ids_for_upstream_error(
+                    request_body,
+                    &String::from_utf8_lossy(&upstream_body),
+                )
+            {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "protocol_proxy.responses_item_id_prefix_retry_http_error",
+                    serde_json::json!({
+                        "sourcePrefix": repair.source_prefix,
+                        "expectedPrefix": repair.expected_prefix,
+                        "changedItemCount": repair.changed_count
+                    }),
+                );
+                match crate::protocol_proxy::open_responses_proxy_request_for_path(
+                    &repair.body,
+                    request_user_agent,
+                    path,
+                )
+                .await
+                {
+                    Ok(retry) if retry.is_success() => {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.responses_item_id_prefix_retry_http_ok",
+                            serde_json::json!({
+                                "sourcePrefix": repair.source_prefix,
+                                "expectedPrefix": repair.expected_prefix,
+                                "changedItemCount": repair.changed_count
+                            }),
+                        );
+                        upstream = Some(retry);
+                    }
+                    Ok(_) => {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.responses_item_id_prefix_retry_rejected",
+                            serde_json::json!({ "reason": "http_retry_non_success" }),
+                        );
+                    }
+                    Err(error) => {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.responses_item_id_prefix_retry_failed",
+                            serde_json::json!({
+                                "reason": "http_retry_open_failed",
+                                "error": error.to_string().chars().take(512).collect::<String>()
+                            }),
+                        );
+                    }
+                }
+            }
+        }
+        if upstream.is_none() {
+            let error = crate::protocol_proxy::responses_error_from_upstream(
+                failed_status_code,
+                &upstream_content_type,
+                &upstream_body,
             );
-            let body = serde_json::to_vec(
-                &serde_json::json!({                     "status": "failed",                     "message": error.to_string()                 }),
-            )?;
-            write_http_response(
-                stream,
-                "502 Bad Gateway",
-                "application/json; charset=utf-8",
-                &body,
-            )
-            .await?;
+            let body = serde_json::to_vec(&error)?;
+            write_http_response(stream, &status, "application/json; charset=utf-8", &body).await?;
             log_helper_response(
-                "helper.protocol_proxy_failed",
+                "helper.protocol_proxy_upstream_error",
                 method,
                 path,
-                "502 Bad Gateway",
+                &status,
                 remote_addr_text,
             );
             stream.shutdown().await?;
             return Ok(());
         }
-    };
-    if !upstream.is_success() {
-        let status = upstream.status();
-        let upstream_content_type = upstream.content_type.clone();
-        let upstream_body = upstream.response.bytes().await?.to_vec();
-        let error = crate::protocol_proxy::responses_error_from_upstream(
-            upstream.status_code,
-            &upstream_content_type,
-            &upstream_body,
-        );
-        let body = serde_json::to_vec(&error)?;
-        write_http_response(stream, &status, "application/json; charset=utf-8", &body).await?;
-        log_helper_response(
-            "helper.protocol_proxy_upstream_error",
-            method,
-            path,
-            &status,
-            remote_addr_text,
-        );
-        stream.shutdown().await?;
-        return Ok(());
     }
+    let upstream =
+        upstream.expect("Responses upstream response should exist after failure recovery");
     if upstream.is_stream {
         if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
-            let negotiation_enabled = SettingsStore::default()
-                .load()
-                .map(|settings| {
-                    settings.enhancements_enabled && settings.codex_app_responses_id_negotiation
-                })
-                .unwrap_or(false);
+            let negotiation_enabled = responses_id_negotiation_enabled();
             if !negotiation_enabled {
                 write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8")
                     .await?;
@@ -2187,6 +2249,15 @@ async fn handle_protocol_proxy_connection(
 
 const RESPONSES_STREAM_PREFIX_LIMIT: usize = 64 * 1024;
 const RESPONSES_SSE_COMPAT_EVENT_LIMIT: usize = 64 * 1024 * 1024;
+
+fn responses_id_negotiation_enabled() -> bool {
+    SettingsStore::default()
+        .load()
+        .map(|settings| {
+            settings.enhancements_enabled && settings.codex_app_responses_id_negotiation
+        })
+        .unwrap_or(false)
+}
 
 async fn read_responses_stream_prefix(response: &mut reqwest::Response) -> anyhow::Result<Vec<u8>> {
     let mut prefix = Vec::new();

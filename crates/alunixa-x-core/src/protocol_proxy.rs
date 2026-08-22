@@ -2344,7 +2344,9 @@ pub fn repair_responses_item_ids_for_upstream_error(
     request_body: &str,
     upstream_error: &str,
 ) -> Option<ResponsesItemIdRetryRepair> {
-    if !upstream_error.contains("invalid_id_prefix") {
+    let has_direct_id_error = upstream_error.contains("Invalid 'input[")
+        && upstream_error.contains("Expected an ID that begins with '");
+    if !upstream_error.contains("invalid_id_prefix") && !has_direct_id_error {
         return None;
     }
     let invalid_tail = upstream_error.split_once("Invalid 'input[")?.1;

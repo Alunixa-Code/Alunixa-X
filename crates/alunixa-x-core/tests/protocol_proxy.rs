@@ -72,6 +72,52 @@ fn responses_stream_error_repairs_the_rejected_custom_output_family_once() {
         .is_none()
     );
 }
+
+#[test]
+fn responses_http_error_repairs_only_the_rejected_custom_call_to_ctc() {
+    let request = json!({
+        "model": "gpt-5.6-sol",
+        "input": [
+            {
+                "type": "custom_tool_call",
+                "id": "fc_04066dcbd4d64a16016a895e794e8487d1b5dbe7a62dd90b61",
+                "call_id": "call_H46ChXiuy7nmhwmwt6QBK24n",
+                "name": "exec",
+                "input": "git status --short"
+            },
+            {
+                "type": "custom_tool_call_output",
+                "id": "ctco_01a02899-0ede-7f42-b692-ba57cffb9823",
+                "call_id": "call_H46ChXiuy7nmhwmwt6QBK24n",
+                "output": "Script failed"
+            },
+            {
+                "type": "custom_tool_call",
+                "id": "fc_unrelated",
+                "call_id": "call_unrelated",
+                "name": "exec",
+                "input": "echo untouched"
+            }
+        ],
+        "stream": true
+    });
+    let upstream_error = r#"{"error":{"message":"Invalid 'input[16].id': 'fc_04066dcbd4d64a16016a895e794e8487d1b5dbe7a62dd90b61'. Expected an ID that begins with 'ctc'.","type":"invalid_request_error","code":"invalid_value","param":"input[16].id"}}"#;
+
+    let repaired =
+        repair_responses_item_ids_for_upstream_error(&request.to_string(), upstream_error)
+            .expect("the explicit HTTP prefix error should be repairable");
+    let body: serde_json::Value = serde_json::from_str(&repaired.body).unwrap();
+
+    assert_eq!(repaired.source_prefix, "fc_");
+    assert_eq!(repaired.expected_prefix, "ctc_");
+    assert_eq!(repaired.changed_count, 1);
+    assert_eq!(
+        body["input"][0]["id"],
+        "ctc_04066dcbd4d64a16016a895e794e8487d1b5dbe7a62dd90b61"
+    );
+    assert_eq!(body["input"][1], request["input"][1]);
+    assert_eq!(body["input"][2], request["input"][2]);
+}
 use alunixa_x_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
     RelayMode, RelayModelRoute, RelayProfile, RelayProtocol,

@@ -1048,3 +1048,13 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 - 第一次 archive PATCH 因 GitHub API 网络连接超时失败，随后在有界三次网络重试内成功；临时 Release notes 已删除，本地 `target`、`node_modules`、`dist` 均不存在喵~
 - 正式代码、标签、更新源、Release 和 latest 状态始终位于 `Alunixa-Code/Alunixa-X`，临时 fork 没有进入产品配置、README、更新器或发行说明喵~
 - 全过程没有停止、重启、连接、替换或测试当前正在运行的 Codex、Alunixa X helper、CDP 与 Image Gen companion；用户安装 `v1.0.5` 后需完整退出旧进程并通过 Alunixa X 启动一次以加载新二进制和 MCP 迁移喵~
+
+## 2026-08-22 · v1.0.5 直接 HTTP ID 前缀错误修复
+
+- 用户在已经安装 `v1.0.5` 后报告新的直接请求错误：`Invalid 'input[16].id': 'fc_04066dcbd4d64a16016a895e794e8487d1b5dbe7a62dd90b61'. Expected an ID that begins with 'ctc'.`，不再是此前 SSE 中的 `ctco_ -> fc` 错误喵~
+- 只读确认当前 `D:\AlunixaX\alunixa-x.exe` 与管理器均为 `1.0.5`，因此不是用户仍在使用旧二进制；错误原始 rollout 在 2026-08-22 21:13:04 至 21:18:33 连续出现，均点名历史 `custom_tool_call + fc_04066...` 并要求 `ctc`喵~
+- 该历史的同一 `call_id=call_H46ChXiuy7nmhwmwt6QBK24n` 对应项是 `custom_tool_call.id=fc_04066...` 与 `custom_tool_call_output.id=ctco_01a02899...`；这证明第三方上游先前要求 output 使用 `fc` 是跨家族关联的表象，当前直接错误明确表明 custom call 本身应是 `ctc_`喵~
+- 根因已定位：v1.0.5 的协商只在 HTTP 200 SSE 流内读取 `invalid_id_prefix`，而当前供应商改为在 HTTP 非成功 JSON body 中返回 `invalid_request_error/invalid_value`；代理在进入协商前已直接把该 JSON 错误回传给 Codex喵~
+- 同时 HTTP JSON 文本没有 literal `invalid_id_prefix`，但同时包含严格的 `Invalid 'input[n].id'` 与 `Expected an ID that begins with` 结构；原解析器过度要求 `invalid_id_prefix` token，导致合法协商信号被忽略喵~
+- 修复后，非成功 Responses HTTP body 也会在启用 Agent 能力开关时解析同样的严格 ID/expected-prefix 结构，生成一次精确重试；当前 `fc_04066... -> ctc_04066...` 只改写被点名 custom call，关联 `ctco_` output 与其他 `fc_` item 保持原样喵~
+- 新增 HTTP JSON `fc_ -> ctc_` 精确回归；首次测试失败精确揭露 parser 仍只接受 `invalid_id_prefix` literal，随后放宽为“literal 或完整 Invalid+Expected 结构”后，HTTP 回归和原 SSE `ctco_ -> fc_` 回归均通过喵~
