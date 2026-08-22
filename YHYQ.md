@@ -889,3 +889,9 @@
 - macOS x64 DMG 为 `33,558,801` 字节，SHA-256 `aee81f242144b28fc14a11a7de67d6cf385a715adf2aaf64fd87e6fd81ea2b64`；x64 ZIP 为 `28,023,079` 字节，SHA-256 `40304c7dc57d78389128ab493922bc7cc0c04f37e26612b001232336dc374420` 喵~
 - macOS arm64 DMG 为 `32,295,325` 字节，SHA-256 `2e477d1d32a2aa0d571528aaf695cfed52161208c0e0f19029ac82039afddf3f`；arm64 ZIP 为 `27,445,969` 字节，SHA-256 `a3628450fbaca18abe4de6f66d26b77a73ce20910034a9456b9f2fc5c3b8c13a` 喵~
 - 本地 Release notes 临时文件、Rust `target`、前端 `node_modules`/`dist` 和 `.tmp` 已全部删除，工作树只保留本次发布记录喵~
+
+## 2026-08-22 · Responses 前缀错误仍然出现
+
+- 用户安装或使用修复版本后仍报告 `stream disconnected before completion: [ApiIdParam] [input[17].id] [invalid_id_prefix]`，其中 `function_call_output` 链路仍携带 `ctco_01a02899-0ede-7f42-b692-ba57cffb9823` 并被上游要求 `fc` 前缀喵~
+- 用户要求明确判断问题来自上游还是 Alunixa X，并尽快找到为什么 `v1.0.2` 的发送前规范化没有生效喵~
+- 本轮禁止启动、重启、连接或操作当前 Codex/Helper/CDP，也不使用当前会话做真实测试；只读核对已安装版本、进程命令行、代理日志、配置和代码分支，并仅使用隔离请求样本验证喵~
