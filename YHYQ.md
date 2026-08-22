@@ -1068,3 +1068,12 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目录均不存在喵~
 - 首次组合清理命令在记录 Actions 成功后因 `cargo clean` 超过 30 秒工具窗口而中断后续步骤；只读复核确认 cargo clean 子进程继续执行并最终完成，没有重复启动清理喵~
 - `v1.0.6` 本地 Rust `target`、前端 `node_modules` 与 `dist` 现均不存在，清理完成喵~
+- `v1.0.6` 正式 Release workflow `32581961666` 全部成功：版本与品牌校验、Windows x64、macOS x64、macOS arm64、六项资产下载/验证和 `Publish GitHub Release` 均为 success，tag commit 为 `1d737fbcea07646cb050c9b4421936bb2b3ed427`喵~
+- 自动发行说明已替换为详细中文说明，完整记录真实 `fc_04066... -> ctc_04066...` 错误、HTTP JSON 与 SSE 协商差异、精确单 ID 修复、安全边界、测试结果和升级步骤喵~
+- `v1.0.5` 发行说明顶部已增加 superseded 通知，明确非成功 HTTP JSON 中的 `Expected ... ctc` 路径已由 `v1.0.6` 修复喵~
+- `v1.0.6` 已核验为 latest、非草稿、非预发布，六项资产全部为 uploaded，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.6`喵~
+- Windows Setup 为 `20,712,589` 字节，SHA-256 `01726fefd22c24710ddf929a8a0421778b4105e8618201bc822284ed06413c51`；Windows ZIP 为 `26,432,090` 字节，SHA-256 `a24c0b9e3af52043fe1be0f593838969e675f78289da05904020dac7127648f2`喵~
+- macOS x64 DMG 为 `33,526,857` 字节，SHA-256 `71996a13920db19df8dbc2eab690ea24f3ec520f2835df1c00628113b4e9feac`；x64 ZIP 为 `28,028,989` 字节，SHA-256 `77628ca1d47f2d8c7b2ddac5eede51fb787fddc77aed340dd2c6f77d673db07f`喵~
+- macOS arm64 DMG 为 `32,320,366` 字节，SHA-256 `a058ba7293ab147362b15608a67335c11920878aa6c4aa1df7ea0f39bc5b22c3`；arm64 ZIP 为 `27,455,323` 字节，SHA-256 `90f1e09bd771ffaeb60c272c0a9a5ea54d22624e72702776de6149d348544aab`喵~
+- GitHub queued 与 in-progress Actions 均为空；临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 全部不存在喵~
+- 当前运行中的 Alunixa X 仍是用户已安装的 `1.0.5`，本轮没有停止、替换或重启 Codex、Helper、CDP；用户安装 `v1.0.6` 并完整重启后，新 HTTP JSON 协商逻辑才会加载喵~
