@@ -895,3 +895,8 @@
 - 用户安装或使用修复版本后仍报告 `stream disconnected before completion: [ApiIdParam] [input[17].id] [invalid_id_prefix]`，其中 `function_call_output` 链路仍携带 `ctco_01a02899-0ede-7f42-b692-ba57cffb9823` 并被上游要求 `fc` 前缀喵~
 - 用户要求明确判断问题来自上游还是 Alunixa X，并尽快找到为什么 `v1.0.2` 的发送前规范化没有生效喵~
 - 本轮禁止启动、重启、连接或操作当前 Codex/Helper/CDP，也不使用当前会话做真实测试；只读核对已安装版本、进程命令行、代理日志、配置和代码分支，并仅使用隔离请求样本验证喵~
+- 只读运行状态确认 `D:\AlunixaX\alunixa-x.exe` 与管理器均为 `1.0.2`，当前主代理进程为 PID `36908`；因此错误不是旧版未安装或新版代理未运行喵~
+- 新错误 ID 的真实 rollout 原始记录为合法 `custom_tool_call_output`：`id=ctco_01a02899-0ede-7f42-b692-ba57cffb9823`、`call_id=call_H46ChXiuy7nmhwmwt6QBK24n`，不是本地历史文件被错误改成了 function item 喵~
+- Alunixa X 日志确认对应时段请求经过 `/v1/responses` 和自定义供应商 `9527 / gpt-5.6-sol / Responses`，上游先返回 HTTP 200 SSE，随后才在流内发出 `invalid_id_prefix`；当前 helper 把 Responses SSE 原样透传并将任何 HTTP 200 都记为 stream_ok，因此上一版既无法识别流内验证失败，也无法自动重试喵~
+- `v1.0.2` 的发送前规范化只修复 `type` 与 ID 前缀已经互相矛盾的条目；合法 `custom_tool_call_output + ctco_` 按设计保持不变。供应商 9527 对当前 Codex custom-tool 历史不完整兼容，错误地要求 function-call 的 `fc_` 家族，所以该错误的原始触发点在上游兼容实现，而 Alunixa X 作为兼容代理仍缺少按上游明确错误自适应重试的兜底喵~
+- 首次只读探测命令曾因 PowerShell 管道语法错误立即退出且没有修改任何文件或进程，随后已用修正后的只读命令完成版本、日志、代码发送路径与 rollout 核对喵~
