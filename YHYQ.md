@@ -1032,3 +1032,5 @@ ode_modules、dist 三个目录均不存在喵~
 - 原仓库紧急 self-hosted recovery workflow 已扩展为两种互斥来源：原仓库成功 PR build run，或原仓库的公开 fork Release；fork 模式必须验证 public fork 关系、tag 递归解析后的 commit SHA、非草稿/非预发布状态、六项精确资产名、uploaded 状态和 GitHub SHA-256 digest喵~
 - fork Release 恢复模式只下载已经由 fork GitHub-hosted Windows/macOS Actions 构建并发布的六项资产，不在 self-hosted runner 重新编译或重新封装；最终仍由原仓库 GitHub Actions 验证并发布正式 Release喵~
 - 扩展后的 workflow YAML 已由 PyYAML 解析，五段 PowerShell run 脚本通过 PowerShell AST 静态语法检查，差异空白检查通过喵~
+- 1.0.5 本地构建残留已清理：Removed 10760 files, 9.8GiB total；前端 
+ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三个目录均不存在喵~
