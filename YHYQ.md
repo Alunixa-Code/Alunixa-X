@@ -936,3 +936,4 @@
 - 可选协商最终本地验证通过：settings 单元 `42/42`、协议代理 `69/69`、前端 `43/43`、TypeScript、Vite 生产构建、i18n plain `851/851`、template `80/80`、品牌保护、Rust formatter 与 `cargo check --workspace --all-targets` 全部成功喵~
 - Vite 产物 JS 为 `596.78 kB`、gzip `182.93 kB`，仅有既有单 chunk 大小提示；`npm ci` 报告 4 个既有依赖漏洞（3 high、1 low），本轮未为无关依赖执行破坏性自动升级喵~
 - CHANGELOG 已按最终可选设计重写 `1.0.3`：记录默认关闭、关闭时零改写、开启后先原样请求、只依据上游 expected prefix 协商、仅改 ID、单次重试、即时生效和真实 9527 测试矩阵喵~
+- 本地验证完成后已清理 Rust `target`（`6729` 个文件、`3.9 GiB`）、前端 `node_modules` 和 `dist`；Node 清理脚本先解析父目录并验证目标路径位于 `D:\Cursor\AlunixaX` 内，再删除两个精确目录喵~
