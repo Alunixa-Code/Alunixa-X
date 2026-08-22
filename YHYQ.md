@@ -980,3 +980,6 @@ ode_modules、dist 三个目录均不存在喵~
 - 自托管恢复 workflow 会重新校验 tag 格式、Cargo/前端/Tauri 的 `1.0.4` 版本一致性、本地品牌保护，以及源 Actions `32567542700` 的 workflow 名称、push 事件、completed/success 结论和 tag commit SHA 完全一致，任一不满足即拒绝发行喵~
 - 恢复流程只重新封装已经由成功 GitHub Actions 编译的三平台二进制：Windows 使用本机 NSIS 按正式 `1.0.4` 重新生成 installer；macOS DMG 保持原字节，ZIP 中三个 Mach-O 文件校验 CPU 类型并写入 Unix `0755` 权限；最后只允许六项非空资产并输出 SHA-256 后由该 GitHub Actions job 创建 Release喵~
 - 新 workflow 的 YAML 已由 PyYAML 成功解析，四段 PowerShell run 脚本已通过 PowerShell AST parser 静态语法检查，`git diff --check` 通过；未执行产品、未连接当前 Codex/Helper/CDP，也未启动任何常驻服务喵~
+- 第一次临时 self-hosted recovery Actions `32569812620` 已实际接入 GitHub 并在临时 Windows runner 上执行；它不是计费阻断，而是在版本校验阶段精确暴露 PowerShell 7 对含空字符串属性名的 `package-lock.json` 使用普通 `ConvertFrom-Json` 会报错喵~
+- 已将 package-lock 读取改为 `ConvertFrom-Json -AsHashtable`，通过 `$packageLock['packages']['']` 安全访问 npm lockfile 的根包条目，并继续同时校验顶层与根包版本均为 `1.0.4`喵~
+- 修复后已直接用仓库真实 package-lock 验证顶层与空键根包版本读取成功，四段 workflow PowerShell 脚本再次通过 AST 语法解析，差异空白检查通过喵~

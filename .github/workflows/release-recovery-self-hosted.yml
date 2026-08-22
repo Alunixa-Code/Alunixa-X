@@ -51,10 +51,10 @@ jobs:
           }
 
           $packageJson = Get-Content apps/alunixa-x-manager/package.json -Raw | ConvertFrom-Json
-          $packageLock = Get-Content apps/alunixa-x-manager/package-lock.json -Raw | ConvertFrom-Json
-          $packageLockRoot = $packageLock.packages.PSObject.Properties[''].Value
+          $packageLock = Get-Content apps/alunixa-x-manager/package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          $packageLockRoot = $packageLock['packages']['']
           $tauri = Get-Content apps/alunixa-x-manager/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-          $versions = @($packageJson.version, $packageLock.version, $packageLockRoot.version, $tauri.version)
+          $versions = @($packageJson.version, $packageLock['version'], $packageLockRoot['version'], $tauri.version)
           if (@($versions | Where-Object { $_ -ne $version }).Count -ne 0) {
             throw "Frontend or Tauri versions do not match $version"
           }
