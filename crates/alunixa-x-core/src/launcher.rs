@@ -3995,6 +3995,55 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn responses_negotiation_reads_chunked_vendor_prelude_through_failure() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            let _ = stream.read(&mut request).await.unwrap();
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            for event in [
+                b"event: codex.rate_limits\ndata: {}\n\n".as_slice(),
+                b"event: codex.response.metadata\ndata: {}\n\n".as_slice(),
+                b"event: response.failed\ndata: {\"error\":{\"message\":\"invalid_id_prefix\"}}\n\n"
+                    .as_slice(),
+            ] {
+                stream
+                    .write_all(format!("{:X}\r\n", event.len()).as_bytes())
+                    .await
+                    .unwrap();
+                stream.write_all(event).await.unwrap();
+                stream.write_all(b"\r\n").await.unwrap();
+                stream.flush().await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            stream.write_all(b"0\r\n\r\n").await.unwrap();
+        });
+
+        let mut response = reqwest::Client::new()
+            .get(format!("http://{addr}/responses"))
+            .send()
+            .await
+            .unwrap();
+        let prefix = read_responses_stream_prefix(&mut response).await.unwrap();
+        let text = String::from_utf8(prefix).unwrap();
+
+        assert!(text.contains("codex.rate_limits"));
+        assert!(text.contains("codex.response.metadata"));
+        assert!(text.contains("response.failed"));
+        assert!(text.contains("invalid_id_prefix"));
+        server.await.unwrap();
+    }
+
     #[test]
     fn launcher_stays_alive_while_an_existing_cdp_endpoint_is_available() {
         assert!(launcher_target_alive(false, true));

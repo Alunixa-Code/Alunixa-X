@@ -957,3 +957,5 @@
 - SSE 协商前缀读取现按完整事件块判定：`codex.rate_limits`、`codex.response.metadata` 等厂商前导事件只缓冲不放行；遇到完整 `response.created/in_progress/...` 正常生命周期事件立即按正常流释放，遇到完整 `response.failed` 或 `invalid_id_prefix` 则保留完整错误供协商解析喵~
 - 判定同时支持 LF 与 CRLF SSE 分隔、分块传输下的不完整事件等待和 64 KiB 硬上限；正常流只额外缓冲少量前导元数据，不等待整次生成完成喵~
 - 新增三项 launcher 单元回归，精确覆盖用户真实三事件顺序、正常 `response.created` 放行和不完整失败块不提前决定喵~
+- 新增真实 HTTP chunked SSE 隔离回归服务器，分三个网络 chunk 依次发送 `codex.rate_limits`、`codex.response.metadata` 和含 `invalid_id_prefix` 的 `response.failed`；读取器确认会跨越两个厂商前导事件并把完整失败块交给协商层喵~
+- launcher 协商专项现 `4/4` 通过，包含纯事件判定、正常流早放行、不完整块等待和真实 chunked 读取；协议修复精确回归 `1/1` 同时通过喵~
