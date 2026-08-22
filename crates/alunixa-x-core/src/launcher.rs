@@ -2199,13 +2199,38 @@ async fn read_responses_stream_prefix(response: &mut reqwest::Response) -> anyho
             break;
         };
         prefix.extend_from_slice(&chunk);
-        if prefix.windows(2).any(|window| window == b"\n\n")
-            || prefix.windows(4).any(|window| window == b"\r\n\r\n")
-        {
+        if responses_stream_prefix_is_decidable(&prefix) {
             break;
         }
     }
     Ok(prefix)
+}
+
+fn responses_stream_prefix_is_decidable(prefix: &[u8]) -> bool {
+    if prefix.len() >= RESPONSES_STREAM_PREFIX_LIMIT {
+        return true;
+    }
+    let text = String::from_utf8_lossy(prefix).replace("\r\n", "\n");
+    let Some(complete_end) = text.rfind("\n\n") else {
+        return false;
+    };
+    for block in text[..complete_end].split("\n\n") {
+        if block.contains("invalid_id_prefix") {
+            return true;
+        }
+        let event = block
+            .lines()
+            .find_map(|line| line.strip_prefix("event:"))
+            .map(str::trim)
+            .unwrap_or("");
+        // Providers may prepend vendor metadata such as codex.rate_limits and
+        // codex.response.metadata. Keep buffering those, but stop as soon as
+        // the actual Responses lifecycle starts or a complete failure arrives.
+        if event.starts_with("response.") {
+            return true;
+        }
+    }
+    false
 }
 async fn handle_chat_completions_proxy_connection(
     stream: &mut tokio::net::TcpStream,
@@ -3934,6 +3959,41 @@ fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn responses_negotiation_skips_vendor_prelude_until_real_failure() {
+        let rate_limits = b"event: codex.rate_limits\ndata: {}\n\n";
+        let metadata = b"event: codex.response.metadata\ndata: {}\n\n";
+        let failed = b"event: response.failed\ndata: {\"error\":{\"message\":\"[invalid_id_prefix] Invalid 'input[17].id': 'ctco_real'. Expected an ID that begins with 'fc'.\"}}\n\n";
+
+        let mut prefix = rate_limits.to_vec();
+        assert!(!responses_stream_prefix_is_decidable(&prefix));
+        prefix.extend_from_slice(metadata);
+        assert!(!responses_stream_prefix_is_decidable(&prefix));
+        prefix.extend_from_slice(failed);
+        assert!(responses_stream_prefix_is_decidable(&prefix));
+        assert!(String::from_utf8_lossy(&prefix).contains("invalid_id_prefix"));
+    }
+
+    #[test]
+    fn responses_negotiation_releases_normal_stream_at_first_response_event() {
+        let mut prefix = b"event: codex.rate_limits\ndata: {}\n\n".to_vec();
+        prefix.extend_from_slice(
+            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+        );
+
+        assert!(responses_stream_prefix_is_decidable(&prefix));
+    }
+
+    #[test]
+    fn responses_negotiation_waits_for_a_complete_sse_block() {
+        assert!(!responses_stream_prefix_is_decidable(
+            b"event: response.failed\ndata: {\"error\":\"invalid_id_prefix\"}"
+        ));
+        assert!(responses_stream_prefix_is_decidable(
+            b"event: response.failed\ndata: {\"error\":\"invalid_id_prefix\"}\n\n"
+        ));
+    }
 
     #[test]
     fn launcher_stays_alive_while_an_existing_cdp_endpoint_is_available() {

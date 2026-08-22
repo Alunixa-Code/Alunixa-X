@@ -954,3 +954,6 @@
 - 使用用户真实调用/输出 ID 形态的独立最小请求复现成功，HTTP 200 SSE 事件顺序为 `codex.rate_limits`、`codex.response.metadata`、`response.failed`，`invalid_id_prefix` 位于第三个事件，明确要求 `ctco_... -> fc` 喵~
 - 因 `v1.0.3` 只缓冲首个 SSE 事件，它会在厂商 rate-limit 事件后过早开始透传，无法捕获第三个事件的真实错误；本轮将扩展为跳过允许的厂商前导事件，直到完整 `response.*` 正常开始、完整失败事件、命中错误或达到大小上限后再决定喵~
 - 已建立修改前检查点；后续将发布 `v1.0.4` 替代不完整的 `v1.0.3`，不会宣称 1.0.3 已解决真实样本喵~
+- SSE 协商前缀读取现按完整事件块判定：`codex.rate_limits`、`codex.response.metadata` 等厂商前导事件只缓冲不放行；遇到完整 `response.created/in_progress/...` 正常生命周期事件立即按正常流释放，遇到完整 `response.failed` 或 `invalid_id_prefix` 则保留完整错误供协商解析喵~
+- 判定同时支持 LF 与 CRLF SSE 分隔、分块传输下的不完整事件等待和 64 KiB 硬上限；正常流只额外缓冲少量前导元数据，不等待整次生成完成喵~
+- 新增三项 launcher 单元回归，精确覆盖用户真实三事件顺序、正常 `response.created` 放行和不完整失败块不提前决定喵~
