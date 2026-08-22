@@ -923,3 +923,8 @@
 - 用户要求该行为成为“Agent 能力”中的可选项，而不是默认对所有请求强制生效；实现前先用独立最小请求测试仅改 ID、同时改类型和错误反馈等候选方式，确认真实上游接受哪一种喵~
 - 因需求发生变化，已请求取消尚在运行的旧方案主分支 Actions `32563483954`，避免继续构建马上会被替换的版本；不会重复创建或循环运行 Actions喵~
 - 本轮真实上游测试获得用户明确授权，将使用独立最小请求和现有供应商配置，不读取或改写当前任务 rollout，不启动、重启或连接当前 Codex/Helper/CDP，也不在日志或回复中暴露 API Key喵~
+- 已使用当前 9527 `gpt-5.6-sol` 的真实 Responses 端点执行五个独立最小请求，每个最多生成 16 Token，Key 仅从设置文件读入请求头且未输出、未写入文件或日志喵~
+- 真实结果确认：`function_call_output + ctco_` 返回 HTTP 200 内 `response.failed`，仅改为 `function_call_output + fc_` 后返回 `response.completed`；说明上游明确要求的 ID 修正真实有效喵~
+- 更关键的兼容结论是：`custom_tool_call_output + ctco_` 同样返回 `response.failed`，保持 item 类型不变、仅把 ID 改成 `fc_` 后返回 `response.completed`；因此不需要也不应把 custom item 强行改成 function item喵~
+- 将“Expected an ID that begins with fc”等错误文字作为额外用户消息反馈给上游仍然返回 `response.failed`，因为参数校验发生在模型读取消息之前；可行的“让上游自己给答案”方式是解析它在结构化错误中给出的 expected prefix，由代理据此改写并重试喵~
+- 首次五路 `Invoke-WebRequest` 因成功 SSE 流保持连接超过工具 30 秒窗口而没有产出结论，随后单路缓冲测试也在 18 秒超时；最终改用 `HttpClient + ResponseHeadersRead` 逐行读取 SSE，在看到 `response.completed/failed` 后立即停止，五项均在约 1.2 至 2.7 秒内得出明确结果喵~
