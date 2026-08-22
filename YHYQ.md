@@ -1066,3 +1066,5 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 - 该成功 run 对应提交 `1d737fbcea07646cb050c9b4421936bb2b3ed427`，后续正式 `v1.0.6` 标签将精确指向该已验证提交，不打在带 `[skip ci]` 的后续日志提交上喵~
 - 1.0.6 本地构建残留已清理：Removed 4281 files, 4.4GiB total；前端 
 ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目录均不存在喵~
+- 首次组合清理命令在记录 Actions 成功后因 `cargo clean` 超过 30 秒工具窗口而中断后续步骤；只读复核确认 cargo clean 子进程继续执行并最终完成，没有重复启动清理喵~
+- `v1.0.6` 本地 Rust `target`、前端 `node_modules` 与 `dist` 现均不存在，清理完成喵~
