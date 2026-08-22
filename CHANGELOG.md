@@ -1,3 +1,11 @@
+## 1.0.2 - 2026-08-22
+
+- 修复工具执行后的下一轮 Responses 请求可能因 typed item ID 前缀不匹配而中断的问题，典型错误为 `Invalid input[n].id: ctco_... Expected an ID that begins with fc` 喵~
+- Responses 直连发送前按 item `type` 结构化校验工具历史 ID：`function_call/function_call_output` 使用 `fc_`，`custom_tool_call` 使用 `ctc_`，`custom_tool_call_output` 使用 `ctco_` 喵~
+- 仅修正来自已知工具 ID 家族且前缀与类型不一致的条目，保留原 UUID 后缀、`call_id`、工具输出、arguments、普通消息、图片和其他 typed item，避免广泛删除 ID 或改变上下文语义喵~
+- 修复覆盖普通 Responses、单模型路由、自定义模型 Responses 和 `/responses/compact`；Chat Completions、Completions、Anthropic 与 Gemini 转换路径保持原行为喵~
+- 新增脱敏诊断事件，只记录供应商和修正条目数量，不记录请求正文、工具输出或凭据喵~
+- 新增精确 `ctco_01a0257d-d256-7d93-b048-b22fba274c2d` 回归，并完成协议代理 `68/68` 全集验证喵~
 ## 1.0.1 - 2026-08-21
 
 - 修复 `1179×820` 等实际管理器窗口下首页下半区越界：系统检查与最近运行改为单列自适应，长安装路径、日志路径、启动消息、时间、Debug 与 Helper 信息会在卡片内部安全换行，不再相互覆盖或伸出窗口喵~

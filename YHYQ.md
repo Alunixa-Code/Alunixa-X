@@ -878,3 +878,6 @@
 - 新增脱敏诊断事件 `protocol_proxy.responses_item_id_prefix_normalized`，只记录供应商 ID/名称和修正数量，不记录工具输出、请求正文或凭据喵~
 - 新增精确回归复现 `ctco_01a0257d-d256-7d93-b048-b22fba274c2d` 出现在 `function_call_output.id` 的场景，验证上游实际收到 `fc_...`，且 `call_id`/output 不变；同时验证反向 custom output 修正、合法 `fc_` 和普通 message 完全不变喵~
 - 协议代理完整专项 `68/68` 全部通过；随后 workspace check 仅因本地前端 `dist` 已按发布清理而被 Tauri build macro 阻止，没有出现 Rust 编译错误，最终全工作区由 GitHub Actions 标准构建执行喵~
+- 只读核对用户报错来源 rollout 后确认该 ID 原始记录确实是 `custom_tool_call_output`：`id=ctco_01a0257d-d256-7d93-b048-b22fba274c2d`、`call_id=call_FT0NDedZTdo4G1AOCZgvaJGC`；失败发生在后续请求重建/上游校验阶段，上游却按 function item 要求 `fc` 前缀，与跨类型前缀不一致根因吻合喵~
+- `v1.0.2` 已统一写入 Cargo workspace/lock、前端 package/lock 与 Tauri 配置，CHANGELOG 已详细记录 typed item 前缀修复范围和不变边界喵~
+- `v1.0.2` 下协议代理完整专项再次 `68/68` 通过，`cargo check -p alunixa-x-core`、Rust formatter、差异空白和版本一致性通过；未使用当前 Codex 发真实请求做测试喵~
