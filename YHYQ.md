@@ -1023,3 +1023,6 @@ ode_modules、dist 三个目录均不存在喵~
 - 修复后的专项验证通过：晚到协商 `5/5`、Image Gen SSE `3/3`、精确 ID 修复 `1/1`、MCP 配置迁移 `1/1`，Rust formatter 与差异空白检查通过；验证均使用隔离 SSE/JSON、临时 HTTP server 和临时 config，没有操作当前 Codex/Helper/CDP喵~
 - 修复版本已从 `1.0.4` 精确提升为 `1.0.5`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包与 Tauri 配置；第三方依赖自身的同号版本未被批量替换喵~
 - CHANGELOG 新增 `1.0.5` 章节，明确记录 1.0.4 晚到失败盲区、created/in_progress 缓冲、精确单 ID 改写、重试结果复核、Image Gen completed 修正与旧 imagegen MCP 迁移喵~
+- `v1.0.5` 完整本地验证已通过：core lib `271/271`、协议代理 `69/69`、relay config `117/117`、前端 `43/43`、TypeScript、Vite 生产构建、i18n plain `851/851`、template `80/80`、品牌保护、Rust formatter、`cargo check --workspace --all-targets` 与差异空白检查全部成功喵~
+- Vite 产物 JS 为 `596.78 kB`、gzip `182.93 kB`，只有既有单 chunk 大小提示；`npm ci` 仍报告 4 个既有依赖漏洞（3 high、1 low），本轮未为无关依赖执行破坏性自动升级喵~
+- 当前原仓库为 PUBLIC，但 Alunixa-Code 组织的 GitHub-hosted Actions 在上一版本已被账户付款或 spending limit 状态阻断；为继续获得 Windows、macOS x64、macOS arm64 的真实 GitHub Actions 构建，将只使用公开源码的个人 fork 作为临时 CI 执行来源，正式代码、标签、更新源与 Release 仍保留在 `Alunixa-Code/Alunixa-X`喵~
