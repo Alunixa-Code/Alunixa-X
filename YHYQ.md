@@ -1061,3 +1061,6 @@ ode_modules 与 dist 均按验证后的仓库绝对路径删除，并确认三�
 - 修复版本已精确提升为 `1.0.6`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包与 Tauri 配置；CHANGELOG 明确记录 HTTP JSON 前缀协商和真实 `fc_ -> ctc_` custom call 修复喵~
 - `v1.0.6` 本地核心验证通过：协议代理 `70/70`（新增 HTTP JSON `fc_ -> ctc_` 精确回归）、core lib `271/271`、`cargo check -p alunixa-x-core`、Rust formatter 与差异空白检查通过喵~
 - 验证继续只使用隔离测试；当前运行中的 Alunixa X 1.0.5、Codex、Helper、CDP 与供应商请求均未被重启、替换或作为测试目标喵~
+- 用户要求继续完成 `v1.0.6` 构建与发行；恢复后未创建新 Actions，而是查询已有唯一权威主分支 run `32575925932`喵~
+- `32575925932` 已全部成功：Windows 完成品牌保护、前端测试、TypeScript、生产构建、完整 Rust tests、release 二进制、NSIS 与资产上传；macOS x64/arm64 完成前端、release 二进制、DMG、结构验证与上传喵~
+- 该成功 run 对应提交 `1d737fbcea07646cb050c9b4421936bb2b3ed427`，后续正式 `v1.0.6` 标签将精确指向该已验证提交，不打在带 `[skip ci]` 的后续日志提交上喵~
