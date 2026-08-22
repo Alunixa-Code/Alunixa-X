@@ -1,3 +1,12 @@
+## 1.0.3 - 2026-08-22
+
+- 修复 `v1.0.2` 后仍可能出现的 `stream disconnected before completion`：当前 Codex 合法产生 `custom_tool_call_output + ctco_`，但部分第三方 Responses 实现会在 HTTP 200 SSE 流内错误要求 `fc_`，导致工具输出回传后的下一轮请求中断喵~
+- Alunixa X 不再仅凭 HTTP 200 把 Responses 流判定为成功，而是先缓冲首个 SSE 事件；若上游明确返回 `invalid_id_prefix`，会从错误中提取被拒绝 ID 和要求的前缀，对当前请求执行一次精确兼容修复并自动重试，用户不再需要反复重发消息喵~
+- 自适应重试仅允许 `fc_`、`ctc_`、`ctco_` 三种已知工具 ID 家族，且必须确认上游点名的完整 ID 确实存在于当前 `input`；无关错误、正常成功流和原生支持 custom tools 的供应商不会触发请求改写喵~
+- 针对 `ctco_ -> fc_` 的上游要求，会同步修正同一来源家族的历史输出 ID，保留 UUID 后缀、`call_id`、output、工具类型、消息、数组顺序和其他 ID 家族；重试最多一次，避免重复创建请求或无限循环喵~
+- 调整常规 typed item 规范化边界：继续修复 `function_call/function_call_output` 携带非 `fc_` ID 的非法组合，但不再覆盖由上游明确要求的 custom item `fc_` 兼容结果喵~
+- 新增脱敏诊断事件，区分首次流内前缀错误、自适应重试成功、重试失败与异常响应；不记录请求正文、工具输出或凭据喵~
+- 新增本次真实错误 ID `ctco_01a02899-0ede-7f42-b692-ba57cffb9823` 回归，协议代理完整专项由 `68/68` 增至 `69/69`，并通过 `cargo check -p alunixa-x-core` 喵~
 ## 1.0.2 - 2026-08-22
 
 - 修复工具执行后的下一轮 Responses 请求可能因 typed item ID 前缀不匹配而中断的问题，典型错误为 `Invalid input[n].id: ctco_... Expected an ID that begins with fc` 喵~
