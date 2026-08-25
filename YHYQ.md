@@ -1112,3 +1112,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - `v1.0.7` 完整本地验收已通过：core lib `271/271`、manager lib `33/33`、前端 `43/43`、i18n plain `851/851`、template `80/80`、TypeScript、Vite 生产构建、品牌保护、Rust formatter、`cargo test --workspace`、`cargo check --workspace --all-targets` 和差异空白检查全部成功喵~
 - 兼容专项确认新版阈值 `26.814.0`、当前 `26.814.5517.0` 自动修正自定义 Provider、旧版/未知版本不改、官方 Provider 不改；隔离配置回归全部通过喵~
 - 前端构建产物 JS 为 `596.78 kB`、gzip `182.93 kB`，只有既有单 chunk 提示；`npm ci` 仍报告 4 个既有依赖漏洞（3 high、1 low），没有执行无关依赖升级喵~
+- `v1.0.7` 构建残留已清理：`cargo clean` 删除 Rust 构建文件，前端 `node_modules` 与 `dist` 也已按仓库绝对路径删除；三个目录确认不存在喵~
