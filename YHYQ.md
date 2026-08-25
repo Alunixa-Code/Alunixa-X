@@ -1119,3 +1119,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 将取消这条已失败分支的剩余构建以避免继续消耗 runner，并只修正品牌保护的文件范围：README 迁移说明允许旧仓库链接，产品源码、更新器、更新源和运行时配置仍禁止旧仓库链接喵~
 - 旧 `v1.0.7` 主分支 run `32803211422` 已最终标记为 cancelled；Windows 原因是 branding guard 将 README 合法迁移链接误判为 stale，macOS x64 在取消时停止，macOS arm64 已成功但不作为正式版本依据喵~
 - 本地 `tools/check-local-branding.mjs` 修复已验证通过：只允许 README.md/README_EN.md 中的历史 Codex+++ 链接，API、更新器、源码、工作流和运行时文件仍严格禁止 stale marker喵~
+- `v1.0.7` 正式 Release workflow `32805194979` 全部成功：版本/品牌校验、Windows x64、macOS x64、macOS arm64 和六项资产发布均完成喵~
+- `v1.0.7` 已核验为 latest、非草稿、非预发布，六项资产全部 uploaded，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.7`喵~
+- 自动发行说明已替换为详细中文说明，记录 Codex `26.814.0+` 版本门槛、只修改活动自定义 Provider、官方/旧版/未知版本不变、测试与升级方法喵~
+- `v1.0.7` Windows Setup 为 `20,740,371` 字节，SHA-256 `41e1c1a2fb83472a68b2877b349fcb71145c3c7ebb4f84c5d5a57920bb6b2ec0`；Windows ZIP 为 `26,461,219` 字节，SHA-256 `40eead34ebac33d996fd510d213bf5cccc8dc364860316e88c399f39cbf48e29`喵~
+- `v1.0.7` macOS x64 DMG 为 `33,561,073` 字节，SHA-256 `9344c991430d362d6ed63bda011fe0373eff2e3d2c335842cf46c652356df8e7`；x64 ZIP 为 `28,033,743` 字节，SHA-256 `586135e6e54e709dd88dd99d8e138c84a536bc779b8bcfbefe48f39047367480`喵~
+- `v1.0.7` macOS arm64 DMG 为 `32,329,704` 字节，SHA-256 `96aeb520001e364a3590b229d9ff5ffaa6f01a2606af4291fd3b4a67fd0ab526`；arm64 ZIP 为 `27,517,463` 字节，SHA-256 `2548201a4d60c0deed236adef7b82f9262e26e458908f9ffc9e78a3f7c597c6c`喵~
+- `v1.0.6` 发行说明顶部已增加 superseded 通知，明确新版 Codex `requires_openai_auth=false` 鉴权继承问题已由 `v1.0.7` 修复喵~
+- 临时发行说明已删除，Rust `target`、前端 `node_modules` 与 `dist` 均不存在；主分支工作树只保留本轮日志待提交喵~
