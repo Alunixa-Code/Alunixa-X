@@ -1143,3 +1143,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 只读对比当前 Codex Desktop 真实进程确认其 app-server 命令行包含 `-c features.code_mode_host=true app-server --analytics-default-enabled`；本轮先修复确定存在的 CLI 解析/回退和错误诊断，不在没有隔离协议依据时盲目强制所有旧版 CLI 接受新版附加参数喵~
 - 上游 `BigPizzaV3/CodexPlusPlus` 截至 `v1.2.53` 的微信 app-server、CLI 自动发现和单路径启动实现与当前代码相同，尚未包含该故障修复，不能直接等待或照搬上游补丁喵~
 - 所有排查均为文件、ACL、哈希、进程命令行和源码的只读核对；没有执行任一真实 Codex CLI、没有发送微信测试消息，也没有操作当前 Codex/Helper/CDP/Alunixa X 进程喵~
+- 第一轮隔离回归编译在 `launch_executable_key` 中把已经是 `String` 的值调用成 `into_owned()`，Rust 报 `E0599`；已在独立 WIP 提交中保留失败证据，并改为直接返回该 `String`，没有执行任何产品进程喵~
+- 第一版 fake CLI 子进程测试启动后卡住，进程树确认父子均仅为 `alunixa_x_core` 测试二进制；根因是 Rust test harness 在 fake JSON 前写入了同一行的测试名称，使父进程按整行 JSON 解析时忽略响应喵~
+- 已只终止该隔离 cargo/fake 测试会话，在 fake 响应前先输出换行隔离 test harness 前缀；随后“首个 CLI 创建进程失败后自动切换第二个隔离 CLI 并完成 initialize”的专项回归 `1/1` 通过，全程未启动真实 Codex CLI喵~

@@ -802,6 +802,8 @@ mod tests {
         }
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout().lock();
+        writeln!(stdout).unwrap();
+        stdout.flush().unwrap();
         for line in stdin.lock().lines().map_while(Result::ok) {
             let Ok(message) = serde_json::from_str::<Value>(&line) else {
                 continue;
