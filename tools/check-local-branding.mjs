@@ -36,6 +36,12 @@ const staleMarkers = [
   "https://api.github.com/repos/ygzzfyh123/CodexPPP",
 ];
 
+// The archived Codex+++ URL is intentionally present in the migration notice
+// and is therefore allowed only in the two top-level README files. Product
+// source, updater code, runtime assets, and workflows must never point users
+// back to the archived repository.
+const migrationReadmeFiles = new Set(["README.md", "README_EN.md"]);
+
 const failures = [];
 for (const [file, markers] of requiredMarkers) {
   const text = readFileSync(resolve(root, file), "utf8");
@@ -43,7 +49,9 @@ for (const [file, markers] of requiredMarkers) {
     if (!text.includes(marker)) failures.push(`${file} is missing required Alunixa X marker: ${marker}`);
   }
   for (const marker of staleMarkers) {
-    if (text.includes(marker)) failures.push(`${file} still references stale repository marker: ${marker}`);
+    if (text.includes(marker) && !(migrationReadmeFiles.has(file) && marker.includes("CodexPlusPlusPlus"))) {
+      failures.push(`${file} still references stale repository marker: ${marker}`);
+    }
   }
 }
 

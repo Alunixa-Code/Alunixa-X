@@ -1117,3 +1117,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 现在创建唯一的 release-prep 提交并推送，专门触发一次主分支三平台构建；正式标签会等这条 run 成功后再创建喵~
 - 权威 Actions `32803211422` 的 Windows job 在品牌保护第 4 步失败，真实原因是新 README 迁移公告合法引用归档旧仓库 `https://github.com/Alunixa-Code/CodexPlusPlusPlus`，而 `check-local-branding.mjs` 仍把所有旧链接一概视为 stale marker；macOS x64 尚在执行但本次 run 已不可能成功喵~
 - 将取消这条已失败分支的剩余构建以避免继续消耗 runner，并只修正品牌保护的文件范围：README 迁移说明允许旧仓库链接，产品源码、更新器、更新源和运行时配置仍禁止旧仓库链接喵~
+- 旧 `v1.0.7` 主分支 run `32803211422` 已最终标记为 cancelled；Windows 原因是 branding guard 将 README 合法迁移链接误判为 stale，macOS x64 在取消时停止，macOS arm64 已成功但不作为正式版本依据喵~
+- 本地 `tools/check-local-branding.mjs` 修复已验证通过：只允许 README.md/README_EN.md 中的历史 Codex+++ 链接，API、更新器、源码、工作流和运行时文件仍严格禁止 stale marker喵~
