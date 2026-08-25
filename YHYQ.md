@@ -1161,3 +1161,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 第一次组合清理命令因执行工具的递归删除安全策略在创建 PowerShell 进程前被拒绝，未删除或修改任何文件；随后拆分为 `cargo clean` 与单一 Node 安全清理流程喵~
 - `cargo clean` 已删除 `16209` 个 Rust 构建文件、共 `19.2 GiB`；Node 清理先用 `path.relative` 验证两个目标均严格位于 `D:\Cursor\AlunixaX` 内，再删除前端 `node_modules` 与 `dist`喵~
 - 现已确认本地 Rust `target`、前端 `node_modules` 和 `dist` 三个目录均不存在，没有遗留 fake CLI、测试子进程、临时日志或 Release notes喵~
+- 唯一主分支权威 Actions `32861069553` 已完成且结论为 success，head SHA 精确为 release-prep 提交 `f7c450d897dcca37e971f54c82b212b9d35aedd4`喵~
+- Windows job `97844903401` 已通过品牌保护、前端 `43/43`、TypeScript、Vite、完整 Rust workspace tests、release 二进制、NSIS installer 和 artifact 上传；macOS arm64 job `97844903595` 与 x64 job `97844903676` 均通过 release 二进制、DMG、包结构验证和 artifact 上传喵~
+- GitHub Actions 仅给出 actions/checkout/setup-node/upload-artifact 的 Node 20 将被平台强制为 Node 24 的维护性注解，没有测试、构建、安装包或资产失败喵~
+- 创建正式标签前已核验本地与远端均不存在 `v1.0.8` 标签，GitHub 也不存在同名 Release；不会覆盖历史标签或重复发行喵~
