@@ -67,6 +67,12 @@ Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点
 
 首次使用建议先打开 **Alunixa X**，确认 Codex 应用路径、供应商和模型，然后点击概览页的“启动 Agent 轨道”。
 
+## 从 Codex+++ 迁移
+
+旧 `Alunixa-Code/CodexPlusPlusPlus` 仓库已经归档，最终桥接版本为 `v1.2.67`。现有用户可以在“Codex++ 管理工具 → 关于 → 迁移到 Alunixa X”中自主下载安装 Alunixa X，也可以从 [Codex+++ v1.2.67 最终 Release](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.67) 直接下载 `Alunixa-X-1.0.6-*` 迁移包。
+
+Codex+++ 与 Alunixa X 继续复用 `~/.codex-session-delete/settings.json`，供应商、模型和增强设置无需手工复制。迁移不会强制卸载旧程序，建议先验证 Alunixa X 正常，再自行卸载 Codex+++。
+
 ## 数据与隐私
 
 Alunixa X 默认在本机处理配置、密钥、会话索引和运行日志：

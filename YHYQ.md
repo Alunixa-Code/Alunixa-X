@@ -1077,3 +1077,13 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - macOS arm64 DMG 为 `32,320,366` 字节，SHA-256 `a058ba7293ab147362b15608a67335c11920878aa6c4aa1df7ea0f39bc5b22c3`；arm64 ZIP 为 `27,455,323` 字节，SHA-256 `90f1e09bd771ffaeb60c272c0a9a5ea54d22624e72702776de6149d348544aab`喵~
 - GitHub queued 与 in-progress Actions 均为空；临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 全部不存在喵~
 - 当前运行中的 Alunixa X 仍是用户已安装的 `1.0.5`，本轮没有停止、替换或重启 Codex、Helper、CDP；用户安装 `v1.0.6` 并完整重启后，新 HTTP JSON 协商逻辑才会加载喵~
+
+## 2026-08-25 · Codex+++ 最终迁移桥与归档
+
+- 用户要求把 Alunixa X 新版本在原 `Alunixa-Code/CodexPlusPlusPlus` 仓库再发布一份，让旧 Codex+++ 用户自主迁移，随后归档旧仓库；若令牌无归档权限则停止等待用户喵~
+- 旧仓库已发布最终桥接版 `v1.2.67`：管理器“关于”页新增自主迁移入口，普通 Codex+++ 更新与 Alunixa X 迁移使用独立资产选择器，设置继续复用 `~/.codex-session-delete/settings.json`，不会强制卸载旧程序喵~
+- 最终旧仓库 Release 同时包含六项 Codex+++ `v1.2.67` 资产和六项 Alunixa X `v1.0.6` 迁移资产；正式 workflow 固定校验 Alunixa X 源 Release 状态和六个 SHA-256，最终必须精确存在十二项资产喵~
+- 旧仓库主分支 Actions `32791051620` 和正式 Release Actions `32792615157` 均全部成功；`v1.2.67` 为 latest、非草稿、非预发布，详细发行说明、README 中英文迁移公告和 `MIGRATION_TO_ALUNIXA_X.md` 均已完成喵~
+- 当前 GitHub 凭据对旧仓库具备 `admin=true`，归档 PATCH 成功；`Alunixa-Code/CodexPlusPlusPlus` 当前 `archived=true`，homepage 指向 Alunixa X，Issues、Projects、Wiki 和 Discussions 已关闭喵~
+- 归档后再次读取旧仓库 `/releases/latest` 成功，仍为 `v1.2.67`、十二项资产；`Alunixa-X-1.0.6-windows-x64-setup.exe` 等迁移资产仍为 uploaded 且 digest 可读，旧管理器的自主迁移路径保持可用喵~
+- Alunixa X README 中英文现新增“从 Codex+++ 迁移”章节，链接最终桥接 Release，并说明共享设置、非强制卸载和验证后卸载旧程序的流程喵~

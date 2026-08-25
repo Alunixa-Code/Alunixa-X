@@ -63,6 +63,12 @@ The installer creates two entries:
 - **Alunixa X** opens the main control system.
 - **Alunixa X Launch** starts Codex Desktop with the saved provider and agent configuration.
 
+## Migrating from Codex+++
+
+The legacy `Alunixa-Code/CodexPlusPlusPlus` repository is archived, and its final bridge release is `v1.2.67`. Existing users can migrate from **Codex++ Manager → About → Migrate to Alunixa X**, or download an `Alunixa-X-1.0.6-*` migration installer directly from the [final Codex+++ v1.2.67 release](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.67).
+
+Codex+++ and Alunixa X continue sharing `~/.codex-session-delete/settings.json`, so provider, model, and enhancement settings do not need to be copied manually. Migration does not forcibly uninstall the legacy app; verify Alunixa X first, then uninstall Codex+++ when ready.
+
 ## Privacy
 
 Configuration, credentials, session indexes, and diagnostics are local by default. Future recommendations, anonymous usage metrics, and online catalogs will ship with visible controls and documentation. They are not intended to collect prompts, conversations, file contents, API keys, or terminal output.
