@@ -1115,3 +1115,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - `v1.0.7` 构建残留已清理：`cargo clean` 删除 Rust 构建文件，前端 `node_modules` 与 `dist` 也已按仓库绝对路径删除；三个目录确认不存在喵~
 - `v1.0.7` 清理记录提交已推送到 Alunixa X `origin/main`，由于该提交使用 `[skip ci]`，没有触发无意义的主分支 Actions喵~
 - 现在创建唯一的 release-prep 提交并推送，专门触发一次主分支三平台构建；正式标签会等这条 run 成功后再创建喵~
+- 权威 Actions `32803211422` 的 Windows job 在品牌保护第 4 步失败，真实原因是新 README 迁移公告合法引用归档旧仓库 `https://github.com/Alunixa-Code/CodexPlusPlusPlus`，而 `check-local-branding.mjs` 仍把所有旧链接一概视为 stale marker；macOS x64 尚在执行但本次 run 已不可能成功喵~
+- 将取消这条已失败分支的剩余构建以避免继续消耗 runner，并只修正品牌保护的文件范围：README 迁移说明允许旧仓库链接，产品源码、更新器、更新源和运行时配置仍禁止旧仓库链接喵~
