@@ -1129,3 +1129,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 临时发行说明已删除，Rust `target`、前端 `node_modules` 与 `dist` 均不存在；主分支工作树只保留本轮日志待提交喵~
 - 最终发行说明提交 `ac8f8fabb11a88ae52e50b3dfed01e8e6b81f568` 触发了仅文档变更的重复主分支 run `32806408248`；该 run 没有必要重新编译产品，已在确认正式 Release 成功后取消并核验为 cancelled喵~
 - 正式 `v1.0.7` Release run `32805194979` 保持唯一权威发布构建，全部 job success；当前不再有需要跟踪的构建任务喵~
+
+## 2026-08-25 · 个人微信连接无法启动新版 Codex app-server
+
+- 用户报告个人微信已经扫码登录，但处理联系人消息时先提示“无法启动 Codex app-server（codex）”，自动发现 Windows Store 内置 CLI 后仍提示“无法启动 Codex app-server（C:\Program Files\WindowsApps\OpenAI.Codex_26.814.5517.0_x64__2p2nqsd0c76g0\app\resources\codex.exe）”，要求修复喵~
+- 本轮将把故障边界限定在微信消息到 Codex app-server 的启动与初始化链路；先读取脱敏诊断日志、设置和当前代码，确认底层 Windows OS error 与新版 CLI 参数/环境要求，再实施最小兼容修复喵~
+- 明确不启动、停止、重启、连接或修改当前 Codex、Helper、CDP 与现有 Alunixa X 服务，也不使用当前 Codex 会话做测试；运行验证仅使用隔离 fake CLI、临时目录、单元/集成测试和 GitHub Actions喵~
+- 已在干净的 `main` 上建立修改前空提交检查点 `77ddb91`，便于完整回滚本轮微信 app-server 修复喵~
