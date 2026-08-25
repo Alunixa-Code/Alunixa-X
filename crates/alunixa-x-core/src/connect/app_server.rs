@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -9,6 +10,7 @@ use tokio::process::{Child, ChildStdout, Command};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
+const MAX_LAUNCH_ERROR_CHARS: usize = 480;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
@@ -41,35 +43,106 @@ pub struct CodexAppServer {
     config: AppServerConfig,
 }
 
+#[derive(Debug, Clone)]
+struct AppServerLaunchCandidate {
+    executable: PathBuf,
+    arguments: Vec<OsString>,
+    environment: Vec<(OsString, OsString)>,
+    source: &'static str,
+}
+
+impl AppServerLaunchCandidate {
+    fn standard(executable: PathBuf, source: &'static str) -> Self {
+        Self {
+            executable,
+            arguments: vec![OsString::from("app-server")],
+            environment: Vec::new(),
+            source,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct AppServerStartFailure {
+    stage: &'static str,
+    message: String,
+    os_error_code: Option<i32>,
+}
+
 impl CodexAppServer {
     pub async fn start(config: AppServerConfig) -> anyhow::Result<Self> {
-        let executable = if config.executable.trim().is_empty() {
-            "codex"
+        let candidates = app_server_launch_candidates(&config.executable);
+        Self::start_with_candidates(config, candidates).await
+    }
+
+    async fn start_with_candidates(
+        config: AppServerConfig,
+        candidates: Vec<AppServerLaunchCandidate>,
+    ) -> anyhow::Result<Self> {
+        let mut failures = Vec::new();
+        for candidate in candidates {
+            match Self::start_candidate(config.clone(), &candidate).await {
+                Ok(server) => {
+                    append_launch_diagnostic("connect.weixin_app_server_spawned", &candidate, None);
+                    return Ok(server);
+                }
+                Err(error) => {
+                    append_launch_diagnostic(
+                        "connect.weixin_app_server_candidate_failed",
+                        &candidate,
+                        Some(&error),
+                    );
+                    let os_error = error
+                        .os_error_code
+                        .map(|code| format!("，os error {code}"))
+                        .unwrap_or_default();
+                    failures.push(format!(
+                        "{}（{}，{}{}）：{}",
+                        candidate.executable.display(),
+                        candidate.source,
+                        error.stage,
+                        os_error,
+                        bounded_launch_error(&error.message)
+                    ));
+                }
+            }
+        }
+        let detail = if failures.is_empty() {
+            "没有解析到任何 Codex CLI 候选".to_string()
         } else {
-            config.executable.trim()
+            failures.join("；")
         };
-        let mut command = Command::new(executable);
+        bail!("无法启动 Codex app-server；已尝试的 CLI 均失败：{detail}")
+    }
+
+    async fn start_candidate(
+        mut config: AppServerConfig,
+        candidate: &AppServerLaunchCandidate,
+    ) -> Result<Self, AppServerStartFailure> {
+        let mut command = Command::new(&candidate.executable);
         command
-            .arg("app-server")
+            .args(&candidate.arguments)
+            .envs(candidate.environment.iter().cloned())
             .current_dir(&config.work_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
-        let mut child = command.spawn().with_context(|| {
-            format!(
-                "无法启动 Codex app-server（{}），请检查 Codex CLI 路径",
-                executable
-            )
+        let mut child = command.spawn().map_err(|error| AppServerStartFailure {
+            stage: "创建进程",
+            message: error.to_string(),
+            os_error_code: error.raw_os_error(),
         })?;
-        let stdin = child
-            .stdin
-            .take()
-            .context("无法连接 Codex app-server stdin")?;
-        let stdout = child
-            .stdout
-            .take()
-            .context("无法连接 Codex app-server stdout")?;
+        let stdin = child.stdin.take().ok_or_else(|| AppServerStartFailure {
+            stage: "连接 stdin",
+            message: "子进程没有提供 stdin 管道".to_string(),
+            os_error_code: None,
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| AppServerStartFailure {
+            stage: "连接 stdout",
+            message: "子进程没有提供 stdout 管道".to_string(),
+            os_error_code: None,
+        })?;
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
@@ -77,6 +150,7 @@ impl CodexAppServer {
             });
         }
 
+        config.executable = candidate.executable.to_string_lossy().into_owned();
         let mut server = Self {
             child,
             stdin,
@@ -85,7 +159,14 @@ impl CodexAppServer {
             running: true,
             config,
         };
-        server.initialize().await?;
+        server
+            .initialize()
+            .await
+            .map_err(|error| AppServerStartFailure {
+                stage: "初始化",
+                message: format!("{error:#}"),
+                os_error_code: None,
+            })?;
         Ok(server)
     }
 
@@ -370,6 +451,117 @@ impl CodexAppServer {
     }
 }
 
+fn app_server_launch_candidates(configured: &str) -> Vec<AppServerLaunchCandidate> {
+    let configured = (!configured.trim().is_empty()).then(|| PathBuf::from(configured.trim()));
+    let cached = crate::app_paths::find_cached_codex_cli_candidates();
+    let bundled = crate::app_paths::resolve_codex_app_dir_with_saved(None, None)
+        .and_then(|app_dir| crate::app_paths::find_bundled_codex_cli(&app_dir));
+    let on_path = crate::app_paths::find_codex_cli_on_path();
+    assemble_app_server_launch_candidates(configured, cached, bundled, on_path)
+}
+
+fn assemble_app_server_launch_candidates(
+    configured: Option<PathBuf>,
+    cached: Vec<PathBuf>,
+    bundled: Option<PathBuf>,
+    on_path: Option<PathBuf>,
+) -> Vec<AppServerLaunchCandidate> {
+    let configured_is_store = configured
+        .as_deref()
+        .is_some_and(crate::app_paths::is_windows_store_codex_cli);
+    let mut candidates = Vec::new();
+    if !configured_is_store {
+        if let Some(configured) = configured.clone() {
+            push_launch_candidate(&mut candidates, configured, "configured");
+        }
+    }
+    for executable in cached {
+        push_launch_candidate(&mut candidates, executable, "desktop-cache");
+    }
+    if configured_is_store {
+        if let Some(configured) = configured {
+            push_launch_candidate(&mut candidates, configured, "configured-store");
+        }
+    }
+    if let Some(bundled) = bundled {
+        push_launch_candidate(&mut candidates, bundled, "desktop-bundle");
+    }
+    let has_path_candidate = on_path.is_some();
+    if let Some(on_path) = on_path {
+        push_launch_candidate(&mut candidates, on_path, "path");
+    }
+    if !has_path_candidate {
+        push_launch_candidate(
+            &mut candidates,
+            PathBuf::from(if cfg!(windows) { "codex.exe" } else { "codex" }),
+            "command-search",
+        );
+    }
+    candidates
+}
+
+fn push_launch_candidate(
+    candidates: &mut Vec<AppServerLaunchCandidate>,
+    executable: PathBuf,
+    source: &'static str,
+) {
+    let key = launch_executable_key(&executable);
+    if candidates
+        .iter()
+        .any(|candidate| launch_executable_key(&candidate.executable) == key)
+    {
+        return;
+    }
+    candidates.push(AppServerLaunchCandidate::standard(executable, source));
+}
+
+fn launch_executable_key(path: &Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_ascii_lowercase()
+    } else {
+        normalized.into_owned()
+    }
+}
+
+fn bounded_launch_error(message: &str) -> String {
+    let mut value = message
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\n' || *character == '\t')
+        .take(MAX_LAUNCH_ERROR_CHARS)
+        .collect::<String>();
+    if message.chars().count() > MAX_LAUNCH_ERROR_CHARS {
+        value.push_str("...");
+    }
+    value
+}
+
+#[cfg(not(test))]
+fn append_launch_diagnostic(
+    event: &str,
+    candidate: &AppServerLaunchCandidate,
+    failure: Option<&AppServerStartFailure>,
+) {
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        event,
+        json!({
+            "source": candidate.source,
+            "executable": candidate.executable.to_string_lossy(),
+            "stage": failure.map(|failure| failure.stage),
+            "osErrorCode": failure.and_then(|failure| failure.os_error_code),
+            "message": failure.map(|failure| bounded_launch_error(&failure.message))
+        }),
+    );
+}
+
+#[cfg(test)]
+fn append_launch_diagnostic(
+    _event: &str,
+    _candidate: &AppServerLaunchCandidate,
+    _failure: Option<&AppServerStartFailure>,
+) {
+}
+
 impl Drop for CodexAppServer {
     fn drop(&mut self) {
         if self.running {
@@ -526,6 +718,117 @@ fn deep_string(value: Option<&Value>, keys: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, Write};
+
+    #[test]
+    fn explicit_custom_cli_keeps_priority_before_automatic_fallbacks() {
+        let candidates = assemble_app_server_launch_candidates(
+            Some(PathBuf::from("custom-codex")),
+            vec![PathBuf::from("cached-codex")],
+            Some(PathBuf::from("bundled-codex")),
+            Some(PathBuf::from("path-codex")),
+        );
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.source)
+                .collect::<Vec<_>>(),
+            vec!["configured", "desktop-cache", "desktop-bundle", "path"]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_store_cli_prefers_the_same_version_user_cache() {
+        let configured = PathBuf::from(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.814.5517.0_x64__publisher\app\resources\codex.exe",
+        );
+        let cached =
+            PathBuf::from(r"C:\Users\tester\AppData\Local\OpenAI\Codex\bin\hash\codex.exe");
+        let candidates = assemble_app_server_launch_candidates(
+            Some(configured.clone()),
+            vec![cached.clone()],
+            Some(configured),
+            Some(PathBuf::from(r"C:\Tools\codex.exe")),
+        );
+        assert_eq!(candidates[0].executable, cached);
+        assert_eq!(candidates[0].source, "desktop-cache");
+        assert_eq!(candidates[1].source, "configured-store");
+        assert_eq!(candidates.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn app_server_retries_a_second_isolated_cli_after_spawn_failure() {
+        let temp = tempfile::tempdir().unwrap();
+        let current_test_exe = std::env::current_exe().unwrap();
+        let missing = AppServerLaunchCandidate::standard(
+            temp.path().join("missing-codex-do-not-create"),
+            "missing-test",
+        );
+        let fake = AppServerLaunchCandidate {
+            executable: current_test_exe.clone(),
+            arguments: vec![
+                OsString::from("connect::app_server::tests::fake_codex_app_server_process"),
+                OsString::from("--exact"),
+                OsString::from("--ignored"),
+                OsString::from("--nocapture"),
+                OsString::from("--test-threads=1"),
+            ],
+            environment: vec![(
+                OsString::from("ALUNIXA_X_FAKE_APP_SERVER"),
+                OsString::from("1"),
+            )],
+            source: "fake-test",
+        };
+        let config = AppServerConfig {
+            executable: missing.executable.to_string_lossy().into_owned(),
+            work_dir: temp.path().to_path_buf(),
+            model: String::new(),
+            sandbox: "read-only".to_string(),
+        };
+
+        let mut server = CodexAppServer::start_with_candidates(config, vec![missing, fake])
+            .await
+            .unwrap();
+        assert_eq!(PathBuf::from(&server.config.executable), current_test_exe);
+        server.close().await;
+    }
+
+    #[test]
+    #[ignore = "isolated JSON-RPC child used by app-server fallback tests"]
+    fn fake_codex_app_server_process() {
+        if std::env::var("ALUNIXA_X_FAKE_APP_SERVER").as_deref() != Ok("1") {
+            return;
+        }
+        let stdin = std::io::stdin();
+        let mut stdout = std::io::stdout().lock();
+        for line in stdin.lock().lines().map_while(Result::ok) {
+            let Ok(message) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            let Some(id) = message.get("id").cloned() else {
+                continue;
+            };
+            let method = message
+                .get("method")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let response = match method {
+                "initialize" => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {"serverInfo": {"name": "isolated-fake-codex"}}
+                }),
+                _ => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "error": {"code": -32601, "message": "method not found"}
+                }),
+            };
+            writeln!(stdout, "{response}").unwrap();
+            stdout.flush().unwrap();
+        }
+    }
 
     #[test]
     fn extracts_ids_from_current_app_server_shapes() {

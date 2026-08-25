@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy)]
 struct AppPackageSpec {
@@ -348,6 +349,71 @@ pub fn find_bundled_codex_cli(app_dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
+/// Return Codex Desktop's user-writable CLI cache, newest first.
+///
+/// Current Windows Store builds mirror the packaged CLI and its sidecars into
+/// `%LOCALAPPDATA%\OpenAI\Codex\bin\<content-id>`. External desktop clients
+/// should prefer that mirror over starting a child directly from WindowsApps,
+/// whose package path can become inaccessible or stale after an app update.
+pub fn find_cached_codex_cli_candidates() -> Vec<PathBuf> {
+    let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") else {
+        return Vec::new();
+    };
+    cached_codex_cli_candidates_from_root(&PathBuf::from(local_appdata))
+}
+
+pub fn find_cached_codex_cli() -> Option<PathBuf> {
+    find_cached_codex_cli_candidates().into_iter().next()
+}
+
+pub fn find_codex_cli_on_path() -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    let executable = if cfg!(windows) { "codex.exe" } else { "codex" };
+    std::env::split_paths(&paths)
+        .map(|path| path.join(executable))
+        .find(|candidate| candidate.is_file())
+}
+
+pub fn is_windows_store_codex_cli(path: &Path) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase();
+    normalized.contains("\\windowsapps\\")
+        && (normalized.contains("\\openai.codex_")
+            || normalized.contains("\\openai.codexbeta_")
+            || normalized.contains("\\openai.chatgpt-desktop_"))
+        && normalized.ends_with("\\codex.exe")
+}
+
+fn cached_codex_cli_candidates_from_root(local_appdata: &Path) -> Vec<PathBuf> {
+    let root = local_appdata.join("OpenAI").join("Codex").join("bin");
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let executable = if cfg!(windows) { "codex.exe" } else { "codex" };
+    let mut candidates = entries
+        .flatten()
+        .map(|entry| entry.path().join(executable))
+        .filter(|candidate| candidate.is_file())
+        .map(|candidate| {
+            let modified = candidate
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            (modified, candidate)
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.cmp(&right.1)));
+    candidates
+        .into_iter()
+        .map(|(_, candidate)| candidate)
+        .collect()
+}
+
 pub fn codex_app_version(app_dir: &Path) -> Option<String> {
     if app_dir.extension() == Some(OsStr::new("app")) {
         return macos_app_version(app_dir);
@@ -597,4 +663,42 @@ fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'
     }
     let (head, rest) = value.split_at(prefix.len());
     head.eq_ignore_ascii_case(prefix).then_some(rest)
+}
+
+#[cfg(test)]
+mod cli_cache_tests {
+    use super::*;
+
+    #[test]
+    fn cached_codex_cli_candidates_prefer_the_newest_user_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("OpenAI").join("Codex").join("bin");
+        let executable = if cfg!(windows) { "codex.exe" } else { "codex" };
+        let older = bin.join("older").join(executable);
+        let newer = bin.join("newer").join(executable);
+        std::fs::create_dir_all(older.parent().unwrap()).unwrap();
+        std::fs::write(&older, b"older").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        std::fs::create_dir_all(newer.parent().unwrap()).unwrap();
+        std::fs::write(&newer, b"newer").unwrap();
+
+        assert_eq!(
+            cached_codex_cli_candidates_from_root(temp.path()),
+            vec![newer, older]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn recognizes_windows_store_codex_cli_paths_only() {
+        assert!(is_windows_store_codex_cli(Path::new(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.814.5517.0_x64__publisher\app\resources\codex.exe"
+        )));
+        assert!(!is_windows_store_codex_cli(Path::new(
+            r"C:\Users\tester\AppData\Local\OpenAI\Codex\bin\hash\codex.exe"
+        )));
+        assert!(!is_windows_store_codex_cli(Path::new(
+            r"C:\Program Files\WindowsApps\Unrelated.App_1.0.0.0_x64__publisher\codex.exe"
+        )));
+    }
 }

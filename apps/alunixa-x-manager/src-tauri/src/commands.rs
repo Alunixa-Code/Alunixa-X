@@ -804,14 +804,17 @@ pub fn find_desktop_codex_cli() -> CommandResult<Value> {
     ) else {
         return failed("未找到 Codex Desktop 应用。", json!({ "path": null }));
     };
-    let Some(path) = alunixa_x_core::app_paths::find_bundled_codex_cli(&app_dir) else {
+    let Some(path) = alunixa_x_core::app_paths::find_cached_codex_cli()
+        .or_else(|| alunixa_x_core::app_paths::find_bundled_codex_cli(&app_dir))
+        .or_else(alunixa_x_core::app_paths::find_codex_cli_on_path)
+    else {
         return failed(
-            "已找到 Codex Desktop，但包内没有可用的 Codex CLI。",
+            "已找到 Codex Desktop，但没有可用的 Codex CLI。",
             json!({ "path": null }),
         );
     };
     ok(
-        "已填入桌面版内置 Codex CLI。",
+        "已填入桌面版可用 Codex CLI。",
         json!({ "path": path.to_string_lossy() }),
     )
 }
