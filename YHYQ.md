@@ -1109,3 +1109,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 复核启动顺序后发现兼容调用目前位于 `relay_profiles_enabled` 分支内；为确保用户直接维护的自定义 `config.toml` 在新版 Codex 上也能被检测，将把版本门控兼容检查移到 Provider 应用分支之后、无论管理器总开关是否开启都执行喵~
 - 已将新版 Codex `requires_openai_auth` 兼容检查从 `relay_profiles_enabled` 条件分支移到启动前公共路径；即使用户手工维护 config.toml 或未开启 Provider 管理，只要检测到新版 Codex 和活动自定义 Provider，仍会自动修正喵~
 - 移动后的专项测试 `new_codex_auto_enables_auth_json_for_active_custom_provider_only` 通过，`cargo check -p alunixa-x-core` 通过；版本为 `1.0.7`喵~
+- `v1.0.7` 完整本地验收已通过：core lib `271/271`、manager lib `33/33`、前端 `43/43`、i18n plain `851/851`、template `80/80`、TypeScript、Vite 生产构建、品牌保护、Rust formatter、`cargo test --workspace`、`cargo check --workspace --all-targets` 和差异空白检查全部成功喵~
+- 兼容专项确认新版阈值 `26.814.0`、当前 `26.814.5517.0` 自动修正自定义 Provider、旧版/未知版本不改、官方 Provider 不改；隔离配置回归全部通过喵~
+- 前端构建产物 JS 为 `596.78 kB`、gzip `182.93 kB`，只有既有单 chunk 提示；`npm ci` 仍报告 4 个既有依赖漏洞（3 high、1 low），没有执行无关依赖升级喵~
