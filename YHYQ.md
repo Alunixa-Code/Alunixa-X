@@ -1087,3 +1087,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前 GitHub 凭据对旧仓库具备 `admin=true`，归档 PATCH 成功；`Alunixa-Code/CodexPlusPlusPlus` 当前 `archived=true`，homepage 指向 Alunixa X，Issues、Projects、Wiki 和 Discussions 已关闭喵~
 - 归档后再次读取旧仓库 `/releases/latest` 成功，仍为 `v1.2.67`、十二项资产；`Alunixa-X-1.0.6-windows-x64-setup.exe` 等迁移资产仍为 uploaded 且 digest 可读，旧管理器的自主迁移路径保持可用喵~
 - Alunixa X README 中英文现新增“从 Codex+++ 迁移”章节，链接最终桥接 Release，并说明共享设置、非强制卸载和验证后卸载旧程序的流程喵~
+
+## 2026-08-25 · 新版 Codex requires_openai_auth 兼容修复
+
+- 用户报告新版 Codex 不再允许自定义 Provider 在 `requires_openai_auth=false` 时自动继承 `auth.json` 鉴权；手动将 `~/.codex/config.toml` 或 `%USERPROFILE%\\.codex\\config.toml` 中对应值改为 `true` 后恢复正常喵~
+- 用户要求在 Alunixa X 中检测新版 Codex，启动前自动把自定义 Provider 的 `requires_openai_auth` 修正为 `true`，完成回归后发布新版本喵~
+- 本轮只修改启动前配置兼容逻辑和测试，不启动、重启、连接或操作当前 Codex、Helper、CDP 或真实供应商请求喵~
