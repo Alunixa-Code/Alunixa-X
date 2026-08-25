@@ -1107,3 +1107,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前 `v1.0.6` 工作树已包含启动前兼容实现和两个专项回归，`cargo check -p alunixa-x-core` 与两个 `relay_config` 测试均已单独通过；本轮建立 `v1.0.7` 修改前检查点喵~
 - `v1.0.7` 版本已统一更新到 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包和 Tauri 配置；CHANGELOG 新增新版 Codex `requires_openai_auth` 自动兼容说明喵~
 - 复核启动顺序后发现兼容调用目前位于 `relay_profiles_enabled` 分支内；为确保用户直接维护的自定义 `config.toml` 在新版 Codex 上也能被检测，将把版本门控兼容检查移到 Provider 应用分支之后、无论管理器总开关是否开启都执行喵~
+- 已将新版 Codex `requires_openai_auth` 兼容检查从 `relay_profiles_enabled` 条件分支移到启动前公共路径；即使用户手工维护 config.toml 或未开启 Provider 管理，只要检测到新版 Codex 和活动自定义 Provider，仍会自动修正喵~
+- 移动后的专项测试 `new_codex_auto_enables_auth_json_for_active_custom_provider_only` 通过，`cargo check -p alunixa-x-core` 通过；版本为 `1.0.7`喵~

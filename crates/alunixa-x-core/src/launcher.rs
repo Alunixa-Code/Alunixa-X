@@ -355,19 +355,19 @@ where
         }
         if settings.relay_profiles_enabled {
             hooks.apply_active_relay_profile(&settings).await?;
-            let codex_version = crate::app_paths::codex_app_version(&app_dir);
-            if crate::relay_config::ensure_requires_openai_auth_for_new_codex(
-                &home,
-                codex_version.as_deref(),
-            )? {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.codex_requires_openai_auth_compat_applied",
-                    serde_json::json!({
-                        "codexVersion": codex_version,
-                        "provider": settings.active_relay_profile().id,
-                    }),
-                );
-            }
+        }
+        let codex_version = crate::app_paths::codex_app_version(&app_dir);
+        if crate::relay_config::ensure_requires_openai_auth_for_new_codex(
+            &home,
+            codex_version.as_deref(),
+        )? {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.codex_requires_openai_auth_compat_applied",
+                serde_json::json!({
+                    "codexVersion": codex_version,
+                    "provider": settings.active_relay_profile().id,
+                }),
+            );
         }
         if settings.relay_profiles_enabled
             && settings.codex_app_disable_wss
