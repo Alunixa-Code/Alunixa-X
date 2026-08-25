@@ -23,6 +23,7 @@ test("WeChat connection is explicit, searchable, and defaults to restricted acce
   assert.match(appSource, /id: "weixin"/);
   assert.match(appSource, /list="weixin-session-workdirs"/);
   assert.match(appSource, /find_desktop_codex_cli/);
+  assert.match(commandSource, /find_cached_codex_cli/);
   assert.match(appSource, /weixinConnectSandbox: "read-only"/);
   assert.match(settingsSource, /default_weixin_connect_sandbox/);
   assert.match(commandSource, /weixin_connect_qr_start/);
