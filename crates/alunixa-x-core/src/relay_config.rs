@@ -32,6 +32,10 @@ const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "oss",
     "ollama-chat",
 ];
+/// Codex Desktop versions at or after this release no longer inherit the
+/// ChatGPT auth.json token for custom providers when the provider explicitly
+/// sets `requires_openai_auth = false`.
+pub const CODEX_REQUIRES_OPENAI_AUTH_COMPAT_VERSION: &str = "26.814.0";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -330,6 +334,70 @@ pub fn responses_proxy_configured_in_home(home: &Path) -> bool {
             )
             .as_str(),
         )
+}
+
+/// Returns whether the installed Codex Desktop is in the version range that
+/// requires custom providers to opt into auth.json inheritance explicitly.
+/// Unknown versions intentionally return false so an unrecognized future or
+/// portable build is never rewritten speculatively.
+pub fn codex_requires_openai_auth_compatibility(version: Option<&str>) -> bool {
+    let Some(version) = version.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Ok(mut actual) = crate::update::parse_version_tag(version) else {
+        return false;
+    };
+    let Ok(mut threshold) =
+        crate::update::parse_version_tag(CODEX_REQUIRES_OPENAI_AUTH_COMPAT_VERSION)
+    else {
+        return false;
+    };
+    let length = actual.len().max(threshold.len());
+    actual.resize(length, 0);
+    threshold.resize(length, 0);
+    actual >= threshold
+}
+
+/// Applies the new Codex auth inheritance compatibility only to the active
+/// custom provider. Official providers and older/unknown Codex versions are
+/// left byte-for-byte unchanged.
+pub fn ensure_requires_openai_auth_for_new_codex(
+    home: &Path,
+    codex_version: Option<&str>,
+) -> anyhow::Result<bool> {
+    if !codex_requires_openai_auth_compatibility(codex_version) {
+        return Ok(false);
+    }
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("读取 {} 失败", config_path.display()));
+        }
+    };
+    let mut document = parse_toml_document(&existing)?;
+    let Some(provider_id) = active_provider_id(&document) else {
+        return Ok(false);
+    };
+    if !is_custom_provider_id(&provider_id) {
+        return Ok(false);
+    }
+    let Some(provider) = document
+        .get_mut("model_providers")
+        .and_then(Item::as_table_mut)
+        .and_then(|providers| providers.get_mut(&provider_id))
+        .and_then(Item::as_table_mut)
+    else {
+        return Ok(false);
+    };
+    if provider.get("requires_openai_auth").and_then(Item::as_bool) != Some(false) {
+        return Ok(false);
+    }
+    provider["requires_openai_auth"] = toml_edit::value(true);
+    let updated = ensure_trailing_newline(document.to_string());
+    crate::settings::atomic_write(&config_path, updated.as_bytes())?;
+    Ok(true)
 }
 
 pub fn apply_relay_config_to_home(

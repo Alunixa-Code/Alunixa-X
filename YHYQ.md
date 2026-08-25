@@ -1101,3 +1101,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本轮目标仅覆盖启动前配置兼容，不改变官方 Provider、旧版 Codex 行为、用户自建配置边界或运行中的 Codex；真实供应商请求和当前 Codex/Helper/CDP 均不作为测试目标喵~
 - 首次执行新版 Codex auth 兼容专项时，测试文件误用了旧仓库 crate 名 `codex_plus_core`，导致编译器报 unresolved crate；产品代码已成功编译到测试阶段，尚未运行当前 Codex 或真实供应商喵~
 - 在修正测试导入前建立新的 Git 回滚检查点，保留当前兼容实现和失败证据喵~
+- 新版 Codex auth 兼容实现已加入启动前活动自定义 Provider 修正：检测 Codex 版本达到 `26.814.0` 时，把 `requires_openai_auth = false` 改为 `true`；官方 Provider、旧版/未知版本和缺少活动 Provider 的配置不改动喵~
+- 第一次专项命令的两个目标测试实际均通过，但同一长命令尾部显示了旧 crate 名 unresolved 错误输出，疑似来自命令串行/缓存输出；当前先固定代码状态，随后单独重跑验证以确认真实结果喵~

@@ -1554,6 +1554,83 @@ fn imagegen_mcp_config_is_managed_without_touching_user_servers() {
 }
 
 #[test]
+fn new_codex_requires_openai_auth_compatibility_is_version_gated() {
+    use alunixa_x_core::relay_config::{
+        CODEX_REQUIRES_OPENAI_AUTH_COMPAT_VERSION, codex_requires_openai_auth_compatibility,
+    };
+
+    assert_eq!(CODEX_REQUIRES_OPENAI_AUTH_COMPAT_VERSION, "26.814.0");
+    assert!(!codex_requires_openai_auth_compatibility(Some(
+        "26.813.9999.0"
+    )));
+    assert!(codex_requires_openai_auth_compatibility(Some("26.814.0")));
+    assert!(codex_requires_openai_auth_compatibility(Some(
+        "26.814.5517.0"
+    )));
+    assert!(codex_requires_openai_auth_compatibility(Some("v26.900.1")));
+    assert!(!codex_requires_openai_auth_compatibility(None));
+    assert!(!codex_requires_openai_auth_compatibility(Some(
+        "portable-codex"
+    )));
+}
+
+#[test]
+fn new_codex_auto_enables_auth_json_for_active_custom_provider_only() {
+    use alunixa_x_core::relay_config::ensure_requires_openai_auth_for_new_codex;
+
+    let temp = tempfile::tempdir().unwrap();
+    let config = r#"model_provider = "custom"
+model = "gpt-5.6-sol"
+
+[model_providers.custom]
+name = "Custom"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://example.test/v1"
+experimental_bearer_token = "sk-test"
+"#;
+    std::fs::write(temp.path().join("config.toml"), config).unwrap();
+
+    assert!(ensure_requires_openai_auth_for_new_codex(temp.path(), Some("26.814.5517.0")).unwrap());
+    let updated = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(updated.contains("requires_openai_auth = true"));
+    assert!(!updated.contains("requires_openai_auth = false"));
+    assert!(updated.contains("base_url = \"https://example.test/v1\""));
+    assert!(updated.contains("experimental_bearer_token = \"sk-test\""));
+    assert!(
+        !ensure_requires_openai_auth_for_new_codex(temp.path(), Some("26.814.5517.0")).unwrap()
+    );
+
+    std::fs::write(temp.path().join("config.toml"), config).unwrap();
+    assert!(
+        !ensure_requires_openai_auth_for_new_codex(temp.path(), Some("26.813.9999.0")).unwrap()
+    );
+    assert!(
+        std::fs::read_to_string(temp.path().join("config.toml"))
+            .unwrap()
+            .contains("requires_openai_auth = false")
+    );
+
+    let official = r#"model_provider = "openai"
+
+[model_providers.openai]
+name = "OpenAI"
+wire_api = "responses"
+requires_openai_auth = false
+base_url = "https://example.test/v1"
+"#;
+    std::fs::write(temp.path().join("config.toml"), official).unwrap();
+    assert!(
+        !ensure_requires_openai_auth_for_new_codex(temp.path(), Some("26.814.5517.0")).unwrap()
+    );
+    assert!(
+        std::fs::read_to_string(temp.path().join("config.toml"))
+            .unwrap()
+            .contains("requires_openai_auth = false")
+    );
+}
+
+#[test]
 fn set_codex_sub_agent_max_threads_preserves_config_and_clamps_value() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
