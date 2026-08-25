@@ -1093,3 +1093,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 用户报告新版 Codex 不再允许自定义 Provider 在 `requires_openai_auth=false` 时自动继承 `auth.json` 鉴权；手动将 `~/.codex/config.toml` 或 `%USERPROFILE%\\.codex\\config.toml` 中对应值改为 `true` 后恢复正常喵~
 - 用户要求在 Alunixa X 中检测新版 Codex，启动前自动把自定义 Provider 的 `requires_openai_auth` 修正为 `true`，完成回归后发布新版本喵~
 - 本轮只修改启动前配置兼容逻辑和测试，不启动、重启、连接或操作当前 Codex、Helper、CDP 或真实供应商请求喵~
+
+## 2026-08-25 · 新版 Codex requires_openai_auth 自动兼容
+
+- 用户报告新版 Codex 不再允许自定义 Provider 在 `requires_openai_auth=false` 时自动继承 `auth.json`，手动将 `~/.codex/config.toml` 或 `%USERPROFILE%\\.codex\\config.toml` 中该项改为 `true` 后恢复喵~
+- 用户要求 Alunixa X 检测新版 Codex，启动前自动把自定义 Provider 的 `requires_openai_auth` 修正为 `true`，完成回归后发布新版本喵~
+- 本轮目标仅覆盖启动前配置兼容，不改变官方 Provider、旧版 Codex 行为、用户自建配置边界或运行中的 Codex；真实供应商请求和当前 Codex/Helper/CDP 均不作为测试目标喵~
