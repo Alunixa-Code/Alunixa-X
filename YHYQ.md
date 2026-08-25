@@ -1146,3 +1146,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 第一轮隔离回归编译在 `launch_executable_key` 中把已经是 `String` 的值调用成 `into_owned()`，Rust 报 `E0599`；已在独立 WIP 提交中保留失败证据，并改为直接返回该 `String`，没有执行任何产品进程喵~
 - 第一版 fake CLI 子进程测试启动后卡住，进程树确认父子均仅为 `alunixa_x_core` 测试二进制；根因是 Rust test harness 在 fake JSON 前写入了同一行的测试名称，使父进程按整行 JSON 解析时忽略响应喵~
 - 已只终止该隔离 cargo/fake 测试会话，在 fake 响应前先输出换行隔离 test harness 前缀；随后“首个 CLI 创建进程失败后自动切换第二个隔离 CLI 并完成 initialize”的专项回归 `1/1` 通过，全程未启动真实 Codex CLI喵~
+- 微信 app-server 专项现 `6/6` 通过并保留一个只供父测试启动的 ignored fake 子进程入口；覆盖自定义 CLI 优先级、WindowsApps 时缓存前置、首候选 spawn 失败后的第二候选 initialize、现有消息/usage 解析喵~
+- Codex 用户态缓存专项 `2/2` 通过，覆盖按文件修改时间选择最新缓存和 WindowsApps 路径识别；当前安装的缓存与包内 CLI 哈希一致，但测试仅使用临时目录和测试二进制喵~
+- 管理器 `cargo check` 已编译到 Tauri `generate_context!`，随后因本地已按上一版本要求删除前端 `dist` 而明确停止；这不是 Rust 代码错误，完成 `npm ci` 与 `vite:build` 后再执行完整 manager/workspace 验收喵~
+- 官方 `openai/codex` 当前源码确认 `--analytics-default-enabled` 是可选布尔开关，普通 `codex app-server` 仍是受支持入口；因此本轮不强制旧版或自定义 CLI 接受 Codex Desktop 自身的可选分析/Code Mode 启动参数喵~
+- 修复版本已统一提升为 `1.0.8`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包和 Tauri 配置；CHANGELOG 已详细记录根因、候选顺序、诊断边界和隔离验证喵~
+- 首次版本一致性 PowerShell 检查因单元素管道结果是标量、直接读取 `.Count` 得到空值而误报 mismatch；未修改版本文件，改用数组包装后 Cargo、package、lock 根包和 Tauri 的 `1.0.8` 一致性均通过喵~
