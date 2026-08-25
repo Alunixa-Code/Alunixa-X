@@ -1,3 +1,12 @@
+## 1.0.7 - 2026-08-25
+
+- 修复新版 Codex Desktop 不再允许自定义 Provider 在 `requires_openai_auth = false` 时继承 `auth.json` 鉴权的问题喵~
+- Alunixa X 启动前会读取已检测到的 Codex Desktop 版本；从 `26.814.0` 起，如果当前活动 Provider 是自定义 Provider 且配置明确写入 `requires_openai_auth = false`，会原子改为 `true` 后再启动 Codex喵~
+- 官方 `openai`、`ollama`、`lmstudio` 等保留 Provider 不会被改写；旧版 Codex、未知版本、缺少版本信息和没有活动自定义 Provider 时也保持原配置喵~
+- 只修改当前活动 Provider 的 `requires_openai_auth`，保留 Base URL、API Key、模型、上下文窗口、MCP、Skills、Plugins 和其他配置喵~
+- 新增版本门槛、活动自定义 Provider、旧版 Codex、未知版本和官方 Provider 隔离回归，避免对旧版或官方登录流程产生副作用喵~
+- 该兼容修复对应手动修复方式：新版 Codex 的 `~/.codex/config.toml` 或 `%USERPROFILE%\\.codex\\config.toml` 中，将活动自定义 Provider 的 `requires_openai_auth = false` 改为 `true`喵~
+
 ## 1.0.6 - 2026-08-22
 
 - 修复 `v1.0.5` 只协商 HTTP 200 SSE 内 `invalid_id_prefix`、但第三方上游改为以 HTTP 非成功 JSON `invalid_request_error` 返回同一 ID 兼容信息时直接把错误回传给 Codex的问题喵~
