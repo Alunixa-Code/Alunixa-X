@@ -1103,3 +1103,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 在修正测试导入前建立新的 Git 回滚检查点，保留当前兼容实现和失败证据喵~
 - 新版 Codex auth 兼容实现已加入启动前活动自定义 Provider 修正：检测 Codex 版本达到 `26.814.0` 时，把 `requires_openai_auth = false` 改为 `true`；官方 Provider、旧版/未知版本和缺少活动 Provider 的配置不改动喵~
 - 第一次专项命令的两个目标测试实际均通过，但同一长命令尾部显示了旧 crate 名 unresolved 错误输出，疑似来自命令串行/缓存输出；当前先固定代码状态，随后单独重跑验证以确认真实结果喵~
+- 用户要求继续发布新版：将新版 Codex 自定义 Provider `requires_openai_auth=false` 自动兼容为 `true` 的修复需要提升 Alunixa X 版本并走完整 Actions/Release 流程喵~
+- 当前 `v1.0.6` 工作树已包含启动前兼容实现和两个专项回归，`cargo check -p alunixa-x-core` 与两个 `relay_config` 测试均已单独通过；本轮建立 `v1.0.7` 修改前检查点喵~
