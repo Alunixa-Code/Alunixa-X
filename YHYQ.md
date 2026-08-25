@@ -1127,3 +1127,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - `v1.0.7` macOS arm64 DMG 为 `32,329,704` 字节，SHA-256 `96aeb520001e364a3590b229d9ff5ffaa6f01a2606af4291fd3b4a67fd0ab526`；arm64 ZIP 为 `27,517,463` 字节，SHA-256 `2548201a4d60c0deed236adef7b82f9262e26e458908f9ffc9e78a3f7c597c6c`喵~
 - `v1.0.6` 发行说明顶部已增加 superseded 通知，明确新版 Codex `requires_openai_auth=false` 鉴权继承问题已由 `v1.0.7` 修复喵~
 - 临时发行说明已删除，Rust `target`、前端 `node_modules` 与 `dist` 均不存在；主分支工作树只保留本轮日志待提交喵~
+- 最终发行说明提交 `ac8f8fabb11a88ae52e50b3dfed01e8e6b81f568` 触发了仅文档变更的重复主分支 run `32806408248`；该 run 没有必要重新编译产品，已在确认正式 Release 成功后取消并核验为 cancelled喵~
+- 正式 `v1.0.7` Release run `32805194979` 保持唯一权威发布构建，全部 job success；当前不再有需要跟踪的构建任务喵~
