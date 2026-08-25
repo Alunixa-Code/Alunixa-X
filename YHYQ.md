@@ -1165,3 +1165,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - Windows job `97844903401` 已通过品牌保护、前端 `43/43`、TypeScript、Vite、完整 Rust workspace tests、release 二进制、NSIS installer 和 artifact 上传；macOS arm64 job `97844903595` 与 x64 job `97844903676` 均通过 release 二进制、DMG、包结构验证和 artifact 上传喵~
 - GitHub Actions 仅给出 actions/checkout/setup-node/upload-artifact 的 Node 20 将被平台强制为 Node 24 的维护性注解，没有测试、构建、安装包或资产失败喵~
 - 创建正式标签前已核验本地与远端均不存在 `v1.0.8` 标签，GitHub 也不存在同名 Release；不会覆盖历史标签或重复发行喵~
+- 正式 annotated tag `v1.0.8` 已创建并推送；标签对象为 `1b41c8366341732dba0c3679bef7ac4687d0b2ac`，递归解析后的产品提交精确为已通过主分支 Actions 的 `f7c450d897dcca37e971f54c82b212b9d35aedd4`喵~
+- 正式 Release workflow `32863259127` 全部成功：verify-version `97852198221`、Windows x64 `97852259576`、macOS arm64 `97852259628`、macOS x64 `97852259646` 与 Publish GitHub Release `97856611551` 均为 success喵~
+- `v1.0.8` 已核验为 latest、非草稿、非预发布，详细中文发行说明完整记录用户错误、根因、候选顺序、兼容边界、诊断事件、验证矩阵、升级步骤和全部 SHA-256；`v1.0.7` 顶部已增加 superseded 通知喵~
+- 首次尝试在单个超长 PowerShell 命令中同时写发行说明、编辑两个 Release 并删除临时文件时，执行工具的安全策略在创建进程前拒绝命令，GitHub 与本地文件均未改变；随后改用仓库内两个精确临时 Markdown、分步 `gh release edit` 和 `apply_patch` 删除完成同一操作喵~
+- 六项正式资产均为 uploaded 且 digest 可读：Windows Setup `20,811,876` 字节、SHA-256 `0a668ef6ceb852f4786d943c2fdbd61f2435b7c6218477f9470de88452d84c55`；Windows ZIP `26,594,137` 字节、SHA-256 `ca7a37cc61a0a0fc6d772d927de6abda7b06c318b94aa25ca55488e8c4436fb1`喵~
+- macOS x64 DMG `33,627,981` 字节、SHA-256 `4b654b8615f1b31a6b4b6a5f3e22cd50171b4ae17453a7deab017e2d0c223496`；x64 ZIP `28,080,220` 字节、SHA-256 `3acd1b532eecc90f8b5a84aab7bf34ac17dc145086d6de6f26e48590b6d3f1f6`喵~
+- macOS arm64 DMG `32,376,548` 字节、SHA-256 `7936c9ecafc0f6f16530bb435ce62198a4d0c0cc5dbfa1675a3eacece67682ca`；arm64 ZIP `27,538,291` 字节、SHA-256 `8fcf30fcf01375365652f0e83b1e362735757bb02b0160b07d672a82e64a6587`喵~
+- GitHub queued/in-progress Actions 当前为 `0`；两个临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 均不存在，工作树在最终日志提交前干净喵~
