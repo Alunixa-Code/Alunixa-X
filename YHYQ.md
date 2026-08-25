@@ -1136,3 +1136,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本轮将把故障边界限定在微信消息到 Codex app-server 的启动与初始化链路；先读取脱敏诊断日志、设置和当前代码，确认底层 Windows OS error 与新版 CLI 参数/环境要求，再实施最小兼容修复喵~
 - 明确不启动、停止、重启、连接或修改当前 Codex、Helper、CDP 与现有 Alunixa X 服务，也不使用当前 Codex 会话做测试；运行验证仅使用隔离 fake CLI、临时目录、单元/集成测试和 GitHub Actions喵~
 - 已在干净的 `main` 上建立修改前空提交检查点 `77ddb91`，便于完整回滚本轮微信 app-server 修复喵~
+- 只读排查确认微信设置中的工作目录存在，故障不是 `current_dir` 指向不存在目录；保存的 CLI 路径则精确指向 Windows Store 受管目录中的 `codex.exe` 喵~
+- 当前机器同时存在 Codex Desktop 自动展开到 `%LOCALAPPDATA%\OpenAI\Codex\bin\f71e347eb70b3d24\codex.exe` 的用户态 CLI 与所需 sidecar；该文件和 WindowsApps 包内 `codex.exe` 大小一致、SHA-256 均为 `539D351A0F87D4186673A3BD65A480B2E87EBEB7324045019A2D23729770C092`，说明可以优先使用同版本用户态副本而不必从受管包目录直接创建子进程喵~
+- 当前 `find_desktop_codex_cli` 只返回包内 CLI，微信 app-server 也只尝试用户保存的单一路径或裸 `codex`；一旦 WindowsApps 路径因进程令牌、包更新或目录访问失败，就没有用户态缓存、PATH 或其他候选回退喵~
+- 当前 `Command::spawn()` 用 `anyhow::Context` 包装后，微信状态又只以 `{error}` 显示最外层文本，底层 `os error` 被 UI 丢失；诊断日志也没有微信 app-server 启动候选和失败原因事件，因此现有截图无法区分 access denied、路径过期或其他 CreateProcess 错误喵~
+- 只读对比当前 Codex Desktop 真实进程确认其 app-server 命令行包含 `-c features.code_mode_host=true app-server --analytics-default-enabled`；本轮先修复确定存在的 CLI 解析/回退和错误诊断，不在没有隔离协议依据时盲目强制所有旧版 CLI 接受新版附加参数喵~
+- 上游 `BigPizzaV3/CodexPlusPlus` 截至 `v1.2.53` 的微信 app-server、CLI 自动发现和单路径启动实现与当前代码相同，尚未包含该故障修复，不能直接等待或照搬上游补丁喵~
+- 所有排查均为文件、ACL、哈希、进程命令行和源码的只读核对；没有执行任一真实 Codex CLI、没有发送微信测试消息，也没有操作当前 Codex/Helper/CDP/Alunixa X 进程喵~
