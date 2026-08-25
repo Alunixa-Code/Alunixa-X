@@ -1,3 +1,14 @@
+## 1.0.8 - 2026-08-25
+
+- 修复个人微信已经扫码登录、但收到首条消息后无法启动 Codex app-server 的问题；典型错误会先显示裸命令 `codex`，自动发现后又显示 Windows Store 受管目录中的 `...\WindowsApps\OpenAI.Codex_*\app\resources\codex.exe` 喵~
+- 根因是微信连接只尝试设置中保存的单一 CLI 路径或裸 `codex`；自动发现又只返回 WindowsApps 包内文件，一旦该受管路径因进程令牌、Codex 更新后目录变化或 CreateProcess 访问限制失败，就没有任何可用回退喵~
+- Windows 现在优先发现 Codex Desktop 写入 `%LOCALAPPDATA%\OpenAI\Codex\bin\<content-id>\codex.exe` 的同版本用户态 CLI 缓存；该目录保留 `codex-code-mode-host.exe` 等配套 sidecar，避免把单个二进制盲目复制到不完整目录喵~
+- 用户显式选择的普通自定义 CLI 仍保持最高优先级；只有配置指向 WindowsApps 时才把用户态缓存前置，随后仍保留已配置包内路径、自动发现桌面包、PATH 与裸命令回退，不改变 macOS 或自定义 CLI 的既有选择语义喵~
+- app-server 启动会去重并逐个尝试候选；创建进程、stdin/stdout 管道或 initialize 任一阶段失败都会清理该子进程并尝试下一候选，不再让一次 WindowsApps 启动失败直接终止整条微信连接喵~
+- “查找桌面版 Codex CLI”现在同样优先填写用户态缓存，再回退包内 CLI 与 PATH；已保存旧 WindowsApps 路径的用户无需先手工清空设置，运行时也会自动采用缓存候选喵~
+- 错误状态现在包含每个候选的来源、失败阶段、底层 Windows `os error` 编号和有界错误文本；诊断日志新增脱敏的 `connect.weixin_app_server_spawned` 与 `connect.weixin_app_server_candidate_failed` 事件，不记录微信 Token、联系人、消息正文、提示词或终端输出喵~
+- 新增 WindowsApps 识别、缓存时间排序、自定义 CLI 优先级、候选去重和真实子进程回退回归；隔离 fake JSON-RPC CLI 精确验证首个可执行文件不存在时会自动切换第二候选并完成 initialize，全程不执行当前 Codex、Helper、CDP 或真实微信消息喵~
+
 ## 1.0.7 - 2026-08-25
 
 - 修复新版 Codex Desktop 不再允许自定义 Provider 在 `requires_openai_auth = false` 时继承 `auth.json` 鉴权的问题喵~
