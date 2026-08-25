@@ -520,7 +520,7 @@ fn launch_executable_key(path: &Path) -> String {
     if cfg!(windows) {
         normalized.to_ascii_lowercase()
     } else {
-        normalized.into_owned()
+        normalized
     }
 }
 
