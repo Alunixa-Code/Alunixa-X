@@ -1152,3 +1152,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 官方 `openai/codex` 当前源码确认 `--analytics-default-enabled` 是可选布尔开关，普通 `codex app-server` 仍是受支持入口；因此本轮不强制旧版或自定义 CLI 接受 Codex Desktop 自身的可选分析/Code Mode 启动参数喵~
 - 修复版本已统一提升为 `1.0.8`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包和 Tauri 配置；CHANGELOG 已详细记录根因、候选顺序、诊断边界和隔离验证喵~
 - 首次版本一致性 PowerShell 检查因单元素管道结果是标量、直接读取 `.Count` 得到空值而误报 mismatch；未修改版本文件，改用数组包装后 Cargo、package、lock 根包和 Tauri 的 `1.0.8` 一致性均通过喵~
+- 前端完整验收通过：`npm test` 为 `43/43`，TypeScript `tsc --noEmit` 通过，Vite 生产构建成功；主 JS `596.78 kB`、gzip `182.93 kB`，仅保留既有单 chunk 提示喵~
+- `npm ci` 仍报告 4 个既有依赖漏洞（3 high、1 low），本轮没有执行会引入无关破坏性升级的 `npm audit fix`喵~
+- 完整 Rust workspace 测试全部通过：core lib `276 passed + 1 ignored fake child`、manager lib `33/33`，其余 workspace 单元、集成与文档测试均零失败；`cargo check --workspace --all-targets`、Rust formatter、品牌保护和差异空白检查通过喵~
+- 自动填写微信 CLI 的管理器命令进一步改为先读取用户态缓存，再尝试桌面包与 PATH；即使 Codex 更新过程中旧 WindowsApps 应用目录暂时不可解析，只要官方用户态缓存仍存在就可以返回可用 CLI喵~
+- 上述管理器调整后再次通过 manager lib `33/33`、前端 `43/43` 和 `cargo check -p alunixa-x-manager`；未启动管理器窗口、真实 Codex CLI、微信连接或任何现有服务喵~

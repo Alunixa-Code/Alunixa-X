@@ -798,18 +798,21 @@ pub fn find_desktop_codex_cli() -> CommandResult<Value> {
             );
         }
     };
-    let Some(app_dir) = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+    let cached = alunixa_x_core::app_paths::find_cached_codex_cli();
+    let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
         None,
         Some(settings.codex_app_path.as_str()),
-    ) else {
-        return failed("未找到 Codex Desktop 应用。", json!({ "path": null }));
-    };
-    let Some(path) = alunixa_x_core::app_paths::find_cached_codex_cli()
-        .or_else(|| alunixa_x_core::app_paths::find_bundled_codex_cli(&app_dir))
+    );
+    let Some(path) = cached
+        .or_else(|| {
+            app_dir
+                .as_deref()
+                .and_then(alunixa_x_core::app_paths::find_bundled_codex_cli)
+        })
         .or_else(alunixa_x_core::app_paths::find_codex_cli_on_path)
     else {
         return failed(
-            "已找到 Codex Desktop，但没有可用的 Codex CLI。",
+            "未找到可用的 Codex CLI，请先安装或启动一次 Codex Desktop。",
             json!({ "path": null }),
         );
     };
