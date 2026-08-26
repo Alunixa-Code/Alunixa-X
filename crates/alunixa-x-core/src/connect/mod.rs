@@ -1,4 +1,5 @@
 pub mod app_server;
+mod progress;
 pub mod session_store;
 pub mod weixin;
 
@@ -10,6 +11,7 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
 use self::app_server::{AppServerConfig, AppServerTurnResult, CodexAppServer};
+use self::progress::forward_progress_to_weixin;
 use self::session_store::{ConnectSessionStore, ConnectState};
 use self::weixin::{WeixinClient, WeixinMessage};
 
@@ -285,7 +287,14 @@ async fn process_weixin_message(
         .thread_ids
         .insert(message.from_user_id.clone(), thread_id.clone());
 
-    let turn = server.run_turn(&thread_id, text);
+    let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let progress_task = tokio::spawn(forward_progress_to_weixin(
+        client.clone(),
+        message.from_user_id.clone(),
+        message.context_token.clone(),
+        progress_receiver,
+    ));
+    let turn = server.run_turn_with_progress(&thread_id, text, Some(progress_sender.clone()));
     tokio::pin!(turn);
     let turn_result = loop {
         tokio::select! {
@@ -297,6 +306,15 @@ async fn process_weixin_message(
             }
         }
     };
+    drop(progress_sender);
+    if let Ok(Err(error)) = progress_task.await {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "connect.weixin_progress_delivery_failed",
+            serde_json::json!({
+                "message": error.to_string().chars().take(320).collect::<String>()
+            }),
+        );
+    }
     let reply = if turn_result.reply.trim().is_empty() {
         "Codex 已完成处理，但没有返回文字内容。"
     } else {
