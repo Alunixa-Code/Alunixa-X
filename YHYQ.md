@@ -1173,3 +1173,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - macOS x64 DMG `33,627,981` 字节、SHA-256 `4b654b8615f1b31a6b4b6a5f3e22cd50171b4ae17453a7deab017e2d0c223496`；x64 ZIP `28,080,220` 字节、SHA-256 `3acd1b532eecc90f8b5a84aab7bf34ac17dc145086d6de6f26e48590b6d3f1f6`喵~
 - macOS arm64 DMG `32,376,548` 字节、SHA-256 `7936c9ecafc0f6f16530bb435ce62198a4d0c0cc5dbfa1675a3eacece67682ca`；arm64 ZIP `27,538,291` 字节、SHA-256 `8fcf30fcf01375365652f0e83b1e362735757bb02b0160b07d672a82e64a6587`喵~
 - GitHub queued/in-progress Actions 当前为 `0`；两个临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 均不存在，工作树在最终日志提交前干净喵~
+
+## 2026-08-26 · 个人微信连接实时发送 Codex 全过程进度
+
+- 用户要求把个人微信连接做得更详细：Codex 思考中、可公开的思考摘要、网页搜索、命令执行、文件修改、MCP/工具调用、计划变化、错误、输出和最终回答等所有可观察操作，都要及时发送到对应微信联系人，而不是只在完成后发送最终文字喵~
+- 本轮会基于 Codex app-server 官方结构化 `item/started`、`item/completed`、delta 与 `turn/*` 通知实现，不解析或伪造模型不可见的内部隐式思维；“思考中”会发送状态，只有 app-server 明确提供的 reasoning summary 才作为可见摘要发送喵~
+- 为避免逐 token/逐字刷屏，将发送每个操作的开始、受控增量输出、完成/失败和最终结果；命令输出等高频数据按时间、长度和微信分段限制合并，但不会丢失操作类别、关键输出与失败信息喵~
+- 继续保持联系人独立 Codex 会话、微信官方服务域名、工作目录、Provider/模型、审批策略和最终回复页脚不变；不把 Token、API Key、Cookie、认证头或其他凭据写入进度消息喵~
+- 所有验证继续使用隔离 fake app-server 与 fake Weixin sink，不启动、停止、重启、连接或修改当前 Codex、Helper、CDP、Alunixa X 和真实微信会话喵~
+- 已在干净的 `main` 上建立修改前空提交检查点 `48c6347`，便于完整回滚本轮实时进度功能喵~
