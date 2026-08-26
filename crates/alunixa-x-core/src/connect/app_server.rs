@@ -766,6 +766,9 @@ fn extract_completed_agent_text(message: &Value) -> Option<String> {
     ) {
         return None;
     }
+    if string_field(item, &["phase"]).as_deref() == Some("commentary") {
+        return None;
+    }
     deep_string(Some(item), &["text", "content", "output_text"])
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
@@ -1084,12 +1087,27 @@ fn progress_event_from_item(item: &Value, completed: bool) -> Option<AppServerPr
             "上下文压缩完成",
             String::new(),
         ),
-        "agentMessage" | "assistantMessage" | "output_text" => (
-            AppServerProgressKind::Reply,
-            "正在生成最终回复",
-            "最终回复已生成",
-            String::new(),
-        ),
+        "agentMessage" | "assistantMessage" | "output_text" => {
+            let commentary = string_field(item, &["phase"]).as_deref() == Some("commentary");
+            (
+                AppServerProgressKind::Reply,
+                if commentary {
+                    "正在生成过程输出"
+                } else {
+                    "正在生成最终回复"
+                },
+                if commentary {
+                    "Codex 过程输出"
+                } else {
+                    "最终回复已生成"
+                },
+                if completed && commentary {
+                    deep_string(Some(item), &["text", "content", "output_text"]).unwrap_or_default()
+                } else {
+                    String::new()
+                },
+            )
+        }
         _ => (
             AppServerProgressKind::Other,
             "正在执行操作",
@@ -1616,6 +1634,12 @@ mod tests {
                 && event.detail.contains("src/main.rs")
         }));
         assert!(events.iter().any(|event| {
+            event.kind == AppServerProgressKind::Reply
+                && event.phase == AppServerProgressPhase::Completed
+                && event.title == "Codex 过程输出"
+                && event.detail.contains("fake progress narration")
+        }));
+        assert!(events.iter().any(|event| {
             event.kind == AppServerProgressKind::Status
                 && event.phase == AppServerProgressPhase::Completed
         }));
@@ -1659,8 +1683,10 @@ mod tests {
                     json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"mcpToolCall","id":"tool-1","server":"demo","tool":"lookup","status":"completed","arguments":{"query":"safe"},"result":{"content":[{"type":"text","text":"tool result"}]},"error":null}}}),
                     json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"fileChange","id":"patch-1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@"}],"status":"inProgress"}}}),
                     json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"fileChange","id":"patch-1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@"}],"status":"completed"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":""}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"fake final reply"}}}),
+                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"commentary-1","text":"","phase":"commentary"}}}),
+                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"commentary-1","text":"fake progress narration","phase":"commentary"}}}),
+                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"","phase":"final_answer"}}}),
+                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"fake final reply","phase":"final_answer"}}}),
                     json!({"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}),
                 ];
                 for response in messages {
@@ -1707,6 +1733,27 @@ mod tests {
         assert_eq!(
             extract_completed_agent_text(&message).as_deref(),
             Some("done")
+        );
+        let commentary = json!({
+            "method": "item/completed",
+            "params": {"item": {
+                "type": "agentMessage",
+                "text": "interim",
+                "phase": "commentary"
+            }}
+        });
+        assert_eq!(extract_completed_agent_text(&commentary), None);
+        let final_answer = json!({
+            "method": "item/completed",
+            "params": {"item": {
+                "type": "agentMessage",
+                "text": "final",
+                "phase": "final_answer"
+            }}
+        });
+        assert_eq!(
+            extract_completed_agent_text(&final_answer).as_deref(),
+            Some("final")
         );
         let user = json!({
             "method": "item/completed",

@@ -145,6 +145,7 @@ async fn send_messages(
 fn format_event(event: &AppServerProgressEvent) -> Option<String> {
     if event.kind == AppServerProgressKind::Reply
         && event.phase == AppServerProgressPhase::Completed
+        && event.detail.trim().is_empty()
     {
         return Some("✅ 最终回复已生成\n正在发送完整回复。".to_string());
     }

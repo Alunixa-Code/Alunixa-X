@@ -1199,3 +1199,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 增加每个单项事件 16000 字符上限，超长 MCP 结果、工具参数或异常文本会明确标记截断；命令等增量仍保留单轮 128K 总上限，避免完成事件绕过保护导致巨型微信消息或内存占用喵~
 - 新增隔离 fake Weixin HTTP sink 回归，第一次失败精确揭露由 connect 模块直接产生的桥接状态没有经过 app-server 格式化器，因此测试中的 Authorization 文本未脱敏；已把统一 ANSI 清理、凭据脱敏和单项上限下沉到最终批处理入口，确保所有来源都执行同一保护喵~
 - fake Weixin sink 现验证三条真实 HTTP sendmessage 请求顺序为“思考开始 → 合并摘要 → 思考完成”，敏感文本被替换为 `[redacted]`；app-server 专项仍为 `8 passed + 1 ignored`，core 编译和差异空白检查通过喵~
+- app-server `AgentMessage.phase` 现按官方 `commentary` 与 `final_answer` 区分：中途的 Codex 过程说明会立即作为“Codex 过程输出”发送微信，最终答案只在 turn 完成后发送一次完整正文，不再把 commentary 拼进最终回复造成重复喵~
+- 新增隔离回归验证 commentary 文本进入进度事件、final_answer 成为最终回复、旧版缺少 phase 时仍按兼容行为处理；fake app-server 全流程、fake Weixin sink、批处理与 core 编译全部通过喵~
