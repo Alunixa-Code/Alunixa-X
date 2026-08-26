@@ -298,10 +298,10 @@ async fn process_weixin_message(
     tokio::pin!(turn);
     let turn_result = loop {
         tokio::select! {
-            reply = &mut turn => break reply?,
+            reply = &mut turn => break reply,
             _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
                 if stop.load(Ordering::SeqCst) {
-                    bail!("微信连接已停止");
+                    break Err(anyhow::anyhow!("微信连接已停止"));
                 }
             }
         }
@@ -315,6 +315,7 @@ async fn process_weixin_message(
             }),
         );
     }
+    let turn_result = turn_result?;
     let reply = if turn_result.reply.trim().is_empty() {
         "Codex 已完成处理，但没有返回文字内容。"
     } else {

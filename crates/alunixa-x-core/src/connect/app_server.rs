@@ -278,6 +278,16 @@ impl CodexAppServer {
         while !response_received || !turn_completed {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
+                emit_progress(
+                    progress.as_ref(),
+                    progress_event(
+                        "turn",
+                        AppServerProgressKind::Error,
+                        AppServerProgressPhase::Failed,
+                        "等待 Codex 回复超时",
+                        "本轮任务超过 600 秒仍未完成。",
+                    ),
+                );
                 bail!("等待 Codex 回复超时");
             }
             let message = self.read_message(remaining).await?;
@@ -290,6 +300,16 @@ impl CodexAppServer {
             }
             if response_id(&message) == Some(id) {
                 if let Some(error) = rpc_error(&message) {
+                    emit_progress(
+                        progress.as_ref(),
+                        progress_event(
+                            "turn",
+                            AppServerProgressKind::Error,
+                            AppServerProgressPhase::Failed,
+                            "启动任务失败",
+                            &error,
+                        ),
+                    );
                     bail!("Codex turn/start 失败：{error}");
                 }
                 let result = message.get("result").cloned().unwrap_or(Value::Null);
@@ -327,6 +347,18 @@ impl CodexAppServer {
                 }
                 Some("turn/completed") => turn_completed = true,
                 Some("thread/status/changed") if thread_status_is_idle(&message) => {
+                    if !turn_completed {
+                        emit_progress(
+                            progress.as_ref(),
+                            progress_event(
+                                "turn",
+                                AppServerProgressKind::Status,
+                                AppServerProgressPhase::Completed,
+                                "任务进入空闲状态",
+                                "Codex 已结束本轮操作。",
+                            ),
+                        );
+                    }
                     turn_completed = true;
                 }
                 Some("error") => {
@@ -1241,9 +1273,9 @@ fn format_mcp_item(item: &Value, completed: bool) -> String {
         if let Some(arguments) = item.get("arguments") {
             parts.push(format!("参数：{}", safe_json_preview(arguments)));
         }
-    } else if let Some(error) = item.get("error") {
+    } else if let Some(error) = item.get("error").filter(|value| !value.is_null()) {
         parts.push(format!("错误：{}", safe_json_preview(error)));
-    } else if let Some(result) = item.get("result") {
+    } else if let Some(result) = item.get("result").filter(|value| !value.is_null()) {
         parts.push(format!("结果：{}", safe_json_preview(result)));
     }
     parts.join("\n")
@@ -1360,6 +1392,21 @@ fn sanitize_progress_text(value: &str) -> String {
     without_ansi
         .lines()
         .map(|line| {
+            let lower_line = line.to_ascii_lowercase();
+            if [
+                "authorization:",
+                "api_key=",
+                "apikey=",
+                "password=",
+                "access_token=",
+                "refresh_token=",
+                "cookie:",
+            ]
+            .iter()
+            .any(|needle| lower_line.contains(needle))
+            {
+                return "[redacted]".to_string();
+            }
             line.split_whitespace()
                 .map(|part| {
                     let lower = part.to_ascii_lowercase();

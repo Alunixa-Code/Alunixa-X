@@ -1182,3 +1182,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 继续保持联系人独立 Codex 会话、微信官方服务域名、工作目录、Provider/模型、审批策略和最终回复页脚不变；不把 Token、API Key、Cookie、认证头或其他凭据写入进度消息喵~
 - 所有验证继续使用隔离 fake app-server 与 fake Weixin sink，不启动、停止、重启、连接或修改当前 Codex、Helper、CDP、Alunixa X 和真实微信会话喵~
 - 已在干净的 `main` 上建立修改前空提交检查点 `48c6347`，便于完整回滚本轮实时进度功能喵~
+- 对照 2026-08-26 的 OpenAI Codex app-server 官方协议确认，可观察过程由 `item/started`、`item/completed`、`item/reasoning/summaryTextDelta`、`item/plan/delta`、`item/commandExecution/outputDelta`、`item/fileChange/patchUpdated`、`item/mcpToolCall/progress` 与 `turn/*` 等结构化通知提供喵~
+- 微信桥接初始化现只继续 opt-out 原始 `item/reasoning/textDelta` 和逐 token `item/agentMessage/delta`；公开 reasoning summary、计划、命令输出和文件输出均恢复订阅，最终回复仍以完整消息发送，避免逐 token 重复刷屏喵~
+- 新增统一进度事件模型，覆盖任务开始/完成、思考摘要、计划、网页搜索及结果、命令及实时输出、文件变化、MCP/动态工具参数与结果、Agent 协作、图片、审查、上下文压缩、授权拒绝、错误和最终回复生成状态喵~
+- 新增独立微信进度发送任务，app-server 读取不会被微信 HTTP 发送阻塞；增量按 1.2 秒或 1600 字符合并，同一项完成前先刷新剩余输出，保证命令输出、完成状态和最终回答顺序稳定喵~
+- 单轮增量输出设 128K 字符保护上限，达到上限后只停止继续转发高频增量并明确通知，所有操作开始/完成/失败状态和最终回答仍继续发送，防止异常命令无限刷屏或耗尽内存喵~
+- 进度文本会去除 ANSI 控制序列，并对 token、password、authorization、cookie、API Key、GitHub/Cloudflare/JWT 等明显凭据执行脱敏；MCP/动态工具 JSON 参数按敏感字段递归脱敏喵~
+- 第一轮隔离全流程测试失败是因为完成的 MCP item 同时携带 `error: null` 和有效 `result`，格式化器把 null 当作真实错误而跳过 result；修复为只处理非 null error/result 后，隔离 fake app-server 已验证思考、网页搜索、命令输出、MCP 结果、文件变化和最终状态全部产生进度事件喵~
+- 当前专项通过：app-server `8 passed + 1 ignored fake child`、进度批处理 `2/2`、raw reasoning 忽略与工具凭据脱敏 `1/1`、核心编译与差异空白检查通过；所有运行均为测试二进制和临时目录，没有连接真实 Codex 或微信喵~
