@@ -10,7 +10,10 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use self::app_server::{AppServerConfig, AppServerTurnResult, CodexAppServer};
+use self::app_server::{
+    AppServerConfig, AppServerProgressEvent, AppServerProgressKind, AppServerProgressPhase,
+    AppServerTurnResult, CodexAppServer,
+};
 use self::progress::forward_progress_to_weixin;
 use self::session_store::{ConnectSessionStore, ConnectState};
 use self::weixin::{WeixinClient, WeixinMessage};
@@ -263,30 +266,6 @@ async fn process_weixin_message(
     text: &str,
     stop: &AtomicBool,
 ) -> anyhow::Result<()> {
-    if app_server
-        .as_ref()
-        .map(|server| !server.is_running())
-        .unwrap_or(true)
-    {
-        *app_server = Some(CodexAppServer::start(app_config.clone()).await?);
-    }
-    let server = app_server.as_mut().context("Codex app-server 未启动")?;
-    let saved_thread_id = state.thread_ids.get(&message.from_user_id).cloned();
-    let thread_id = match server.prepare_thread(saved_thread_id.as_deref()).await {
-        Ok(thread_id) => thread_id,
-        Err(error) if saved_thread_id.is_some() => {
-            state.thread_ids.remove(&message.from_user_id);
-            server
-                .prepare_thread(None)
-                .await
-                .with_context(|| format!("恢复原会话失败（{error}），新建会话也失败"))?
-        }
-        Err(error) => return Err(error),
-    };
-    state
-        .thread_ids
-        .insert(message.from_user_id.clone(), thread_id.clone());
-
     let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
     let progress_task = tokio::spawn(forward_progress_to_weixin(
         client.clone(),
@@ -294,18 +273,133 @@ async fn process_weixin_message(
         message.context_token.clone(),
         progress_receiver,
     ));
-    let turn = server.run_turn_with_progress(&thread_id, text, Some(progress_sender.clone()));
-    tokio::pin!(turn);
-    let turn_result = loop {
-        tokio::select! {
-            reply = &mut turn => break reply,
-            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
-                if stop.load(Ordering::SeqCst) {
-                    break Err(anyhow::anyhow!("微信连接已停止"));
+
+    send_progress(
+        &progress_sender,
+        "bridge",
+        AppServerProgressKind::Status,
+        AppServerProgressPhase::Started,
+        "已收到微信消息",
+        "正在连接 Codex 并准备联系人独立会话。",
+    );
+
+    let operation_result: anyhow::Result<AppServerTurnResult> = async {
+        if app_server
+            .as_ref()
+            .map(|server| !server.is_running())
+            .unwrap_or(true)
+        {
+            send_progress(
+                &progress_sender,
+                "app-server",
+                AppServerProgressKind::Status,
+                AppServerProgressPhase::Started,
+                "正在启动 Codex app-server",
+                "会自动尝试用户配置、Codex Desktop 缓存、桌面包和 PATH 中的 CLI。",
+            );
+            match CodexAppServer::start(app_config.clone()).await {
+                Ok(server) => {
+                    *app_server = Some(server);
+                    send_progress(
+                        &progress_sender,
+                        "app-server",
+                        AppServerProgressKind::Status,
+                        AppServerProgressPhase::Completed,
+                        "Codex app-server 已连接",
+                        "JSON-RPC 初始化成功。",
+                    );
+                }
+                Err(error) => {
+                    send_progress(
+                        &progress_sender,
+                        "app-server",
+                        AppServerProgressKind::Error,
+                        AppServerProgressPhase::Failed,
+                        "Codex app-server 启动失败",
+                        &format!("{error:#}"),
+                    );
+                    return Err(error);
                 }
             }
         }
-    };
+        let server = app_server.as_mut().context("Codex app-server 未启动")?;
+        let saved_thread_id = state.thread_ids.get(&message.from_user_id).cloned();
+        send_progress(
+            &progress_sender,
+            "thread",
+            AppServerProgressKind::Status,
+            AppServerProgressPhase::Started,
+            if saved_thread_id.is_some() {
+                "正在恢复联系人会话"
+            } else {
+                "正在创建联系人会话"
+            },
+            "每个微信联系人继续映射到独立 Codex thread。",
+        );
+        let thread_id = match server.prepare_thread(saved_thread_id.as_deref()).await {
+            Ok(thread_id) => thread_id,
+            Err(error) if saved_thread_id.is_some() => {
+                send_progress(
+                    &progress_sender,
+                    "thread",
+                    AppServerProgressKind::Error,
+                    AppServerProgressPhase::Failed,
+                    "恢复原会话失败",
+                    &format!("{error:#}\n正在创建新会话继续处理。"),
+                );
+                state.thread_ids.remove(&message.from_user_id);
+                send_progress(
+                    &progress_sender,
+                    "thread-new",
+                    AppServerProgressKind::Status,
+                    AppServerProgressPhase::Started,
+                    "正在创建替代会话",
+                    "原会话不可恢复，正在新建 Codex thread。",
+                );
+                server
+                    .prepare_thread(None)
+                    .await
+                    .with_context(|| format!("恢复原会话失败（{error}），新建会话也失败"))?
+            }
+            Err(error) => return Err(error),
+        };
+        state
+            .thread_ids
+            .insert(message.from_user_id.clone(), thread_id.clone());
+        send_progress(
+            &progress_sender,
+            "thread-ready",
+            AppServerProgressKind::Status,
+            AppServerProgressPhase::Completed,
+            "联系人会话准备完成",
+            "开始把本条微信消息交给 Codex。",
+        );
+
+        let turn = server.run_turn_with_progress(&thread_id, text, Some(progress_sender.clone()));
+        tokio::pin!(turn);
+        loop {
+            tokio::select! {
+                reply = &mut turn => break reply,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                    if stop.load(Ordering::SeqCst) {
+                        break Err(anyhow::anyhow!("微信连接已停止"));
+                    }
+                }
+            }
+        }
+    }
+    .await;
+
+    if let Err(error) = &operation_result {
+        send_progress(
+            &progress_sender,
+            "bridge-error",
+            AppServerProgressKind::Error,
+            AppServerProgressPhase::Failed,
+            "Codex 处理失败",
+            &format!("{error:#}"),
+        );
+    }
     drop(progress_sender);
     if let Ok(Err(error)) = progress_task.await {
         let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -315,7 +409,7 @@ async fn process_weixin_message(
             }),
         );
     }
-    let turn_result = turn_result?;
+    let turn_result = operation_result?;
     let reply = if turn_result.reply.trim().is_empty() {
         "Codex 已完成处理，但没有返回文字内容。"
     } else {
@@ -329,6 +423,23 @@ async fn process_weixin_message(
             &message.context_token,
         )
         .await
+}
+
+fn send_progress(
+    sender: &tokio::sync::mpsc::UnboundedSender<AppServerProgressEvent>,
+    item_id: &str,
+    kind: AppServerProgressKind,
+    phase: AppServerProgressPhase,
+    title: &str,
+    detail: &str,
+) {
+    let _ = sender.send(AppServerProgressEvent {
+        item_id: item_id.to_string(),
+        kind,
+        phase,
+        title: title.to_string(),
+        detail: detail.to_string(),
+    });
 }
 
 fn append_reply_footer(

@@ -192,6 +192,8 @@ fn needs_separator(existing: &str, incoming: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn event(
         item_id: &str,
@@ -273,5 +275,75 @@ mod tests {
             "退出码：0",
         ));
         assert_eq!(completed, vec!["✅ 命令执行完成\n退出码：0"]);
+    }
+
+    #[tokio::test]
+    async fn forwards_ordered_progress_to_an_isolated_fake_weixin_sink() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/ilink/bot/sendmessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ret": 0,
+                "errcode": 0,
+                "errmsg": ""
+            })))
+            .mount(&server)
+            .await;
+        let client = WeixinClient::new_unchecked_for_tests(&server.uri());
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let forwarder = tokio::spawn(forward_progress_to_weixin(
+            client,
+            "peer-1".to_string(),
+            "context-1".to_string(),
+            receiver,
+        ));
+        sender
+            .send(event(
+                "reason-1",
+                AppServerProgressKind::Reasoning,
+                AppServerProgressPhase::Started,
+                "思考中",
+                "正在分析",
+            ))
+            .unwrap();
+        sender
+            .send(event(
+                "reason-1",
+                AppServerProgressKind::Reasoning,
+                AppServerProgressPhase::Delta,
+                "思考摘要",
+                "检查配置，authorization: Bearer secret-value",
+            ))
+            .unwrap();
+        sender
+            .send(event(
+                "reason-1",
+                AppServerProgressKind::Reasoning,
+                AppServerProgressPhase::Completed,
+                "思考阶段完成",
+                "已确认原因",
+            ))
+            .unwrap();
+        drop(sender);
+        forwarder.await.unwrap().unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3);
+        let texts = requests
+            .iter()
+            .map(|request| {
+                serde_json::from_slice::<serde_json::Value>(&request.body)
+                    .unwrap()
+                    .pointer("/msg/item_list/0/text_item/text")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        assert!(texts[0].contains("思考中"));
+        assert!(texts[1].contains("思考摘要"));
+        assert!(texts[1].contains("[redacted]"));
+        assert!(!texts.iter().any(|text| text.contains("secret-value")));
+        assert!(texts[2].contains("思考阶段完成"));
     }
 }

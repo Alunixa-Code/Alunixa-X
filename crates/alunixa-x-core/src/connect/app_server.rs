@@ -12,6 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_LAUNCH_ERROR_CHARS: usize = 480;
+const MAX_PROGRESS_EVENT_CHARS: usize = 16_000;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
@@ -867,8 +868,7 @@ fn progress_events_from_message(message: &Value) -> Vec<AppServerProgressEvent> 
             "Codex 已创建本轮任务。",
         )],
         "turn/completed" => {
-            let status = deep_string(Some(params), &["type", "status"])
-                .unwrap_or_else(|| "completed".to_string());
+            let status = extract_turn_status(params).unwrap_or_else(|| "completed".to_string());
             let failed = matches!(status.as_str(), "failed" | "interrupted" | "cancelled");
             vec![progress_event(
                 "turn",
@@ -1389,7 +1389,7 @@ fn sanitize_progress_text(value: &str) -> String {
             without_ansi.push(character);
         }
     }
-    without_ansi
+    let sanitized = without_ansi
         .lines()
         .map(|line| {
             let lower_line = line.to_ascii_lowercase();
@@ -1432,7 +1432,20 @@ fn sanitize_progress_text(value: &str) -> String {
                 .join(" ")
         })
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    let mut bounded = sanitized
+        .chars()
+        .take(MAX_PROGRESS_EVENT_CHARS)
+        .collect::<String>();
+    if sanitized.chars().count() > MAX_PROGRESS_EVENT_CHARS {
+        bounded.push_str("\n…该事件内容超过 16000 字符，已截断；后续操作状态仍会继续发送。");
+    }
+    bounded
+}
+
+fn extract_turn_status(value: &Value) -> Option<String> {
+    string_field(value, &["status", "type"])
+        .or_else(|| value.get("turn").and_then(extract_turn_status))
 }
 
 fn translated_status(status: &str) -> &str {

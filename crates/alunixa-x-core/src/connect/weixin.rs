@@ -139,6 +139,16 @@ impl WeixinClient {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_unchecked_for_tests(base_url: &str) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            token: "test-token".to_string(),
+            route_tag: String::new(),
+            client: reqwest::Client::new(),
+        }
+    }
+
     pub async fn fetch_qr_code(base_url: &str, route_tag: &str) -> anyhow::Result<WeixinQrCode> {
         let client = Self::new(base_url, "", route_tag)?;
         let mut url = client.endpoint("ilink/bot/get_bot_qrcode")?;
