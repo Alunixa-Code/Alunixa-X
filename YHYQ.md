@@ -1213,3 +1213,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - Windows job `98085144543` 已通过品牌保护、前端 `43/43`、TypeScript、Vite、完整 Rust workspace tests、release 二进制、NSIS installer 和 artifact 上传；macOS x64 `98085144611` 与 arm64 `98085144658` 均通过 release 二进制、DMG、包结构验证和 artifact 上传喵~
 - `gh run watch` 在构建继续正常运行时因到 GitHub API 的一次网络连接超时退出；没有重跑或重复创建 Actions，改用 `gh run view 32938744900` 查询同一 run，最终确认三平台全部成功喵~
 - Actions 仅有 GitHub 官方 actions Node 20 被平台强制为 Node 24 的维护性注解，没有产品测试、编译、安装包或资产失败喵~
+- 正式 annotated tag `v1.0.9` 已创建并推送；递归解析后的产品提交精确为已通过主分支 Actions 的 `9a9dd4fb430e92aea9ede3c5c3c2769b4fe6c9a4`喵~
+- 正式 Release workflow `32940374620` 全部成功：verify-version `98089957178`、Windows x64 `98089990402`、macOS x64 `98089990395`、macOS arm64 `98089990406` 与 Publish GitHub Release `98091988393` 均为 success喵~
+- `v1.0.9` 已核验为 latest、非草稿、非预发布，详细中文发行说明完整记录全过程事件、思考边界、搜索/命令/文件/工具输出、队列顺序、节流、上限、脱敏、测试和升级步骤；`v1.0.8` 顶部已增加 superseded 通知喵~
+- 六项正式资产均为 uploaded 且 digest 可读：Windows Setup `20,792,087` 字节、SHA-256 `eb887c122d49769dedf8fee29a09c3b3829e8c3fce9198558d780faf1ed5389f`；Windows ZIP `26,545,097` 字节、SHA-256 `d216ab0b3c3962f32df99d0353823061c861038de12dc5def1888221f045fbc9`喵~
+- macOS x64 DMG `33,667,904` 字节、SHA-256 `caf8ec123bff3f800109a9bed74410ed3b5f73cb26dea8f2e986a5c8192fda81`；x64 ZIP `28,136,689` 字节、SHA-256 `2b3fb032d959a34ca27d89b01652ca691e731ac222f1f1f1617ef3994f402132`喵~
+- macOS arm64 DMG `32,449,161` 字节、SHA-256 `ee4d5429caa2f0bbbd1190428390990b04d48040a142890e238ce323c2964bd3`；arm64 ZIP `27,596,561` 字节、SHA-256 `2ba5533e7499e475e4ba66209764f2e16f0d586dcdbc7f239f84e846121fe0df`喵~
+- GitHub queued/in-progress Actions 当前为 `0`；两个临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 均不存在，工作树在最终日志提交前干净喵~
