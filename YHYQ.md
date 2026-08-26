@@ -1207,3 +1207,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 最终 fake app-server 同时覆盖 commentary 与 final_answer：commentary 只进入微信过程输出，final_answer 才进入最终回复；旧版缺少 phase 时继续保持兼容行为喵~
 - fake Weixin HTTP sink 精确验证进度通过真实 `ilink/bot/sendmessage` 请求按开始、摘要、完成顺序发送，统一入口会在发出前再次执行 ANSI 清理、敏感行脱敏和单项 16000 字符上限喵~
 - 当前没有残留 cargo、rustc 或测试子进程；工作树在本记录提交前干净，完整改动只涉及微信 app-server/进度通道、微信测试构造器、管理器说明、版本和文档喵~
+- `v1.0.9` 本地构建残留已清理：`cargo clean` 删除 `22762` 个文件、共 `26.9 GiB`；随后用 Node `path.relative` 验证目标严格位于仓库内，再删除前端 `node_modules` 与 `dist`喵~
+- 已确认 Rust `target`、前端 `node_modules` 和 `dist` 三个目录均不存在，没有遗留 fake app-server、fake Weixin sink、测试进程或临时发行说明喵~
