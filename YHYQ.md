@@ -1201,3 +1201,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - fake Weixin sink 现验证三条真实 HTTP sendmessage 请求顺序为“思考开始 → 合并摘要 → 思考完成”，敏感文本被替换为 `[redacted]`；app-server 专项仍为 `8 passed + 1 ignored`，core 编译和差异空白检查通过喵~
 - app-server `AgentMessage.phase` 现按官方 `commentary` 与 `final_answer` 区分：中途的 Codex 过程说明会立即作为“Codex 过程输出”发送微信，最终答案只在 turn 完成后发送一次完整正文，不再把 commentary 拼进最终回复造成重复喵~
 - 新增隔离回归验证 commentary 文本进入进度事件、final_answer 成为最终回复、旧版缺少 phase 时仍按兼容行为处理；fake app-server 全流程、fake Weixin sink、批处理与 core 编译全部通过喵~
+- 管理器个人微信页说明已更新为“联系人映射到独立 Codex 会话，并实时回传思考摘要、搜索、命令、工具与输出”，英文界面同步说明 live reasoning summaries、searches、commands、tools and output喵~
+- 前端契约新增实时过程说明断言；最终前端 `43/43`、TypeScript 和 Vite 生产构建再次通过，主 JS `596.92 kB`、gzip `182.99 kB`，仅有既有单 chunk 提示喵~

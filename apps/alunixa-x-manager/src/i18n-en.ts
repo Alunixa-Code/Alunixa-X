@@ -105,8 +105,8 @@ export const EN_PLAIN: Record<string, string> = {
   "选择 Codex CLI": "Choose Codex CLI",
   "Codex CLI": "Codex CLI",
   "个人微信连接": "Personal WeChat connection",
-  "扫码登录后，联系人分别映射到独立 Codex 会话":
-    "After QR sign-in, each contact maps to an independent Codex task",
+  "联系人映射到独立 Codex 会话，并实时回传思考摘要、搜索、命令、工具与输出":
+    "Each contact maps to an independent Codex task with live reasoning summaries, searches, commands, tools, and output",
   "微信连接未启动。": "The WeChat connection is not running.",
   "未登录": "Not signed in",
   "微信账号": "WeChat account",

@@ -3976,7 +3976,7 @@ function WeixinConnectScreen({
       <Panel>
         <CardHead
           title={t("个人微信连接")}
-          detail={t("扫码登录后，联系人分别映射到独立 Codex 会话")}
+          detail={t("联系人映射到独立 Codex 会话，并实时回传思考摘要、搜索、命令、工具与输出")}
         />
         <CardContent>
           <div className="weixin-status-row">
