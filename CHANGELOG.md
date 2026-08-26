@@ -1,3 +1,14 @@
+## 1.0.9 - 2026-08-26
+
+- 个人微信连接不再只等待最终回答：从收到消息开始，会实时发送 Codex 已收到任务、任务开始、思考中、公开思考摘要、计划更新、网页搜索与结果、命令、命令输出、文件修改、MCP/动态工具、Agent 协作、图片、审查、上下文压缩、错误、完成状态和最终回复喵~
+- 过程消息直接消费 Codex app-server 官方结构化 `item/*` 与 `turn/*` 通知，不从日志猜测行为，也不伪造模型不可见的内部隐式思维；原始 reasoning text 继续不订阅，只发送 app-server 明确公开的 reasoning summary 和“思考中”状态喵~
+- 命令、计划、思考摘要和工具进度使用独立发送任务并按 1.2 秒或 1600 字符合并；app-server JSON-RPC 读取不会被微信 HTTP 发送阻塞，同一操作完成前会先刷新剩余输出，最终回答始终排在全过程消息之后喵~
+- 网页搜索会显示查询、搜索/打开页面/页内查找动作和最多 8 条结构化结果；命令显示命令、工作目录、实时输出、退出码和耗时；文件变化显示新增/更新/删除路径；工具显示脱敏参数、进度、结果或错误喵~
+- 单轮高频增量设置 128K 字符保护上限，达到上限后会发送明确提示并停止继续刷增量，但所有操作开始/完成/失败状态和最终完整回答仍继续发送喵~
+- 过程文本会清理 ANSI 控制序列，并对 authorization、cookie、password、API Key、access/refresh token、GitHub/Cloudflare token 和 JWT 等明显凭据脱敏；MCP 与动态工具 JSON 按敏感字段递归脱敏喵~
+- 中间进度发送失败不会丢掉 Codex 最终结果；失败会写入脱敏诊断事件 `connect.weixin_progress_delivery_failed`，最终回复仍单独尝试发送喵~
+- 新增隔离 fake app-server 全流程回归，覆盖思考摘要、网页搜索、命令输出、MCP 进度与结果、文件变化、最终回答、raw reasoning 隔离、凭据脱敏、批量刷新和 128K 上限，全程不连接当前 Codex 或真实微信喵~
+
 ## 1.0.8 - 2026-08-25
 
 - 修复个人微信已经扫码登录、但收到首条消息后无法启动 Codex app-server 的问题；典型错误会先显示裸命令 `codex`，自动发现后又显示 Windows Store 受管目录中的 `...\WindowsApps\OpenAI.Codex_*\app\resources\codex.exe` 喵~

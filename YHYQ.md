@@ -1190,3 +1190,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 进度文本会去除 ANSI 控制序列，并对 token、password、authorization、cookie、API Key、GitHub/Cloudflare/JWT 等明显凭据执行脱敏；MCP/动态工具 JSON 参数按敏感字段递归脱敏喵~
 - 第一轮隔离全流程测试失败是因为完成的 MCP item 同时携带 `error: null` 和有效 `result`，格式化器把 null 当作真实错误而跳过 result；修复为只处理非 null error/result 后，隔离 fake app-server 已验证思考、网页搜索、命令输出、MCP 结果、文件变化和最终状态全部产生进度事件喵~
 - 当前专项通过：app-server `8 passed + 1 ignored fake child`、进度批处理 `2/2`、raw reasoning 忽略与工具凭据脱敏 `1/1`、核心编译与差异空白检查通过；所有运行均为测试二进制和临时目录，没有连接真实 Codex 或微信喵~
+- 发行版本已统一提升为 `1.0.9`，覆盖 Cargo workspace、四个本地 Cargo.lock package、前端 package/lock 根包与 Tauri 配置；CHANGELOG 详细记录全过程事件、节流、上限、脱敏和兼容边界喵~
+- 首次直接执行完整 workspace tests 时，Tauri manager 在 `generate_context!` 阶段因前一版本清理后 `apps/alunixa-x-manager/dist` 不存在而停止；core 新代码此前已通过专项，这不是产品代码编译错误喵~
+- 完成 `npm ci`、前端 `43/43`、TypeScript 和 Vite 生产构建后，完整 `cargo test --workspace` 全部通过：core `280 passed + 1 ignored fake child`、manager `33/33`，其余集成与文档测试零失败喵~
+- `cargo check --workspace --all-targets`、品牌保护、Rust formatter、版本一致性和差异空白检查均通过；前端仍只有既有单 chunk 提示与 4 个既有 npm 依赖漏洞（3 high、1 low），未执行无关依赖升级喵~
