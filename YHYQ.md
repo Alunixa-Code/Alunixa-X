@@ -1203,3 +1203,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 新增隔离回归验证 commentary 文本进入进度事件、final_answer 成为最终回复、旧版缺少 phase 时仍按兼容行为处理；fake app-server 全流程、fake Weixin sink、批处理与 core 编译全部通过喵~
 - 管理器个人微信页说明已更新为“联系人映射到独立 Codex 会话，并实时回传思考摘要、搜索、命令、工具与输出”，英文界面同步说明 live reasoning summaries、searches、commands、tools and output喵~
 - 前端契约新增实时过程说明断言；最终前端 `43/43`、TypeScript 和 Vite 生产构建再次通过，主 JS `596.92 kB`、gzip `182.99 kB`，仅有既有单 chunk 提示喵~
+- 最终完整验收在 commentary 分流和 UI 说明更新后再次通过：core `281 passed + 1 ignored fake child`、manager `33/33`，完整 workspace 集成与文档测试零失败，`cargo check --workspace --all-targets`、品牌保护、Rust formatter、版本 `1.0.9` 一致性和差异空白检查通过喵~
+- 最终 fake app-server 同时覆盖 commentary 与 final_answer：commentary 只进入微信过程输出，final_answer 才进入最终回复；旧版缺少 phase 时继续保持兼容行为喵~
+- fake Weixin HTTP sink 精确验证进度通过真实 `ilink/bot/sendmessage` 请求按开始、摘要、完成顺序发送，统一入口会在发出前再次执行 ANSI 清理、敏感行脱敏和单项 16000 字符上限喵~
+- 当前没有残留 cargo、rustc 或测试子进程；工作树在本记录提交前干净，完整改动只涉及微信 app-server/进度通道、微信测试构造器、管理器说明、版本和文档喵~
