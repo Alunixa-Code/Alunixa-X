@@ -1372,7 +1372,7 @@ fn safe_json_preview(value: &Value) -> String {
     sanitize_progress_text(&serde_json::to_string(&sanitized(value)).unwrap_or_default())
 }
 
-fn sanitize_progress_text(value: &str) -> String {
+pub(super) fn sanitize_progress_text(value: &str) -> String {
     let mut without_ansi = String::new();
     let mut chars = value.chars().peekable();
     while let Some(character) = chars.next() {

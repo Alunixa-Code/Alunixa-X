@@ -3,7 +3,9 @@ use std::time::Duration;
 
 use tokio::sync::mpsc::UnboundedReceiver;
 
-use super::app_server::{AppServerProgressEvent, AppServerProgressKind, AppServerProgressPhase};
+use super::app_server::{
+    AppServerProgressEvent, AppServerProgressKind, AppServerProgressPhase, sanitize_progress_text,
+};
 use super::weixin::WeixinClient;
 
 const FLUSH_INTERVAL: Duration = Duration::from_millis(1_200);
@@ -25,7 +27,8 @@ pub(crate) struct ProgressMessageBatcher {
 }
 
 impl ProgressMessageBatcher {
-    pub(crate) fn push(&mut self, event: AppServerProgressEvent) -> Vec<String> {
+    pub(crate) fn push(&mut self, mut event: AppServerProgressEvent) -> Vec<String> {
+        event.detail = sanitize_progress_text(&event.detail);
         if event.phase == AppServerProgressPhase::Delta {
             return self.push_delta(event);
         }

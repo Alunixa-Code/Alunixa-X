@@ -1194,3 +1194,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 首次直接执行完整 workspace tests 时，Tauri manager 在 `generate_context!` 阶段因前一版本清理后 `apps/alunixa-x-manager/dist` 不存在而停止；core 新代码此前已通过专项，这不是产品代码编译错误喵~
 - 完成 `npm ci`、前端 `43/43`、TypeScript 和 Vite 生产构建后，完整 `cargo test --workspace` 全部通过：core `280 passed + 1 ignored fake child`、manager `33/33`，其余集成与文档测试零失败喵~
 - `cargo check --workspace --all-targets`、品牌保护、Rust formatter、版本一致性和差异空白检查均通过；前端仍只有既有单 chunk 提示与 4 个既有 npm 依赖漏洞（3 high、1 low），未执行无关依赖升级喵~
+- 实时进度通道进一步前移到收到微信消息之后：现在会发送“已收到微信消息”、app-server 启动/连接、联系人会话恢复或创建、恢复失败后的替代会话、会话准备完成，再进入 Codex turn 全过程喵~
+- 无论 app-server 启动、会话准备、turn 执行或用户停止在哪一步失败，都会先通过同一进度队列发送明确失败信息、刷新剩余消息并关闭队列；进度发送失败只写诊断，最终错误处理和最终回复仍继续喵~
+- 增加每个单项事件 16000 字符上限，超长 MCP 结果、工具参数或异常文本会明确标记截断；命令等增量仍保留单轮 128K 总上限，避免完成事件绕过保护导致巨型微信消息或内存占用喵~
+- 新增隔离 fake Weixin HTTP sink 回归，第一次失败精确揭露由 connect 模块直接产生的桥接状态没有经过 app-server 格式化器，因此测试中的 Authorization 文本未脱敏；已把统一 ANSI 清理、凭据脱敏和单项上限下沉到最终批处理入口，确保所有来源都执行同一保护喵~
+- fake Weixin sink 现验证三条真实 HTTP sendmessage 请求顺序为“思考开始 → 合并摘要 → 思考完成”，敏感文本被替换为 `[redacted]`；app-server 专项仍为 `8 passed + 1 ignored`，core 编译和差异空白检查通过喵~
