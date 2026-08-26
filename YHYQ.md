@@ -1209,3 +1209,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前没有残留 cargo、rustc 或测试子进程；工作树在本记录提交前干净，完整改动只涉及微信 app-server/进度通道、微信测试构造器、管理器说明、版本和文档喵~
 - `v1.0.9` 本地构建残留已清理：`cargo clean` 删除 `22762` 个文件、共 `26.9 GiB`；随后用 Node `path.relative` 验证目标严格位于仓库内，再删除前端 `node_modules` 与 `dist`喵~
 - 已确认 Rust `target`、前端 `node_modules` 和 `dist` 三个目录均不存在，没有遗留 fake app-server、fake Weixin sink、测试进程或临时发行说明喵~
+- 唯一主分支权威 Actions `32938744900` 已完成且结论为 success，head SHA 精确为 release-prep 提交 `9a9dd4fb430e92aea9ede3c5c3c2769b4fe6c9a4`喵~
+- Windows job `98085144543` 已通过品牌保护、前端 `43/43`、TypeScript、Vite、完整 Rust workspace tests、release 二进制、NSIS installer 和 artifact 上传；macOS x64 `98085144611` 与 arm64 `98085144658` 均通过 release 二进制、DMG、包结构验证和 artifact 上传喵~
+- `gh run watch` 在构建继续正常运行时因到 GitHub API 的一次网络连接超时退出；没有重跑或重复创建 Actions，改用 `gh run view 32938744900` 查询同一 run，最终确认三平台全部成功喵~
+- Actions 仅有 GitHub 官方 actions Node 20 被平台强制为 Node 24 的维护性注解，没有产品测试、编译、安装包或资产失败喵~
