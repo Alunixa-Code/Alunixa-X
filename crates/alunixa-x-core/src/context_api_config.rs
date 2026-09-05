@@ -358,4 +358,28 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn inline_features_and_provider_replacement_remain_valid_and_reversible() {
+        let temp = tempfile::tempdir().unwrap();
+        let original = "features = { goals = true, token_budget = { enabled = false } }\n";
+        let (enabled, state) = prepare_config(
+            temp.path(), original, true, Path::new("/test/bridge"),
+        ).unwrap();
+        assert!(enabled.parse::<toml::Value>().is_ok());
+        save_restore(temp.path(), &state.unwrap()).unwrap();
+        let (disabled, _) = prepare_config(
+            temp.path(), &enabled, false, Path::new("/test/bridge"),
+        ).unwrap();
+        assert_eq!(disabled.parse::<toml::Value>().unwrap(), original.parse::<toml::Value>().unwrap());
+        let replaced = "model = 'second-provider-model'\n";
+        let (updated, state) = prepare_config(
+            temp.path(), replaced, true, Path::new("/test/bridge"),
+        ).unwrap();
+        save_restore(temp.path(), &state.unwrap()).unwrap();
+        let (disabled, _) = prepare_config(
+            temp.path(), &updated, false, Path::new("/test/bridge"),
+        ).unwrap();
+        assert_eq!(disabled.parse::<toml::Value>().unwrap(), replaced.parse::<toml::Value>().unwrap());
+    }
 }

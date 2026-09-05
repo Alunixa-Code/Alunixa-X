@@ -1239,3 +1239,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已增加按 thread UUID 隔离的 SQLite 笔记和公开消息历史检索；限定请求/笔记大小、rollout 扫描大小、目录深度、条数与返回字数，拒绝 symlink/reparse point，不读取或输出原始 reasoning/二进制附件；复用 companion 的独立 `--context-management` 入口，原图片入口保持不变喵~
 - 纯 API 配置只写本地功能与工具，不伪造 ChatGPT 登录和订阅，不修改 Provider 认证、模型或已有压缩阈值；默认 16384 token 提醒与额外 2048 token 收尾，界面已明确说明原生窗口 rollover 与传统摘要压缩的区别喵~
 - workspace 切换为 new-chat-3 时上一同步命令被中止；已只读确认正式仓库仍停在 e1eccc0 且干净，复制已有暂存源代码到新的可写 workspace 后继续，没有重复提交或重复构建喵~
+- 本地 context 专项首轮 `29/30` 通过，唯一失败揭露 SettingsStore 局部 update 的已知字段白名单遗漏新开关，导致局部关闭请求被忽略；已补齐 `merge_bool_setting(..., "codexAppExperimentalContext")` 并保留失败证据喵~
+- 为验证原生窗口 rollover 不是仅配置静态通过，已从官方 GitHub 下载独立 CLI v0.153.4 至隔离 fixture；ZIP SHA-256 `c016b0e6968b78586919c720d2685a03712f6d5f11bcd9d6f92c91eb8c41ba16` 与官方资产 digest 一致，未使用本机安装的 Codex 可执行文件喵~
+- 新增显式运行的隔离集成脚本：独立 HOME/CODEX_HOME、无 auth.json、假 API Key、随机 loopback HTTP API、禁止 shell 工具、90 秒上限；计划验证实际 MCP 笔记写入→原生 new_context→笔记读取→旧消息检索，不连接当前 Codex/CDP 或任何真实供应商喵~

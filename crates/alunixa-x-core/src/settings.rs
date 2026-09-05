@@ -1658,6 +1658,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppDisableAutoUpdate");
     merge_bool_setting(target, source, "codexAppDisableWss");
     merge_bool_setting(target, source, "codexAppResponsesIdNegotiation");
+    merge_bool_setting(target, source, "codexAppExperimentalContext");
     merge_bool_setting(target, source, "codexAppSharedTerminal");
     if let Some(value) = source
         .get("codexAppSharedTerminalRetentionMinutes")
