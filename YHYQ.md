@@ -1260,3 +1260,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已原子推送 main 与 annotated tag v1.0.10 到 Alunixa-Code/Alunixa-X，产品提交 `5e5eb3f6687ff74eca3680fa907580ec256fd94f`；仅显式创建一次正式 Release Actions `33959509419`，没有重复主分支构建或第二轮发行任务喵~
 - Actions 版本核验已成功，三平台构建进行中；本地 gh run watch 只每 60 秒读取同一 run，不重新派发；GitHub 提示既有 Dependabot 10 项，未作无关升级喵~
 - 准备清理已完成的本地构建缓存、前端临时产物、固定官方 CLI 下载和隔离测试临时目录；先保留成功端到端 evidence.json 到本任务 outputs，再仅删除精确确认的本轮路径，不删除用户服务数据或笔记喵~
+- 本地 Rust 构建缓存已清理：cargo clean 删除 10859 文件、12.1 GiB；随后在单一 PowerShell 中先解析并验证目标严格位于本项目/本次 workspace 内，再删除 node_modules、dist、独立官方 CLI 下载与本次隔离测试/暂存目录喵~
+- 成功的纯 API 原生窗口恢复证据保留在任务 outputs/context-api-runtime-evidence.json，详细中文发行说明保留在 outputs/alunixa-x-1.0.10-release.md；仓库正式源码、YHYQ.md、公开验证文档及已有用户配置没有删除喵~
