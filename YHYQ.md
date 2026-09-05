@@ -1255,3 +1255,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 最终 core lib 验收 `298 passed + 1 ignored fake child`；前端最终 `44/44`，i18n `853/853`、template `80/80`，TypeScript、Vite、品牌保护与 Rust formatter 全部通过喵~
 - 供应商回归首轮 `115/119` 通过，4 项数据库路径测试失败由测试命令全局设置 CODEX_SQLITE_HOME 覆盖测试自身 tempdir 导致，非产品代码回归；下一轮只保留隔离 CODEX_HOME 并在子进程环境移除 CODEX_SQLITE_HOME 后重跑，不改用户实际环境或数据库喵~
 - 正式 Release Windows job 加入固定官方 CLI SHA-256 校验的同一隔离端到端测试，将使用本次 release companion 二进制验证无登录笔记/窗口/历史链路，成功后才打包并发布喵~
+- 移除仅测试命令中的 CODEX_SQLITE_HOME 覆盖后，relay_config `119/119` 与 relay_switch `9/9` 全部通过；manager lib `33/33` 和 windows_subsystem 源码契约通过；最终 `cargo check --workspace --all-targets --locked` 成功喵~
+- 版本 Cargo workspace、四个 Cargo.lock 本地 package、前端 package/lock 与 Tauri 均为 1.0.10；品牌保护仍确认仓库/更新源/图标不变喵~
+- 已原子推送 main 与 annotated tag v1.0.10 到 Alunixa-Code/Alunixa-X，产品提交 `5e5eb3f6687ff74eca3680fa907580ec256fd94f`；仅显式创建一次正式 Release Actions `33959509419`，没有重复主分支构建或第二轮发行任务喵~
+- Actions 版本核验已成功，三平台构建进行中；本地 gh run watch 只每 60 秒读取同一 run，不重新派发；GitHub 提示既有 Dependabot 10 项，未作无关升级喵~
+- 准备清理已完成的本地构建缓存、前端临时产物、固定官方 CLI 下载和隔离测试临时目录；先保留成功端到端 evidence.json 到本任务 outputs，再仅删除精确确认的本轮路径，不删除用户服务数据或笔记喵~
