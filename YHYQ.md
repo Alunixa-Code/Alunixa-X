@@ -1290,3 +1290,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - launcher 在模型指令和供应商同步前执行窄范围修复；成功和失败均写入诊断事件，修复失败不吞掉后续启动流程喵~
 - 新增隔离单元测试，验证 guardianv2 被移除、goals 和 model_providers 保留、重复执行幂等；测试 `1 passed, 0 failed`，未运行真实 Codex 喵~
 - CHANGELOG 增加 Unreleased 修复说明；本轮未创建构建或发行版，避免重复 Actions，待用户确认后再升版本发布喵~
+
+## 2026-09-05 · 全量排查 Codex 更新兼容性
+
+- 用户要求再次全面查看 Alunixa X 代码，修复所有因 Codex 更新导致失效、错误或兼容性回归的功能，并推送 GitHub、通过 Actions 构建和发布新版本喵~
+- 已确认正式仓库为 `D:\Cursor\AlunixaX`、发布仓库为 `Alunixa-Code/Alunixa-X`、当前已发布版本为 `v1.0.10`；本地包含尚未发布的 guardianv2 启动前修复喵~
+- 先只读检查 YHYQ、Git 状态、工作流、功能引用与官方 Codex 当前配置/协议源码；没有连接、重启或修改当前 Codex、Helper、CDP、管理器、微信或真实供应商喵~
+- 官方当前源码确认 guardian/auto-review 仍存在，因此后续不能无条件删除 `guardianv2`；需要按当前 `FeatureToml` 可接受形状判定，只修复真正失效的旧形状喵~
+- 已建立全量审计前空 checkpoint；下一步执行隔离回归、静态兼容性检查和最小修复，再统一版本、发布和记录资产喵~
