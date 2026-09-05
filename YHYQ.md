@@ -1275,3 +1275,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 上述资产哈希来自 GitHub Release digest 元数据，未为重复校验下载或安装全部平台包；成功 API runtime evidence、完整发行说明与 release-verification-1.0.10.json 保留在当前 new-chat-4/outputs 作为有用交付证据，前序临时构建及下载目录已清理喵~
 - 收尾前最近 20 项 Actions 中没有 queued/in-progress 等未完成任务；本次只显式提交 YHYQ.md，以 [skip ci] 将此前两项日志与本项发行结果一次推送 main，不再触发新的产品构建或改变 v1.0.10 标签喵~
 - 全程没有操作用户当前 Codex、Helper、CDP、管理器、微信或其他服务，未改动真实配置、Provider、模型、压缩阈值、登录状态与发行仓库喵~
+
+## 2026-09-06 · guardianv2 导致新对话无法创建
+
+- 用户报告创建新对话失败：Codex 无法加载 config.toml，错误为 eatures.guardianv2 不匹配 FeatureToml，要求自动修复后可恢复新线程喵~
+- 已读取现有项目日志、main 分支状态和配置写入链路；当前未修改用户真实 Codex 配置、未启动或重启 Codex，先建立调查前 checkpoint 喵~
+
