@@ -1245,3 +1245,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 补齐局部设置白名单后，context 相关隔离专项 `31/31` 全部通过，companion debug 构建成功；前端 `44/44`、TypeScript 与 Vite 均通过喵~
 - npm ci 因官方 registry 多次 ECONNRESET 耗时约 8 分钟，未重复启动安装或 Actions；当前依赖审计为 5 项（1 low、4 high），未执行无关的破坏性升级喵~
 - 独立官方 CLI 的首个假 API 请求已确认无登录也暴露 native `new_context` 和 `get_context_remaining`；首轮集成脚本因“所有 MCP 工具应立即出现在第一请求”的旧假设失败，当前版本 MCP 固定通过 tool_search 延迟发现，已按官方 tool_search_call 协议修正测试，并要求重新发现后真正返回两个本地工具喵~
+- 隔离 CLI 已完成延迟工具发现，第二轮假 API 把命名空间错误编码成点分 name，导致官方 router 报 unsupported call；已按官方 FunctionCall 的独立 namespace 字段修正假 API，并收紧断言为检查实际 function_call_output，而非仅在输入历史中查到工具参数喵~

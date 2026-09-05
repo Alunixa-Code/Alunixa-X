@@ -42,10 +42,21 @@ const getToolName = (tools, suffix) => {
     }
   }
 };
-const functionCall = (name, arguments_) => ({
-  id: `fc_${randomUUID().replaceAll("-", "")}`, type: "function_call",
-  call_id: `call_${phase}`, name, arguments: JSON.stringify(arguments_),
-});
+const functionCall = (qualifiedName, arguments_) => {
+  const separator = qualifiedName.lastIndexOf(".");
+  return {
+    id: `fc_${randomUUID().replaceAll("-", "")}`, type: "function_call",
+    call_id: `call_${phase}`,
+    name: separator < 0 ? qualifiedName : qualifiedName.slice(separator + 1),
+    ...(separator < 0 ? {} : { namespace: qualifiedName.slice(0, separator) }),
+    arguments: JSON.stringify(arguments_),
+  };
+};
+const outputText = (body, callId) => {
+  const item = body.input.findLast((item) => item.type === "function_call_output" && item.call_id === callId);
+  assert(item, `Missing real tool output for ${callId}`);
+  return typeof item.output === "string" ? item.output : JSON.stringify(item.output);
+};
 const finalMessage = () => ({
   id: `msg_${phase}`, type: "message", role: "assistant", status: "completed",
   content: [{ type: "output_text", text: "ISOLATED_CONTEXT_COMPAT_PASS", annotations: [] }],
@@ -100,17 +111,18 @@ const server = createServer(async (request, response) => {
       assert(threadId, "CLI must report its own thread UUID before issuing the request");
       item = functionCall(noteName, { thread_id: threadId, action: "set", content: expectedNote });
     } else if (phase === 1) {
-      assert(inputText.includes(expectedNote), "Persistent note write must produce a real tool result");
+      assert(outputText(body, "call_0").includes(expectedNote), "Persistent note write must produce a real tool result");
       item = functionCall("new_context", {});
     } else if (phase === 2) {
       assert(!inputText.includes(expectedNote), "new_context must actually clear the earlier note tool output");
       item = functionCall(noteName, { thread_id: threadId, action: "get" });
     } else if (phase === 3) {
-      assert(inputText.includes(expectedNote), "Saved note must be readable after a real window rollover");
+      assert(outputText(body, "call_2").includes(expectedNote), "Saved note must be readable after a real window rollover");
       item = functionCall(historyName, { thread_id: threadId, query: "LOCAL_CONTEXT_NEEDLE" });
     } else {
-      assert(inputText.includes('\\"found\\":true'), "History lookup must find this thread's local rollout");
-      assert(inputText.includes("LOCAL_CONTEXT_NEEDLE"), "Local history must recover the earlier user message");
+      const history = outputText(body, "call_3");
+      assert(history.includes('"found":true') || history.includes('\\"found\\":true'), "History lookup must find this thread's local rollout");
+      assert(history.includes("LOCAL_CONTEXT_NEEDLE"), "Local history must recover the earlier user message");
       item = finalMessage();
     }
     phase++;
