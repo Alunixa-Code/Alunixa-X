@@ -1220,3 +1220,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - macOS x64 DMG `33,667,904` 字节、SHA-256 `caf8ec123bff3f800109a9bed74410ed3b5f73cb26dea8f2e986a5c8192fda81`；x64 ZIP `28,136,689` 字节、SHA-256 `2b3fb032d959a34ca27d89b01652ca691e731ac222f1f1f1617ef3994f402132`喵~
 - macOS arm64 DMG `32,449,161` 字节、SHA-256 `ee4d5429caa2f0bbbd1190428390990b04d48040a142890e238ce323c2964bd3`；arm64 ZIP `27,596,561` 字节、SHA-256 `2ba5533e7499e475e4ba66209764f2e16f0d586dcdbc7f239f84e846121fe0df`喵~
 - GitHub queued/in-progress Actions 当前为 `0`；两个临时发行说明、本地 Rust `target`、前端 `node_modules` 与 `dist` 均不存在，工作树在最终日志提交前干净喵~
+
+## 2026-09-05 · Agent 能力新增实验性上下文
+
+- 用户要求在 Agent 能力加入名为“实验性上下文”的可选开关，映射 `features.context_management.experimental_mode`，并核对相关官方资料喵~
+- 已读取历史 YHYQ.md、Git 状态与项目相关记忆；当前正式仓库为 `D:\Cursor\AlunixaX`，基线 `ef60ae5`，分支 `main`，原工作树干净，已建立修改前提交喵~
+- 已只读定位管理器 Agent 能力、设置模型及保存入口；最初读取预想的 `.github/workflows/build.yml` 失败，实际工作流为 `pr-build.yml` 和 `release-assets.yml`，未改动或启动任何构建喵~
+- 2026-09-05 官方配置参考确认该参数类型为 boolean、默认关闭，使用笔记与可搜索历史保留上下文细节，要求登录 ChatGPT Plus、Pro 或 Pro Lite；来源为 `https://learn.chatgpt.com/docs/config-file/config-reference` 喵~
+- 本轮只新增开关、持久化/启动前配置同步及隔离回归，保留现有 Provider、模型、自动压缩 token 设置与更新仓库；不使用当前 Codex 做测试，不连接或重启现有 Codex、Helper、CDP、管理器与微信服务喵~
