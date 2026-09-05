@@ -1262,3 +1262,16 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 准备清理已完成的本地构建缓存、前端临时产物、固定官方 CLI 下载和隔离测试临时目录；先保留成功端到端 evidence.json 到本任务 outputs，再仅删除精确确认的本轮路径，不删除用户服务数据或笔记喵~
 - 本地 Rust 构建缓存已清理：cargo clean 删除 10859 文件、12.1 GiB；随后在单一 PowerShell 中先解析并验证目标严格位于本项目/本次 workspace 内，再删除 node_modules、dist、独立官方 CLI 下载与本次隔离测试/暂存目录喵~
 - 成功的纯 API 原生窗口恢复证据保留在任务 outputs/context-api-runtime-evidence.json，详细中文发行说明保留在 outputs/alunixa-x-1.0.10-release.md；仓库正式源码、YHYQ.md、公开验证文档及已有用户配置没有删除喵~
+- 续接收尾时先读取 YHYQ.md、干净的 main 与此前验证证据，确认功能产品提交和正式标签均未改变；使用已提交 HEAD c03b495 作为本轮说明/日志修改前检查点，不重复修改功能或创建构建喵~
+- 工作区再次切换至 new-chat-4 导致此前两次申请中的命令被 aborted，未产生发行版编辑或产品修改；原始说明无构建结果节，已在新 workspace 继续补齐而非重复追加喵~
+- 正式 Release Actions 33959509419 已最终核验为 completed/success，产品 SHA 精确为 5e5eb3f6687ff74eca3680fa907580ec256fd94f；版本核验、Windows x64、macOS arm64、macOS x64 与 Publish GitHub Release 五个实际执行 job 全部 success，历史资产复用分支 skipped 为正常喵~
+- 读取已完成的 Windows job 101288816493 日志确认：前端 44/44、core 298 passed / 1 ignored fake child、manager 33/33、relay_config 119/119、relay_switch 9/9，完整 Rust workspace 零失败；没有重跑这些测试喵~
+- 同一正式 Windows job 使用本次 release companion 与独立官方 CLI 的纯 API 验证输出 status=PASS、requests=7、noChatGptLogin=true，证明无登录笔记写入、真实窗口切换、持久笔记读取和旧消息检索链路；模型响应仍是确定性 loopback 假 API，不宣称所有真实模型或供应商均已验收喵~
+- 只读复核脚本确认本地 evidence 中 sawRollover=false 仅表示 CLI 未发出 context_compact 事件；真正窗口切换由 new_context 后旧笔记工具结果已从输入清除的断言验证，不依赖该诊断布尔值，未修改已发行代码喵~
+- v1.0.10 Release ID 383210807 已核验为 Latest、非草稿、非预发布，六项安装包全部 uploaded；详细中文说明与本任务 outputs/alunixa-x-1.0.10-release.md 逐字核验一致，涵盖本地兼容原理、配置恢复、工具级审批范围、Token 行为、隔离验证边界、使用方式、构建结果和全部资产哈希喵~
+- Windows Setup 为 20,878,331 字节，SHA-256 979374b5d9bed937c1eb9ce1e12a6ef8b0029640ddbc571e49d0ae463f067591；Windows ZIP 为 26,679,501 字节，SHA-256 2ab2d1ec9819595358c43e09e46e14d3967c209505346e50a2df0cf7540930c2 喵~
+- macOS arm64 DMG 为 33,442,944 字节，SHA-256 1822fbf57feaf754a7a602b50bf2ae91fbaf337e12f07b43ea2d9e7dd86095a8；arm64 ZIP 为 28,534,955 字节，SHA-256 335bda5a4c0da5dedc62532a549265f04596a900a1dec3b890311161b3e035b8 喵~
+- macOS x64 DMG 为 34,802,560 字节，SHA-256 d6cea9eb3469fbf3d335004459f73e7dd78c855458a6a300bccecd65e748b647；x64 ZIP 为 29,214,998 字节，SHA-256 a2b61ff74155e58b6aa3a360a11a8ecf0ea388bed2819a0d2d08b6dc2001ae9e 喵~
+- 上述资产哈希来自 GitHub Release digest 元数据，未为重复校验下载或安装全部平台包；成功 API runtime evidence、完整发行说明与 release-verification-1.0.10.json 保留在当前 new-chat-4/outputs 作为有用交付证据，前序临时构建及下载目录已清理喵~
+- 收尾前最近 20 项 Actions 中没有 queued/in-progress 等未完成任务；本次只显式提交 YHYQ.md，以 [skip ci] 将此前两项日志与本项发行结果一次推送 main，不再触发新的产品构建或改变 v1.0.10 标签喵~
+- 全程没有操作用户当前 Codex、Helper、CDP、管理器、微信或其他服务，未改动真实配置、Provider、模型、压缩阈值、登录状态与发行仓库喵~
