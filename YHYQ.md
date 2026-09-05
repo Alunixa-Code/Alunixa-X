@@ -1252,3 +1252,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 远端只读核验 main 仍为 ef60ae5、latest 仍为 v1.0.9 且没有 v1.0.10，准备发布 1.0.10，不覆盖历史版本喵~
 - 为避免重复主分支/标签双构建，本轮计划用 release-prep 的 skip-ci 提交推送 main 与 tag，然后只显式启动一次 release-assets.yml；该正式发行工作流新增前端测试/TypeScript/i18n 与完整 Rust workspace 测试后再构建安装包，保持发布仓库、平台和六类资产不变喵~
 - 本机不运行可能触及固定 CDP 端口的 launcher 集成测试；只执行隔离核心/供应商/管理器专项和编译检查，完整 workspace 测试在没有用户 Codex 的 GitHub runner 执行喵~
+- 最终 core lib 验收 `298 passed + 1 ignored fake child`；前端最终 `44/44`，i18n `853/853`、template `80/80`，TypeScript、Vite、品牌保护与 Rust formatter 全部通过喵~
+- 供应商回归首轮 `115/119` 通过，4 项数据库路径测试失败由测试命令全局设置 CODEX_SQLITE_HOME 覆盖测试自身 tempdir 导致，非产品代码回归；下一轮只保留隔离 CODEX_HOME 并在子进程环境移除 CODEX_SQLITE_HOME 后重跑，不改用户实际环境或数据库喵~
+- 正式 Release Windows job 加入固定官方 CLI SHA-256 校验的同一隔离端到端测试，将使用本次 release companion 二进制验证无登录笔记/窗口/历史链路，成功后才打包并发布喵~

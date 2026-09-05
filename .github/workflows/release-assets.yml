@@ -122,6 +122,30 @@ jobs:
       - name: Build binaries
         run: cargo build --release
 
+      - name: Verify API-only context with isolated official CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $fixture = Join-Path $env:RUNNER_TEMP "alunixa-x-context-fixture"
+          New-Item -ItemType Directory -Force -Path $fixture | Out-Null
+          $zip = Join-Path $fixture "codex-v0.153.4.zip"
+          Invoke-WebRequest -Uri "https://github.com/openai/codex/releases/download/rust-v0.153.4/codex-x86_64-pc-windows-msvc.exe.zip" -OutFile $zip -TimeoutSec 120
+          $expected = "c016b0e6968b78586919c720d2685a03712f6d5f11bcd9d6f92c91eb8c41ba16"
+          if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
+            throw "Official isolated CLI archive digest mismatch"
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $entry = @($archive.Entries | Where-Object { $_.Name -eq "codex-x86_64-pc-windows-msvc.exe" })
+            if ($entry.Count -ne 1) { throw "Missing isolated CLI executable" }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry[0], (Join-Path $fixture "isolated-codex.exe"), $false)
+          } finally {
+            $archive.Dispose()
+          }
+          node tools/test-context-api-compat.mjs "$fixture" (Resolve-Path "target/release/alunixa-x-imagegen-mcp.exe").Path
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Stage Windows app files
         shell: pwsh
         run: |
