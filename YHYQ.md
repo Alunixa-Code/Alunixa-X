@@ -1247,3 +1247,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 独立官方 CLI 的首个假 API 请求已确认无登录也暴露 native `new_context` 和 `get_context_remaining`；首轮集成脚本因“所有 MCP 工具应立即出现在第一请求”的旧假设失败，当前版本 MCP 固定通过 tool_search 延迟发现，已按官方 tool_search_call 协议修正测试，并要求重新发现后真正返回两个本地工具喵~
 - 隔离 CLI 已完成延迟工具发现，第二轮假 API 把命名空间错误编码成点分 name，导致官方 router 报 unsupported call；已按官方 FunctionCall 的独立 namespace 字段修正假 API，并收紧断言为检查实际 function_call_output，而非仅在输入历史中查到工具参数喵~
 - 隔离端到端进一步发现真实集成问题：当前 Codex 在 CLI never 审批策略下会拒绝未指定权限的 MCP 笔记写入；本功能为用户主动开启的本地持久化能力，已仅对 context_notes/context_history 两项设置工具级 approval_mode=approve，并将该 MCP 标为 required，避免工具初始化失败后仍开始清空窗口；不修改全局审批、shell、其他 MCP 或用户服务权限喵~
+- 真实独立 CLI v0.153.4 + 本地假 Responses API 的完整链路现已通过：7 请求完成延迟发现→真实笔记写入→原生 new_context→再发现→真实 SQLite 笔记读取→旧用户消息检索→成功回答，无 auth.json，无 ChatGPT 登录；新增公开验证文档记录证据与真实模型尚未验收的边界喵~
+- 最终 formatter 仅指出本轮新增 Rust 行格式，已只格式化四个本轮改动文件，没有改动无关源码喵~
+- 远端只读核验 main 仍为 ef60ae5、latest 仍为 v1.0.9 且没有 v1.0.10，准备发布 1.0.10，不覆盖历史版本喵~
+- 为避免重复主分支/标签双构建，本轮计划用 release-prep 的 skip-ci 提交推送 main 与 tag，然后只显式启动一次 release-assets.yml；该正式发行工作流新增前端测试/TypeScript/i18n 与完整 Rust workspace 测试后再构建安装包，保持发布仓库、平台和六类资产不变喵~
+- 本机不运行可能触及固定 CDP 端口的 launcher 集成测试；只执行隔离核心/供应商/管理器专项和编译检查，完整 workspace 测试在没有用户 Codex 的 GitHub runner 执行喵~

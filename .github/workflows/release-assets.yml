@@ -106,6 +106,19 @@ jobs:
         working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
+      - name: Frontend tests and TypeScript check
+        working-directory: apps/alunixa-x-manager
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node ../../tools/i18n-verify.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rust workspace regression tests
+        run: cargo test --workspace --locked
+
       - name: Build binaries
         run: cargo build --release
 

@@ -4904,7 +4904,7 @@ function EnhanceScreen({
             <FeatureGroup title={t("对话与输入")} detail={t("调整会话管理、输入行为和对话阅读体验。")}>
               <FeatureToggle
                 title={t("实验性上下文")}
-                detail={t("默认关闭。开启后写入 features.context_management.experimental_mode = true。纯 API / 未登录时自动使用本地兼容模式：原生上下文窗口管理 + 本地笔记与历史检索，无需 ChatGPT 登录；官方云端模式要求 ChatGPT Plus、Pro 或 Pro Lite。兼容模式不是传统摘要压缩，不改动原有自动压缩 Token 阈值，默认额外预留 2048 Token 保存笔记（不突破模型上限）。关闭后恢复托管参数，保留笔记。开关自动保存，需通过 Alunixa X 重启 Codex 后生效，并使用支持 token_budget 的新版 Codex。")}
+                detail={t("默认关闭。开启后写入 features.context_management.experimental_mode = true。纯 API / 未登录时自动使用本地兼容模式：原生上下文窗口管理 + 本地笔记与历史检索，无需 ChatGPT 登录；官方云端模式要求 ChatGPT Plus、Pro 或 Pro Lite。兼容模式不是传统摘要压缩，不改动原有自动压缩 Token 阈值，默认额外预留 2048 Token 保存笔记（不突破模型上限）。仅自动批准这两个本地工具，不更改全局审批；关闭后恢复托管参数，保留笔记。开关自动保存，需通过 Alunixa X 重启 Codex 后生效，并使用支持 token_budget 的新版 Codex。")}
                 checked={form.codexAppExperimentalContext}
                 disabled={!masterEnabled}
                 onChange={(value) => setPersistedEnhanceFlag("codexAppExperimentalContext", value)}
