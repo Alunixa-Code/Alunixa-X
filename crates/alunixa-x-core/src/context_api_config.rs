@@ -115,8 +115,17 @@ pub fn prepare_config(
         args.push("--context-management");
         server["args"] = toml_edit::value(args);
         server["enabled"] = toml_edit::value(true);
+        server["required"] = toml_edit::value(true);
         server["startup_timeout_sec"] = toml_edit::value(15);
         server["tool_timeout_sec"] = toml_edit::value(30);
+        // Opt-in authorizes only these local persistence tools, not other MCPs or shell commands.
+        let mut tools = Table::new();
+        for name in ["context_notes", "context_history"] {
+            let mut policy = Table::new();
+            policy["approval_mode"] = toml_edit::value("approve");
+            tools[name] = Item::Table(policy);
+        }
+        server["tools"] = Item::Table(tools);
         let mut env = Table::new();
         env["ALUNIXA_X_CONTEXT_HOME"] =
             toml_edit::value(home.to_str().context("Codex home 不是 UTF-8")?);
@@ -287,6 +296,14 @@ mod tests {
         assert_eq!(
             parsed["mcp_servers"][CONTEXT_SERVER_ID]["args"][0].as_str(),
             Some("--context-management")
+        );
+        assert_eq!(
+            parsed["mcp_servers"][CONTEXT_SERVER_ID]["tools"]["context_notes"]["approval_mode"].as_str(),
+            Some("approve")
+        );
+        assert_eq!(
+            parsed["mcp_servers"][CONTEXT_SERVER_ID]["required"].as_bool(),
+            Some(true)
         );
         let (again, state) =
             prepare_config(temp.path(), &enabled, true, Path::new("/test/bridge")).unwrap();

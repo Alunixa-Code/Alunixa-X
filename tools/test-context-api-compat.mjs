@@ -167,8 +167,13 @@ guidance_message = "Use local context_notes and context_history. Persist task no
 command = ${tomlString(bridge)}
 args = ["--context-management"]
 enabled = true
+required = true
 [mcp_servers.alunixa-x-context.env]
 ALUNIXA_X_CONTEXT_HOME = ${tomlString(home)}
+[mcp_servers.alunixa-x-context.tools.context_notes]
+approval_mode = "approve"
+[mcp_servers.alunixa-x-context.tools.context_history]
+approval_mode = "approve"
 `);
 
 const child = spawn(executable, [
