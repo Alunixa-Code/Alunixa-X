@@ -1234,3 +1234,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 底层 `features.token_budget.enabled`、`new_context`、`get_context_remaining` 与窗口 rollover 可由本地配置启用；将配套本地持久化笔记/有界历史检索工具与管理器说明，避免调用需要 ChatGPT 登录的云端 history-notes 服务喵~
 - 官方文档首次沙盒 HTTPS 请求失败，获准后只读获取成功；源码预想旧路径 `core/src/tools/spec.rs` 返回 404，已改为按官方树定位，不反复重试失效路径喵~
 - 暂存源文件只写入本任务 workspace 后显式同步至正式仓库；没有更改实际用户 Codex 配置、登录状态或任何运行进程，未创建 Actions 或发行版喵~
+- 首轮隔离单元测试编译发现 `toml::Value` 在当前依赖版本不能直接与 bool/int 比较；已将断言改为 `as_bool()` / `as_integer()`，不是运行中的 Codex 故障，未执行真实 CLI喵~
+- 已增加纯 API 本地兼容配置：原生 token_budget、关闭云端 history-notes、独立本地 MCP、模型收尾提示与字段级恢复记录；管理器开关关闭或返回官方登录模式时恢复原值，并保留用户后续手动修改喵~
+- 已增加按 thread UUID 隔离的 SQLite 笔记和公开消息历史检索；限定请求/笔记大小、rollout 扫描大小、目录深度、条数与返回字数，拒绝 symlink/reparse point，不读取或输出原始 reasoning/二进制附件；复用 companion 的独立 `--context-management` 入口，原图片入口保持不变喵~
+- 纯 API 配置只写本地功能与工具，不伪造 ChatGPT 登录和订阅，不修改 Provider 认证、模型或已有压缩阈值；默认 16384 token 提醒与额外 2048 token 收尾，界面已明确说明原生窗口 rollover 与传统摘要压缩的区别喵~
+- workspace 切换为 new-chat-3 时上一同步命令被中止；已只读确认正式仓库仍停在 e1eccc0 且干净，复制已有暂存源代码到新的可写 workspace 后继续，没有重复提交或重复构建喵~

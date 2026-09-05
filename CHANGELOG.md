@@ -3,7 +3,11 @@
 - Agent 能力 → 对话与输入新增“实验性上下文”开关，默认关闭，操作后自动保存；开启时写入嵌套布尔参数 `features.context_management.experimental_mode = true`，关闭时只移除此参数及空父表喵~
 - 设置保存、完整配置导入、供应商切换和启动前使用同一配置策略；启动器在供应商/公共配置写入之后重新应用，避免重启或切换后丢失；遵循增强总开关，不依赖供应商管理总开关喵~
 - 保留现有 Provider、模型、上下文窗口、自动压缩 token 阈值、MCP/插件与其他 feature；支持标准/点分/内联 TOML 表，开启时拒绝覆盖无效配置或冲突的表结构，未开启时不创建空配置喵~
-- 中英文说明同步标注自动保存、需要通过 Alunixa X 重启 Codex，以及官方要求的 ChatGPT Plus、Pro 或 Pro Lite 登录；此开关不解锁账户权限，不承诺自定义 API Provider 支持，也不扩大模型上下文窗口喵~
+- 纯 API、聚合、中转和未登录账户自动走本地兼容路径：启用 Codex 原生 `features.token_budget` 窗口管理，使用独立本地 MCP `context_notes` / `context_history` 保存任务笔记与检索当前 thread 的公开用户/助手消息；不会调用需要 ChatGPT 登录的云端 history/notes API，也不伪造账户或订阅喵~
+- 兼容模式默认在剩余 16384 token 时提醒保存笔记，在原有压缩阈值后额外预留 2048 token 收尾（始终受模型完整窗口上限约束）；已有自定义提醒/收尾参数保持不变，关闭时恢复托管字段并保留用户后续手动修改及本地笔记喵~
+- 本地笔记按 thread UUID 隔离存入 SQLite，跨进程与窗口切换保留；历史检索限定该 thread 的本地 rollout，只返回公开用户/助手文本，不读取 auth.json，不返回原始 reasoning 或二进制附件，限制输入、扫描与返回大小并拒绝链接跳转喵~
+- 复用随安装包提供的 companion 二进制，通过 `--context-management` 启动独立上下文 MCP 模式；未带该参数时图片生成功能保持原样，不增加第三方服务，不改更新仓库或现有认证设置喵~
+- 中英文说明明确区分本地兼容与官方云端模式；开关自动保存，使用支持 token_budget 的新版 Codex，经 Alunixa X 重启后生效；不承诺解锁云端权限或扩大模型上下文窗口喵~
 - 官方资料核对于 2026-09-05：`https://learn.chatgpt.com/docs/config-file/config-reference` 中的 `features.context_management.experimental_mode` 条目，说明其使用笔记和可搜索历史保留细节，而非反复压缩为单一摘要喵~
 
 ## 1.0.9 - 2026-08-26

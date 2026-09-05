@@ -435,6 +435,7 @@ where
         // Apply last so provider/common-config replacement cannot reset this opt-in.
         crate::experimental_context::apply_experimental_context_policy(&home, &settings)
             .context("failed to apply Codex experimental context configuration")?;
+        crate::experimental_context::validate_local_context_companion(&home, &settings)?;
         if settings.enhancements_enabled || protocol_proxy_enabled {
             hooks.start_helper(helper_port).await?;
             helper_started = true;

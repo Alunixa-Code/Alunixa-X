@@ -15,6 +15,8 @@ pub mod codex_sqlite;
 mod computer_use_guard;
 pub mod config_backup;
 pub mod connect;
+mod context_api_config;
+pub mod context_mcp;
 pub mod diagnostic_log;
 pub mod dream_skin;
 pub mod dream_skin_community;

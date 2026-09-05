@@ -16,7 +16,7 @@ fn experimental_context_survives_provider_switch_and_respects_disabled_master() 
     let result = switch_relay_profile_in_home(&store, &home, settings.clone(), "").unwrap();
     assert!(result.settings.codex_app_experimental_context);
     let config: toml::Value = std::fs::read_to_string(home.join("config.toml")).unwrap().parse().unwrap();
-    assert_eq!(config["features"]["context_management"]["experimental_mode"], true);
+    assert_eq!(config["features"]["context_management"]["experimental_mode"].as_bool(), Some(true));
     assert!(config.get("model_provider").is_some());
 
     settings.enhancements_enabled = false;

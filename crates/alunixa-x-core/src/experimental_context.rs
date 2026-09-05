@@ -20,21 +20,90 @@ pub fn apply_experimental_context_policy(
         }
     };
     let updated = update_config(&existing, enabled)?;
+    let api_enabled = enabled && use_local_api_context(home, settings, &updated);
+    let companion = crate::context_api_config::companion_path()?;
+    let (updated, restore) =
+        crate::context_api_config::prepare_config(home, &updated, api_enabled, &companion)?;
+    // Persist rollback information before modifying the user's live TOML.
+    if let Some(restore) = &restore {
+        crate::context_api_config::save_restore(home, restore)?;
+    }
     if updated == existing {
+        if !api_enabled {
+            crate::context_api_config::clear_restore(home)?;
+        }
         return Ok(false);
     }
     crate::settings::atomic_write(&config_path, updated.as_bytes())
         .context("保存实验性上下文配置失败")?;
+    if !api_enabled {
+        crate::context_api_config::clear_restore(home)?;
+    }
     Ok(true)
+}
+
+fn use_local_api_context(home: &Path, settings: &BackendSettings, config: &str) -> bool {
+    if settings.relay_profiles_enabled {
+        let relay = settings.active_relay_profile();
+        if relay.relay_mode != crate::settings::RelayMode::Official || relay.official_mix_api_key {
+            return true;
+        }
+    }
+    let doc = config
+        .trim_start_matches('\u{feff}')
+        .parse::<DocumentMut>()
+        .ok();
+    let provider = doc
+        .as_ref()
+        .and_then(|doc| doc.get("model_provider"))
+        .and_then(Item::as_str);
+    if provider.is_some_and(|id| id != "openai") {
+        return true;
+    }
+    // Only choose the cloud path for an actual ChatGPT session, never just an API key.
+    let auth = std::fs::read(home.join("auth.json"))
+        .ok()
+        .filter(|bytes| bytes.len() <= 128 * 1024)
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    !auth.as_ref().is_some_and(|auth| {
+        auth.get("OPENAI_API_KEY")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|key| key.is_empty())
+            && auth
+                .pointer("/tokens/access_token")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|token| !token.is_empty())
+    })
+}
+
+pub fn validate_local_context_companion(
+    home: &Path,
+    settings: &BackendSettings,
+) -> anyhow::Result<()> {
+    if !(settings.enhancements_enabled && settings.codex_app_experimental_context) {
+        return Ok(());
+    }
+    let config = std::fs::read_to_string(home.join("config.toml"))?;
+    if use_local_api_context(home, settings, &config)
+        && !crate::context_api_config::companion_path()?.is_file()
+    {
+        anyhow::bail!("本地实验性上下文工具缺失，请使用完整 Alunixa X 安装包");
+    }
+    Ok(())
 }
 
 fn update_config(existing: &str, enabled: bool) -> anyhow::Result<String> {
     let has_bom = existing.starts_with('\u{feff}');
-    let mut doc = match existing.trim_start_matches('\u{feff}').parse::<DocumentMut>() {
+    let mut doc = match existing
+        .trim_start_matches('\u{feff}')
+        .parse::<DocumentMut>()
+    {
         Ok(doc) => doc,
         // A disabled, optional feature must not repair or rewrite malformed user config.
         Err(_) if !enabled => return Ok(existing.to_string()),
-        Err(error) => return Err(error).context("实验性上下文：config.toml 格式无效，未修改原配置"),
+        Err(error) => {
+            return Err(error).context("实验性上下文：config.toml 格式无效，未修改原配置");
+        }
     };
 
     if enabled {
@@ -119,7 +188,11 @@ mod tests {
         let home = temp.path().join("unused");
         assert!(!apply_experimental_context_policy(&home, &BackendSettings::default()).unwrap());
         assert!(!home.exists());
-        for original in ["# untouched\n", "[features]\ngoals = true\n", "invalid TOML ["] {
+        for original in [
+            "# untouched\n",
+            "[features]\ngoals = true\n",
+            "invalid TOML [",
+        ] {
             assert_eq!(update_config(original, false).unwrap(), original);
         }
     }
@@ -143,7 +216,10 @@ command = "example-tool"
 "#;
         let updated = update_config(original, true).unwrap();
         let mut enabled = parse(&updated);
-        assert_eq!(enabled["features"]["context_management"]["experimental_mode"], true);
+        assert_eq!(
+            enabled["features"]["context_management"]["experimental_mode"].as_bool(),
+            Some(true)
+        );
         enabled["features"]["context_management"]
             .as_table_mut()
             .unwrap()
@@ -151,7 +227,10 @@ command = "example-tool"
         assert_eq!(enabled, parse(original));
         assert!(updated.starts_with("# user configuration\n"));
         assert_eq!(update_config(&updated, true).unwrap(), updated);
-        assert_eq!(parse(&update_config(&updated, false).unwrap()), parse(original));
+        assert_eq!(
+            parse(&update_config(&updated, false).unwrap()),
+            parse(original)
+        );
     }
 
     #[test]
@@ -165,12 +244,15 @@ command = "example-tool"
         ] {
             let updated = update_config(original, true).unwrap();
             let parsed = parse(&updated);
-            assert_eq!(parsed["features"]["context_management"]["experimental_mode"], true);
-            assert_eq!(parsed["features"]["goals"], true);
+            assert_eq!(
+                parsed["features"]["context_management"]["experimental_mode"].as_bool(),
+                Some(true)
+            );
+            assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
             assert_eq!(update_config(&updated, true).unwrap(), updated);
             let disabled = update_config(&updated, false).unwrap();
             let parsed = parse(&disabled);
-            assert_eq!(parsed["features"]["goals"], true);
+            assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
             assert!(
                 parsed["features"]
                     .get("context_management")
@@ -178,7 +260,10 @@ command = "example-tool"
                     .is_none()
             );
             if original.contains("extra = 42") {
-                assert_eq!(parsed["features"]["context_management"]["extra"], 42);
+                assert_eq!(
+                    parsed["features"]["context_management"]["extra"].as_integer(),
+                    Some(42)
+                );
             }
         }
     }
@@ -214,7 +299,11 @@ command = "example-tool"
     fn invalid_toml_or_conflicting_table_types_are_not_overwritten() {
         let temp = tempfile::tempdir().unwrap();
         let config = temp.path().join("config.toml");
-        for original in ["broken = [\n", "features = false\n", "[features]\ncontext_management = true\n"] {
+        for original in [
+            "broken = [\n",
+            "features = false\n",
+            "[features]\ncontext_management = true\n",
+        ] {
             std::fs::write(&config, original).unwrap();
             assert!(apply_experimental_context_policy(temp.path(), &enabled_settings()).is_err());
             assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
@@ -237,9 +326,15 @@ command = "example-tool"
         let mut disabled_master = settings.clone();
         disabled_master.enhancements_enabled = false;
         assert!(apply_experimental_context_policy(&home, &disabled_master).unwrap());
-        assert!(!std::fs::read_to_string(home.join("config.toml")).unwrap().contains("experimental_mode"));
+        assert!(
+            !std::fs::read_to_string(home.join("config.toml"))
+                .unwrap()
+                .contains("experimental_mode")
+        );
         assert!(apply_experimental_context_policy(&home, &settings).unwrap());
-        store.update(serde_json::json!({"codexAppExperimentalContext": false})).unwrap();
+        store
+            .update(serde_json::json!({"codexAppExperimentalContext": false}))
+            .unwrap();
         let settings = store.load().unwrap();
         assert!(!settings.codex_app_experimental_context);
         assert!(apply_experimental_context_policy(&home, &settings).unwrap());
@@ -253,5 +348,30 @@ command = "example-tool"
             serde_json::to_value(enabled_settings()).unwrap()["codexAppExperimentalContext"],
             true
         );
+    }
+
+    #[test]
+    fn api_key_and_signed_out_modes_use_local_context_but_official_login_keeps_cloud_mode() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = enabled_settings();
+        settings.relay_profiles_enabled = false;
+        assert!(use_local_api_context(temp.path(), &settings, ""));
+        std::fs::write(
+            temp.path().join("auth.json"),
+            r#"{"OPENAI_API_KEY":"fixture-only"}"#,
+        )
+        .unwrap();
+        assert!(use_local_api_context(temp.path(), &settings, ""));
+        std::fs::write(
+            temp.path().join("auth.json"),
+            r#"{"tokens":{"access_token":"fixture-only"}}"#,
+        )
+        .unwrap();
+        assert!(!use_local_api_context(temp.path(), &settings, ""));
+        assert!(use_local_api_context(
+            temp.path(),
+            &settings,
+            "model_provider = 'custom'\n"
+        ));
     }
 }
