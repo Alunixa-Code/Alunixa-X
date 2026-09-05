@@ -31,6 +31,7 @@ let sawRollover = false;
 const expectedNote = "LOCAL_CONTEXT_SAVED_NOTE: resume the isolated task after rollover";
 const toolNames = [];
 const events = [];
+const discoveries = new Set();
 
 const getToolName = (tools, suffix) => {
   for (const tool of tools) {
@@ -68,14 +69,30 @@ const server = createServer(async (request, response) => {
     for await (const chunk of request) chunks.push(chunk);
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     requests++;
-    assert(requests <= 8, "No unbounded model loop");
+    assert(requests <= 10, "No unbounded model loop");
     assert.equal(request.headers.authorization, "Bearer alunixa-context-fixture-only");
     const inputText = JSON.stringify(body.input);
     toolNames.push((body.tools ?? []).map((tool) => tool.name ?? tool.type));
+    const available = [
+      ...(body.tools ?? []),
+      ...(body.input ?? []).filter((item) => item.type === "tool_search_output").flatMap((item) => item.tools ?? []),
+    ];
+    if ([0, 2, 3].includes(phase) &&
+        (!getToolName(available, "context_notes") || !getToolName(available, "context_history"))) {
+      assert(!discoveries.has(phase), "Deferred MCP discovery must return both real tools");
+      discoveries.add(phase);
+      assert((body.tools ?? []).some((tool) => tool.type === "tool_search"));
+      sse(response, {
+        id: `tsc_${requests}`, type: "tool_search_call",
+        call_id: `discover_${requests}`, execution: "client", status: "completed",
+        arguments: { query: "alunixa-x-context context_notes context_history local", limit: 8 },
+      });
+      return;
+    }
     let item;
     if (phase === 0) {
-      noteName = getToolName(body.tools ?? [], "context_notes");
-      historyName = getToolName(body.tools ?? [], "context_history");
+      noteName = getToolName(available, "context_notes");
+      historyName = getToolName(available, "context_history");
       assert(noteName && historyName, "The real CLI must expose both local MCP tools");
       assert(getToolName(body.tools ?? [], "new_context"), "Native new_context must be available without login");
       assert(getToolName(body.tools ?? [], "get_context_remaining"), "Native context budget tool must be available");
@@ -86,12 +103,13 @@ const server = createServer(async (request, response) => {
       assert(inputText.includes(expectedNote), "Persistent note write must produce a real tool result");
       item = functionCall("new_context", {});
     } else if (phase === 2) {
+      assert(!inputText.includes(expectedNote), "new_context must actually clear the earlier note tool output");
       item = functionCall(noteName, { thread_id: threadId, action: "get" });
     } else if (phase === 3) {
       assert(inputText.includes(expectedNote), "Saved note must be readable after a real window rollover");
       item = functionCall(historyName, { thread_id: threadId, query: "LOCAL_CONTEXT_NEEDLE" });
     } else {
-      assert(inputText.includes('"found\\":true') || inputText.includes('\\"found\\":true'), "History lookup must find this thread's local rollout");
+      assert(inputText.includes('\\"found\\":true'), "History lookup must find this thread's local rollout");
       assert(inputText.includes("LOCAL_CONTEXT_NEEDLE"), "Local history must recover the earlier user message");
       item = finalMessage();
     }

@@ -1242,3 +1242,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本地 context 专项首轮 `29/30` 通过，唯一失败揭露 SettingsStore 局部 update 的已知字段白名单遗漏新开关，导致局部关闭请求被忽略；已补齐 `merge_bool_setting(..., "codexAppExperimentalContext")` 并保留失败证据喵~
 - 为验证原生窗口 rollover 不是仅配置静态通过，已从官方 GitHub 下载独立 CLI v0.153.4 至隔离 fixture；ZIP SHA-256 `c016b0e6968b78586919c720d2685a03712f6d5f11bcd9d6f92c91eb8c41ba16` 与官方资产 digest 一致，未使用本机安装的 Codex 可执行文件喵~
 - 新增显式运行的隔离集成脚本：独立 HOME/CODEX_HOME、无 auth.json、假 API Key、随机 loopback HTTP API、禁止 shell 工具、90 秒上限；计划验证实际 MCP 笔记写入→原生 new_context→笔记读取→旧消息检索，不连接当前 Codex/CDP 或任何真实供应商喵~
+- 补齐局部设置白名单后，context 相关隔离专项 `31/31` 全部通过，companion debug 构建成功；前端 `44/44`、TypeScript 与 Vite 均通过喵~
+- npm ci 因官方 registry 多次 ECONNRESET 耗时约 8 分钟，未重复启动安装或 Actions；当前依赖审计为 5 项（1 low、4 high），未执行无关的破坏性升级喵~
+- 独立官方 CLI 的首个假 API 请求已确认无登录也暴露 native `new_context` 和 `get_context_remaining`；首轮集成脚本因“所有 MCP 工具应立即出现在第一请求”的旧假设失败，当前版本 MCP 固定通过 tool_search 延迟发现，已按官方 tool_search_call 协议修正测试，并要求重新发现后真正返回两个本地工具喵~
