@@ -32,6 +32,10 @@ const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "oss",
     "ollama-chat",
 ];
+/// `guardianv2` was emitted by an older Codex build, but newer builds no
+/// longer accept its shape in `FeatureToml`.  Keeping it in config.toml makes
+/// the whole file unreadable and prevents creating or resuming threads.
+const STALE_FEATURE_KEYS: &[&str] = &["guardianv2"];
 /// Codex Desktop versions at or after this release no longer inherit the
 /// ChatGPT auth.json token for custom providers when the provider explicitly
 /// sets `requires_openai_auth = false`.
@@ -155,6 +159,46 @@ pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Re
         Err(_) => set_codex_goals_feature_text_fallback(&existing, enabled),
     };
     crate::settings::atomic_write(&config_path, updated.as_bytes())
+}
+
+/// Remove feature keys known to be incompatible with the installed Codex
+/// parser.  This is intentionally narrow: unknown user features and all
+/// provider/model settings are preserved byte-for-byte by `toml_edit`.
+pub fn repair_stale_feature_entries_in_home(home: &Path) -> anyhow::Result<bool> {
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("读取 {} 失败", config_path.display()));
+        }
+    };
+    let mut document = parse_toml_document(&existing)?;
+    let Some(features) = document
+        .get_mut("features")
+        .and_then(Item::as_table_like_mut)
+    else {
+        return Ok(false);
+    };
+    let mut removed = Vec::new();
+    for key in STALE_FEATURE_KEYS {
+        if features.remove(key).is_some() {
+            removed.push(*key);
+        }
+    }
+    if removed.is_empty() {
+        return Ok(false);
+    }
+    if features.is_empty() {
+        document.as_table_mut().remove("features");
+    }
+    let updated = ensure_trailing_newline(document.to_string());
+    crate::settings::atomic_write(&config_path, updated.as_bytes())?;
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "codex_config.stale_feature_entries_repaired",
+        serde_json::json!({ "keys": removed, "path": config_path }),
+    );
+    Ok(true)
 }
 
 pub fn set_codex_imagegen_mcp_in_home(
@@ -3383,6 +3427,24 @@ fn account_label_from_jwt(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_stale_guardian_feature_preserves_other_features() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[features]\nguardianv2 = { enabled = true }\ngoals = true\n\n[model_providers.custom]\nbase_url = \"https://example.invalid\"\n",
+        )
+        .unwrap();
+
+        assert!(repair_stale_feature_entries_in_home(temp.path()).unwrap());
+        let repaired = std::fs::read_to_string(path).unwrap();
+        assert!(!repaired.contains("guardianv2"));
+        assert!(repaired.contains("goals = true"));
+        assert!(repaired.contains("[model_providers.custom]"));
+        assert!(!repair_stale_feature_entries_in_home(temp.path()).unwrap());
+    }
 
     #[test]
     fn backfill_relay_profile_from_home_with_common_restores_template_provider_id() {

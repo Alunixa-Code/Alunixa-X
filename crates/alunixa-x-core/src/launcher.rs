@@ -308,6 +308,21 @@ where
 
     let result: anyhow::Result<LaunchHandle> = async {
         let home = crate::relay_config::default_codex_home_dir();
+        match crate::relay_config::repair_stale_feature_entries_in_home(&home) {
+            Ok(true) => {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "launcher.stale_feature_entries_repaired",
+                    serde_json::json!({ "feature": "guardianv2" }),
+                );
+            }
+            Ok(false) => {}
+            Err(error) => {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "launcher.stale_feature_entries_repair_failed",
+                    serde_json::json!({ "message": error.to_string() }),
+                );
+            }
+        }
         crate::codex_instructions::apply_model_instructions_policy(
             &home,
             settings.codex_app_instructions_enabled,

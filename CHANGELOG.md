@@ -1,3 +1,7 @@
+## Unreleased
+
+- 修复新版 Codex 创建新对话失败：启动前自动移除旧版本遗留且新版 `FeatureToml` 无法解析的 `features.guardianv2`，保留其他 feature、Provider、模型和 MCP 配置，并写入诊断事件；新增隔离回归测试喵~
+
 ## 1.0.10 - 2026-09-05
 
 - Agent 能力 → 对话与输入新增“实验性上下文”开关，默认关闭，操作后自动保存；开启时写入嵌套布尔参数 `features.context_management.experimental_mode = true`，关闭时只移除此参数及空父表喵~

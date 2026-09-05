@@ -1281,3 +1281,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 用户报告创建新对话失败：Codex 无法加载 config.toml，错误为 eatures.guardianv2 不匹配 FeatureToml，要求自动修复后可恢复新线程喵~
 - 已读取现有项目日志、main 分支状态和配置写入链路；当前未修改用户真实 Codex 配置、未启动或重启 Codex，先建立调查前 checkpoint 喵~
 
+
+## 2026-09-06 · 修复新版 Codex guardianv2 配置解析失败
+
+- 用户报告创建新对话时报 `failed to load configuration: data did not match any variant of untagged enum FeatureToml in features.guardianv2`，Codex 无法加载 config.toml，要求修复喵~
+- 根因确认：旧版本遗留的 `features.guardianv2` TOML 项在新版 Codex 的 `FeatureToml` 中已没有兼容形状；该项会让整个 config.toml 解析失败，而不是单个功能关闭喵~
+- 在 core 增加 `repair_stale_feature_entries_in_home`，启动前仅移除 `guardianv2`，保留其他 feature、Provider、模型、MCP 和用户配置；没有修改真实用户 config.toml、没有启动或重启当前 Codex 喵~
+- launcher 在模型指令和供应商同步前执行窄范围修复；成功和失败均写入诊断事件，修复失败不吞掉后续启动流程喵~
+- 新增隔离单元测试，验证 guardianv2 被移除、goals 和 model_providers 保留、重复执行幂等；测试 `1 passed, 0 failed`，未运行真实 Codex 喵~
+- CHANGELOG 增加 Unreleased 修复说明；本轮未创建构建或发行版，避免重复 Actions，待用户确认后再升版本发布喵~
