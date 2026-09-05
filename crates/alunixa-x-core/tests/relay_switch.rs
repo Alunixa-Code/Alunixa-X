@@ -1,4 +1,30 @@
 use alunixa_x_core::relay_switch::switch_relay_profile_in_home;
+
+#[test]
+fn experimental_context_survives_provider_switch_and_respects_disabled_master() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let profile = pure_profile("custom", "https://provider.example/v1", "test-key");
+    let mut settings = BackendSettings {
+        active_relay_id: "custom".to_string(),
+        relay_profiles: vec![profile],
+        codex_app_experimental_context: true,
+        ..BackendSettings::default()
+    };
+    store.save(&settings).unwrap();
+    let result = switch_relay_profile_in_home(&store, &home, settings.clone(), "").unwrap();
+    assert!(result.settings.codex_app_experimental_context);
+    let config: toml::Value = std::fs::read_to_string(home.join("config.toml")).unwrap().parse().unwrap();
+    assert_eq!(config["features"]["context_management"]["experimental_mode"], true);
+    assert!(config.get("model_provider").is_some());
+
+    settings.enhancements_enabled = false;
+    switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
+    let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    assert!(!config.contains("experimental_mode"));
+    assert!(store.load().unwrap().codex_app_experimental_context);
+}
 use alunixa_x_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
     CustomRelayModel, LaunchMode, RelayMode, RelayProfile, SettingsStore,

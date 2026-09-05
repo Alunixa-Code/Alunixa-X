@@ -1,3 +1,11 @@
+## 未发布
+
+- Agent 能力 → 对话与输入新增“实验性上下文”开关，默认关闭，操作后自动保存；开启时写入嵌套布尔参数 `features.context_management.experimental_mode = true`，关闭时只移除此参数及空父表喵~
+- 设置保存、完整配置导入、供应商切换和启动前使用同一配置策略；启动器在供应商/公共配置写入之后重新应用，避免重启或切换后丢失；遵循增强总开关，不依赖供应商管理总开关喵~
+- 保留现有 Provider、模型、上下文窗口、自动压缩 token 阈值、MCP/插件与其他 feature；支持标准/点分/内联 TOML 表，开启时拒绝覆盖无效配置或冲突的表结构，未开启时不创建空配置喵~
+- 中英文说明同步标注自动保存、需要通过 Alunixa X 重启 Codex，以及官方要求的 ChatGPT Plus、Pro 或 Pro Lite 登录；此开关不解锁账户权限，不承诺自定义 API Provider 支持，也不扩大模型上下文窗口喵~
+- 官方资料核对于 2026-09-05：`https://learn.chatgpt.com/docs/config-file/config-reference` 中的 `features.context_management.experimental_mode` 条目，说明其使用笔记和可搜索历史保留细节，而非反复压缩为单一摘要喵~
+
 ## 1.0.9 - 2026-08-26
 
 - 个人微信连接不再只等待最终回答：从收到消息开始，会实时发送 Codex 已收到任务、任务开始、思考中、公开思考摘要、计划更新、网页搜索与结果、命令、命令输出、文件修改、MCP/动态工具、Agent 协作、图片、审查、上下文压缩、错误、完成状态和最终回复喵~

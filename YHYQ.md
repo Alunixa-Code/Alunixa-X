@@ -1228,3 +1228,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已只读定位管理器 Agent 能力、设置模型及保存入口；最初读取预想的 `.github/workflows/build.yml` 失败，实际工作流为 `pr-build.yml` 和 `release-assets.yml`，未改动或启动任何构建喵~
 - 2026-09-05 官方配置参考确认该参数类型为 boolean、默认关闭，使用笔记与可搜索历史保留上下文细节，要求登录 ChatGPT Plus、Pro 或 Pro Lite；来源为 `https://learn.chatgpt.com/docs/config-file/config-reference` 喵~
 - 本轮只新增开关、持久化/启动前配置同步及隔离回归，保留现有 Provider、模型、自动压缩 token 设置与更新仓库；不使用当前 Codex 做测试，不连接或重启现有 Codex、Helper、CDP、管理器与微信服务喵~
+- 已实现首版官方参数开关及保存/导入/切换/启动前同步，加入 TOML 结构、默认关闭、开关往返、设置重载和前端契约测试，当前尚未执行测试喵~
+- 用户追加要求：不登录 ChatGPT 的纯 API 状态下也能使用实验性上下文，因此本轮继续研究并实现本地兼容路径，而不是仅显示官方开关喵~
+- OpenAI 官方 `openai/codex` 固定提交 `ddf04ad26789d040f9ef6a96736f76602e35a6cc` 的 `core/src/session/token_budget.rs` 确认 experimental wrapper 有 ChatGPT/订阅/provider 门控；`ext/history-notes/src/extension.rs` 还有独立云端鉴权门控，`backend.rs` 实际 POST 到 `alpha/history/v2/*` 与 `alpha/notes/v2/*`，直接改开关或 token_budget 不会自动获得纯 API 的笔记历史喵~
+- 底层 `features.token_budget.enabled`、`new_context`、`get_context_remaining` 与窗口 rollover 可由本地配置启用；将配套本地持久化笔记/有界历史检索工具与管理器说明，避免调用需要 ChatGPT 登录的云端 history-notes 服务喵~
+- 官方文档首次沙盒 HTTPS 请求失败，获准后只读获取成功；源码预想旧路径 `core/src/tools/spec.rs` 返回 404，已改为按官方树定位，不反复重试失效路径喵~
+- 暂存源文件只写入本任务 workspace 后显式同步至正式仓库；没有更改实际用户 Codex 配置、登录状态或任何运行进程，未创建 Actions 或发行版喵~

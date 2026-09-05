@@ -21,6 +21,7 @@ pub mod dream_skin_community;
 pub mod dream_skin_library;
 pub mod dream_skin_package;
 pub mod env_conflicts;
+pub mod experimental_context;
 pub mod http_client;
 pub mod imagegen_mcp;
 pub mod install;

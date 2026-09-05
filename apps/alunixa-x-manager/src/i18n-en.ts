@@ -293,6 +293,9 @@ export const EN_PLAIN: Record<string, string> = {
   "仅在供应商明确拒绝 Responses 工具 ID 时按其错误提示协商兼容格式。":
     "Negotiate a compatible format only when the provider explicitly rejects a Responses tool item ID.",
   "Responses ID 自动协商": "Automatic Responses ID negotiation",
+  "实验性上下文": "Experimental context",
+  "默认关闭。通过笔记与可搜索历史保留上下文细节，减少反复压缩为单一摘要。开启后写入 features.context_management.experimental_mode = true；关闭后移除此参数，不改动原有自动压缩 Token 阈值。开关自动保存，需通过 Alunixa X 重启 Codex 后生效。官方要求使用支持此功能的新版 Codex，并登录 ChatGPT Plus、Pro 或 Pro Lite；自定义 API Provider 不保证支持。":
+    "Off by default. Uses notes and searchable history to preserve context details instead of repeatedly compressing them into a single summary. Enabling writes features.context_management.experimental_mode = true; disabling removes only this setting without changing your auto-compaction token threshold. The toggle saves automatically; restart Codex through Alunixa X to apply it. Requires a compatible Codex version and ChatGPT sign-in on Plus, Pro, or Pro Lite according to the official documentation; custom API providers are not guaranteed to support it.",
   "默认关闭。开启后仍先原样发送；只有上游返回 invalid_id_prefix 并明确给出期望前缀时，才只改写相关 ID 并自动重试一次。未出现错误时请求完全不变，保存后立即用于后续请求。":
     "Off by default. When enabled, the original request is still sent first. Only an invalid_id_prefix response with an explicit expected prefix triggers an ID-only rewrite and one automatic retry. Requests remain unchanged when no error occurs, and saving applies to subsequent requests immediately.",
   "记忆检索": "Memory retrieval",

@@ -1215,6 +1215,7 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             )
             .map(|_| ())
         })
+        .and_then(|_| apply_codex_experimental_context_policy(&settings))
         .and_then(|_| {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
                 settings.codex_app_disable_auto_update,
@@ -1254,6 +1255,14 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
 fn apply_codex_hook_policy(settings: &BackendSettings) -> anyhow::Result<()> {
     let launcher_path = alunixa_x_core::install::option_or_current_exe(&None, SILENT_BINARY);
     alunixa_x_core::codex_hooks::apply_alunixa_x_hooks(settings, &launcher_path).map(|_| ())
+}
+
+fn apply_codex_experimental_context_policy(settings: &BackendSettings) -> anyhow::Result<()> {
+    alunixa_x_core::experimental_context::apply_experimental_context_policy(
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+        settings,
+    )
+    .map(|_| ())
 }
 
 fn apply_codex_instructions_policy(settings: &BackendSettings) -> anyhow::Result<()> {
@@ -1310,6 +1319,7 @@ pub fn import_full_config(path: String) -> CommandResult<Value> {
                 )?;
                 apply_codex_instructions_policy(&settings)?;
                 apply_codex_hook_policy(&settings)?;
+                apply_codex_experimental_context_policy(&settings)?;
                 Ok(settings.codex_app_path)
             });
             match policy_result {

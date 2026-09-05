@@ -190,6 +190,7 @@ type BackendSettings = {
   codexAppDisableAutoUpdate: boolean;
   codexAppDisableWss: boolean;
   codexAppResponsesIdNegotiation: boolean;
+  codexAppExperimentalContext: boolean;
   codexAppSharedTerminal: boolean;
   codexAppSharedTerminalRetentionMinutes: number;
   codexAppAiShell: CodexAiShell;
@@ -952,6 +953,7 @@ const defaultSettings: BackendSettings = {
   codexAppDisableAutoUpdate: false,
   codexAppDisableWss: false,
   codexAppResponsesIdNegotiation: false,
+  codexAppExperimentalContext: false,
   codexAppSharedTerminal: false,
   codexAppSharedTerminalRetentionMinutes: 2,
   codexAppAiShell: "pwsh",
@@ -4900,6 +4902,13 @@ function EnhanceScreen({
               </div>
             </FeatureGroup>
             <FeatureGroup title={t("对话与输入")} detail={t("调整会话管理、输入行为和对话阅读体验。")}>
+              <FeatureToggle
+                title={t("实验性上下文")}
+                detail={t("默认关闭。通过笔记与可搜索历史保留上下文细节，减少反复压缩为单一摘要。开启后写入 features.context_management.experimental_mode = true；关闭后移除此参数，不改动原有自动压缩 Token 阈值。开关自动保存，需通过 Alunixa X 重启 Codex 后生效。官方要求使用支持此功能的新版 Codex，并登录 ChatGPT Plus、Pro 或 Pro Lite；自定义 API Provider 不保证支持。")}
+                checked={form.codexAppExperimentalContext}
+                disabled={!masterEnabled}
+                onChange={(value) => setPersistedEnhanceFlag("codexAppExperimentalContext", value)}
+              />
               <FeatureToggle title={t("会话删除")} detail={t("在会话列表悬停显示删除按钮，并支持撤销。")} checked={form.codexAppSessionDelete} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppSessionDelete", value)} />
               <FeatureToggle title={t("Markdown 导出")} detail={t("在会话列表显示导出按钮，导出带时间戳的 Markdown。")} checked={form.codexAppMarkdownExport} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppMarkdownExport", value)} />
               <FeatureToggle title={t("粘贴修复")} detail={t("从 Word 等富文本粘贴到 Codex composer 时只保留纯文本，避免被识别为图片/文件附件。需重启 Codex 才生效。")} checked={form.codexAppPasteFix} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPasteFix", value)} />

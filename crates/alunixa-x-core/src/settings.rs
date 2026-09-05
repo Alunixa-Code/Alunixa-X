@@ -480,6 +480,8 @@ pub struct BackendSettings {
     pub codex_app_disable_wss: bool,
     #[serde(rename = "codexAppResponsesIdNegotiation", default)]
     pub codex_app_responses_id_negotiation: bool,
+    #[serde(rename = "codexAppExperimentalContext", default)]
+    pub codex_app_experimental_context: bool,
     #[serde(rename = "codexAppSharedTerminal", default)]
     pub codex_app_shared_terminal: bool,
     #[serde(
@@ -683,6 +685,7 @@ impl Default for BackendSettings {
             codex_app_disable_auto_update: false,
             codex_app_disable_wss: false,
             codex_app_responses_id_negotiation: false,
+            codex_app_experimental_context: false,
             codex_app_shared_terminal: false,
             codex_app_shared_terminal_retention_minutes:
                 default_codex_shared_terminal_retention_minutes(),
@@ -2291,6 +2294,7 @@ mod tests {
         assert!(settings.codex_app_force_chinese_locale);
         assert!(!settings.codex_app_disable_auto_update);
         assert!(!settings.codex_app_responses_id_negotiation);
+        assert!(!settings.codex_app_experimental_context);
         assert!(!settings.codex_goals_enabled);
         assert!(settings.codex_app_path.is_empty());
         assert!(settings.codex_extra_args.is_empty());
@@ -2957,6 +2961,7 @@ experimental_bearer_token = "sk-existing""#
             "codexAppNativeMenuLocalization": false,
             "codexAppServiceTierControls": true,
             "codexAppResponsesIdNegotiation": true,
+            "codexAppExperimentalContext": true,
             "codexAppSharedTerminalRetentionMinutes": 4,
             "codexAppSubAgentMaxThreads": 7,
             "codexAppPetRealMouseLook": true,
@@ -2976,6 +2981,7 @@ experimental_bearer_token = "sk-existing""#
         assert!(updated.codex_app_thread_id_badge);
         assert!(!updated.codex_app_native_menu_localization);
         assert!(updated.codex_app_responses_id_negotiation);
+        assert!(updated.codex_app_experimental_context);
         assert_eq!(updated.codex_app_shared_terminal_retention_minutes, 4);
         assert_eq!(updated.codex_app_sub_agent_max_threads, 7);
         assert!(updated.codex_app_service_tier_controls);

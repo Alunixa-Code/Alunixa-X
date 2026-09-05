@@ -432,6 +432,9 @@ where
             .ensure_imagegen_mcp_config(&settings, helper_port)
             .await
             .context("failed to configure the Alunixa X image_gen tool")?;
+        // Apply last so provider/common-config replacement cannot reset this opt-in.
+        crate::experimental_context::apply_experimental_context_policy(&home, &settings)
+            .context("failed to apply Codex experimental context configuration")?;
         if settings.enhancements_enabled || protocol_proxy_enabled {
             hooks.start_helper(helper_port).await?;
             helper_started = true;

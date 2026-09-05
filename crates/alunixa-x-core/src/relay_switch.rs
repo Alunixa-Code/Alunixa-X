@@ -158,6 +158,7 @@ fn apply_selected_relay_profile(
         home,
         settings.codex_app_sub_agent_max_threads,
     )?;
+    crate::experimental_context::apply_experimental_context_policy(home, settings)?;
     let status = relay_config_status_from_home(home);
     if relay.relay_mode == RelayMode::PureApi && !status.configured {
         anyhow::bail!(

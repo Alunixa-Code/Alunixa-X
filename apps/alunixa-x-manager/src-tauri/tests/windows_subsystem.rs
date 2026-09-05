@@ -336,6 +336,24 @@ fn relay_context_management_is_global_not_supplier_scoped() {
 }
 
 #[test]
+fn experimental_context_policy_is_applied_on_save_import_switch_and_before_launch() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs")).unwrap();
+    let root = manifest_dir.join("../../..");
+    let launcher = std::fs::read_to_string(root.join("crates/alunixa-x-core/src/launcher.rs")).unwrap();
+    let switch = std::fs::read_to_string(root.join("crates/alunixa-x-core/src/relay_switch.rs")).unwrap();
+    assert!(commands.contains(".and_then(|_| apply_codex_experimental_context_policy(&settings))"));
+    let import = commands.split("pub fn import_full_config(").nth(1).unwrap().split("#[tauri::command]").next().unwrap();
+    assert!(import.contains("apply_codex_experimental_context_policy(&settings)?"));
+    assert!(switch.contains("experimental_context::apply_experimental_context_policy(home, settings)?"));
+    let policy = launcher.find("experimental_context::apply_experimental_context_policy(&home, &settings)").unwrap();
+    let provider = launcher.find("hooks.apply_active_relay_profile(&settings).await?").unwrap();
+    let launch = launcher.find(".launch_codex(&app_dir, debug_port, &settings, &settings.codex_extra_args)").unwrap();
+    assert!(provider < policy && policy < launch);
+    assert!(!launcher[policy..launch].contains("relay_profiles_enabled"));
+}
+
+#[test]
 fn manager_window_and_relay_detail_header_stay_usable() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let app_tsx = manifest_dir.parent().unwrap().join("src/App.tsx");
