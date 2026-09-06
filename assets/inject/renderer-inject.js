@@ -113,17 +113,42 @@
     if (!config) return;
     const enabled = config.enabled === true;
     const locale = typeof config.locale === "string" && config.locale ? config.locale : "zh-CN";
-    const installationKey = `2:${enabled ? "on" : "off"}:${locale}`;
-    if (window.__alunixaXForceChineseLocaleInstalled === installationKey) return;
+    const installationKey = `3:${enabled ? "on" : "off"}:${locale}`;
+    const previousRuntime = window.__alunixaXForceChineseLocaleRuntime;
+    if (previousRuntime?.key === installationKey && previousRuntime.status !== "failed") return;
+    previousRuntime?.dispose?.();
     window.__alunixaXForceChineseLocaleInstalled = installationKey;
-    const languages = [locale, "zh", "en-US", "en"];
+    const cleanups = [];
+    const timers = new Set();
+    const runtime = {
+      key: installationKey, enabled, disposed: false, status: "pending",
+      attempts: 0, patchedClients: 0, latePatch: false, settingSynced: false,
+      dispose() {
+        runtime.disposed = true;
+        for (const timer of timers) window.clearTimeout(timer);
+        timers.clear();
+        for (const cleanup of cleanups.splice(0).reverse()) {
+          try { cleanup(); } catch {}
+        }
+      },
+    };
+    window.__alunixaXForceChineseLocaleRuntime = runtime;
+    const later = (callback, delay) => {
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
+        if (!runtime.disposed) callback();
+      }, delay);
+      timers.add(timer);
+      return timer;
+    };
     const managedLocaleStorageKey = "alunixaX.forceChineseLocale.managed.v1";
-    const localeReloadStorageKey = "alunixaX.forceChineseLocale.reload.v1";
+    const localeReloadStorageKey = "alunixaX.forceChineseLocale.reload.v2";
 
     const readManagedLocale = () => {
       try {
         const value = JSON.parse(window.localStorage.getItem(managedLocaleStorageKey) || "null");
-        return value && typeof value === "object" ? value : null;
+        return value && typeof value === "object" && !Array.isArray(value)
+          && typeof value.appliedLocale === "string" ? value : null;
       } catch {
         return null;
       }
@@ -136,44 +161,42 @@
         } else {
           window.localStorage.removeItem(managedLocaleStorageKey);
         }
+        return true;
       } catch {
+        return false;
       }
     };
 
-    const waitForElectronBridge = () => new Promise((resolve) => {
-      const startedAt = Date.now();
-      const check = () => {
-        const bridge = window.electronBridge;
-        if (bridge && typeof bridge.sendMessageFromView === "function") {
-          resolve(bridge);
-          return;
-        }
-        if (Date.now() - startedAt >= 5000) {
-          resolve(null);
-          return;
-        }
-        window.setTimeout(check, 50);
-      };
-      check();
-    });
-
     const callCodexSettingApi = (bridge, method, params) => new Promise((resolve, reject) => {
-      const requestId = typeof crypto?.randomUUID === "function"
-        ? crypto.randomUUID()
+      const requestId = typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
         : `alunixa-x-locale-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       let timeout;
+      let settled = false;
       const cleanup = () => {
         window.clearTimeout(timeout);
+        timers.delete(timeout);
         window.removeEventListener("message", onMessage);
+        const index = cleanups.indexOf(cancel);
+        if (index >= 0) cleanups.splice(index, 1);
       };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const cancel = () => fail(new Error("Codex locale sync cancelled"));
       const onMessage = (event) => {
         const message = event?.data;
         if (!message || message.type !== "fetch-response" || message.requestId !== requestId) return;
-        cleanup();
         if (message.responseType !== "success") {
-          reject(new Error(message.error || `Codex ${method} failed`));
+          fail(new Error(`Codex ${method} failed`));
           return;
         }
+        if (settled) return;
+        settled = true;
+        cleanup();
         try {
           resolve(JSON.parse(message.bodyJsonString || "null"));
         } catch (error) {
@@ -181,10 +204,8 @@
         }
       };
       window.addEventListener("message", onMessage);
-      timeout = window.setTimeout(() => {
-        cleanup();
-        reject(new Error(`Codex ${method} timed out`));
-      }, 5000);
+      cleanups.push(cancel);
+      timeout = later(() => fail(new Error(`Codex ${method} timed out`)), 5000);
       const message = {
         type: "fetch",
         requestId,
@@ -192,196 +213,235 @@
         url: `vscode://codex/${method}`,
         body: JSON.stringify({ params }),
       };
-      Promise.resolve(bridge.sendMessageFromView(message)).catch((error) => {
-        cleanup();
-        reject(error);
-      });
+      try {
+        Promise.resolve(bridge.sendMessageFromView(message)).catch(fail);
+      } catch (error) {
+        fail(error);
+      }
     });
 
     const reloadAfterLocaleChange = (value) => {
-      const marker = JSON.stringify(value);
+      if (runtime.disposed) return;
+      const marker = JSON.stringify({ key: installationKey, value });
       try {
         if (window.sessionStorage.getItem(localeReloadStorageKey) === marker) return;
         window.sessionStorage.setItem(localeReloadStorageKey, marker);
+        if (window.sessionStorage.getItem(localeReloadStorageKey) !== marker) return;
       } catch {
+        // Without a durable per-window marker, reloading can loop forever.
+        runtime.status = "reload-deferred";
+        return;
       }
       window.location.reload();
     };
 
-    const clearLocaleReloadMarker = () => {
-      try {
-        window.sessionStorage.removeItem(localeReloadStorageKey);
-      } catch {
-      }
+    const refreshLateLocaleProvider = () => {
+      // Current React-compiled providers memoize the Layer object. A method
+      // patch made after mount cannot invalidate that object by itself.
+      if (enabled && runtime.latePatch && runtime.settingSynced) reloadAfterLocaleChange(locale);
     };
 
     const syncOfficialLocaleSetting = async () => {
       const managed = readManagedLocale();
-      if (!enabled && !managed) return;
-      const bridge = await waitForElectronBridge();
-      if (!bridge) return;
+      if (!enabled && !managed && !previousRuntime?.enabled) {
+        runtime.status = "disabled";
+        return;
+      }
+      const bridge = window.electronBridge;
+      if (typeof bridge?.sendMessageFromView !== "function") throw new Error("Codex locale bridge not ready");
       const response = await callCodexSettingApi(bridge, "get-setting", { key: "localeOverride" });
+      if (runtime.disposed) return;
+      if (!response || typeof response !== "object" || !Object.hasOwn(response, "value")) {
+        throw new Error("Invalid Codex locale setting response");
+      }
       const currentValue = response?.value ?? null;
+      if (currentValue !== null && typeof currentValue !== "string") {
+        throw new Error("Invalid Codex locale setting value");
+      }
 
       if (enabled) {
         if (currentValue === locale) {
-          clearLocaleReloadMarker();
+          runtime.settingSynced = true;
+          runtime.status = "ok";
+          refreshLateLocaleProvider();
           return;
         }
-        if (!managed) {
-          writeManagedLocale({ appliedLocale: locale, previousValue: currentValue });
+        if (!writeManagedLocale({ appliedLocale: locale, previousValue: managed ? managed.previousValue ?? null : currentValue })) {
+          throw new Error("Cannot back up the original Codex locale setting");
         }
         await callCodexSettingApi(bridge, "set-setting", { key: "localeOverride", value: locale });
+        if (runtime.disposed) return;
+        runtime.settingSynced = true;
+        runtime.status = "ok";
         reloadAfterLocaleChange(locale);
         return;
       }
 
-      if (currentValue !== managed.appliedLocale) {
+      if (!managed || currentValue !== managed.appliedLocale) {
         writeManagedLocale(null);
-        clearLocaleReloadMarker();
+        runtime.status = "disabled";
+        if (previousRuntime?.enabled) reloadAfterLocaleChange(currentValue);
         return;
       }
       const previousValue = managed.previousValue ?? null;
+      if (previousValue !== null && typeof previousValue !== "string") {
+        throw new Error("Invalid saved Codex locale value");
+      }
       await callCodexSettingApi(bridge, "set-setting", {
         key: "localeOverride",
         value: previousValue,
       });
+      if (runtime.disposed) return;
       writeManagedLocale(null);
+      runtime.status = "disabled";
       reloadAfterLocaleChange(previousValue);
     };
 
-    syncOfficialLocaleSetting().catch(() => {});
-    if (!enabled) return;
+    const syncWithRetry = () => {
+      runtime.attempts++;
+      runtime.syncPromise = syncOfficialLocaleSetting().catch(() => {
+        if (runtime.disposed) return;
+        if (runtime.attempts < 8) {
+          later(syncWithRetry, Math.min(250 * 2 ** (runtime.attempts - 1), 4000));
+        } else {
+          runtime.status = "failed";
+        }
+      });
+    };
 
     const defineNavigatorGetter = (name, value) => {
       try {
-        Object.defineProperty(Navigator.prototype, name, {
+        const original = Object.getOwnPropertyDescriptor(navigator, name);
+        const getter = () => value;
+        Object.defineProperty(navigator, name, {
           configurable: true,
-          get: () => value,
+          get: getter,
         });
-      } catch {
-        try {
-          Object.defineProperty(navigator, name, {
-            configurable: true,
-            get: () => value,
-          });
-        } catch {
-        }
-      }
+        cleanups.push(() => {
+          if (Object.getOwnPropertyDescriptor(navigator, name)?.get !== getter) return;
+          if (original) Object.defineProperty(navigator, name, original);
+          else delete navigator[name];
+        });
+      } catch {}
     };
 
-    defineNavigatorGetter("language", locale);
-    defineNavigatorGetter("languages", languages);
-
+    const patchedConfigs = new WeakMap();
     const patchI18nConfig = (dynamicConfig) => {
       if (!dynamicConfig || typeof dynamicConfig !== "object") return dynamicConfig;
-      const value = dynamicConfig.value && typeof dynamicConfig.value === "object" ? dynamicConfig.value : {};
-      const nextValue = {
-        ...value,
-        enable_i18n: true,
-        locale_source: "SYSTEM",
+      if (patchedConfigs.has(dynamicConfig)) return patchedConfigs.get(dynamicConfig);
+      const result = {
+        ...dynamicConfig,
+        get value() {
+          if (runtime.disposed) return dynamicConfig.value;
+          return { ...dynamicConfig.value, enable_i18n: true, locale_source: "SYSTEM" };
+        },
+        get(key, ...args) {
+          if (!runtime.disposed) {
+            if (key === "enable_i18n") return true;
+            if (key === "locale_source") return "SYSTEM";
+          }
+          return typeof dynamicConfig.get === "function"
+            ? dynamicConfig.get.call(dynamicConfig, key, ...args) : args[0];
+        },
       };
-      try {
-        dynamicConfig.value = nextValue;
-      } catch {
-      }
-      if (typeof dynamicConfig.get === "function" && !dynamicConfig.__alunixaXForceChineseLocaleGetPatched) {
-        const originalGet = dynamicConfig.get.bind(dynamicConfig);
-        dynamicConfig.get = (key, fallback) => {
-          if (key === "enable_i18n") return true;
-          if (key === "locale_source") return "SYSTEM";
-          return originalGet(key, fallback);
-        };
-        dynamicConfig.__alunixaXForceChineseLocaleGetPatched = true;
-      }
-      return dynamicConfig;
+      patchedConfigs.set(dynamicConfig, result);
+      return result;
     };
 
     const statsigClients = () => {
       const root = window.__STATSIG__ || globalThis.__STATSIG__;
       if (!root || typeof root !== "object") return [];
-      const clients = [root.firstInstance, typeof root.instance === "function" ? root.instance() : null];
-      if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances));
+      const clients = [];
+      try { clients.push(root.firstInstance); } catch {}
+      try { if (typeof root.instance === "function") clients.push(root.instance()); } catch {}
+      try { if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances)); } catch {}
       return clients.filter((client, index, array) => client && typeof client === "object" && array.indexOf(client) === index);
     };
 
     const patchStatsigClient = (client) => {
       if (!client || typeof client !== "object") return;
-      if (typeof client.getDynamicConfig !== "function") return;
-      if (!client.__alunixaXForceChineseLocalePatched) {
-        const originalGetDynamicConfig = client.getDynamicConfig.bind(client);
-        client.getDynamicConfig = (name, options) => {
-          const result = originalGetDynamicConfig(name, options);
-          return name === "72216192" ? patchI18nConfig(result) : result;
+      let changed = false;
+      for (const method of ["getLayer", "getDynamicConfig"]) {
+        let original;
+        try { original = client[method]; } catch { continue; }
+        if (typeof original !== "function" || original.__alunixaXLocaleRuntime === runtime) continue;
+        const patched = function (name, ...args) {
+          const result = original.call(this, name, ...args);
+          return !runtime.disposed && name === "72216192" ? patchI18nConfig(result) : result;
         };
-        client.__alunixaXForceChineseLocalePatched = true;
+        patched.__alunixaXLocaleRuntime = runtime;
+        try {
+          client[method] = patched;
+          if (client[method] !== patched) continue;
+          changed = true;
+          cleanups.push(() => { if (client[method] === patched) client[method] = original; });
+        } catch {}
       }
+      if (changed) {
+        runtime.patchedClients++;
+        runtime.latePatch ||= document.readyState !== "loading";
+        refreshLateLocaleProvider();
+      }
+    };
+
+    const watchedProperties = new WeakMap();
+    const watchProperty = (owner, key, onValue) => {
+      if (!owner || typeof owner !== "object") return;
+      let watched = watchedProperties.get(owner);
+      if (!watched) watchedProperties.set(owner, watched = new Set());
+      if (watched.has(key)) return;
+      const original = Object.getOwnPropertyDescriptor(owner, key);
+      if (original && (!original.configurable || original.get || original.set || !original.writable)) return;
+      let current = owner[key];
+      const getter = () => current;
       try {
-        patchI18nConfig(client.getDynamicConfig("72216192", { disableExposureLog: true }));
-      } catch {
-      }
+        Object.defineProperty(owner, key, {
+          configurable: true, enumerable: original?.enumerable ?? true,
+          get: getter,
+          set(value) {
+            current = value;
+            if (!runtime.disposed) {
+              try { onValue(value); } catch {}
+            }
+          },
+        });
+        watched.add(key);
+        cleanups.push(() => {
+          if (Object.getOwnPropertyDescriptor(owner, key)?.get !== getter) return;
+          if (original) Object.defineProperty(owner, key, { ...original, value: current });
+          else {
+            delete owner[key];
+            if (current !== undefined) owner[key] = current;
+          }
+        });
+      } catch {}
+      try { onValue(current); } catch {}
     };
 
     const patchStatsigRoot = (root) => {
-      if (!root || typeof root !== "object" || root.__alunixaXForceChineseLocaleRootPatched) return;
-      root.__alunixaXForceChineseLocaleRootPatched = true;
-      ["firstInstance", "instance"].forEach((key) => {
-        let current;
-        try {
-          current = root[key];
-        } catch {
-          return;
-        }
-        patchStatsigClient(typeof current === "function" && key === "instance" ? current.call(root) : current);
-        try {
-          Object.defineProperty(root, key, {
-            configurable: true,
-            get: () => current,
-            set: (next) => {
-              current = next;
-              patchStatsigClient(typeof next === "function" && key === "instance" ? next.call(root) : next);
-            },
-          });
-        } catch {
-        }
-      });
-    };
-
-    const installStatsigRootSetter = () => {
-      const descriptor = Object.getOwnPropertyDescriptor(window, "__STATSIG__");
-      if (descriptor && descriptor.configurable === false) return;
-      let currentRoot = window.__STATSIG__;
-      patchStatsigRoot(currentRoot);
-      try {
-        Object.defineProperty(window, "__STATSIG__", {
-          configurable: true,
-          get: () => currentRoot,
-          set: (next) => {
-            currentRoot = next;
-            patchStatsigRoot(next);
-            statsigClients().forEach(patchStatsigClient);
-          },
+      if (!root || typeof root !== "object") return;
+      for (const key of ["firstInstance", "instance", "instances"]) {
+        watchProperty(root, key, () => {
+          statsigClients().forEach(patchStatsigClient);
         });
-      } catch {
       }
+      statsigClients().forEach(patchStatsigClient);
     };
 
-    const patchStatsigI18nConfig = () => {
-      installStatsigRootSetter();
-      const root = window.__STATSIG__ || globalThis.__STATSIG__;
-      patchStatsigRoot(root);
-      statsigClients().forEach((client) => {
-        if (typeof client.getDynamicConfig !== "function") return;
-        patchStatsigClient(client);
-      });
-    };
-
-    patchStatsigI18nConfig();
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      patchStatsigI18nConfig();
-      if (Date.now() - startedAt > 5000) window.clearInterval(timer);
-    }, 50);
+    if (enabled) {
+      defineNavigatorGetter("language", locale);
+      defineNavigatorGetter("languages", Object.freeze([locale, "zh", "en-US", "en"]));
+      watchProperty(window, "__STATSIG__", patchStatsigRoot);
+      const startedAt = Date.now();
+      const discoverClients = () => {
+        try {
+          patchStatsigRoot(window.__STATSIG__ || globalThis.__STATSIG__);
+        } catch {}
+        if (Date.now() - startedAt < 20000) later(discoverClients, 250);
+      };
+      discoverClients();
+    }
+    syncWithRetry();
   }
 
   installAlunixaXFastStartup();
