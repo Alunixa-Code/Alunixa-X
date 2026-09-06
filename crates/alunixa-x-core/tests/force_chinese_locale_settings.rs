@@ -79,6 +79,12 @@ fn injection_script_includes_force_chinese_locale_global_and_patch() {
         "window.__ALUNIXA_X_FAST_STARTUP__ = {\"enabled\":true,\"statsigTimeoutMs\":800};"
     ));
     assert!(script.contains("__alunixaXForceChineseLocaleInstalled"));
+    assert!(script.contains("__alunixaXForceChineseLocaleRuntime"));
+    assert!(script.contains("[\"getLayer\", \"getDynamicConfig\"]"));
+    assert!(script.contains("refreshLateLocaleProvider"));
+    assert!(script.contains("runtime.attempts < 8"));
+    assert!(script.contains("Cannot back up the original Codex locale setting"));
+    assert!(!script.contains("Object.defineProperty(Navigator.prototype"));
     assert!(script.contains("__alunixaXFastStartupInstalled"));
     assert!(script.contains("72216192"));
     assert!(script.contains("enable_i18n"));
