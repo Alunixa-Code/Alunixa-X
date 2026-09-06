@@ -1329,3 +1329,26 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 正式 Actions 三平台前端与完整 Rust workspace 测试均已通过，macOS arm64 的正式二进制、DMG/ZIP、包结构核验和上传全部成功；Windows 与 macOS x64 正在 release 编译，未提前声明发行成功喵~
 - 本地只读安装包审计、最终 core/data/manager 测试与 all-targets 编译日志、发行说明和报告已保留到当前任务 `outputs/alunixa-x-1.0.11`，便于删除构建缓存后仍保留验证证据喵~
 - 本轮新仓库的 `target`、管理器 `node_modules`/`dist` 清理命令包含单一 PowerShell、精确根目录和非链接目录检查，但执行环境在进程启动前返回 `blocked by policy`，因此没有任何删除执行；停止清理尝试，不换工具绕过，缓存保留不影响 GitHub Actions 和正式安装包喵~
+
+## 2026-09-06 · Alunixa X v1.0.11 正确仓库发行完成
+
+- `Alunixa-Code/Alunixa-X` 的 `v1.0.11` 已于 `2026-09-06T01:54:08Z` 正式发布，Release ID 为 `383430985`，非草稿、非预发布；公开发行地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.11`，不再以旧仓库发行代替新仓库交付喵~
+- 唯一正式 Actions `34004305142` 于 `2026-09-06T01:54:11Z` 完成且整体 success，版本/品牌校验、Windows x64、macOS x64、macOS arm64 与 Publish GitHub Release 全部成功；未使用的历史构建复用分支 skipped 正常，没有重复发行运行喵~
+- 远端 main 和 annotated `v1.0.11` 递归解析后均为 `b9621e0d14ac6dda0a018902ff2d16904d1b1b56`，与正式 Actions head SHA、Release notes 的构建提交完全一致；tag 对象为 `f013b3a4c6a4f5739875118b51f137fd0b4a4550`，未覆盖或移动已有 tag 喵~
+- Windows 权威 job 日志确认前端 `53/53`、完整 Rust workspace 共 `38` 套件、`1046` 通过、`0` 失败；唯一 ignored 是已有 fake JSON-RPC 子进程入口，已被父测试显式执行，两个 macOS 架构的完整测试、安装包结构核验和上传同样成功喵~
+- Windows 使用正式 release companion 和固定官方 CLI 的纯 API 隔离端到端输出 `status=PASS`、`requests=7`、`noChatGptLogin=true`，原有本地笔记、真实原生窗口切换、恢复笔记与历史检索链路保留喵~
+- 六项安装资产逐项确认名称唯一、uploaded、体积非零，GitHub digest 与发行说明中 Actions 实际计算的 SHA-256 完全匹配；详细说明含高级提示词、last-good 恢复、全部兼容修复、提交和构建来源，`NotesAndHashes=PASS` 喵~
+- 未携带任何认证的 `/releases/latest` 请求返回相同 Release ID、`v1.0.11` 和六资产，确认新仓库公开 Latest 可正常读取，`AnonymousLatest=PASS` 喵~
+- 核验 JSON、正式运行元数据、Windows 权威日志与发行内容已保留在当前任务 `outputs/alunixa-x-1.0.11`；已向 Codex 右侧面板提交新发行页预览，工具返回 queued，不将排队状态误报为已显示喵~
+
+| 正式安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.11-windows-x64-setup.exe` | 20925445 | `a191f5cb735e4af78f5c4fa3c6f9898bb1f5a1841f78b7538033bca375e127b1` |
+| `Alunixa-X-1.0.11-windows-x64.zip` | 26746999 | `6dd278a504113e864b9a4f30f3b740939c456c310ab568478f71190673cbd638` |
+| `Alunixa-X-1.0.11-macos-x64.dmg` | 34842820 | `3a64b5985b424bd46e1732a84f830bfceecc28a9e78a283a0c6a6e58f4e873fc` |
+| `Alunixa-X-1.0.11-macos-x64.zip` | 29210615 | `9a88a9e8b02a55853c9cfe052c28cff2db13639e3f5a622c175b98e5839a8652` |
+| `Alunixa-X-1.0.11-macos-arm64.dmg` | 33555876 | `2532128352e15228320976a87f9cdd99348e8785201637ab6a0076de371bbd63` |
+| `Alunixa-X-1.0.11-macos-arm64.zip` | 28639167 | `48b5759e7ddc7e6856c3ed3a55df14b51a4331a92f995f840708128a359346b3` |
+
+- 所有产品修复均已推送并包含于正式 tag，额外本地提交仅记录 YHYQ 操作和验收；旧仓库仍维持归档且本轮未改动，用户正在使用的 Codex、真实提示词与配置没有被操作，新策略在安装本版本后通过 Alunixa X 启动时生效喵~
+- 唯一未完成项仍是被执行环境拒绝的本地缓存清理，三个新仓库缓存目录确认保留，未尝试其他删除工具绕过；不影响已完成的代码修复、正确仓库推送、三平台正式构建与公开发行喵~
