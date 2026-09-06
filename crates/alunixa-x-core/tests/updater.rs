@@ -65,7 +65,8 @@ fn github_payload_selects_platform_installer() {
             {"name": "source.zip", "browser_download_url": "https://example.test/source.zip"},
             {"name": "alunixa-x-manager.exe", "browser_download_url": "https://example.test/manager.exe"},
             {"name": "AlunixaX_1.0.9_x64-setup.exe", "browser_download_url": "https://example.test/setup.exe"},
-            {"name": "AlunixaX_1.0.9_x64.dmg", "browser_download_url": "https://example.test/app.dmg"}
+            {"name": "AlunixaX_1.0.9_x64.dmg", "browser_download_url": "https://example.test/app.dmg"},
+            {"name": "AlunixaX_1.0.9_arm64.dmg", "browser_download_url": "https://example.test/app-arm64.dmg"}
         ]
     }))
     .unwrap();
@@ -77,10 +78,12 @@ fn github_payload_selects_platform_installer() {
             Some("AlunixaX_1.0.9_x64-setup.exe")
         );
     } else if cfg!(target_os = "macos") {
-        assert_eq!(
-            release.asset_name.as_deref(),
-            Some("AlunixaX_1.0.9_x64.dmg")
-        );
+        let expected = if cfg!(target_arch = "aarch64") {
+            "AlunixaX_1.0.9_arm64.dmg"
+        } else {
+            "AlunixaX_1.0.9_x64.dmg"
+        };
+        assert_eq!(release.asset_name.as_deref(), Some(expected));
     } else {
         assert_eq!(release.asset_name.as_deref(), None);
     }
@@ -114,7 +117,8 @@ fn latest_json_payload_selects_platform_installer_without_github_api_shape() {
         "assets": [
             {"name": "source.zip", "url": "https://example.test/source.zip"},
             {"name": "AlunixaX-1.1.6-windows-x64-setup.exe", "url": "https://example.test/setup.exe"},
-            {"name": "AlunixaX-1.1.6-macos-x64.dmg", "url": "https://example.test/app.dmg"}
+            {"name": "AlunixaX-1.1.6-macos-x64.dmg", "url": "https://example.test/app.dmg"},
+            {"name": "AlunixaX-1.1.6-macos-arm64.dmg", "url": "https://example.test/app-arm64.dmg"}
         ]
     }))
     .unwrap();
@@ -127,10 +131,12 @@ fn latest_json_payload_selects_platform_installer_without_github_api_shape() {
             Some("AlunixaX-1.1.6-windows-x64-setup.exe")
         );
     } else if cfg!(target_os = "macos") {
-        assert_eq!(
-            release.asset_name.as_deref(),
-            Some("AlunixaX-1.1.6-macos-x64.dmg")
-        );
+        let expected = if cfg!(target_arch = "aarch64") {
+            "AlunixaX-1.1.6-macos-arm64.dmg"
+        } else {
+            "AlunixaX-1.1.6-macos-x64.dmg"
+        };
+        assert_eq!(release.asset_name.as_deref(), Some(expected));
     } else {
         assert_eq!(release.asset_name.as_deref(), None);
     }
@@ -155,6 +161,10 @@ fn asset_selection_prefers_current_platform_artifacts() {
             "AlunixaX_1.0.9_x64.dmg".to_string(),
             "https://example.test/app.dmg".to_string(),
         ),
+        (
+            "AlunixaX_1.0.9_arm64.dmg".to_string(),
+            "https://example.test/app-arm64.dmg".to_string(),
+        ),
     ];
 
     if cfg!(windows) {
@@ -162,10 +172,26 @@ fn asset_selection_prefers_current_platform_artifacts() {
         assert_eq!(selected.name, "AlunixaX_1.0.9_x64-setup.exe");
     } else if cfg!(target_os = "macos") {
         let selected = select_update_asset(&assets).unwrap();
-        assert_eq!(selected.name, "AlunixaX_1.0.9_x64.dmg");
+        let expected = if cfg!(target_arch = "aarch64") {
+            "AlunixaX_1.0.9_arm64.dmg"
+        } else {
+            "AlunixaX_1.0.9_x64.dmg"
+        };
+        assert_eq!(selected.name, expected);
     } else {
         assert!(select_update_asset(&assets).is_none());
     }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn asset_selection_rejects_wrong_arch_macos_installer() {
+    let foreign_arch = if cfg!(target_arch = "aarch64") { "x64" } else { "arm64" };
+    let assets = vec![(
+        format!("Alunixa-X-1.0.11-macos-{foreign_arch}.dmg"),
+        "https://example.test/wrong-arch.dmg".to_string(),
+    )];
+    assert!(select_update_asset(&assets).is_none());
 }
 
 #[test]

@@ -21,23 +21,104 @@ pub fn delete_local_from_paths(
     );
     let mut deleted_count = 0usize;
     let mut backup_tokens = Vec::new();
+    let mut errors = Vec::new();
     for db_path in db_paths {
         let adapter = SQLiteStorageAdapter::new(db_path, backup_store.clone());
         let candidate_result = adapter.delete_local(session);
+        if let Some(token) = candidate_result.undo_token.as_ref() {
+            backup_tokens.push(token.clone());
+        }
         if matches!(candidate_result.status, DeleteStatus::LocalDeleted) {
             deleted_count += 1;
-            if let Some(token) = candidate_result.undo_token.as_ref() {
-                backup_tokens.push(token.clone());
-            }
             result = candidate_result;
         } else if deleted_count == 0 {
+            if !is_missing_storage_result(&candidate_result) {
+                errors.push(candidate_result.message.clone());
+            }
             result = candidate_result;
+        } else if !is_missing_storage_result(&candidate_result) {
+            errors.push(candidate_result.message);
         }
     }
     if deleted_count > 1 {
         result.message = format!("已从 {deleted_count} 个本地存储删除");
-        result.undo_token = Some(json!(backup_tokens).to_string());
         result.backup_path = None;
+    }
+    if !errors.is_empty() {
+        result.status = DeleteStatus::Failed;
+        result.message = errors.join("; ");
+    }
+    if !backup_tokens.is_empty() {
+        result.undo_token = Some(if backup_tokens.len() == 1 {
+            backup_tokens.remove(0)
+        } else {
+            json!(backup_tokens).to_string()
+        });
+    }
+    result
+}
+
+fn is_missing_storage_result(result: &DeleteResult) -> bool {
+    result.undo_token.is_none()
+        && (result.message == "Thread not found in local storage"
+            || result.message == "Session not found in local storage"
+            || result.message == "Unsupported local storage schema"
+            || result.message.starts_with("Database not found:"))
+}
+
+pub fn delete_local_from_paths_with_home(
+    db_paths: impl IntoIterator<Item = PathBuf>,
+    backup_store: BackupStore,
+    session: &SessionRef,
+    home: &Path,
+) -> DeleteResult {
+    let mut index = match crate::session_index::SessionIndex::open(home, false) {
+        Ok(index) => index,
+        Err(error) => return failed(&session.session_id, error.to_string()),
+    };
+    let id = normalize_codex_thread_id(&session.session_id);
+    let lines = index
+        .as_ref()
+        .map(|index| index.lines(&id))
+        .unwrap_or_default();
+    let token = if lines.is_empty() {
+        None
+    } else {
+        match backup_store.write_backup(
+            &id,
+            &home.join("session_index.jsonl"),
+            json!({"__session_index": lines}),
+        ) {
+            Ok(token) => Some(token),
+            Err(error) => return failed(&session.session_id, error.to_string()),
+        }
+    };
+    let mut result = delete_local_from_paths(db_paths, backup_store.clone(), session);
+    if !matches!(result.status, DeleteStatus::LocalDeleted) && !is_missing_storage_result(&result) {
+        return result;
+    }
+    if let (Some(index), Some(token)) = (index.as_mut(), token) {
+        let mut tokens = result
+            .undo_token
+            .as_deref()
+            .map(|value| {
+                serde_json::from_str::<Vec<String>>(value)
+                    .unwrap_or_else(|_| vec![value.to_string()])
+            })
+            .unwrap_or_default();
+        tokens.push(token);
+        result.undo_token = Some(json!(tokens).to_string());
+        result.backup_path = None;
+        match index.remove(&id) {
+            Ok(()) => {
+                result.status = DeleteStatus::LocalDeleted;
+                result.message = "已从本地存储和会话索引删除".to_string();
+            }
+            Err(error) => {
+                result.status = DeleteStatus::Failed;
+                result.message = format!("session_index.jsonl 删除失败，可从备份恢复：{error}");
+            }
+        }
     }
     result
 }
@@ -65,6 +146,7 @@ pub struct SQLiteStorageAdapter {
     db_path: PathBuf,
     backup_store: BackupStore,
     allowed_db_paths: Vec<PathBuf>,
+    codex_home: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +154,7 @@ enum SchemaKind {
     GenericSessions,
     CodexThreads,
     CodexAutomationRuns,
+    CodexThreadCatalog,
 }
 
 fn sqlite_limit(limit: usize) -> i64 {
@@ -313,6 +396,7 @@ impl SQLiteStorageAdapter {
             allowed_db_paths: vec![db_path.clone()],
             db_path,
             backup_store,
+            codex_home: None,
         }
     }
 
@@ -322,6 +406,11 @@ impl SQLiteStorageAdapter {
                 self.allowed_db_paths.push(db_path);
             }
         }
+        self
+    }
+
+    pub fn with_codex_home(mut self, home: impl Into<PathBuf>) -> Self {
+        self.codex_home = Some(home.into());
         self
     }
 
@@ -339,6 +428,9 @@ impl SQLiteStorageAdapter {
                 Some(SchemaKind::CodexThreads) => self.delete_codex_thread(&mut db, session),
                 Some(SchemaKind::CodexAutomationRuns) => {
                     self.delete_codex_automation_run(&mut db, session)
+                }
+                Some(SchemaKind::CodexThreadCatalog) => {
+                    self.delete_catalog_thread(&mut db, session)
                 }
                 None => Ok(failed(
                     &session.session_id,
@@ -361,6 +453,7 @@ impl SQLiteStorageAdapter {
         match schema_kind(&db)? {
             Some(SchemaKind::CodexThreads) => self.list_codex_threads(&db, limit),
             Some(SchemaKind::CodexAutomationRuns) => self.list_codex_automation_runs(&db, limit),
+            Some(SchemaKind::CodexThreadCatalog) => Ok(Vec::new()),
             _ => anyhow::bail!("Unsupported local storage schema"),
         }
     }
@@ -480,7 +573,12 @@ impl SQLiteStorageAdapter {
         let result = (|| -> anyhow::Result<DeleteResult> {
             let backups = undo_backups(&self.backup_store, token)?;
             let session_id = backups[0]["session_id"].as_str().unwrap_or("").to_string();
-            restore_backups(&backups, &self.db_path, &self.allowed_db_paths)?;
+            restore_backups(
+                &backups,
+                &self.db_path,
+                &self.allowed_db_paths,
+                self.codex_home.as_deref(),
+            )?;
             Ok(DeleteResult {
                 status: DeleteStatus::Undone,
                 session_id,
@@ -736,6 +834,9 @@ impl SQLiteStorageAdapter {
             &[&session.session_id],
         )?;
         if sessions.is_empty() {
+            if has_table(db, "local_thread_catalog")? {
+                return self.delete_catalog_thread(db, session);
+            }
             return Ok(failed(
                 &session.session_id,
                 "Session not found in local storage".to_string(),
@@ -750,11 +851,19 @@ impl SQLiteStorageAdapter {
         } else {
             Vec::new()
         };
-        let token = self.backup_store.write_backup(
-            &session.session_id,
-            &self.db_path,
-            json!({"sessions": sessions, "messages": messages}),
+        let mut tables = json!({"sessions": sessions, "messages": messages});
+        let catalog_filter = local_catalog_filter(db)?;
+        let thread_id = normalize_codex_thread_id(&session.session_id);
+        backup_related_rows(
+            db,
+            tables.as_object_mut().unwrap(),
+            "local_thread_catalog",
+            &catalog_filter,
+            &[&thread_id],
         )?;
+        let token = self
+            .backup_store
+            .write_backup(&session.session_id, &self.db_path, tables)?;
         let backup_path = self.backup_store.path_for(&token);
         let delete_result = (|| -> anyhow::Result<()> {
             let tx = db.transaction()?;
@@ -765,6 +874,8 @@ impl SQLiteStorageAdapter {
                 )?;
             }
             tx.execute("DELETE FROM sessions WHERE id = ?1", [&session.session_id])?;
+            delete_related_rows(&tx, "local_thread_catalog", &catalog_filter, &[&thread_id])?;
+            bump_catalog_revision(&tx)?;
             tx.commit()?;
             Ok(())
         })();
@@ -787,6 +898,9 @@ impl SQLiteStorageAdapter {
         let thread_id = normalize_codex_thread_id(&session.session_id);
         let thread_rows = select_dicts(db, "SELECT * FROM threads WHERE id = ?1", &[&thread_id])?;
         if thread_rows.is_empty() {
+            if has_table(db, "local_thread_catalog")? {
+                return self.delete_catalog_thread(db, session);
+            }
             return Ok(failed(
                 &session.session_id,
                 "Thread not found in local storage".to_string(),
@@ -794,6 +908,14 @@ impl SQLiteStorageAdapter {
         }
         let mut tables = Map::new();
         tables.insert("threads".to_string(), Value::Array(thread_rows));
+        let catalog_filter = local_catalog_filter(db)?;
+        backup_related_rows(
+            db,
+            &mut tables,
+            "local_thread_catalog",
+            &catalog_filter,
+            &[&thread_id],
+        )?;
         backup_related_rows(
             db,
             &mut tables,
@@ -857,6 +979,8 @@ impl SQLiteStorageAdapter {
                 )?;
             }
             tx.execute("DELETE FROM threads WHERE id = ?1", [&thread_id])?;
+            delete_related_rows(&tx, "local_thread_catalog", &catalog_filter, &[&thread_id])?;
+            bump_catalog_revision(&tx)?;
             tx.commit()?;
             Ok(())
         })();
@@ -893,6 +1017,45 @@ impl SQLiteStorageAdapter {
         Ok(local_deleted(&thread_id, &token, &backup_path))
     }
 
+    fn delete_catalog_thread(
+        &self,
+        db: &mut Connection,
+        session: &SessionRef,
+    ) -> anyhow::Result<DeleteResult> {
+        let id = normalize_codex_thread_id(&session.session_id);
+        let filter = local_catalog_filter(db)?;
+        let rows = select_dicts(
+            db,
+            &format!("SELECT * FROM local_thread_catalog WHERE {filter}"),
+            &[&id],
+        )?;
+        if rows.is_empty() {
+            return Ok(failed(&id, "Thread not found in local storage".to_string()));
+        }
+        let token = self.backup_store.write_backup(
+            &id,
+            &self.db_path,
+            json!({"local_thread_catalog": rows}),
+        )?;
+        let path = self.backup_store.path_for(&token);
+        let result = (|| -> anyhow::Result<()> {
+            let tx = db.transaction()?;
+            delete_related_rows(&tx, "local_thread_catalog", &filter, &[&id])?;
+            bump_catalog_revision(&tx)?;
+            tx.commit()?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => Ok(local_deleted(&id, &token, &path)),
+            Err(error) => Ok(failed_with_undo(
+                &id,
+                error.to_string(),
+                &token,
+                Some(&path),
+            )),
+        }
+    }
+
     fn delete_codex_automation_run(
         &self,
         db: &mut Connection,
@@ -914,6 +1077,14 @@ impl SQLiteStorageAdapter {
             "thread_id = ?1",
             &[&thread_id],
         )?;
+        let catalog_filter = local_catalog_filter(db)?;
+        backup_related_rows(
+            db,
+            &mut tables,
+            "local_thread_catalog",
+            &catalog_filter,
+            &[&thread_id],
+        )?;
         if tables.values().all(|rows| {
             rows.as_array()
                 .map(|items| items.is_empty())
@@ -932,6 +1103,8 @@ impl SQLiteStorageAdapter {
             let tx = db.transaction()?;
             delete_related_rows(&tx, "automation_runs", "thread_id = ?1", &[&thread_id])?;
             delete_related_rows(&tx, "inbox_items", "thread_id = ?1", &[&thread_id])?;
+            delete_related_rows(&tx, "local_thread_catalog", &catalog_filter, &[&thread_id])?;
+            bump_catalog_revision(&tx)?;
             tx.commit()?;
             Ok(())
         })();
@@ -945,6 +1118,24 @@ impl SQLiteStorageAdapter {
         }
         Ok(local_deleted(&thread_id, &token, &backup_path))
     }
+}
+
+fn local_catalog_filter(db: &Connection) -> anyhow::Result<String> {
+    Ok(if has_columns(db, "local_thread_catalog", &["host_id"])? {
+        "thread_id = ?1 AND COALESCE(host_id, 'local') = 'local'".to_string()
+    } else {
+        "thread_id = ?1".to_string()
+    })
+}
+
+fn bump_catalog_revision(db: &Connection) -> anyhow::Result<()> {
+    if has_columns(db, "local_thread_catalog_metadata", &["catalog_revision"])? {
+        db.execute(
+            "UPDATE local_thread_catalog_metadata SET catalog_revision = catalog_revision + 1",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 fn optional_column_expression<'a>(
@@ -1118,11 +1309,16 @@ fn restore_backups(
     backups: &[Value],
     fallback_db_path: &Path,
     allowed_db_paths: &[PathBuf],
+    codex_home: Option<&Path>,
 ) -> anyhow::Result<()> {
+    let index_lines = crate::session_index::restore_lines(backups, codex_home)?;
     for backup in backups {
         let Some(tables) = backup["tables"].as_object() else {
             continue;
         };
+        if tables.contains_key("__session_index") {
+            continue;
+        }
         let source_db = backup_source_db(backup, fallback_db_path, allowed_db_paths)?;
         let db = Connection::open_with_flags(&source_db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         validate_restore_tables(tables)?;
@@ -1131,10 +1327,22 @@ fn restore_backups(
         preflight_restore_rows(&db, tables)?;
     }
 
+    let mut index = if index_lines.is_empty() {
+        None
+    } else {
+        crate::session_index::SessionIndex::open(codex_home.unwrap(), true)?
+    };
+    let index_text = index
+        .as_ref()
+        .map(|index| index.plan_restore(&index_lines))
+        .transpose()?;
     for backup in backups {
         let Some(tables) = backup["tables"].as_object() else {
             continue;
         };
+        if tables.contains_key("__session_index") {
+            continue;
+        }
         let source_db = backup_source_db(backup, fallback_db_path, allowed_db_paths)?;
         let mut db = Connection::open_with_flags(&source_db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         let tx = db.transaction()?;
@@ -1156,6 +1364,9 @@ fn restore_backups(
                 fs::write(path, bytes)?;
             }
         }
+    }
+    if let (Some(index), Some(text)) = (index.as_mut(), index_text) {
+        index.write(&text)?;
     }
     Ok(())
 }
@@ -1187,6 +1398,9 @@ fn restore_rows(db: &Connection, tables: &Map<String, Value>) -> anyhow::Result<
                 insert_row(db, table, row)?;
             }
         }
+    }
+    if tables.contains_key("local_thread_catalog") {
+        bump_catalog_revision(db)?;
     }
     Ok(())
 }
@@ -1230,6 +1444,9 @@ fn schema_kind(db: &Connection) -> anyhow::Result<Option<SchemaKind>> {
     }
     if has_table(db, "automation_runs")? && has_columns(db, "automation_runs", &["thread_id"])? {
         return Ok(Some(SchemaKind::CodexAutomationRuns));
+    }
+    if has_columns(db, "local_thread_catalog", &["thread_id"])? {
+        return Ok(Some(SchemaKind::CodexThreadCatalog));
     }
     Ok(None)
 }
@@ -1287,6 +1504,7 @@ fn validate_restore_tables(tables: &Map<String, Value>) -> anyhow::Result<()> {
         "agent_job_items",
         "automation_runs",
         "inbox_items",
+        "local_thread_catalog",
         "__files",
     ];
     for table in tables.keys() {
@@ -1354,6 +1572,7 @@ fn restore_conflict_key_columns<'a>(table: &str, row: &'a Map<String, Value>) ->
         "sessions" | "threads" => &["id"],
         "messages" => &["id"],
         "automation_runs" | "inbox_items" => &["thread_id"],
+        "local_thread_catalog" => &["host_id", "thread_id"],
         "thread_dynamic_tools" => &["thread_id", "tool_name"],
         "thread_goals" => &["thread_id", "goal"],
         "thread_spawn_edges" => &["parent_thread_id", "child_thread_id"],

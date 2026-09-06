@@ -732,8 +732,14 @@ impl BridgeDataService for LauncherDataService {
     async fn delete(&self, session: SessionRef) -> anyhow::Result<DeleteResult> {
         let db_paths = self.candidate_db_paths();
         let backup_store = alunixa_x_data::BackupStore::new(self.backup_dir.clone());
+        let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
         tokio::task::spawn_blocking(move || {
-            alunixa_x_data::delete_local_from_paths(db_paths, backup_store, &session)
+            alunixa_x_data::delete_local_from_paths_with_home(
+                db_paths,
+                backup_store,
+                &session,
+                &home,
+            )
         })
         .await
         .map_err(|error| anyhow::anyhow!("delete task failed: {error}"))
@@ -894,6 +900,7 @@ impl LauncherDataService {
             alunixa_x_data::BackupStore::new(self.backup_dir.clone()),
         )
         .with_allowed_db_paths(allowed_db_paths)
+        .with_codex_home(alunixa_x_core::codex_sqlite::default_codex_home_dir())
     }
 }
 

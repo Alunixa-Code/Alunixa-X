@@ -476,3 +476,57 @@ fn base_theme_restore_removes_generated_desktop_table() {
     let restored = std::fs::read_to_string(home.join("config.toml")).unwrap();
     assert_eq!(restored, "model = \"gpt-5\"\n");
 }
+
+#[test]
+fn base_theme_preserves_stale_backup_after_codex_home_moves() {
+    let temp = tempfile::tempdir().unwrap();
+    let old = temp.path().join("old");
+    let home = temp.path().join("new");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&old).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        old.join("config.toml"),
+        "[desktop]\nappearanceTheme='light'\n",
+    )
+    .unwrap();
+    std::fs::write(home.join("config.toml"), "model='current'\n").unwrap();
+    let theme = DreamSkinThemeConfig::default();
+    sync_dream_skin_base_theme_in_home(&old, &state, true, &theme).unwrap();
+    let backup = state.join("dream-skin-base-theme-backup.json");
+    let old_bytes = std::fs::read(&backup).unwrap();
+    std::fs::remove_file(old.join("config.toml")).unwrap();
+    sync_dream_skin_base_theme_in_home(&home, &state, true, &theme).unwrap();
+    sync_dream_skin_base_theme_in_home(&home, &state, false, &theme).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        "model='current'\n"
+    );
+    let preserved = std::fs::read_dir(&state)
+        .unwrap()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dream-skin-base-theme-backup.stale-")
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(preserved.path()).unwrap(), old_bytes);
+}
+
+#[test]
+fn base_theme_accepts_equivalent_existing_config_paths() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("home");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("config.toml"), "model='current'\n").unwrap();
+    let theme = DreamSkinThemeConfig::default();
+    sync_dream_skin_base_theme_in_home(&home, &state, true, &theme).unwrap();
+    sync_dream_skin_base_theme_in_home(&home.join("."), &state, false, &theme).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        "model='current'\n"
+    );
+}

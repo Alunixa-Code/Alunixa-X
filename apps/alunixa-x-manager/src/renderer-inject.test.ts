@@ -124,6 +124,7 @@ describe("renderer injection compatibility", () => {
     );
     const source = [
       "codexRemoteSessionProviderNormalizationEnabled",
+      "codexRemoteSessionPureApiEnabled",
       "codexRemoteSessionTargetProvider",
       "codexRemoteSessionThreadStartMethod",
       "applyCodexRemoteSessionProviderOverride",

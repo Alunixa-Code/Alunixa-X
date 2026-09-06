@@ -3437,7 +3437,7 @@ mod tests {
         let path = temp.path().join("config.toml");
         std::fs::write(
             &path,
-            "[features]\nguardianv2 = { enabled = true }\ngoals = true\n\n[model_providers.custom]\nbase_url = \"https://example.invalid\"\n",
+            "[features]\nguardianv2 = \"legacy\"\ngoals = true\n\n[model_providers.custom]\nbase_url = \"https://example.invalid\"\n",
         )
         .unwrap();
 
@@ -3447,6 +3447,31 @@ mod tests {
         assert!(repaired.contains("goals = true"));
         assert!(repaired.contains("[model_providers.custom]"));
         assert!(!repair_stale_feature_entries_in_home(temp.path()).unwrap());
+    }
+
+    #[test]
+    fn repair_stale_guardian_preserves_supported_boolean_and_structured_settings() {
+        for value in [
+            "true",
+            "false",
+            "{ enabled = true }",
+            "{ enabled = false, thread_context = true }",
+            "{ enabled = true, transcript = { include_images = false } }",
+            "{ future_option = \"preserve unknown structured options\" }",
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("config.toml");
+            let original = format!("[features]\nguardianv2 = {value}\ngoals = true\n");
+            std::fs::write(&path, &original).unwrap();
+            assert!(!repair_stale_feature_entries_in_home(temp.path()).unwrap());
+            assert_eq!(std::fs::read_to_string(path).unwrap(), original);
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("config.toml");
+        let original = "[features.guardianv2]\nenabled = true\nthread_context = true\n";
+        std::fs::write(&path, original).unwrap();
+        assert!(!repair_stale_feature_entries_in_home(temp.path()).unwrap());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), original);
     }
 
     #[test]

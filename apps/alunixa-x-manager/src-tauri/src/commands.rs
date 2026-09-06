@@ -1687,12 +1687,13 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
                 .collect::<Vec<_>>(),
         }),
     );
-    let result = alunixa_x_data::delete_local_from_paths(
+    let result = alunixa_x_data::delete_local_from_paths_with_home(
         candidate_paths.clone(),
         alunixa_x_data::BackupStore::new(
             alunixa_x_core::paths::default_app_state_dir().join("backups"),
         ),
         &session,
+        &alunixa_x_core::codex_sqlite::default_codex_home_dir(),
     );
     log_manager_event(
         "manager.delete_local_session.finish",

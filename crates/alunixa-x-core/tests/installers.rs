@@ -5,6 +5,29 @@ use alunixa_x_core::install::{
 };
 
 #[test]
+fn release_requires_tests_and_versioned_notes_before_publication() {
+    let workflow = include_str!("../../../.github/workflows/release-assets.yml");
+    assert_eq!(workflow.matches("- name: Validate frontend").count(), 2);
+    assert_eq!(
+        workflow.matches("cargo test --workspace --locked").count(),
+        2
+    );
+    assert!(workflow.contains("docs/releases/${RELEASE_TAG}.md"));
+    assert!(workflow.contains("--notes-file \"$NOTES\""));
+    assert!(workflow.contains("cd dist/release && sha256sum *"));
+    assert!(workflow.contains("test \"$(find dist/release -maxdepth 1 -type f | wc -l)\" -eq 12"));
+    let preview = include_str!("../../../.github/workflows/pr-build.yml");
+    assert_eq!(preview.matches("run: npm ci").count(), 2);
+    assert_eq!(preview.matches("run: npm test").count(), 2);
+    assert_eq!(preview.matches("run: npm run check").count(), 2);
+    assert_eq!(
+        preview.matches("cargo test --workspace --locked").count(),
+        2
+    );
+    assert!(!preview.contains("npm install --package-lock=false"));
+}
+
+#[test]
 fn windows_entrypoint_plan_contains_silent_and_manager_entrypoints() {
     let options = InstallOptions {
         install_root: Some("C:/Users/A/Desktop".into()),

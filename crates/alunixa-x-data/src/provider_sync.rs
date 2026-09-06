@@ -362,6 +362,15 @@ pub fn run_remote_control_session_finalization_for_thread_with_target(
     thread_id: &str,
     target_provider: &str,
 ) -> ProviderSyncResult {
+    finalize_remote_control_session(codex_home, thread_id, target_provider, || {})
+}
+
+fn finalize_remote_control_session(
+    codex_home: Option<&Path>,
+    thread_id: &str,
+    target_provider: &str,
+    before_apply: impl FnOnce(),
+) -> ProviderSyncResult {
     let thread_id = thread_id.trim();
     let target_provider = target_provider.trim();
     if thread_id.is_empty()
@@ -445,6 +454,7 @@ pub fn run_remote_control_session_finalization_for_thread_with_target(
             .cloned()
             .collect::<Vec<_>>();
         let backup_dir = create_backup(&home, target_provider, &rewrite_changes)?;
+        before_apply();
         let applied = apply_session_changes(&rewrite_changes)?;
         if !rollout_file_matches_provider(&rollout_path, thread_id, target_provider)? {
             let mut deferred = result(
@@ -3232,3 +3242,6 @@ fn now_secs() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+#[cfg(test)]
+mod tests;

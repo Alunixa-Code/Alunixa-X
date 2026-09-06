@@ -505,7 +505,7 @@
       codexStatsigModelPatchVersion,
       window.__alunixaXDynamicModelPatchGeneration,
     ].join(":");
-  const codexPluginMarketplaceUnlockVersion = "15";
+  const codexPluginMarketplaceUnlockVersion = "16";
   const codexPluginAutoExpandVersion = "1";
   const codexPluginAutoExpandMaxClicks = 80;
   const codexPluginAutoExpandClickDelayMs = 90;
@@ -1819,7 +1819,12 @@
   const codexEnabledReasoningEfforts = ["low", "medium", "high", "xhigh", "max", "ultra"];
   const codexServiceTierFallbackFastValue = "priority";
   const codexServiceTierModulePromises = new Map();
+  const codexAppAssetTextPromises = new Map();
+  const codexAppModuleFailures = new Map();
+  const codexAppModuleRetryCooldownMs = 30000;
+  const codexAppModuleMaxAttempts = 8;
   const codexServiceTierSupportedFastModels = new Set(["gpt-5.4", "gpt-5.5"]);
+  const codexNativeModelServiceTiers = new Map();
   const codexThreadServiceTierModes = new Set(["inherit", "standard", "fast"]);
   const codexServiceTierControlModes = new Set(["inherit", "global-standard", "global-fast", "custom"]);
   ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].forEach((model) => codexServiceTierSupportedFastModels.add(model));
@@ -1850,13 +1855,26 @@
     const scripts = codexAppAssetCandidateUrls();
     const escaped = String(namePart).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const patterns = [
-      new RegExp(`["'](\\.?/assets/${escaped}[^"']+\\.js)["']`),
-      new RegExp(`["']([^"']*/assets/${escaped}[^"']+\\.js)["']`),
-      new RegExp(`["'](\\./${escaped}[^"']+\\.js)["']`),
+      new RegExp("[\"'`](\\.?/assets/" + escaped + "[^\"'`]+\\.js)[\"'`]"),
+      new RegExp("[\"'`]([^\"'`]*/assets/" + escaped + "[^\"'`]+\\.js)[\"'`]"),
+      new RegExp("[\"'`](\\./" + escaped + "[^\"'`]+\\.js)[\"'`]"),
     ];
     for (const src of scripts) {
       try {
-        const text = await fetch(src).then((response) => response.ok ? response.text() : "");
+        if (!codexAppAssetTextPromises.has(src)) {
+          if (codexAppAssetTextPromises.size >= 64) {
+            codexAppAssetTextPromises.delete(codexAppAssetTextPromises.keys().next().value);
+          }
+          codexAppAssetTextPromises.set(src, fetch(src).then((response) => {
+            if (!response.ok) throw new Error(`Codex asset HTTP ${response.status}`);
+            return response.text();
+          }).then((text) => Array.from(text.matchAll(/["'`]((?:\.?\/|[^"'`\s]+\/)[^"'`\s]+\.js)["'`]/g),
+            (match) => match[0]).join("\n")).catch((error) => {
+            codexAppAssetTextPromises.delete(src);
+            throw error;
+          }));
+        }
+        const text = await codexAppAssetTextPromises.get(src);
         if (!text) continue;
         for (const pattern of patterns) {
           const match = text.match(pattern);
@@ -1872,12 +1890,28 @@
 
   async function loadCodexAppModule(namePart) {
     if (!codexServiceTierModulePromises.has(namePart)) {
+      const signature = codexAppAssetCandidateUrls().join("\n");
+      const failure = codexAppModuleFailures.get(namePart);
+      if (failure?.signature === signature
+          && (failure.attempts >= codexAppModuleMaxAttempts
+            || Date.now() - failure.at < codexAppModuleRetryCooldownMs)) {
+        throw failure.error;
+      }
       const promise = Promise.resolve().then(async () => {
         const url = codexAppAssetUrl(namePart) || await codexAppAssetUrlFromScriptText(namePart);
         if (!url) throw new Error(`未找到 Codex App asset: ${namePart}`);
         return await import(url);
+      }).then((module) => {
+        codexAppModuleFailures.delete(namePart);
+        return module;
       }).catch((error) => {
         codexServiceTierModulePromises.delete(namePart);
+        codexAppModuleFailures.set(namePart, {
+          signature,
+          at: Date.now(),
+          attempts: failure?.signature === signature ? failure.attempts + 1 : 1,
+          error,
+        });
         throw error;
       });
       codexServiceTierModulePromises.set(namePart, promise);
@@ -2104,6 +2138,11 @@
   }
 
   function codexServiceTierFastSupportedForModel(modelName) {
+    const metadata = alunixaXModelMetadata(modelName);
+    const detail = alunixaXModelDetail(modelName);
+    const tiers = metadata?.serviceTiers || detail?.service_tiers || detail?.serviceTiers
+      || codexNativeModelServiceTiers.get(normalizeCodexServiceTierModelName(modelName));
+    if (Array.isArray(tiers)) return tiers.some((tier) => isFastServiceTierValue(tier?.id || tier));
     return codexServiceTierSupportedFastModels.has(normalizeCodexServiceTierModelName(modelName));
   }
 
@@ -2127,7 +2166,7 @@
     const normalizedModel = normalizeCodexServiceTierModelName(modelName);
     return {
       modelName: modelName || "",
-      supported: !!normalizedModel && codexServiceTierSupportedFastModels.has(normalizedModel),
+      supported: !!normalizedModel && codexServiceTierFastSupportedForModel(modelName),
     };
   }
 
@@ -2740,6 +2779,14 @@
     ).trim();
   }
 
+  function codexRemoteSessionPureApiEnabled() {
+    if (!alunixaXBackendSettings.relayProfilesEnabled) return false;
+    const profiles = Array.isArray(alunixaXBackendSettings.relayProfiles)
+      ? alunixaXBackendSettings.relayProfiles : [];
+    return profiles.some((profile) =>
+      profile?.id === alunixaXBackendSettings.activeRelayId && profile.relayMode === "pureApi");
+  }
+
   function codexRemoteSessionThreadStartMethod(method) {
     return [
       "thread/start",
@@ -2751,9 +2798,12 @@
   }
 
   function applyCodexRemoteSessionProviderOverride(method, params) {
-    if (!codexRemoteSessionThreadStartMethod(method)) return params;
-    if (!codexRemoteSessionProviderNormalizationEnabled()) return params;
+    const pureApi = codexRemoteSessionPureApiEnabled();
+    if (!codexRemoteSessionThreadStartMethod(method)
+        && !(pureApi && ["thread/resume", "turn/start"].includes(method))) return params;
+    if (!pureApi && !codexRemoteSessionProviderNormalizationEnabled()) return params;
     if (!params || typeof params !== "object" || Array.isArray(params)) return params;
+    if (method === "turn/start" && !("modelProvider" in params) && !("model_provider" in params)) return params;
     const targetProvider = codexRemoteSessionTargetProvider();
     if (!targetProvider || targetProvider === "openai") return params;
     const requestedProvider = String(params.modelProvider || params.model_provider || "").trim();
@@ -3059,8 +3109,23 @@
     throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);
   }
 
-  function installCodexServiceTierDispatcherPatch(attempt = 0) {
+  let codexServiceTierDispatcherPatchPromise = null;
+  let codexServiceTierDispatcherPatchFailures = 0;
+  let codexServiceTierDispatcherPatchSignature = "";
+  let codexServiceTierDispatcherPatchNextAt = 0;
+  let codexServiceTierDispatcherPatchTimer = null;
+
+  function installCodexServiceTierDispatcherPatch() {
     if (window.__codexServiceTierRequestOverrideInstalled === codexDynamicModelPatchInstance) return;
+    if (codexServiceTierDispatcherPatchPromise) return;
+    const signature = codexAppAssetCandidateUrls().join("\n");
+    if (signature !== codexServiceTierDispatcherPatchSignature) {
+      codexServiceTierDispatcherPatchSignature = signature;
+      codexServiceTierDispatcherPatchFailures = 0;
+      codexServiceTierDispatcherPatchNextAt = 0;
+    }
+    if (codexServiceTierDispatcherPatchFailures >= codexAppModuleMaxAttempts
+        || Date.now() < codexServiceTierDispatcherPatchNextAt) return;
     const patch = async () => {
       try {
         const { dispatcher, assetPrefix } = await loadCodexDispatcher();
@@ -3081,17 +3146,26 @@
         installCodexRemoteSessionDispatcherSubscription(dispatcher, assetPrefix);
         sendAlunixaXDiagnostic("service_tier_dispatcher_patch_installed", { assetPrefix });
       } catch (error) {
-        if (attempt < 60) {
-          setTimeout(() => installCodexServiceTierDispatcherPatch(attempt + 1), 250);
-          return;
+        codexServiceTierDispatcherPatchFailures += 1;
+        codexServiceTierDispatcherPatchNextAt = Date.now() + codexAppModuleRetryCooldownMs;
+        if (codexServiceTierDispatcherPatchFailures < codexAppModuleMaxAttempts
+            && !codexServiceTierDispatcherPatchTimer) {
+          codexServiceTierDispatcherPatchTimer = setTimeout(() => {
+            codexServiceTierDispatcherPatchTimer = null;
+            installCodexServiceTierDispatcherPatch();
+          }, codexAppModuleRetryCooldownMs);
         }
-        sendAlunixaXDiagnostic("service_tier_dispatcher_patch_failed", {
-          errorName: error?.name || "",
-          errorMessage: error?.message || String(error),
-        });
+        if (codexServiceTierDispatcherPatchFailures === 1) {
+          sendAlunixaXDiagnostic("service_tier_dispatcher_patch_failed", {
+            errorName: error?.name || "",
+            errorMessage: error?.message || String(error),
+          });
+        }
+      } finally {
+        codexServiceTierDispatcherPatchPromise = null;
       }
     };
-    void patch();
+    codexServiceTierDispatcherPatchPromise = patch();
   }
 
   const codexSharedTerminalRuntimeVersion = "3";
@@ -3219,7 +3293,10 @@
     const manager = async () => {
       if (state.manager) return state.manager;
       state.modulePromise = state.modulePromise || loadCodexAppModule("app-initial-");
-      const module = await state.modulePromise;
+      const module = await state.modulePromise.catch((error) => {
+        state.modulePromise = null;
+        throw error;
+      });
       const terminalManager = codexTerminalManagerFromModule(module);
       if (!terminalManager) throw new Error("Codex terminal manager unavailable");
       state.manager = terminalManager;
@@ -4479,7 +4556,7 @@
     if (name === "openai-curated") return "OpenAI插件2(Alunixa X)";
     if (name === "openai-primary-runtime") return "OpenAI插件3(Alunixa X)";
     if (name === "openai-api-curated") return "OpenAI插件4(Alunixa X)";
-    if (name === "openai-curated-remote") return "OpenAI插件5(Alunixa X)";
+    if (name === "openai-curated-remote" || name === "alunixa-x-curated") return "OpenAI插件5(Alunixa X)";
     return fallback;
   }
 
@@ -4605,32 +4682,37 @@
     return restored === "openai-bundled" || restored === "openai-curated" || restored === "openai-primary-runtime" || restored === "openai-api-curated" || restored === "openai-curated-remote";
   }
 
-  function isCodexPluginBuildFlavorFilter(callback, sample) {
-    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function") return false;
-    let source = "";
-    try {
-      source = Function.prototype.toString.call(callback);
-    } catch {
-      return false;
+  const codexPluginFilterSourceCache = new WeakMap();
+
+  function codexPluginFilterCallbackSource(callback) {
+    if (typeof callback !== "function") return "";
+    if (!codexPluginFilterSourceCache.has(callback)) {
+      try {
+        codexPluginFilterSourceCache.set(callback, Function.prototype.toString.call(callback).replace(/\s+/g, ""));
+      } catch {
+        return "";
+      }
     }
-    const isKnownFilterSource = source.includes("!u(e.marketplaceName)||e.marketplaceName===r")
-      || source.includes("!ne(e.marketplaceName)||e.marketplaceName===n");
-    if (!isKnownFilterSource) return false;
-    if (!sample.some((plugin) => codexPluginOfficialMarketplaceName(plugin?.marketplaceName))) return false;
-    return sample.some((plugin) => codexPluginOfficialMarketplaceName(plugin?.marketplaceName) && !callback(plugin));
+    return codexPluginFilterSourceCache.get(callback);
   }
 
-  function isCodexPluginMarketplaceHiddenFilter(callback, sample) {
+  function isCodexPluginBuildFlavorFilter(callback, sample, filtered = null) {
     if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function") return false;
-    let source = "";
-    try {
-      source = Function.prototype.toString.call(callback);
-    } catch {
-      return false;
-    }
-    if (!source.includes("!t.includes(e.name)")) return false;
+    const source = codexPluginFilterCallbackSource(callback);
+    const isKnownFilterSource = /^(?:\(?[\w$]+\)?=>|function[\w$]*\([\w$]+\)\{return)![\w$]+\(([\w$]+)\.marketplaceName\)\|\|\1\.marketplaceName===[\w$]+;?\}?$/.test(source);
+    if (!isKnownFilterSource) return false;
+    if (!sample.some((plugin) => codexPluginOfficialMarketplaceName(plugin?.marketplaceName))) return false;
+    return Array.isArray(filtered) && sample.some((plugin) =>
+      codexPluginOfficialMarketplaceName(plugin?.marketplaceName) && !filtered.includes(plugin));
+  }
+
+  function isCodexPluginMarketplaceHiddenFilter(callback, sample, filtered = null) {
+    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function") return false;
+    const source = codexPluginFilterCallbackSource(callback);
+    if (!/^(?:\(?[\w$]+\)?=>|function[\w$]*\([\w$]+\)\{return)![\w$]+\.includes\([\w$]+\.name\);?\}?$/.test(source)) return false;
     if (!sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name))) return false;
-    return sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name) && !callback(marketplace));
+    return Array.isArray(filtered) && sample.some((marketplace) =>
+      codexPluginOfficialMarketplaceName(marketplace?.name) && !filtered.includes(marketplace));
   }
 
   function installPluginBuildFlavorFilterPatch() {
@@ -4650,15 +4732,16 @@
       return;
     }
     const patchedFilter = function codexPluginBuildFlavorFilterPatch(callback, thisArg) {
-      if (isCodexPluginBuildFlavorFilter(callback, this)) {
+      const filtered = originalFilter.call(this, callback, thisArg);
+      if (isCodexPluginBuildFlavorFilter(callback, this, filtered)) {
         sendAlunixaXDiagnostic("plugin_build_flavor_filter_bypassed", { pluginCount: this.length });
         return Array.from(this);
       }
-      if (isCodexPluginMarketplaceHiddenFilter(callback, this)) {
+      if (isCodexPluginMarketplaceHiddenFilter(callback, this, filtered)) {
         sendAlunixaXDiagnostic("plugin_marketplace_hidden_filter_bypassed", { marketplaceCount: this.length });
         return Array.from(this);
       }
-      return originalFilter.call(this, callback, thisArg);
+      return filtered;
     };
     patchedFilter.__codexPluginBuildFlavorPatched = codexPluginMarketplaceUnlockVersion;
     Array.prototype.filter = patchedFilter;
@@ -7069,6 +7152,7 @@
 
   function patchModelArray(models, allowEmpty = false) {
     if (!modelArrayLooksPatchable(models, allowEmpty)) return false;
+    rememberCodexNativeModelServiceTiers(models);
     const customModels = alunixaXModelNames();
     if (!customModels.length && !codexRetiredManagedModelNames.size) return false;
     const customKeys = new Set(customModels.map(alunixaXModelNameKey));
@@ -7407,8 +7491,22 @@
     return String(method || "");
   }
 
+  function rememberCodexNativeModelServiceTiers(result) {
+    const models = Array.isArray(result) ? result : result?.data || result?.models;
+    if (!Array.isArray(models)) return;
+    for (const model of models) {
+      if (typeof model?.model !== "string" || !Array.isArray(model.serviceTiers)) continue;
+      const tiers = model.serviceTiers.map((tier) => typeof tier === "string" ? tier : tier?.id)
+        .filter((tier) => typeof tier === "string");
+      if (codexNativeModelServiceTiers.size >= 512) {
+        codexNativeModelServiceTiers.delete(codexNativeModelServiceTiers.keys().next().value);
+      }
+      codexNativeModelServiceTiers.set(normalizeCodexServiceTierModelName(model.model), tiers);
+    }
+  }
+
   function patchAppServerModelResult(method, result) {
-    if (method !== "list-models-for-host") return result;
+    if (method !== "list-models-for-host" && method !== "model/list") return result;
     try {
       if (Array.isArray(result)) patchModelArray(result, true);
       if (Array.isArray(result?.data)) patchModelArray(result.data, true);
@@ -7518,6 +7616,9 @@
       nextParams = applyCodexRemoteSessionProviderOverride(requestMethod, nextParams);
       nextParams = applyCodexDynamicModelRequestOverride(requestMethod, nextParams);
       const result = await originalSendRequest(method, nextParams, options);
+      if (requestMethod === "model/list" || requestMethod === "list-models-for-host") {
+        rememberCodexNativeModelServiceTiers(result);
+      }
       if (!alunixaXModelUnlockEnabled()) return result;
       if (!alunixaXModelNames().length) await loadCodexModelCatalog();
       return patchAppServerModelResult(requestMethod, result);
@@ -11583,9 +11684,11 @@
       if (isChatContentMutation(mutation)) return false;
       const target = mutation.target;
       if (isExtensionUiNode(target)) return false;
-      if (target?.nodeType === 1 && nodeSelfOrAncestorMatchesScanRelevance(target)) return true;
       const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)];
-      return changedNodes.some((node) => node.nodeType === 1 && isScanRelevantNode(node));
+      const changedElements = changedNodes.filter((node) => node.nodeType === 1);
+      if (changedElements.length && changedElements.every(isExtensionUiNode)) return false;
+      if (target?.nodeType === 1 && nodeSelfOrAncestorMatchesScanRelevance(target)) return true;
+      return changedElements.some((node) => isScanRelevantNode(node));
     });
   }
 

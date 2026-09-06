@@ -470,7 +470,7 @@ fn injection_script_does_not_unlock_disabled_plugin_install_buttons() {
 fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"16\""));
     assert!(!script.contains("function pluginMarketplaceAliasForName"));
     assert!(
         !script.contains("if (name === \"openai-bundled\") return \"alunixa-x-openai-bundled\"")
@@ -482,10 +482,10 @@ fn injection_script_keeps_bundled_marketplace_name_for_default_filter() {
 fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"16\""));
     assert!(script.contains("isCodexPluginBuildFlavorFilter"));
-    assert!(script.contains("source.includes(\"!u(e.marketplaceName)||e.marketplaceName===r\")"));
-    assert!(script.contains("source.includes(\"!t.includes(e.name)\")"));
+    assert!(script.contains("codexPluginFilterCallbackSource"));
+    assert!(script.contains("const filtered = originalFilter.call(this, callback, thisArg)"));
     assert!(!script.contains("if (!source.includes(\"marketplaceName\")) return false"));
     assert!(!script.contains("if (!source.includes(\"name\")) return false"));
 }
@@ -494,7 +494,7 @@ fn injection_script_does_not_bypass_plugin_marketplace_search_filters() {
 fn injection_script_expands_api_key_plugin_marketplace_requests() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"15\""));
+    assert!(script.contains("codexPluginMarketplaceUnlockVersion = \"16\""));
     assert!(script.contains("installPluginMarketplaceRequestPatch"));
     assert!(script.contains("installPluginMarketplaceBridgePatch"));
     assert!(script.contains("installPluginBuildFlavorFilterPatch"));
@@ -502,11 +502,11 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(script.contains("codexPluginBuildFlavorFilterPatch"));
     assert!(script.contains("isCodexPluginBuildFlavorFilter"));
     assert!(script.contains(
-        "codexPluginOfficialMarketplaceName(plugin?.marketplaceName) && !callback(plugin)"
+        "codexPluginOfficialMarketplaceName(plugin?.marketplaceName) && !filtered.includes(plugin)"
     ));
     assert!(script.contains("isCodexPluginMarketplaceHiddenFilter"));
     assert!(script.contains(
-        "codexPluginOfficialMarketplaceName(marketplace?.name) && !callback(marketplace)"
+        "codexPluginOfficialMarketplaceName(marketplace?.name) && !filtered.includes(marketplace)"
     ));
     assert!(script.contains("plugin_marketplace_hidden_filter_bypassed"));
     assert!(script.contains("method === \"list-plugins\""));
@@ -545,7 +545,7 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(script.contains("restored === \"openai-curated-remote\""));
     assert!(
         script
-            .contains("if (name === \"openai-curated-remote\") return \"OpenAI插件5(Alunixa X)\"")
+            .contains("name === \"alunixa-x-curated\") return \"OpenAI插件5(Alunixa X)\"")
     );
     assert!(script.contains(
         "if (name === \"alunixa-x-openai-curated-remote\") return \"openai-curated-remote\""

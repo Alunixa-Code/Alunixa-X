@@ -2,6 +2,7 @@ pub mod backup;
 pub mod markdown;
 pub mod provider_sync;
 pub mod rollout_image_cleanup;
+mod session_index;
 pub mod storage;
 
 pub use backup::BackupStore;
@@ -22,5 +23,6 @@ pub use rollout_image_cleanup::{
 };
 pub use storage::{
     DashboardUsageAnalytics, LocalSession, ModelUsageShare, SQLiteStorageAdapter,
-    delete_local_from_paths, move_codex_thread_workspace_from_paths, summarize_local_session_usage,
+    delete_local_from_paths, delete_local_from_paths_with_home,
+    move_codex_thread_workspace_from_paths, summarize_local_session_usage,
 };

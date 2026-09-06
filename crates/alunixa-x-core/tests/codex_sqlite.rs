@@ -14,6 +14,22 @@ fn create_threads_table(conn: &Connection) {
 }
 
 #[test]
+fn discovers_new_root_state_versions_and_catalog_only_databases() {
+    let temp = tempfile::tempdir().unwrap();
+    let state = temp.path().join("state_9.sqlite");
+    create_threads_table(&Connection::open(&state).unwrap());
+    let catalog = temp.path().join("catalog.sqlite");
+    Connection::open(&catalog)
+        .unwrap()
+        .execute_batch("CREATE TABLE local_thread_catalog(host_id TEXT, thread_id TEXT);")
+        .unwrap();
+    let paths = alunixa_x_core::codex_sqlite::codex_session_db_paths_from_home(temp.path());
+    assert!(paths.contains(&state));
+    assert!(paths.contains(&catalog));
+    assert!(paths.contains(&temp.path().join("state_5.sqlite")));
+}
+
+#[test]
 fn sanitize_strips_suffix_from_thread_model() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join(".codex");

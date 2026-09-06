@@ -85,7 +85,7 @@ model_provider = "chatgpt"
     .unwrap();
 
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
-    assert!(config.contains("[marketplaces.openai-curated-remote]"));
+    assert!(config.contains("[marketplaces.alunixa-x-curated]"));
     assert!(config.contains(r#"source_type = "local""#));
     assert!(config.contains(".tmp\\plugins-remote") || config.contains(".tmp/plugins-remote"));
 }

@@ -246,7 +246,8 @@ fn apply_base_theme(
 
     if backup_path.exists() {
         validate_backup_identity(backup_path, config_path)?;
-    } else {
+    }
+    if !backup_path.exists() {
         let values = APPEARANCE_KEYS
             .iter()
             .map(|key| {
@@ -296,8 +297,9 @@ fn restore_base_theme(config_path: &Path, backup_path: &Path) -> anyhow::Result<
         return Ok(());
     }
     let backup = read_backup(backup_path)?;
-    if backup.config_path != config_path.to_string_lossy() {
-        bail!("Dream Skin theme backup belongs to a different config.toml");
+    validate_backup_identity(backup_path, config_path)?;
+    if !backup_path.exists() {
+        return Ok(());
     }
 
     let existing = read_config_or_empty(config_path)?;
@@ -509,10 +511,38 @@ fn read_backup(path: &Path) -> anyhow::Result<DreamSkinThemeBackup> {
 
 fn validate_backup_identity(backup_path: &Path, config_path: &Path) -> anyhow::Result<()> {
     let backup = read_backup(backup_path)?;
-    if backup.config_path != config_path.to_string_lossy() {
+    let old_config = Path::new(&backup.config_path);
+    if normalized_config_identity(old_config) == normalized_config_identity(config_path) {
+        return Ok(());
+    }
+    if old_config.try_exists()? {
         bail!("Dream Skin theme backup belongs to a different config.toml");
     }
+    let isolated = backup_path.with_file_name(format!(
+        "dream-skin-base-theme-backup.stale-{}.json",
+        uuid::Uuid::new_v4().simple()
+    ));
+    std::fs::rename(backup_path, isolated).context("failed to preserve stale Dream Skin backup")?;
     Ok(())
+}
+
+fn normalized_config_identity(path: &Path) -> String {
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| {
+        path.parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            .and_then(|parent| path.file_name().map(|name| parent.join(name)))
+            .unwrap_or_else(|| path.to_path_buf())
+    });
+    let raw = canonical.to_string_lossy();
+    if cfg!(windows) {
+        let value = raw
+            .strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!(r"\\{rest}"))
+            .unwrap_or_else(|| raw.strip_prefix(r"\\?\").unwrap_or(&raw).to_string());
+        value.replace('/', "\\").to_lowercase()
+    } else {
+        raw.into_owned()
+    }
 }
 
 fn read_config_or_empty(path: &Path) -> anyhow::Result<String> {
