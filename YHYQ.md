@@ -1373,3 +1373,26 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本次采用新仓库 main 与 annotated tag 原子推送，提交消息抑制重复自动构建，再显式启动唯一正式 Release Actions；三平台完整测试、安装包构建与六资产哈希全部通过后才确认正式发行完成喵~
 - 已将 main 与 annotated `v1.0.12` 原子推送到 `Alunixa-Code/Alunixa-X`，正式代码 SHA 为 `99d3310b03e8d6144942591ed86b9905dc07272d`，没有改动旧仓库或移动旧标签喵~
 - 唯一正式 Release Actions 为 `34009620631`，手动派发成功且 headBranch/headSha 均精确匹配；后续只等待这次三平台运行，不重复触发相同构建喵~
+
+## 2026-09-06 · Alunixa X v1.0.12 中文兼容修复正式发行
+
+- 新仓库 `Alunixa-Code/Alunixa-X` 的 `v1.0.12` 已于 `2026-09-06T03:59:36Z` 正式发布，Release ID 为 `383458559`，非草稿、非预发布且为 Latest；版本化中文标题与说明逐字匹配源文件喵~
+- 唯一正式 Actions `34009620631` 于 `2026-09-06T03:59:40Z` 完成，整体 success；Windows x64、macOS x64、macOS arm64 的完整测试、正式编译、安装结构检查与上传，以及最终六资产验证/发布均 success，未使用的历史复用分支正常 skipped 喵~
+- 正式 main/tag/Actions 代码提交均为 `99d3310b03e8d6144942591ed86b9905dc07272d`；Windows 权威日志核验前端 `66/66`、Rust `38` 套件 `1046` 通过、零失败，唯一 ignored 是既有 fake 子进程入口且已由父测试执行喵~
+- Windows 正式 companion 与固定官方 CLI 的纯 API 原生窗口隔离验证输出 `status=PASS`、`requests=7`、`noChatGptLogin=true`，本地上下文能力没有因语言补丁而回退喵~
+- 六项正式资产全部 uploaded、非零体积，GitHub digest 与 Actions 在发行说明中计算的 SHA-256 逐项一致；不携带认证访问新仓库 Latest 返回同一 Release ID 与六资产，`NotesAndHashes=PASS`、`AnonymousLatest=PASS` 喵~
+- 只读复查增强注册路径包含新文档注入注册与当前文档独立执行，未调用该入口或连接当前 CDP；原生 Ultra/完全访问的权限确认没有被修改，本次交付不包括自动提权或永久免确认喵~
+- 发行核验、Actions 元数据、watch 与 Windows 权威日志保留于 `D:CursorAlunixaX.tmplocale-1.0.12`；已通过验证绝对路径的仓库 `.git/info/exclude` 仅本地排除这份有用证据，不把构建日志或凭据加入产品源码喵~
+
+| 正式安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.12-windows-x64-setup.exe` | 20930636 | `9ba239757cb2c62f9ed95fb51986c876088696f4e2aaae6a4f17e5d681b9dba2` |
+| `Alunixa-X-1.0.12-windows-x64.zip` | 26746851 | `d3b85317b3bd335ca7a70f089558911e7d101ad8b9f739ded4573a5670854e97` |
+| `Alunixa-X-1.0.12-macos-x64.dmg` | 34839677 | `95ba8373a64ff0dd0acbdc64f04d69cc4f2edc2d545b92a9529b78de99dc5e5b` |
+| `Alunixa-X-1.0.12-macos-x64.zip` | 29205063 | `0b9a81c08b71e37e70965a384f5752dd18fb5d30cd68eada45f6105e75e0c415` |
+| `Alunixa-X-1.0.12-macos-arm64.dmg` | 33562670 | `8e1a1d3be7c1cabed84d72776deca1d8767a93f1bec1679d808d1cd3b5be6e21` |
+| `Alunixa-X-1.0.12-macos-arm64.zip` | 28638378 | `994ccb9233e890b506bf89084d34926f68b435b3321d1a8f78314ee7100ac473` |
+
+- 本地仅保留额外 YHYQ 验收提交，所有产品改动已推送且包含于正式 tag；没有重复派发相同产品提交的构建，也没有向旧仓库修改或发布喵~
+- 本轮未操作用户正在运行的 Codex、helper、CDP、微信与真实配置；安装本版本后，通过 Alunixa X 启动并保持强制中文开启才应用新策略喵~
+- 本地 target、前端 node_modules/dist 继续保留，遵循此前执行环境拒绝递归删除后的限制，不重复尝试或换工具绕过；保留缓存不影响已经完成的源码推送、三平台正式构建与发行喵~
