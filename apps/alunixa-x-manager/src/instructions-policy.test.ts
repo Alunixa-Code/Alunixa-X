@@ -12,6 +12,12 @@ test("advanced instructions are checked after all config writers and before star
   assert.ok(repair > launcher.indexOf("experimental_context::validate_local_context_companion("));
   assert.ok(repair < launcher.indexOf(".launch_codex(&app_dir, debug_port, &settings"));
   assert.equal(launcher.includes("codex_instructions::apply_model_instructions_policy("), false);
+  const entrypoint = readFileSync(
+    new URL("../../../apps/alunixa-x-launcher/src/main.rs", import.meta.url), "utf8",
+  );
+  const reactivation = entrypoint.slice(entrypoint.indexOf("async fn activate_existing_codex_app("));
+  const reactivationRepair = reactivation.indexOf("ensure_model_instructions_before_launch(");
+  assert.ok(reactivationRepair > 0 && reactivationRepair < reactivation.indexOf(".launch_codex("));
 });
 
 test("saving unrelated Agent capabilities uses a preserving instructions policy", () => {
