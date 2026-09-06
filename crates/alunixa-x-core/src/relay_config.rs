@@ -32,9 +32,9 @@ const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "oss",
     "ollama-chat",
 ];
-/// `guardianv2` was emitted by an older Codex build, but newer builds no
-/// longer accept its shape in `FeatureToml`.  Keeping it in config.toml makes
-/// the whole file unreadable and prevents creating or resuming threads.
+/// New Codex still supports `guardianv2` as a boolean or structured table.
+/// Only a legacy scalar value that cannot match either `FeatureToml` variant
+/// may be removed automatically; structured Guardian settings are preserved.
 const STALE_FEATURE_KEYS: &[&str] = &["guardianv2"];
 /// Codex Desktop versions at or after this release no longer inherit the
 /// ChatGPT auth.json token for custom providers when the provider explicitly
@@ -182,7 +182,10 @@ pub fn repair_stale_feature_entries_in_home(home: &Path) -> anyhow::Result<bool>
     };
     let mut removed = Vec::new();
     for key in STALE_FEATURE_KEYS {
-        if features.remove(key).is_some() {
+        let invalid_scalar = features
+            .get(*key)
+            .is_some_and(|item| item.as_bool().is_none() && item.as_table_like().is_none());
+        if invalid_scalar && features.remove(key).is_some() {
             removed.push(*key);
         }
     }
