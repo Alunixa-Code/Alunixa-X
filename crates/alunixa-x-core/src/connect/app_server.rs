@@ -36,6 +36,146 @@ pub struct AppServerTurnResult {
     pub usage: TurnUsage,
 }
 
+struct TurnEvents {
+    thread_id: String,
+    turn_id: Option<String>,
+    pending: Vec<Value>,
+    pending_bytes: usize,
+    reply_parts: Vec<String>,
+    final_parts: Vec<String>,
+    model: String,
+    usage: TurnUsage,
+    completed: bool,
+    progress: Option<UnboundedSender<AppServerProgressEvent>>,
+}
+
+impl TurnEvents {
+    fn new(thread_id: &str, model: &str) -> Self {
+        Self {
+            thread_id: thread_id.to_string(),
+            turn_id: None,
+            pending: Vec::new(),
+            pending_bytes: 0,
+            reply_parts: Vec::new(),
+            final_parts: Vec::new(),
+            model: model.to_string(),
+            usage: TurnUsage::default(),
+            completed: false,
+            progress: None,
+        }
+    }
+
+    fn begin(&mut self, result: &Value) -> anyhow::Result<()> {
+        self.turn_id = Some(extract_turn_id(result).context("Codex turn/start 未返回 turn id")?);
+        if self.model.is_empty() {
+            self.model = extract_model(result).unwrap_or_default();
+        }
+        if let Some(usage) = extract_turn_usage(result) {
+            self.usage = usage;
+        }
+        self.pending_bytes = 0;
+        for message in std::mem::take(&mut self.pending) {
+            self.record(message)?;
+        }
+        Ok(())
+    }
+
+    fn record(&mut self, message: Value) -> anyhow::Result<()> {
+        let Some(method) = message.get("method").and_then(Value::as_str) else {
+            return Ok(());
+        };
+        let params = &message["params"];
+        if params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id != self.thread_id)
+        {
+            return Ok(());
+        }
+        let Some(turn_id) = self.turn_id.as_deref() else {
+            let bytes = message.to_string().len();
+            anyhow::ensure!(
+                self.pending.len() < 1024 && self.pending_bytes + bytes <= 2 * 1024 * 1024,
+                "too many notifications before turn/start response"
+            );
+            self.pending_bytes += bytes;
+            self.pending.push(message);
+            return Ok(());
+        };
+        let event_turn = params.get("turnId").and_then(Value::as_str).or_else(|| {
+            params
+                .get("turn")
+                .and_then(|turn| turn.get("id"))
+                .and_then(Value::as_str)
+        });
+        if event_turn.is_some_and(|id| id != turn_id)
+            || (method == "turn/completed" && event_turn != Some(turn_id))
+        {
+            return Ok(());
+        }
+        if self.model.is_empty() {
+            self.model = extract_model(&message).unwrap_or_default();
+        }
+        if let Some(usage) = extract_turn_usage(&message) {
+            self.usage = usage;
+        }
+        let progress_events = if is_server_request(&message) {
+            progress_events_from_server_request(&message)
+        } else {
+            progress_events_from_message(&message)
+        };
+        for event in progress_events {
+            emit_progress(self.progress.as_ref(), event);
+        }
+        match method {
+            "item/completed" => {
+                if let Some(text) = extract_completed_agent_text(&message) {
+                    if params["item"]["phase"].as_str() == Some("final_answer")
+                        && !self.final_parts.contains(&text)
+                    {
+                        self.final_parts.push(text.clone());
+                    }
+                    if !self.reply_parts.contains(&text) {
+                        self.reply_parts.push(text);
+                    }
+                }
+            }
+            "turn/completed" => match params["turn"]["status"].as_str() {
+                Some("failed") => bail!(
+                    "{}",
+                    deep_string(Some(&params["turn"]["error"]), &["message", "error"])
+                        .unwrap_or_else(|| "Codex turn failed".to_string())
+                ),
+                Some("interrupted" | "cancelled") => bail!("Codex turn was interrupted"),
+                Some("completed") | None => self.completed = true,
+                _ => {}
+            },
+            "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
+                bail!(
+                    "{}",
+                    deep_string(Some(params), &["message", "error"])
+                        .unwrap_or_else(|| "Codex app-server 返回未知错误".to_string())
+                );
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> AppServerTurnResult {
+        AppServerTurnResult {
+            reply: if self.final_parts.is_empty() {
+                self.reply_parts
+            } else {
+                self.final_parts
+            }
+            .join("\n\n"),
+            model: self.model,
+            usage: self.usage,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppServerProgressKind {
     Status,
@@ -165,6 +305,8 @@ impl CodexAppServer {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x08000000);
         let mut child = command.spawn().map_err(|error| AppServerStartFailure {
             stage: "创建进程",
             message: error.to_string(),
@@ -270,13 +412,10 @@ impl CodexAppServer {
         }))
         .await?;
 
-        let mut response_received = false;
-        let mut turn_completed = false;
-        let mut reply_parts = Vec::new();
-        let mut model = self.config.model.trim().to_string();
-        let mut usage = TurnUsage::default();
+        let mut events = TurnEvents::new(thread_id, self.config.model.trim());
+        events.progress = progress.clone();
         let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
-        while !response_received || !turn_completed {
+        while events.turn_id.is_none() || !events.completed {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 emit_progress(
@@ -293,9 +432,7 @@ impl CodexAppServer {
             }
             let message = self.read_message(remaining).await?;
             if is_server_request(&message) {
-                for event in progress_events_from_server_request(&message) {
-                    emit_progress(progress.as_ref(), event);
-                }
+                events.record(message.clone())?;
                 self.reject_server_request(&message).await?;
                 continue;
             }
@@ -314,67 +451,12 @@ impl CodexAppServer {
                     bail!("Codex turn/start 失败：{error}");
                 }
                 let result = message.get("result").cloned().unwrap_or(Value::Null);
-                if extract_turn_id(&result).is_none() {
-                    bail!("Codex turn/start 未返回 turn id");
-                }
-                if model.is_empty() {
-                    model = extract_model(&result).unwrap_or_default();
-                }
-                if let Some(reported_usage) = extract_turn_usage(&result) {
-                    usage = reported_usage;
-                }
-                response_received = true;
+                events.begin(&result)?;
                 continue;
             }
-
-            if model.is_empty() {
-                model = extract_model(&message).unwrap_or_default();
-            }
-            if let Some(reported_usage) = extract_turn_usage(&message) {
-                usage = reported_usage;
-            }
-
-            for event in progress_events_from_message(&message) {
-                emit_progress(progress.as_ref(), event);
-            }
-
-            match message.get("method").and_then(Value::as_str) {
-                Some("item/completed") => {
-                    if let Some(text) = extract_completed_agent_text(&message) {
-                        if !reply_parts.iter().any(|part| part == &text) {
-                            reply_parts.push(text);
-                        }
-                    }
-                }
-                Some("turn/completed") => turn_completed = true,
-                Some("thread/status/changed") if thread_status_is_idle(&message) => {
-                    if !turn_completed {
-                        emit_progress(
-                            progress.as_ref(),
-                            progress_event(
-                                "turn",
-                                AppServerProgressKind::Status,
-                                AppServerProgressPhase::Completed,
-                                "任务进入空闲状态",
-                                "Codex 已结束本轮操作。",
-                            ),
-                        );
-                    }
-                    turn_completed = true;
-                }
-                Some("error") => {
-                    let error = deep_string(message.get("params"), &["message", "error"])
-                        .unwrap_or_else(|| "Codex app-server 返回未知错误".to_string());
-                    bail!("{error}");
-                }
-                _ => {}
-            }
+            events.record(message)?;
         }
-        Ok(AppServerTurnResult {
-            reply: reply_parts.join("\n\n"),
-            model,
-            usage,
-        })
+        Ok(events.finish())
     }
 
     pub async fn close(&mut self) {
@@ -462,8 +544,9 @@ impl CodexAppServer {
     }
 
     async fn read_message(&mut self, timeout: Duration) -> anyhow::Result<Value> {
+        let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let line = tokio::time::timeout(timeout, self.stdout.next_line())
+            let line = tokio::time::timeout_at(deadline, self.stdout.next_line())
                 .await
                 .context("等待 Codex app-server 响应超时")??;
             let Some(line) = line else {
@@ -772,15 +855,6 @@ fn extract_completed_agent_text(message: &Value) -> Option<String> {
     deep_string(Some(item), &["text", "content", "output_text"])
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
-}
-
-fn thread_status_is_idle(message: &Value) -> bool {
-    message
-        .get("params")
-        .and_then(|params| params.get("status"))
-        .and_then(|status| status.get("type").or(Some(status)))
-        .and_then(Value::as_str)
-        == Some("idle")
 }
 
 fn deep_string(value: Option<&Value>, keys: &[&str]) -> Option<String> {
@@ -1498,6 +1572,84 @@ mod tests {
     use std::io::{BufRead, Write};
 
     #[test]
+    fn turn_events_ignore_idle_foreign_threads_and_stale_turns_including_progress() {
+        let mut events = TurnEvents::new("target", "model");
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        events.progress = Some(sender);
+        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
+        for message in [
+            json!({"method":"thread/status/changed","params":{"threadId":"target","status":{"type":"idle"}}}),
+            json!({"method":"turn/completed","params":{"threadId":"other","turn":{"id":"current","status":"completed"}}}),
+            json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"previous","status":"completed"}}}),
+            json!({"method":"item/completed","params":{"threadId":"other","item":{"type":"agentMessage","text":"foreign output","phase":"commentary"}}}),
+            json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"target","turnId":"previous","delta":"stale output"}}),
+        ] {
+            events.record(message).unwrap();
+        }
+        assert!(!events.completed);
+        assert!(events.reply_parts.is_empty());
+        assert!(receiver.try_recv().is_err());
+        events.record(json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"current","status":"completed"}}})).unwrap();
+        assert!(events.completed);
+        assert_eq!(
+            receiver.try_recv().unwrap().phase,
+            AppServerProgressPhase::Completed
+        );
+    }
+
+    #[test]
+    fn turn_events_replay_early_progress_and_prefer_final_answer() {
+        let mut events = TurnEvents::new("target", "model");
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        events.progress = Some(sender);
+        for (phase, text) in [("commentary", "working"), ("final_answer", "done")] {
+            events.record(json!({"method":"item/completed","params":{"threadId":"target","turnId":"current",
+                "item":{"type":"agentMessage","phase":phase,"text":text}}})).unwrap();
+        }
+        events.record(json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"current","status":"completed"}}})).unwrap();
+        assert!(!events.completed);
+        assert!(receiver.try_recv().is_err());
+        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
+        assert!(events.completed);
+        assert_eq!(receiver.try_recv().unwrap().detail, "working");
+        assert_eq!(events.finish().reply, "done");
+    }
+
+    #[test]
+    fn failed_interrupted_and_cancelled_turns_cannot_finish_successfully() {
+        for status in ["failed", "interrupted", "cancelled"] {
+            let mut events = TurnEvents::new("target", "model");
+            events.begin(&json!({"turn":{"id":"current"}})).unwrap();
+            assert!(
+                events
+                    .record(
+                        json!({"method":"turn/completed","params":{"threadId":"target",
+                "turn":{"id":"current","status":status,"error":{"message":"failure"}}}})
+                    )
+                    .is_err()
+            );
+            assert!(!events.completed);
+        }
+        let mut events = TurnEvents::new("target", "model");
+        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
+        events.record(json!({"method":"error","params":{"threadId":"target","turnId":"current","willRetry":true,"message":"retry"}})).unwrap();
+        assert!(!events.completed);
+    }
+
+    #[test]
+    fn early_notifications_have_a_bounded_buffer() {
+        let mut events = TurnEvents::new("target", "model");
+        let oversized = "x".repeat(2 * 1024 * 1024);
+        assert!(
+            events
+                .record(json!({"method":"item/commandExecution/outputDelta",
+            "params":{"threadId":"target","turnId":"current","delta":oversized}}))
+                .is_err()
+        );
+        assert!(events.pending.is_empty());
+    }
+
+    #[test]
     fn explicit_custom_cli_keeps_priority_before_automatic_fallbacks() {
         let candidates = assemble_app_server_launch_candidates(
             Some(PathBuf::from("custom-codex")),
@@ -1669,9 +1821,12 @@ mod tests {
                 .unwrap_or_default();
             if method == "turn/start" {
                 let messages = [
-                    json!({"jsonrpc":"2.0","id":id,"result":{"turn":{"id":"turn-1"},"model":"gpt-test"}}),
+                    json!({"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"stale-turn","status":"completed"}}}),
+                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"foreign-thread","turnId":"turn-1","item":{"type":"agentMessage","text":"foreign output","phase":"commentary"}}}),
                     json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"reasoning","id":"reason-1","summary":[],"content":[]}}}),
                     json!({"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"reason-1","summaryIndex":0,"delta":"正在检查配置"}}),
+                    json!({"jsonrpc":"2.0","id":id,"result":{"turn":{"id":"turn-1"},"model":"gpt-test"}}),
+                    json!({"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"idle"}}}),
                     json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"reasoning","id":"reason-1","summary":["检查配置完成"],"content":[]}}}),
                     json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"webSearch","id":"web-1","query":"Codex docs","action":{"type":"search","query":"Codex docs"},"results":null}}}),
                     json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"webSearch","id":"web-1","query":"Codex docs","action":{"type":"search","query":"Codex docs"},"results":[{"title":"Example result","url":"https://example.test","snippet":"result summary"}]}}}),

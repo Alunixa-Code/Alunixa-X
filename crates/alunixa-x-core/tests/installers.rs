@@ -12,10 +12,13 @@ fn release_requires_tests_and_versioned_notes_before_publication() {
         workflow.matches("cargo test --workspace --locked").count(),
         2
     );
-    assert!(workflow.contains("docs/releases/${RELEASE_TAG}.md"));
+    let notes = include_str!("../../../scripts/release/prepare-notes.sh");
+    assert!(notes.contains("docs/releases/${RELEASE_TAG}.md"));
     assert!(workflow.contains("--notes-file \"$NOTES\""));
-    assert!(workflow.contains("cd dist/release && sha256sum *"));
-    assert!(workflow.contains("test \"$(find dist/release -maxdepth 1 -type f | wc -l)\" -eq 12"));
+    assert!(notes.contains("cd dist/release && sha256sum *"));
+    assert!(workflow.contains("test \"$(find dist/release -maxdepth 1 -type f | wc -l)\" -eq 6"));
+    assert!(notes.contains("test \"$GITHUB_REPOSITORY\" = \"Alunixa-Code/Alunixa-X\""));
+    assert!(workflow.contains("Verify API-only context with isolated official CLI"));
     let preview = include_str!("../../../.github/workflows/pr-build.yml");
     assert_eq!(preview.matches("run: npm ci").count(), 2);
     assert_eq!(preview.matches("run: npm test").count(), 2);

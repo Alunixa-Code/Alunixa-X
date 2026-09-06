@@ -43,6 +43,9 @@ const staleMarkers = [
 const migrationReadmeFiles = new Set(["README.md", "README_EN.md"]);
 
 const failures = [];
+if (process.env.GITHUB_REPOSITORY && process.env.GITHUB_REPOSITORY !== "Alunixa-Code/Alunixa-X") {
+  failures.push("Release/build repository must be Alunixa-Code/Alunixa-X.");
+}
 for (const [file, markers] of requiredMarkers) {
   const text = readFileSync(resolve(root, file), "utf8");
   for (const marker of markers) {

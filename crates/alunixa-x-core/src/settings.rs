@@ -1659,6 +1659,13 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppDisableWss");
     merge_bool_setting(target, source, "codexAppResponsesIdNegotiation");
     merge_bool_setting(target, source, "codexAppExperimentalContext");
+    merge_bool_setting(target, source, "codexAppInstructionsEnabled");
+    if let Some(value) = source.get("codexAppInstructions").and_then(Value::as_str) {
+        target.insert(
+            "codexAppInstructions".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
     merge_bool_setting(target, source, "codexAppSharedTerminal");
     if let Some(value) = source
         .get("codexAppSharedTerminalRetentionMinutes")
@@ -2507,6 +2514,36 @@ mod tests {
         assert!(saved.get("apiKey").is_none());
         assert_eq!(saved["configContents"], "model = \"gpt-5.4\"\n");
         assert_eq!(saved["authContents"], "{\"OPENAI_API_KEY\":\"sk-test\"}");
+    }
+
+    #[test]
+    fn partial_updates_persist_instructions_and_unrelated_capabilities_preserve_them() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(temp.path().join("settings.json"));
+        let text = "  My custom instructions\n\nKeep this formatting.  ";
+        let saved = store
+            .update(serde_json::json!({
+                "codexAppInstructionsEnabled": true,
+                "codexAppInstructions": text,
+            }))
+            .unwrap();
+        assert!(saved.codex_app_instructions_enabled);
+        assert_eq!(saved.codex_app_instructions, text);
+        let saved = store
+            .update(serde_json::json!({
+                "codexAppExperimentalContext": true,
+                "codexAppSubAgentMaxThreads": 6,
+            }))
+            .unwrap();
+        assert!(saved.codex_app_instructions_enabled);
+        assert_eq!(saved.codex_app_instructions, text);
+        assert_eq!(store.load().unwrap().codex_app_instructions, text);
+        store
+            .update(serde_json::json!({"codexAppInstructionsEnabled": false}))
+            .unwrap();
+        let saved = store.load().unwrap();
+        assert!(!saved.codex_app_instructions_enabled);
+        assert_eq!(saved.codex_app_instructions, text);
     }
 
     #[test]

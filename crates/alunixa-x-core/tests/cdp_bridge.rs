@@ -543,10 +543,7 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     );
     assert!(script.contains("restored === \"openai-api-curated\""));
     assert!(script.contains("restored === \"openai-curated-remote\""));
-    assert!(
-        script
-            .contains("name === \"alunixa-x-curated\") return \"OpenAI插件5(Alunixa X)\"")
-    );
+    assert!(script.contains("name === \"alunixa-x-curated\") return \"OpenAI插件5(Alunixa X)\""));
     assert!(script.contains(
         "if (name === \"alunixa-x-openai-curated-remote\") return \"openai-curated-remote\""
     ));

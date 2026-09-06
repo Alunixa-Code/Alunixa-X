@@ -1197,6 +1197,15 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
+    let previous = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("读取原设置失败，未保存任何修改：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
     let settings = match normalize_settings_before_save(settings) {
         Ok(settings) => settings,
         Err(error) => {
@@ -1221,7 +1230,13 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
                 settings.codex_app_disable_auto_update,
             )
         })
-        .and_then(|_| apply_codex_instructions_policy(&settings))
+        .and_then(|_| {
+            alunixa_x_core::codex_instructions::sync_model_instructions_after_settings_save(
+                &alunixa_x_core::relay_config::default_codex_home_dir(),
+                &previous,
+                &settings,
+            )
+        })
         .and_then(|_| apply_codex_hook_policy(&settings))
         .and_then(|_| {
             alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(

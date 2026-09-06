@@ -33,7 +33,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
-        run: npm install --package-lock=false
+        run: npm ci
 
       - name: Frontend tests
         working-directory: apps/alunixa-x-manager
@@ -48,10 +48,10 @@ jobs:
         run: npm run vite:build
 
       - name: Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=1
 
       - name: Build release binaries
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Stage Windows app files
         shell: pwsh
@@ -120,14 +120,25 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
-        run: npm install --package-lock=false
+        run: npm ci
+
+      - name: Frontend tests
+        working-directory: apps/alunixa-x-manager
+        run: npm test
+
+      - name: TypeScript check
+        working-directory: apps/alunixa-x-manager
+        run: npm run check
 
       - name: Build frontend
         working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
+      - name: Rust tests
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=1
+
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build macOS DMG
         run: |

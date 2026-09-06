@@ -40,6 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Alunixa-Code/Alunixa-X"
           TAG="$RELEASE_TAG"
           VERSION="${TAG#v}"
           VERSION="${VERSION#V}"
@@ -106,7 +107,7 @@ jobs:
         working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
-      - name: Frontend tests and TypeScript check
+      - name: Validate frontend
         working-directory: apps/alunixa-x-manager
         run: |
           npm test
@@ -117,10 +118,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Rust workspace regression tests
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=1
 
       - name: Build binaries
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Verify API-only context with isolated official CLI
         shell: pwsh
@@ -215,8 +216,20 @@ jobs:
         working-directory: apps/alunixa-x-manager
         run: npm run vite:build
 
+      - name: Validate frontend
+        working-directory: apps/alunixa-x-manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run check
+          node ../../tools/i18n-verify.mjs
+
+      - name: Rust workspace regression tests
+        run: cargo test --workspace --locked --no-fail-fast -- --test-threads=1
+
       - name: Build binaries
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build macOS assets
         shell: bash
@@ -263,6 +276,11 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.reuse_run_id == '' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release notes and scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
       - name: Download all release assets
         uses: actions/download-artifact@v4
         with:
@@ -275,12 +293,17 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ needs.verify-version.outputs.version }}"
-          test -f "dist/release/Alunixa-X-${VERSION}-windows-x64-setup.exe"
-          test -f "dist/release/Alunixa-X-${VERSION}-windows-x64.zip"
-          test -f "dist/release/Alunixa-X-${VERSION}-macos-x64.dmg"
-          test -f "dist/release/Alunixa-X-${VERSION}-macos-x64.zip"
-          test -f "dist/release/Alunixa-X-${VERSION}-macos-arm64.dmg"
-          test -f "dist/release/Alunixa-X-${VERSION}-macos-arm64.zip"
+          test "$(find dist/release -maxdepth 1 -type f | wc -l)" -eq 6
+          test -s "dist/release/Alunixa-X-${VERSION}-windows-x64-setup.exe"
+          test -s "dist/release/Alunixa-X-${VERSION}-windows-x64.zip"
+          test -s "dist/release/Alunixa-X-${VERSION}-macos-x64.dmg"
+          test -s "dist/release/Alunixa-X-${VERSION}-macos-x64.zip"
+          test -s "dist/release/Alunixa-X-${VERSION}-macos-arm64.dmg"
+          test -s "dist/release/Alunixa-X-${VERSION}-macos-arm64.zip"
+
+      - name: Prepare detailed versioned release notes
+        shell: bash
+        run: bash scripts/release/prepare-notes.sh
 
       - name: Create or update GitHub Release
         env:
@@ -288,14 +311,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Alunixa-Code/Alunixa-X"
+          NOTES="$RUNNER_TEMP/alunixa-x-release-notes.md"
+          test -s "$NOTES"
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/release/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES" --latest
           else
             gh release create "$RELEASE_TAG" dist/release/* \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
-              --title "Alunixa X ${{ needs.verify-version.outputs.version }}" \
-              --generate-notes
+              --title "Alunixa X $RELEASE_TAG · Codex 兼容与高级提示词恢复" \
+              --notes-file "$NOTES" --latest
           fi
 
   publish-reused:
@@ -438,18 +465,26 @@ jobs:
           done
           sha256sum "${EXPECTED[@]/#/dist/release/}"
 
+      - name: Prepare detailed versioned release notes
+        shell: bash
+        run: bash scripts/release/prepare-notes.sh
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "Alunixa-Code/Alunixa-X"
+          NOTES="$RUNNER_TEMP/alunixa-x-release-notes.md"
+          test -s "$NOTES"
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/release/* --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$NOTES" --latest
           else
             gh release create "$RELEASE_TAG" dist/release/* \
               --repo "$GITHUB_REPOSITORY" \
               --verify-tag \
-              --title "Alunixa X ${{ needs.verify-version.outputs.version }}" \
-              --generate-notes
+              --title "Alunixa X $RELEASE_TAG · Codex 兼容与高级提示词恢复" \
+              --notes-file "$NOTES" --latest
           fi

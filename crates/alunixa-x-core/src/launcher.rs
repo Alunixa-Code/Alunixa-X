@@ -323,12 +323,6 @@ where
                 );
             }
         }
-        crate::codex_instructions::apply_model_instructions_policy(
-            &home,
-            settings.codex_app_instructions_enabled,
-            &settings.codex_app_instructions,
-        )
-        .context("failed to apply Codex model instructions")?;
         if settings.provider_sync_enabled {
             crate::codex_app_state::capture_app_state_snapshot_nonfatal(&home, "launcher.before");
             hooks.run_provider_sync().await?;
@@ -451,6 +445,18 @@ where
         crate::experimental_context::apply_experimental_context_policy(&home, &settings)
             .context("failed to apply Codex experimental context configuration")?;
         crate::experimental_context::validate_local_context_companion(&home, &settings)?;
+        // Check after every config writer, immediately before starting services/Codex.
+        if crate::codex_instructions::ensure_model_instructions_before_launch(
+            &home,
+            settings.codex_app_instructions_enabled,
+            &settings.codex_app_instructions,
+        )
+        .context("failed to restore Codex advanced instructions before launch")? {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.model_instructions_restored",
+                serde_json::json!({ "checkedBeforeLaunch": true }),
+            );
+        }
         if settings.enhancements_enabled || protocol_proxy_enabled {
             hooks.start_helper(helper_port).await?;
             helper_started = true;

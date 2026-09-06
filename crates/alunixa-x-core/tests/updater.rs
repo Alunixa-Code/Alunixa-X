@@ -186,7 +186,11 @@ fn asset_selection_prefers_current_platform_artifacts() {
 #[test]
 #[cfg(target_os = "macos")]
 fn asset_selection_rejects_wrong_arch_macos_installer() {
-    let foreign_arch = if cfg!(target_arch = "aarch64") { "x64" } else { "arm64" };
+    let foreign_arch = if cfg!(target_arch = "aarch64") {
+        "x64"
+    } else {
+        "arm64"
+    };
     let assets = vec![(
         format!("Alunixa-X-1.0.11-macos-{foreign_arch}.dmg"),
         "https://example.test/wrong-arch.dmg".to_string(),

@@ -305,8 +305,8 @@ export const EN_PLAIN: Record<string, string> = {
   "开启后使用 OpenAI 兼容嵌入接口；关闭或接口异常时使用本地 BM25 关键词匹配。":
     "Use an OpenAI-compatible embedding endpoint when enabled. When disabled or unavailable, use local BM25 keyword matching.",
   "Instructions 提示词": "Instructions prompt",
-  "为 Codex 配置独立的全局 instructions 文件。":
-    "Configure a dedicated global instructions file for Codex.",
+  "每次启动前检查高级提示词，缺失时自动恢复；修改其他能力不覆盖正文，关闭开关保留文件。":
+    "Check advanced instructions before every launch and restore missing files; unrelated capability changes preserve the text, and disabling keeps the file.",
   "提示词正文": "Instructions content",
   "输入需要在所有 Codex 会话中生效的 instructions":
     "Enter instructions that should apply to every Codex conversation",
@@ -690,8 +690,8 @@ export const EN_PLAIN: Record<string, string> = {
   "时间": "Time",
   "桌宠跟随真实鼠标": "Real-mouse pet look",
   "释放并注册内置缓存": "Extract and register embedded cache",
-  "显示服务模式切换按钮；Fast 仅支持 gpt-5.4 / gpt-5.5，其他模型按 Standard 发送。":
-    "Show the service-tier toggle button; Fast only supports gpt-5.4 / gpt-5.5, other models are sent as Standard.",
+  "显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。":
+    "Show the service-tier toggle; prefer the current model's service-tier metadata for Fast support, with legacy compatibility.",
   "暂无": "None",
   "暂无启动状态。": "No launch status yet.",
   "暂无描述。": "No description.",
