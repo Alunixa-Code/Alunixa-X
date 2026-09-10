@@ -499,7 +499,13 @@
   const codexThreadIdBadgeVersion = "1";
   const codexThreadServiceTierVersion = "1";
   const codexServiceTierBadgeClass = "codex-service-tier-badge";
-  const codexServiceTierBadgeVersion = "3";
+  const codexServiceTierBadgeVersion = "4";
+  const codexComposerFooterSelector = [
+    ".composer-footer",
+    "div[data-composer-footer-responsive]",
+    'div[class*="_ComposerFooter_"]',
+    'div[class*="_ComposerLayoutFooter_"]',
+  ].join(", ");
   const codexMenuLocalizationVersion = "1";
   const codexMenuLocalizationMap = new Map([
     ["Toggle Sidebar", "切换侧边栏"],
@@ -2515,6 +2521,7 @@
       node.textContent = state.label;
       node.title = state.title;
       node.setAttribute("aria-label", state.title);
+      node.setAttribute("aria-disabled", String(!!state.disabled));
     });
   }
 
@@ -10640,6 +10647,7 @@
 
   function codexServiceTierBadgeVisibleElement(element) {
     if (!(element instanceof HTMLElement) || !element.isConnected) return false;
+    if (element.closest?.('[hidden], [inert], [aria-hidden="true"]')) return false;
     const style = getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden") return false;
     const rect = element.getBoundingClientRect();
@@ -10688,10 +10696,10 @@
 
   function codexServiceTierVisibleComposerFooters(root = document) {
     const footers = [
-      ...(root?.matches?.(".composer-footer") ? [root] : []),
-      ...Array.from(root?.querySelectorAll?.(".composer-footer") || []),
+      ...(root?.matches?.(codexComposerFooterSelector) ? [root] : []),
+      ...Array.from(root?.querySelectorAll?.(codexComposerFooterSelector) || []),
     ];
-    return footers
+    return Array.from(new Set(footers))
       .filter(codexServiceTierBadgeVisibleElement)
       .sort((left, right) => {
         const leftRect = left.getBoundingClientRect();
@@ -10707,8 +10715,8 @@
     if (providerNames.some((name) => name && text.includes(name))) score += 40;
     if (/完全访问权限|full access|model|超高|high|sub2api|provider/i.test(text)) score += 20;
     if (/本地模式|local mode|worktree|branch|codex\//i.test(text)) score -= 30;
-    if (composer.matches?.(".composer-footer")) score += 4;
-    if (composer.querySelector?.(".composer-footer")) score += 8;
+    if (composer.matches?.(codexComposerFooterSelector)) score += 4;
+    if (composer.querySelector?.(codexComposerFooterSelector)) score += 8;
     const buttons = Array.from(composer.querySelectorAll?.("button, [role='button']") || []).filter(codexServiceTierBadgeVisibleElement);
     if (buttons.some((button) => codexServiceTierLooksLikeProviderButton(button, providerNames))) score += 30;
     score += Math.min(10, buttons.length);
@@ -10736,7 +10744,8 @@
   }
 
   function codexServiceTierFindComposerEl() {
-    return codexServiceTierComposerCandidates()
+    // Prefer the actual footer, not a large ancestor containing unrelated toolbars.
+    return codexServiceTierBestComposerFooter() || codexServiceTierComposerCandidates()
       .map((composer, index) => ({ composer, index, score: codexServiceTierComposerScore(composer) }))
       .sort((left, right) => (right.score - left.score) || (left.index - right.index))[0]?.composer || null;
   }
@@ -10754,14 +10763,16 @@
   }
 
   function codexServiceTierComposerFooter(composer) {
-    if (composer?.matches?.(".composer-footer")) return composer;
+    if (composer?.matches?.(codexComposerFooterSelector)) return composer;
     return codexServiceTierBestComposerFooter(composer) || codexServiceTierBestComposerFooter() || null;
   }
 
   function codexServiceTierBadgeFooterGroup(composer) {
     const footer = codexServiceTierComposerFooter(composer);
     if (!footer) return null;
-    const children = Array.from(footer.children).filter(codexServiceTierBadgeVisibleElement);
+    const children = Array.from(footer.children)
+      .filter((child) => child.matches?.("div") && !child.closest?.('button, [role="button"], a, label'))
+      .filter(codexServiceTierBadgeVisibleElement);
     if (!children.length) return footer;
     const providerNames = codexServiceTierKnownProviderNames();
     const providerGroup = children.find((child) => {
@@ -10773,9 +10784,14 @@
 
   function codexServiceTierBadgePlacement(composer) {
     const anchor = composer ? codexServiceTierBadgeAnchor(composer) : null;
-    if (anchor?.parentElement) return { parent: anchor.parentElement, before: anchor };
+    if (anchor?.parentElement && !anchor.parentElement.closest?.('button, [role="button"], a, label')) {
+      return { parent: anchor.parentElement, before: anchor };
+    }
     const group = composer ? codexServiceTierBadgeFooterGroup(composer) : null;
-    if (group) return { parent: group, before: group.firstChild };
+    if (group) {
+      const before = Array.from(group.childNodes).find((node) => node.dataset?.codexServiceTierBadge !== "true") || null;
+      return { parent: group, before };
+    }
     return null;
   }
 
@@ -10811,7 +10827,7 @@
       existingBadges.forEach((badge) => badge.remove());
       return;
     }
-    let badge = existingBadges.find((node) => node.closest?.(".composer-footer") || node.closest?.("button") == null) || existingBadges[0];
+    let badge = existingBadges.find((node) => node.closest?.(codexComposerFooterSelector) || node.closest?.("button") == null) || existingBadges[0];
     existingBadges.forEach((node) => {
       if (node !== badge) node.remove();
     });
@@ -11708,7 +11724,7 @@
       '[data-testid="conversation-turn"]',
       '[class*="user-message"]',
       '[class*="UserMessage"]',
-      ".composer-footer",
+      codexComposerFooterSelector,
       selectors.appHeader,
       selectors.archiveNav,
       codexMenuLocalizationScopeSelector(),

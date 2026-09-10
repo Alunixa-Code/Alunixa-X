@@ -842,6 +842,25 @@ fn injection_script_exposes_fast_service_tier_control() {
 }
 
 #[test]
+fn injection_script_supports_current_and_legacy_composer_fast_controls() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("const codexComposerFooterSelector = ["));
+    assert!(script.contains("\".composer-footer\""));
+    assert!(script.contains("div[data-composer-footer-responsive]"));
+    assert!(script.contains("_ComposerFooter_"));
+    assert!(script.contains("_ComposerLayoutFooter_"));
+    assert!(
+        script.contains(
+            "codexServiceTierBestComposerFooter() || codexServiceTierComposerCandidates()"
+        )
+    );
+    assert!(script.contains("node.dataset?.codexServiceTierBadge !== \"true\""));
+    assert!(script.contains("setAttribute(\"aria-disabled\", String(!!state.disabled))"));
+    assert!(!script.contains("querySelectorAll?.(\".composer-footer\")"));
+}
+
+#[test]
 fn injection_script_prompts_for_markdown_export_path_when_supported() {
     let script = assets::injection_script(57321);
 
