@@ -1427,3 +1427,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 新版准备提交为 `e26a80c`；接下来采用 main 与 annotated `v1.0.13` 原子推送，最终提交使用 skip-ci 标记避免自动主分支/标签重复打包，再手动启动唯一正式 Release Actions；以三平台完整测试、正式构建和六资产哈希成功作为实际发行依据喵~
 - 已成功将 main 与 annotated `v1.0.13` 原子推送到 `Alunixa-Code/Alunixa-X`，正式产品提交为 `f681e969300a985a3fbf9b992fc480b3559934ee`，未修改旧仓库或覆盖既有标签喵~
 - 唯一正式 Release Actions 为 `34439391305`，创建于 `2026-09-10T05:00:59Z`，headBranch 为 `v1.0.13` 且 head SHA 精确匹配；手动派发已成功，后续只等待和核验这次运行，不重复触发构建喵~
+- 发行等待期间只读复查安装 CSS，确认新版 footer 为 grid 布局、内部分组用于承载控件；现有 badge 为非收缩 inline-flex，产品未修改原生 CSS 或安装包文件，当前实例仍未被操作喵~
+- 正式 Actions 的 Windows x64、macOS x64 与 macOS arm64 均已通过完整前端/Rust 测试；arm64 正式二进制、DMG/ZIP、结构校验与上传已全部成功，另外两平台继续正式打包/编译，尚不宣称发行完成喵~
