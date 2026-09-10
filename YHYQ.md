@@ -1429,3 +1429,26 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 唯一正式 Release Actions 为 `34439391305`，创建于 `2026-09-10T05:00:59Z`，headBranch 为 `v1.0.13` 且 head SHA 精确匹配；手动派发已成功，后续只等待和核验这次运行，不重复触发构建喵~
 - 发行等待期间只读复查安装 CSS，确认新版 footer 为 grid 布局、内部分组用于承载控件；现有 badge 为非收缩 inline-flex，产品未修改原生 CSS 或安装包文件，当前实例仍未被操作喵~
 - 正式 Actions 的 Windows x64、macOS x64 与 macOS arm64 均已通过完整前端/Rust 测试；arm64 正式二进制、DMG/ZIP、结构校验与上传已全部成功，另外两平台继续正式打包/编译，尚不宣称发行完成喵~
+
+## 2026-09-10 · Alunixa X v1.0.13 Fast 修复正式发行
+
+- 正式 Release Actions `34439391305` 于 `2026-09-10T05:19:15Z` 完成且整体 success；版本/品牌、Windows x64、macOS x64、macOS arm64、六资产验证和 Publish GitHub Release 全部成功，未使用的历史构建复用分支正常 skipped 喵~
+- `Alunixa-Code/Alunixa-X` 的 `v1.0.13` 于 `2026-09-10T05:19:12Z` 正式发布，Release ID 为 `386022816`，非草稿、非预发布且为 Latest；正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.13` 喵~
+- 远端 main、annotated tag 解引用、正式 Actions head SHA 均为 `f681e969300a985a3fbf9b992fc480b3559934ee`；发行标题和中文正文前缀与版本化源文件逐字一致，包含构建提交、Actions 来源和六项哈希喵~
+- 六项资产的名称集合、唯一性、uploaded 状态、非零字节及 GitHub digest 与说明内构建哈希逐项一致，`NotesAndHashes=PASS`；不携带认证请求新仓库 Latest 返回同一 Release ID、标签与六资产，`AnonymousLatest=PASS` 喵~
+- Windows 权威 job `102751086579` 的日志在内存解析，确认前端 `77/77`、Rust `38` 套件 `1047` 通过、`0` 失败；唯一 ignored 为既有隔离 fake JSON-RPC 子进程入口，由父测试显式使用，不是本轮跳过产品回归喵~
+- Windows 正式 companion 和固定官方 CLI 的纯 API 原生窗口隔离验证输出 `status=PASS`、`requests=7`、`noChatGptLogin=true`；两个 macOS 架构的完整测试、正式二进制、DMG/ZIP 结构检查及上传也均成功喵~
+- 本轮没有重复派发相同产品提交的 CI，没有修改或重启当前 Codex、helper、CDP、微信或真实配置；本地只保留额外验收日志提交，产品修复、回归、版本和说明均已推送并包含于正式标签喵~
+- **交付范围：Fast 按钮布局兼容已完成并发布；Ultra“确认一次后记住”没有实现，原生权限行为保持不变**，不将用户的两项请求一起误报为全部完成喵~
+- 本轮未下载新依赖，仅复用本地缓存进行隔离验证；此前环境已拒绝的 `target`、前端 `node_modules`/`dist` 递归清理没有重新尝试或绕过，缓存继续保留，不宣称清理完成喵~
+
+| 正式安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.13-windows-x64-setup.exe` | 20930138 | `e6e0bf6ae60eacb05aca41bfaed84991fa184681a9aed6e3b468cb31bd9530b8` |
+| `Alunixa-X-1.0.13-windows-x64.zip` | 26748644 | `15ddafa2ee796c1493a664107eff8f6200be842c6a3a13df8200c8d4889ffda1` |
+| `Alunixa-X-1.0.13-macos-x64.dmg` | 34842904 | `8ef8980ad89a56ad2c8f0eae0d0d8a04d9acc030fd040bbe08e1e7358223d956` |
+| `Alunixa-X-1.0.13-macos-x64.zip` | 29206309 | `cad4458655dd289824f286d2606ba9e97fe590700178ed2bb90481a449db83a2` |
+| `Alunixa-X-1.0.13-macos-arm64.dmg` | 33559641 | `adc0e2fbf5d1fcdb486b458aaef6d5a45274576bb455a8f7765a3e2a5e173ce8` |
+| `Alunixa-X-1.0.13-macos-arm64.zip` | 28637965 | `15dc8643fdcb8f5d8c762160dc32ac1dce4c1e228264793fba8ae3973d58e734` |
+
+- 已向 Codex 右侧面板提交正式发行页预览，工具返回 `queued`，仅记录排队状态，不声称浏览器页已经实际显示喵~
