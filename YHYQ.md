@@ -1470,3 +1470,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已删除旧上下文三个实现模块及专用 CLI 验证脚本、管理器开关和设置字段，替换为仅做删除的 `retired_context` 迁移；普通图片 MCP、模型窗口/压缩阈值、Fast、中文界面和高级提示词不变喵~
 - 迁移覆盖管理器加载/保存、导入、供应商切换和启动/重新激活，旧 JSON 字段及三个配置快照入口会被清理；真实文件修改前在原配置目录内建立备份，检测并发更新和链接目标，不删除笔记/会话/历史喵~
 - 首轮完整前端 `77/77` 通过；准备版本 `1.0.14`，只更新本地包版本并补齐移除说明，Rust 迁移专项和独立清理工具正在编译，尚未修改真实配置或发布喵~
+- 第一轮删除迁移测试 `7/7` 通过，独立清理工具构建成功；前端 `77/77`、TypeScript、i18n `851/851` 与 `80/80`、品牌检查通过，产品移除检查点为 `95840e9` 喵~
+- 已执行用户授权的真实配置清理：`C:\Users\Administrator\.codex\config.toml` 和 `C:\Users\Administrator\.codex-session-delete\settings.json` 均返回 changed=true，删除 token-budget/MCP、旧开关及供应商快照中的退役项喵~
+- 原始文件分别完整备份在上述两个目录各自的 `alunixa-x-retirement-backups` 内，备份内容逐字节匹配修改前文件，未进入 Git；实际结果经 TOML/JSON 语义比较，除指定退役项外完全相同，`LiveConfigSemanticDiff=PASS`、`ProviderSnapshotsCleaned=PASS`、`OtherSettingsPreserved=PASS` 喵~
+- 清理过程中没有读取/改写笔记数据库或其他任务记录，没有启动当前 Codex/Helper/CDP；当前运行窗口仍可能保留既有提示和工具，需用户方便时重启以丢弃内存中的旧能力喵~
+- 最终 Rust 命令最初误写集成目标 `installer`，Cargo 在执行前报不存在，已改为实际目标 `installers`，正在执行 core lib、切换回归、安装器、管理器契约和全目标编译；没有跳过失败产品测试或重复启动同一测试进程喵~
