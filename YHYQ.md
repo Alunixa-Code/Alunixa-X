@@ -1513,3 +1513,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已先读取本文件、确认工作树干净并建立修改前检查点 `7a0f80c`，后续修改仅在 `D:\Cursor\AlunixaX` 进行喵~
 - 版本从 `1.0.14` 提升到 `1.0.15`，同步更新四个 Cargo 包、管理器前端、Tauri 配置、锁文件、CHANGELOG、发行说明和启动审计报告；不升级传递依赖喵~
 - 本轮不重新执行真实 Codex 配置清理、不重启当前 Codex/Helper/CDP；先完成本地回归，再原子推送新版本并由唯一正式 GitHub Actions 构建发布喵~
+- 本地前端验证完成：`npm test` 为 `77/77`，TypeScript 检查、i18n `851/851` 与 `80/80`、Vite 生产构建均退出 `0`；Vite 仅保留既有大 chunk 提示，不是失败喵~
+- 本地 `cargo test --workspace --locked --no-fail-fast -- --test-threads=1` 全部测试套件完成且没有失败，core lib 为 `311 passed / 0 failed / 1 ignored`，relay switch `9/9`、installer `13/13`、manager Windows `24/24` 全部通过；随后 `cargo check --workspace --all-targets --locked` 也退出 `0` 喵~
+- 版本一致性、`git diff --check` 和 Rust formatter 检查通过，`v1.0.15` 本地及远端标签均未占用喵~
+- 曾误将一次只读 Bash 语法检查命令交给 Windows 的 `bash` 入口，系统返回 WSL 使用帮助并在执行脚本前退出；没有执行任何 WSL 构建、测试、文件写入或配置操作，未再次尝试该入口，产品验证全部使用 PowerShell、Node 和 Cargo 完成喵~
