@@ -1506,3 +1506,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 为保护当前未发布的启动审计工作，先将当时已有修改和 `startup_audit.rs` 建立检查点 `089a8a4`；之后完整 core lib 为 `311 passed / 0 failed / 1 ignored`，relay switch `9/9`、installer `13/13`、manager Windows `24/24` 全部通过，`cargo fmt --all -- --check` 与 `cargo check --workspace --all-targets --locked` 也通过喵~
 - 因此结论分为两部分：**实验性上下文删除、本机配置清理及 `v1.0.14` 发布已经完成**；但“每次启动前全面配置与高级提示词审计”是之后新增的未发布工作，当前本地 `main` 为 `089a8a4`、领先远端三次提交，`Cargo.toml` 仍为 `1.0.14`，这部分不能声称已经通过 GitHub Actions 发布喵~
 - 本轮没有重启 Codex、修改真实配置、启动新的 GitHub Actions 或创建新版本标签；当前仓库代码已在检查点保存，后续若要交付启动审计，需要另行提升版本、补齐发行说明并走新的三平台 Actions 发布流程喵~
+
+## 2026-09-11 · 继续完成启动前全面审计并准备正式发行
+
+- 用户明确要求继续完成未发布的启动前全面配置与高级提示词审计喵~
+- 已先读取本文件、确认工作树干净并建立修改前检查点 `7a0f80c`，后续修改仅在 `D:\Cursor\AlunixaX` 进行喵~
+- 版本从 `1.0.14` 提升到 `1.0.15`，同步更新四个 Cargo 包、管理器前端、Tauri 配置、锁文件、CHANGELOG、发行说明和启动审计报告；不升级传递依赖喵~
+- 本轮不重新执行真实 Codex 配置清理、不重启当前 Codex/Helper/CDP；先完成本地回归，再原子推送新版本并由唯一正式 GitHub Actions 构建发布喵~
