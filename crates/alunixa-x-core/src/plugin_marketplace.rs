@@ -52,6 +52,48 @@ pub fn ensure_role_specific_plugins_marketplace_config(home: &Path) -> anyhow::R
     )
 }
 
+/// Remove only marketplace entries owned by Alunixa X.  User-selected
+/// `openai-curated` and other third-party marketplace entries are preserved.
+pub fn remove_alunixa_x_marketplace_config(home: &Path) -> anyhow::Result<bool> {
+    let path = home.join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let mut doc = parse_toml_document(&text)?;
+    let mut changed = false;
+    if let Some(marketplaces) = doc.get_mut("marketplaces").and_then(Item::as_table_mut) {
+        for name in [ALUNIXA_X_MARKETPLACE, ROLE_SPECIFIC_PLUGINS_MARKETPLACE] {
+            changed |= marketplaces.remove(name).is_some();
+        }
+        if marketplaces.is_empty() {
+            doc.as_table_mut().remove("marketplaces");
+        }
+    }
+    if let Some(plugins) = doc.get_mut("plugins").and_then(Item::as_table_mut) {
+        let owned_ids = plugins
+            .iter()
+            .filter_map(|(id, _)| {
+                (id.ends_with(&format!("@{ALUNIXA_X_MARKETPLACE}"))
+                    || id.ends_with(&format!("@{ROLE_SPECIFIC_PLUGINS_MARKETPLACE}")))
+                .then_some(id.to_string())
+            })
+            .collect::<Vec<_>>();
+        for id in owned_ids {
+            changed |= plugins.remove(&id).is_some();
+        }
+        if plugins.is_empty() {
+            doc.as_table_mut().remove("plugins");
+        }
+    }
+    if changed {
+        crate::settings::atomic_write(&path, ensure_trailing_newline(doc.to_string()).as_bytes())?;
+    }
+    let reserved_changed = cleanup_managed_reserved_marketplace_configs(home)?;
+    Ok(changed || reserved_changed)
+}
+
 pub fn ensure_openai_curated_remote_marketplace_available(
     home: &Path,
 ) -> anyhow::Result<MarketplaceEnsureResult> {
@@ -1006,6 +1048,27 @@ mod tests {
 
         assert!(!changed);
         assert!(!temp.path().join("config.toml").exists());
+    }
+
+    #[test]
+    fn disabled_marketplace_cleanup_removes_only_alunixa_owned_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "[marketplaces.alunixa-x-curated]\nsource_type='local'\nsource='owned'\n\
+             [marketplaces.user]\nsource_type='remote'\nsource='keep'\n\
+             [plugins.'sales@role-specific-plugins']\nenabled=true\n\
+             [plugins.'user@custom']\nenabled=true\n",
+        )
+        .unwrap();
+
+        assert!(remove_alunixa_x_marketplace_config(temp.path()).unwrap());
+        let text = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(!text.contains("alunixa-x-curated"));
+        assert!(!text.contains("role-specific-plugins"));
+        assert!(text.contains("[marketplaces.user]"));
+        assert!(text.contains("user@custom"));
+        assert!(!remove_alunixa_x_marketplace_config(temp.path()).unwrap());
     }
 
     #[test]

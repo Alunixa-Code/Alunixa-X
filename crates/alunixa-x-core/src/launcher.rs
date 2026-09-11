@@ -167,6 +167,13 @@ pub trait LaunchHooks: Send + Sync {
     ) -> anyhow::Result<()> {
         Ok(())
     }
+    async fn audit_startup_config(
+        &self,
+        _settings: &BackendSettings,
+        _helper_port: u16,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()>;
     async fn launch_codex(
         &self,
@@ -456,6 +463,10 @@ where
                 serde_json::json!({ "checkedBeforeLaunch": true }),
             );
         }
+        hooks
+            .audit_startup_config(&settings, helper_port)
+            .await
+            .context("Codex 启动前全面配置校验失败")?;
         if settings.enhancements_enabled || protocol_proxy_enabled {
             hooks.start_helper(helper_port).await?;
             helper_started = true;
@@ -816,6 +827,9 @@ impl LaunchHooks for DefaultLaunchHooks {
 
     async fn ensure_computer_use_config(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         if !settings.computer_use_guard_enabled {
+            crate::computer_use_guard::remove_managed_computer_use_config(
+                &crate::relay_config::default_codex_home_dir(),
+            )?;
             return Ok(());
         }
         let home = crate::relay_config::default_codex_home_dir();
@@ -830,6 +844,9 @@ impl LaunchHooks for DefaultLaunchHooks {
         settings: &BackendSettings,
     ) -> anyhow::Result<()> {
         if !settings.codex_app_plugin_marketplace_unlock {
+            crate::plugin_marketplace::remove_alunixa_x_marketplace_config(
+                &crate::relay_config::default_codex_home_dir(),
+            )?;
             return Ok(());
         }
         let home = crate::relay_config::default_codex_home_dir();
@@ -909,6 +926,41 @@ impl LaunchHooks for DefaultLaunchHooks {
                 }),
             );
         }
+        Ok(())
+    }
+
+    async fn audit_startup_config(
+        &self,
+        settings: &BackendSettings,
+        helper_port: u16,
+    ) -> anyhow::Result<()> {
+        let home = crate::relay_config::default_codex_home_dir();
+        let launcher_path = std::env::current_exe().context("无法解析 Alunixa X launcher 路径")?;
+        self.ensure_computer_use_config(settings).await?;
+        self.ensure_plugin_marketplace_config(settings).await?;
+        self.ensure_imagegen_mcp_config(settings, helper_port)
+            .await?;
+        if settings.relay_profiles_enabled && settings.codex_app_disable_wss {
+            let config_path = home.join("config.toml");
+            if config_path.is_file() {
+                crate::relay_config::apply_wss_policy_to_home(&home, true)?;
+            }
+        }
+        let report = crate::startup_audit::audit_and_repair_before_launch(
+            &home,
+            settings,
+            helper_port,
+            &launcher_path,
+        )?;
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "launcher.startup_config_audit",
+            serde_json::json!({
+                "checkedFiles": report.checked_files,
+                "checkedConfigSections": report.checked_config_sections,
+                "advancedInstructionFiles": report.advanced_instruction_files,
+                "repairedItems": report.repaired_items
+            }),
+        );
         Ok(())
     }
 

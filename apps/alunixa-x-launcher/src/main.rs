@@ -273,6 +273,14 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
         &settings.codex_app_instructions,
     )
     .context("failed to restore Codex advanced instructions before reactivation")?;
+    hooks
+        .apply_active_relay_profile(&settings)
+        .await
+        .context("failed to reconcile Codex provider before reactivation")?;
+    hooks
+        .audit_startup_config(&settings, options.helper_port)
+        .await
+        .context("Codex startup configuration audit failed before reactivation")?;
     let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
     save_existing_launch_status(
         &options,
@@ -612,6 +620,14 @@ impl LaunchHooks for LauncherHooks {
         self.core
             .ensure_imagegen_mcp_config(settings, helper_port)
             .await
+    }
+
+    async fn audit_startup_config(
+        &self,
+        settings: &alunixa_x_core::settings::BackendSettings,
+        helper_port: u16,
+    ) -> anyhow::Result<()> {
+        self.core.audit_startup_config(settings, helper_port).await
     }
 
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
@@ -1376,6 +1392,8 @@ mod tests {
         assert!(include_str!("../Cargo.toml").contains("name = \"alunixa-x-imagegen-mcp\""));
         assert!(source.contains("async fn ensure_imagegen_mcp_config"));
         assert!(source.contains(".ensure_imagegen_mcp_config(settings, helper_port)"));
+        assert!(source.contains("async fn audit_startup_config"));
+        assert!(source.contains("self.core.audit_startup_config(settings, helper_port).await"));
         assert!(source.contains("async fn start_computer_use_guard_watchdog"));
         assert!(source.contains("self.core"));
         assert!(source.contains(".start_computer_use_guard_watchdog(settings)"));

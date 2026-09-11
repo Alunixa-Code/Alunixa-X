@@ -238,6 +238,87 @@ pub(crate) fn guard_config_text_with_marketplace(
     Ok(ensure_trailing_newline(doc.to_string()))
 }
 
+pub(crate) fn remove_managed_computer_use_config(home: &Path) -> anyhow::Result<bool> {
+    let path = home.join("config.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let mut doc = parse_toml_document(text.trim_start_matches('\u{feff}'))?;
+    let mut changed = false;
+
+    if let Some(plugins) = doc.get_mut("plugins").and_then(Item::as_table_mut) {
+        for plugin_id in COMPUTER_USE_PLUGINS {
+            changed |= plugins.remove(*plugin_id).is_some();
+        }
+        if plugins.is_empty() {
+            doc.as_table_mut().remove("plugins");
+        }
+    }
+
+    if let Some(marketplaces) = doc.get_mut("marketplaces").and_then(Item::as_table_mut) {
+        let managed_root = home
+            .join(".tmp")
+            .join("bundled-marketplaces")
+            .join(BUNDLED_MARKETPLACE);
+        let is_managed = marketplaces
+            .get(BUNDLED_MARKETPLACE)
+            .and_then(Item::as_table_like)
+            .and_then(|table| table.get("source"))
+            .and_then(Item::as_str)
+            .is_some_and(|source| same_path_ignoring_windows_prefix(source, &managed_root));
+        if is_managed {
+            marketplaces.remove(BUNDLED_MARKETPLACE);
+            changed = true;
+        }
+        if marketplaces.is_empty() {
+            doc.as_table_mut().remove("marketplaces");
+        }
+    }
+
+    if changed {
+        if let Some(features) = doc.get_mut("features").and_then(Item::as_table_mut) {
+            if features.get("js_repl").and_then(Item::as_bool) == Some(true) {
+                features.remove("js_repl");
+                if features.is_empty() {
+                    doc.as_table_mut().remove("features");
+                }
+            }
+        }
+        if let Some(notify) = doc.get("notify").and_then(Item::as_array) {
+            let managed_notify = notify.len() == 2
+                && notify.get(1).and_then(|item| item.as_str()) == Some("turn-ended")
+                && notify
+                    .get(0)
+                    .and_then(|item| item.as_str())
+                    .is_some_and(|value| {
+                        value
+                            .replace('\\', "/")
+                            .ends_with("/codex-computer-use.exe")
+                    });
+            if managed_notify {
+                doc.as_table_mut().remove("notify");
+            }
+        }
+        crate::settings::atomic_write(&path, ensure_trailing_newline(doc.to_string()).as_bytes())?;
+    }
+    Ok(changed)
+}
+
+fn same_path_ignoring_windows_prefix(source: &str, expected: &Path) -> bool {
+    let normalize = |value: String| {
+        let value = value.replace('\\', "/");
+        let value = value.strip_prefix("//?/").unwrap_or(&value);
+        if cfg!(windows) {
+            value.to_lowercase()
+        } else {
+            value.to_string()
+        }
+    };
+    normalize(source.to_string()) == normalize(expected.to_string_lossy().into_owned())
+}
+
 pub(crate) fn find_computer_use_notify_exe(home: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -837,6 +918,38 @@ mod tests {
             parsed["marketplaces"]["openai-bundled"]["source"].as_str(),
             Some(r"\\?\C:\Users\me\.codex\.tmp\bundled-marketplaces\openai-bundled")
         );
+    }
+
+    #[test]
+    fn disabled_cleanup_removes_only_owned_computer_use_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        let managed_root = home
+            .join(".tmp")
+            .join("bundled-marketplaces")
+            .join(BUNDLED_MARKETPLACE);
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                "notify = ['{}', 'turn-ended']\n\
+                 [features]\njs_repl = true\n\
+                 [plugins.'browser@openai-bundled']\nenabled = true\n\
+                 [plugins.'user-plugin@custom']\nenabled = true\n\
+                 [marketplaces.openai-bundled]\nsource_type = 'local'\nsource = '{}'\n\
+                 [marketplaces.user]\nsource_type = 'remote'\nsource = 'keep'\n",
+                home.join("codex-computer-use.exe").display(),
+                managed_root.display(),
+            ),
+        )
+        .unwrap();
+
+        assert!(remove_managed_computer_use_config(home).unwrap());
+        let text = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(!text.contains("browser@openai-bundled"));
+        assert!(!text.contains("openai-bundled"));
+        assert!(text.contains("user-plugin@custom"));
+        assert!(text.contains("[marketplaces.user]"));
+        assert!(!remove_managed_computer_use_config(home).unwrap());
     }
 
     #[test]

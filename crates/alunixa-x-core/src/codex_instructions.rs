@@ -8,6 +8,13 @@ const MANAGED_DIRECTORY: &str = "TSC_ZYL_PJ";
 const MANAGED_FILE: &str = "do_special.md";
 const BACKUP_FILE: &str = "do_special.md.last-good";
 const DEFAULT_INSTRUCTIONS: &str = "# Global instructions\n\nFollow the user's task requirements, verify your work, and report results accurately.\n";
+const MAX_INSTRUCTIONS_BYTES: u64 = 512 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ModelInstructionsAudit {
+    pub files_scanned: usize,
+    pub references_checked: usize,
+}
 
 pub fn managed_instructions_path(home: &Path) -> PathBuf {
     home.join(MANAGED_DIRECTORY).join(MANAGED_FILE)
@@ -29,6 +36,52 @@ pub fn ensure_model_instructions_before_launch(
     instructions: &str,
 ) -> anyhow::Result<bool> {
     sync_model_instructions(home, enabled, instructions, false)
+}
+
+/// Scan every advanced-instruction source before launch without changing
+/// user-owned external files or logging their contents.
+pub fn audit_model_instructions_before_launch(
+    home: &Path,
+    enabled: bool,
+    instructions: &str,
+) -> anyhow::Result<ModelInstructionsAudit> {
+    let config_path = home.join("config.toml");
+    let config = read_optional_text(&config_path)?.unwrap_or_default();
+    let doc = parse_config(&config)?;
+    let reference = doc
+        .get("model_instructions_file")
+        .and_then(Item::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let managed_reference = is_managed_reference(&reference, home);
+    if enabled && reference.is_empty() {
+        anyhow::bail!("启动前高级提示词扫描失败：已启用但 model_instructions_file 缺失");
+    }
+    if !enabled && managed_reference {
+        anyhow::bail!("启动前高级提示词扫描失败：功能已关闭但托管提示词引用仍存在");
+    }
+
+    let mut audit = ModelInstructionsAudit::default();
+    if !reference.is_empty() {
+        audit.references_checked += 1;
+        scan_instruction_file(&resolve_instruction_reference(home, &reference))?;
+        audit.files_scanned += 1;
+    }
+
+    for path in [
+        managed_instructions_path(home),
+        home.join(MANAGED_DIRECTORY).join(BACKUP_FILE),
+    ] {
+        if path.is_file() {
+            scan_instruction_file(&path)?;
+            audit.files_scanned += 1;
+        }
+    }
+    if !instructions.trim().is_empty() {
+        scan_instruction_text(instructions)?;
+    }
+    Ok(audit)
 }
 
 pub fn sync_model_instructions_after_settings_save(
@@ -129,6 +182,46 @@ fn is_managed_reference(value: &str, home: &Path) -> bool {
             .is_ok_and(|path| normalize(value) == normalize(&path.to_string_lossy()))
 }
 
+fn resolve_instruction_reference(home: &Path, value: &str) -> PathBuf {
+    let value = value.replace('\\', "/");
+    if let Some(relative) = value.strip_prefix("~/") {
+        return home
+            .parent()
+            .unwrap_or(home)
+            .join(relative.replace('/', std::path::MAIN_SEPARATOR_STR));
+    }
+    let path = PathBuf::from(&value);
+    if path.is_absolute() {
+        path
+    } else {
+        home.join(path)
+    }
+}
+
+fn scan_instruction_file(path: &Path) -> anyhow::Result<()> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("启动前高级提示词扫描失败：无法读取 {}", path.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!("启动前高级提示词扫描失败：{} 不是普通文件", path.display());
+    }
+    if metadata.len() > MAX_INSTRUCTIONS_BYTES {
+        anyhow::bail!("启动前高级提示词扫描失败：提示词文件超过大小限制");
+    }
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("启动前高级提示词扫描失败：无法读取 {}", path.display()))?;
+    scan_instruction_text(&text)
+}
+
+fn scan_instruction_text(text: &str) -> anyhow::Result<()> {
+    if text.as_bytes().len() as u64 > MAX_INSTRUCTIONS_BYTES {
+        anyhow::bail!("启动前高级提示词扫描失败：提示词内容超过大小限制");
+    }
+    if text.contains('\0') {
+        anyhow::bail!("启动前高级提示词扫描失败：提示词内容包含 NUL 字符");
+    }
+    Ok(())
+}
+
 fn read_optional_text(path: &Path) -> anyhow::Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(text)),
@@ -190,7 +283,7 @@ fn parse_config(config: &str) -> anyhow::Result<DocumentMut> {
     }
     config
         .parse::<DocumentMut>()
-        .context("config.toml TOML parse failed")
+        .map_err(|_| anyhow::anyhow!("config.toml TOML parse failed"))
 }
 
 fn normalize_config(mut config: String) -> String {
