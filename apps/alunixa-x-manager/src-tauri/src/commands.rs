@@ -1192,6 +1192,15 @@ fn empty_dream_skin_community() -> alunixa_x_core::dream_skin_community::DreamSk
 
 #[tauri::command]
 pub fn load_settings() -> CommandResult<SettingsPayload> {
+    if let Err(error) = SettingsStore::default()
+        .remove_retired_context()
+        .and_then(|_| remove_retired_context_config())
+    {
+        return failed(
+            &format!("旧上下文配置清理失败：{error}"),
+            fallback_settings_payload(),
+        );
+    }
     settings_payload("设置已加载。", "设置读取失败")
 }
 
@@ -1224,7 +1233,7 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             )
             .map(|_| ())
         })
-        .and_then(|_| apply_codex_experimental_context_policy(&settings))
+        .and_then(|_| remove_retired_context_config())
         .and_then(|_| {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
                 settings.codex_app_disable_auto_update,
@@ -1272,10 +1281,9 @@ fn apply_codex_hook_policy(settings: &BackendSettings) -> anyhow::Result<()> {
     alunixa_x_core::codex_hooks::apply_alunixa_x_hooks(settings, &launcher_path).map(|_| ())
 }
 
-fn apply_codex_experimental_context_policy(settings: &BackendSettings) -> anyhow::Result<()> {
-    alunixa_x_core::experimental_context::apply_experimental_context_policy(
+fn remove_retired_context_config() -> anyhow::Result<()> {
+    alunixa_x_core::retired_context::remove_from_home(
         &alunixa_x_core::relay_config::default_codex_home_dir(),
-        settings,
     )
     .map(|_| ())
 }
@@ -1334,7 +1342,7 @@ pub fn import_full_config(path: String) -> CommandResult<Value> {
                 )?;
                 apply_codex_instructions_policy(&settings)?;
                 apply_codex_hook_policy(&settings)?;
-                apply_codex_experimental_context_policy(&settings)?;
+                remove_retired_context_config()?;
                 Ok(settings.codex_app_path)
             });
             match policy_result {

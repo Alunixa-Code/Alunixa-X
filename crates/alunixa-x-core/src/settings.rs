@@ -480,8 +480,6 @@ pub struct BackendSettings {
     pub codex_app_disable_wss: bool,
     #[serde(rename = "codexAppResponsesIdNegotiation", default)]
     pub codex_app_responses_id_negotiation: bool,
-    #[serde(rename = "codexAppExperimentalContext", default)]
-    pub codex_app_experimental_context: bool,
     #[serde(rename = "codexAppSharedTerminal", default)]
     pub codex_app_shared_terminal: bool,
     #[serde(
@@ -685,7 +683,6 @@ impl Default for BackendSettings {
             codex_app_disable_auto_update: false,
             codex_app_disable_wss: false,
             codex_app_responses_id_negotiation: false,
-            codex_app_experimental_context: false,
             codex_app_shared_terminal: false,
             codex_app_shared_terminal_retention_minutes:
                 default_codex_shared_terminal_retention_minutes(),
@@ -1420,6 +1417,12 @@ impl SettingsStore {
         self.with_lock(false, || self.load_unlocked())
     }
 
+    pub fn remove_retired_context(&self) -> anyhow::Result<bool> {
+        self.with_lock(true, || {
+            crate::retired_context::remove_from_settings_file(&self.path)
+        })
+    }
+
     fn load_unlocked(&self) -> anyhow::Result<BackendSettings> {
         let contents = match fs::read_to_string(&self.path) {
             Ok(contents) => contents,
@@ -1432,12 +1435,13 @@ impl SettingsStore {
             }
         };
 
-        let value = serde_json::from_str::<Value>(&contents).with_context(|| {
+        let mut value = serde_json::from_str::<Value>(&contents).with_context(|| {
             format!(
                 "failed to parse settings JSON {}; refusing to replace it with defaults",
                 self.path.display()
             )
         })?;
+        crate::retired_context::strip_settings_value(&mut value)?;
         let object = value.as_object().ok_or_else(|| {
             anyhow::anyhow!(
                 "settings JSON {} must be an object; refusing to replace it with defaults",
@@ -1451,7 +1455,7 @@ impl SettingsStore {
                     self.path.display()
                 )
             })?;
-        Ok(normalize_settings_config_sections(settings))
+        normalize_settings_config_sections(settings)
     }
 
     pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
@@ -1471,7 +1475,7 @@ impl SettingsStore {
     }
 
     fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
-        let mut settings = normalize_settings_config_sections(settings.clone());
+        let mut settings = normalize_settings_config_sections(settings.clone())?;
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
         let bytes = serde_json::to_vec_pretty(&settings)?;
         atomic_write_unique(&self.path, &bytes)
@@ -1500,9 +1504,16 @@ impl SettingsStore {
 
         let mut raw = self.load_raw_object()?;
         merge_known_setting_fields(&mut raw, &payload);
+        let mut cleaned = Value::Object(raw);
+        crate::retired_context::strip_settings_value(&mut cleaned)?;
+        let mut raw = cleaned
+            .as_object()
+            .context("settings must be an object")?
+            .clone();
         let settings = normalize_settings_config_sections(
-            serde_json::from_value(Value::Object(raw.clone())).unwrap_or_default(),
-        );
+            serde_json::from_value(Value::Object(raw.clone()))
+                .context("invalid settings update")?,
+        )?;
         raw.insert(
             "relayCommonConfigContents".to_string(),
             Value::String(settings.relay_common_config_contents.clone()),
@@ -1658,7 +1669,6 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppDisableAutoUpdate");
     merge_bool_setting(target, source, "codexAppDisableWss");
     merge_bool_setting(target, source, "codexAppResponsesIdNegotiation");
-    merge_bool_setting(target, source, "codexAppExperimentalContext");
     merge_bool_setting(target, source, "codexAppInstructionsEnabled");
     if let Some(value) = source.get("codexAppInstructions").and_then(Value::as_str) {
         target.insert(
@@ -2030,7 +2040,16 @@ fn settings_to_object(settings: &BackendSettings) -> Map<String, Value> {
     }
 }
 
-fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendSettings {
+fn normalize_settings_config_sections(
+    mut settings: BackendSettings,
+) -> anyhow::Result<BackendSettings> {
+    settings.relay_common_config_contents =
+        crate::retired_context::strip_config(&settings.relay_common_config_contents)?;
+    settings.relay_context_config_contents =
+        crate::retired_context::strip_config(&settings.relay_context_config_contents)?;
+    for profile in &mut settings.relay_profiles {
+        profile.config_contents = crate::retired_context::strip_config(&profile.config_contents)?;
+    }
     let (common, extracted_context) =
         split_context_config_sections(&settings.relay_common_config_contents);
     let context = join_config_sections(&[
@@ -2109,7 +2128,7 @@ fn normalize_settings_config_sections(mut settings: BackendSettings) -> BackendS
         .to_string();
     settings.codex_app_memory_embedding_model =
         settings.codex_app_memory_embedding_model.trim().to_string();
-    settings
+    Ok(settings)
 }
 
 fn split_context_config_sections(config: &str) -> (String, String) {
@@ -2302,7 +2321,6 @@ mod tests {
         assert!(settings.codex_app_force_chinese_locale);
         assert!(!settings.codex_app_disable_auto_update);
         assert!(!settings.codex_app_responses_id_negotiation);
-        assert!(!settings.codex_app_experimental_context);
         assert!(!settings.codex_goals_enabled);
         assert!(settings.codex_app_path.is_empty());
         assert!(settings.codex_extra_args.is_empty());
@@ -2531,7 +2549,6 @@ mod tests {
         assert_eq!(saved.codex_app_instructions, text);
         let saved = store
             .update(serde_json::json!({
-                "codexAppExperimentalContext": true,
                 "codexAppSubAgentMaxThreads": 6,
             }))
             .unwrap();
@@ -2624,7 +2641,7 @@ requires_openai_auth = true
             ..BackendSettings::default()
         };
 
-        let value = settings_to_object(&normalize_settings_config_sections(settings));
+        let value = settings_to_object(&normalize_settings_config_sections(settings).unwrap());
         let profile = &value["relayProfiles"][0];
         assert_eq!(profile["relayMode"], "official");
         assert_eq!(profile["officialMixApiKey"], false);
@@ -2966,7 +2983,7 @@ experimental_bearer_token = "sk-existing""#
         store.save(&settings).unwrap();
 
         let loaded = store.load().unwrap();
-        let expected = normalize_settings_config_sections(settings);
+        let expected = normalize_settings_config_sections(settings).unwrap();
         let active_aggregate = loaded.active_aggregate_relay_profile().unwrap();
         assert_eq!(loaded, expected);
         assert_eq!(
@@ -3019,7 +3036,12 @@ experimental_bearer_token = "sk-existing""#
         assert!(updated.codex_app_thread_id_badge);
         assert!(!updated.codex_app_native_menu_localization);
         assert!(updated.codex_app_responses_id_negotiation);
-        assert!(updated.codex_app_experimental_context);
+        assert!(
+            serde_json::to_value(&updated)
+                .unwrap()
+                .get("codexAppExperimentalContext")
+                .is_none()
+        );
         assert_eq!(updated.codex_app_shared_terminal_retention_minutes, 4);
         assert_eq!(updated.codex_app_sub_agent_max_threads, 7);
         assert!(updated.codex_app_service_tier_controls);
@@ -3035,6 +3057,44 @@ experimental_bearer_token = "sk-existing""#
             ]
         );
         assert_eq!(store.load().unwrap(), updated);
+    }
+
+    #[test]
+    fn removed_context_flag_and_all_saved_config_sources_stay_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        let old = "[features.token_budget]\nenabled = true\n[features.context_management]\nexperimental_mode = true\n[mcp_servers.alunixa-x-context]\ncommand = 'old'\n";
+        std::fs::write(
+            &path,
+            json!({
+                "codexAppExperimentalContext":true,
+                "relayCommonConfigContents":old, "relayContextConfigContents":old,
+                "relayProfiles":[{"id":"x","configContents":old}], "unrelatedCustomKey":42
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let loaded = store.load().unwrap();
+        assert!(!loaded.relay_common_config_contents.contains("token_budget"));
+        assert!(
+            !loaded
+                .relay_context_config_contents
+                .contains("alunixa-x-context")
+        );
+        assert!(
+            !loaded.relay_profiles[0]
+                .config_contents
+                .contains("experimental_mode")
+        );
+        store
+            .update(json!({"codexAppExperimentalContext":true, "codexAppServiceTierControls":true}))
+            .unwrap();
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert!(saved.get("codexAppExperimentalContext").is_none());
+        assert_eq!(saved["unrelatedCustomKey"], 42);
+        assert!(!saved.to_string().contains("token_budget"));
+        assert!(!saved.to_string().contains("alunixa-x-context"));
     }
 
     #[test]

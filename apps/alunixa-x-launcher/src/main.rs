@@ -264,6 +264,9 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     let hooks = LauncherHooks::default();
     let settings = hooks.load_settings().await?;
     ensure_alunixa_x_hooks(&settings).await;
+    alunixa_x_core::retired_context::remove_from_home(
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+    )?;
     alunixa_x_core::codex_instructions::ensure_model_instructions_before_launch(
         &alunixa_x_core::relay_config::default_codex_home_dir(),
         settings.codex_app_instructions_enabled,

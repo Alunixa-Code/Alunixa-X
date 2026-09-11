@@ -336,7 +336,7 @@ fn relay_context_management_is_global_not_supplier_scoped() {
 }
 
 #[test]
-fn experimental_context_policy_is_applied_on_save_import_switch_and_before_launch() {
+fn retired_context_is_removed_on_save_import_switch_and_before_launch() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs")).unwrap();
     let root = manifest_dir.join("../../..");
@@ -344,7 +344,7 @@ fn experimental_context_policy_is_applied_on_save_import_switch_and_before_launc
         std::fs::read_to_string(root.join("crates/alunixa-x-core/src/launcher.rs")).unwrap();
     let switch =
         std::fs::read_to_string(root.join("crates/alunixa-x-core/src/relay_switch.rs")).unwrap();
-    assert!(commands.contains(".and_then(|_| apply_codex_experimental_context_policy(&settings))"));
+    assert!(commands.contains(".and_then(|_| remove_retired_context_config())"));
     let import = commands
         .split("pub fn import_full_config(")
         .nth(1)
@@ -352,12 +352,10 @@ fn experimental_context_policy_is_applied_on_save_import_switch_and_before_launc
         .split("#[tauri::command]")
         .next()
         .unwrap();
-    assert!(import.contains("apply_codex_experimental_context_policy(&settings)?"));
-    assert!(
-        switch.contains("experimental_context::apply_experimental_context_policy(home, settings)?")
-    );
+    assert!(import.contains("remove_retired_context_config()?"));
+    assert!(switch.contains("retired_context::remove_from_home(home)?"));
     let policy = launcher
-        .find("experimental_context::apply_experimental_context_policy(&home, &settings)")
+        .find("retired_context::remove_from_home(&home)")
         .unwrap();
     let provider = launcher
         .find("hooks.apply_active_relay_profile(&settings).await?")

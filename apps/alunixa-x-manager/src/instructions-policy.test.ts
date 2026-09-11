@@ -9,7 +9,7 @@ test("advanced instructions are checked after all config writers and before star
   const repair = launcher.indexOf("codex_instructions::ensure_model_instructions_before_launch(");
   assert.ok(repair > launcher.indexOf(".apply_active_relay_profile(&settings)"));
   assert.ok(repair > launcher.indexOf(".ensure_imagegen_mcp_config(&settings, helper_port)"));
-  assert.ok(repair > launcher.indexOf("experimental_context::validate_local_context_companion("));
+  assert.ok(repair > launcher.indexOf("retired_context::remove_from_home("));
   assert.ok(repair < launcher.indexOf(".launch_codex(&app_dir, debug_port, &settings"));
   assert.equal(launcher.includes("codex_instructions::apply_model_instructions_policy("), false);
   const entrypoint = readFileSync(

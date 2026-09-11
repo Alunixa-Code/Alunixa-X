@@ -441,10 +441,9 @@ where
             .ensure_imagegen_mcp_config(&settings, helper_port)
             .await
             .context("failed to configure the Alunixa X image_gen tool")?;
-        // Apply last so provider/common-config replacement cannot reset this opt-in.
-        crate::experimental_context::apply_experimental_context_policy(&home, &settings)
-            .context("failed to apply Codex experimental context configuration")?;
-        crate::experimental_context::validate_local_context_companion(&home, &settings)?;
+        // Delete retired settings after provider/common-config replacement, including upgrades.
+        crate::retired_context::remove_from_home(&home)
+            .context("failed to remove retired context configuration")?;
         // Check after every config writer, immediately before starting services/Codex.
         if crate::codex_instructions::ensure_model_instructions_before_launch(
             &home,

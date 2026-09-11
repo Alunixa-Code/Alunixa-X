@@ -118,23 +118,11 @@ describe("model-windows helpers", () => {
     assert.match(source, /invalid_id_prefix/);
   });
 
-  it("实验性上下文默认关闭并作为 Agent 能力自动保存，说明账户和重启要求", () => {
+  it("退役的实验性上下文不再出现在界面、默认设置和文案中", () => {
     const source = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const dictionary = fs.readFileSync(new URL("./i18n-en.ts", import.meta.url), "utf8");
-    assert.match(source, /codexAppExperimentalContext: boolean/);
-    assert.match(source, /codexAppExperimentalContext: false/);
-    assert.match(
-      source,
-      /title=\{t\("实验性上下文"\)\}[\s\S]+?checked=\{form\.codexAppExperimentalContext\}\s+disabled=\{!masterEnabled\}\s+onChange=\{\(value\) => setPersistedEnhanceFlag\("codexAppExperimentalContext", value\)\}/,
-    );
-    assert.match(source, /features\.context_management\.experimental_mode = true/);
-    assert.match(source, /不改动原有自动压缩 Token 阈值/);
-    assert.match(source, /需通过 Alunixa X 重启 Codex 后生效/);
-    assert.match(source, /ChatGPT Plus、Pro 或 Pro Lite/);
-    assert.match(source, /纯 API \/ 未登录时自动使用本地兼容模式/);
-    assert.match(source, /无需 ChatGPT 登录/);
-    assert.match(source, /2048 Token 保存笔记/);
-    assert.match(dictionary, /"实验性上下文": "Experimental context"/);
+    assert.doesNotMatch(source, /codexAppExperimentalContext|实验性上下文|features\.token_budget/);
+    assert.doesNotMatch(dictionary, /"实验性上下文"|features\.context_management\.experimental_mode/);
   });
 
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {

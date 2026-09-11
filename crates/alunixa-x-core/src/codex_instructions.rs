@@ -294,7 +294,7 @@ mod tests {
         let file = managed_instructions_path(temp.path());
         std::fs::write(&file, "custom file content").unwrap();
         let mut updated = previous.clone();
-        updated.codex_app_experimental_context = !updated.codex_app_experimental_context;
+        updated.codex_app_shared_terminal = !updated.codex_app_shared_terminal;
         sync_model_instructions_after_settings_save(temp.path(), &previous, &updated).unwrap();
         assert_eq!(
             std::fs::read_to_string(&file).unwrap(),

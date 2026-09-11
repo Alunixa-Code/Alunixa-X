@@ -1,35 +1,43 @@
 use alunixa_x_core::relay_switch::switch_relay_profile_in_home;
 
 #[test]
-fn experimental_context_survives_provider_switch_and_respects_disabled_master() {
+fn retired_context_cannot_return_after_provider_switch_even_with_master_disabled() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("codex");
     let store = SettingsStore::new(temp.path().join("settings.json"));
-    let profile = pure_profile("custom", "https://provider.example/v1", "test-key");
+    let mut profile = pure_profile("custom", "https://provider.example/v1", "test-key");
+    profile.config_contents.push_str("\n[features.token_budget]\nenabled = true\n[features.context_management]\nexperimental_mode = true\n[mcp_servers.alunixa-x-context]\ncommand = 'retired'\n");
     let mut settings = BackendSettings {
         active_relay_id: "custom".to_string(),
         relay_profiles: vec![profile],
-        codex_app_experimental_context: true,
         ..BackendSettings::default()
     };
     store.save(&settings).unwrap();
     let result = switch_relay_profile_in_home(&store, &home, settings.clone(), "").unwrap();
-    assert!(result.settings.codex_app_experimental_context);
+    assert!(
+        !result.settings.relay_profiles[0]
+            .config_contents
+            .contains("token_budget")
+    );
     let config: toml::Value = std::fs::read_to_string(home.join("config.toml"))
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(
-        config["features"]["context_management"]["experimental_mode"].as_bool(),
-        Some(true)
-    );
+    assert!(!config.to_string().contains("experimental_mode"));
+    assert!(!config.to_string().contains("token_budget"));
+    assert!(!config.to_string().contains("alunixa-x-context"));
     assert!(config.get("model_provider").is_some());
 
     settings.enhancements_enabled = false;
     switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(!config.contains("experimental_mode"));
-    assert!(store.load().unwrap().codex_app_experimental_context);
+    assert!(
+        serde_json::to_value(store.load().unwrap())
+            .unwrap()
+            .get("codexAppExperimentalContext")
+            .is_none()
+    );
 }
 use alunixa_x_core::settings::{
     AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
