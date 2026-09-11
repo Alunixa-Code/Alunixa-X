@@ -1517,3 +1517,27 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本地 `cargo test --workspace --locked --no-fail-fast -- --test-threads=1` 全部测试套件完成且没有失败，core lib 为 `311 passed / 0 failed / 1 ignored`，relay switch `9/9`、installer `13/13`、manager Windows `24/24` 全部通过；随后 `cargo check --workspace --all-targets --locked` 也退出 `0` 喵~
 - 版本一致性、`git diff --check` 和 Rust formatter 检查通过，`v1.0.15` 本地及远端标签均未占用喵~
 - 曾误将一次只读 Bash 语法检查命令交给 Windows 的 `bash` 入口，系统返回 WSL 使用帮助并在执行脚本前退出；没有执行任何 WSL 构建、测试、文件写入或配置操作，未再次尝试该入口，产品验证全部使用 PowerShell、Node 和 Cargo 完成喵~
+
+## 2026-09-11 · v1.0.15 启动前全面审计正式发行完成复核
+
+- 用户要求继续完成并核验上一轮停在供应商样例补齐、Actions 构建发布之前的启动前全面配置与高级提示词审计喵~
+- 未重新派发构建，也未重复执行真实配置清理；先查询既有正式 Actions `34605592882`，确认它最终于 `2026-09-11T14:01:44Z` 以 `success` 完成喵~
+- `verify-version`、Windows x64、macOS x64、macOS arm64 和 `Publish GitHub Release` 全部 success，Windows 权威 job 为 `103283153782`，macOS x64 为 `103283153881`，macOS arm64 为 `103283153837`，发布 job 为 `103290041062`，按设计跳过的复用构建 job 为 `103283155728` 喵~
+- Windows 已完成前端验证、完整 Rust workspace 回归、正式二进制、安装包构建和上传，两个 macOS 架构也完成对应测试、构建、包结构检查和上传喵~
+- 等待正式发布 job 完成后，重新通过 GitHub API 核验 `v1.0.15`，Release ID 为 `387082902`，于 `2026-09-11T14:01:43Z` 发布，非草稿、非预发布，正式地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.15` 喵~
+- 发行说明中的六个 SHA-256 与 GitHub asset digest 逐项完全一致，六项资产均为 `uploaded` 且字节数非零，`NotesAndHashes=PASS` 喵~
+
+| 正式安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.15-macos-arm64.dmg` | 32583944 | `a3e4be821b55b775d0b8700b2b6cf44fb21650a133c007cf6de8c565a9161106` |
+| `Alunixa-X-1.0.15-macos-arm64.zip` | 27686621 | `5791485792345f2a79c39b073786cbd88f7f23dce320a9ac62f2817664a62a8c` |
+| `Alunixa-X-1.0.15-macos-x64.dmg` | 33719351 | `dd2c3b0cd031d59b3b9b16e68efb9af28a36e64ae4730d8e9cb76070a306b663` |
+| `Alunixa-X-1.0.15-macos-x64.zip` | 28220249 | `296835e568072803ca76104e3c9016b3b6d0f8feadcec7dccc605d8b34c14053` |
+| `Alunixa-X-1.0.15-windows-x64-setup.exe` | 20847733 | `3b580914e49c810037b6250e87b43647958e1f22957711a43902267f73bc77ba` |
+| `Alunixa-X-1.0.15-windows-x64.zip` | 26612364 | `e18a9fe575cac528d29e96782cc49857bd44023c1955dd814fc04e70bfea3bdf` |
+
+- 未携带认证访问 `releases/latest` 返回同一 `v1.0.15`、Release ID 和六项资产，`AnonymousLatest=PASS` 喵~
+- 远端 `main`、`v1.0.15^{}` 和正式 Actions head SHA 均为 `033a8a6c7f1fc8e05b2ac9490ef9599b712d32ff`，annotated tag 对象为 `05dfdfdf8035d986daaa552a0fded3d8f1497e85`，未移动或重建标签喵~
+- 本轮只追加本日志并建立日志提交，没有改动已发布产品代码、没有下载远端安装资产、没有再次清理缓存、没有重启当前 Codex/Helper/CDP，也没有修改真实 Codex 配置喵~
+- 结论：实验性上下文删除和本机配置清理已随 `v1.0.14` 完成；本轮新增的“每次启动前全面配置与高级提示词审计”已随 `v1.0.15` 正式通过 GitHub Actions 构建并发布喵~
+- 当前正在运行的 Codex 不会因本次发布自动重启，启动审计将在安装 `v1.0.15` 后下一次通过 Alunixa X 启动或重新激活 Codex 时生效喵~
