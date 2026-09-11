@@ -1479,3 +1479,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 版本 `1.0.14` 的前端生产构建和 Release YAML 解析已真实退出 `0`，上下文恢复后仅在正确新仓库继续测试，不重复执行真实配置清理或重启当前实例喵~
 - core lib 修复后真实回归为 `305` 通过、`1` 忽略；发行安装器契约唯一失败是旧测试仍要求已经删除的“API-only context”官方 CLI 步骤，已创建检查点 `059a9e0` 并将断言改为确认该退役步骤不存在且保留 workspace 回归测试喵~
 - 当前用户中断上一轮执行，未留下活跃统一命令；继续在 `D:\Cursor\AlunixaX` 处理发行契约，不重复启动真实配置清理喵~
+- 重新执行后发行安装器契约 `13/13`、管理器 Windows 契约 `24/24`、全 workspace all-targets `cargo check`、`retire_context` example 构建和补跑 relay switch `9/9` 均通过；`cargo fmt --all -- --check`、版本一致性和 diff 检查也通过喵~
+- 发布前检查点为 `a5ac657`；工作树当前仅需记录发布流程，尚未推送 `main` 或创建 `v1.0.14` 标签喵~
