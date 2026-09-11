@@ -1481,3 +1481,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前用户中断上一轮执行，未留下活跃统一命令；继续在 `D:\Cursor\AlunixaX` 处理发行契约，不重复启动真实配置清理喵~
 - 重新执行后发行安装器契约 `13/13`、管理器 Windows 契约 `24/24`、全 workspace all-targets `cargo check`、`retire_context` example 构建和补跑 relay switch `9/9` 均通过；`cargo fmt --all -- --check`、版本一致性和 diff 检查也通过喵~
 - 发布前检查点为 `a5ac657`；工作树当前仅需记录发布流程，尚未推送 `main` 或创建 `v1.0.14` 标签喵~
+- 已核验目标仍为公开且未归档的 `Alunixa-Code/Alunixa-X`，远端 main 为 `f681e969300a985a3fbf9b992fc480b3559934ee`，本地和远端均无 `v1.0.14`；正式更新内容为删除实验性上下文、清理旧配置及快照、防止旧字段写回，发行说明逐项记录保留内容和生效范围喵~
+- 接下来将 main 与 annotated `v1.0.14` 原子推送，最终提交使用 skip-ci 避免双重构建，再手动派发唯一正式 Release Actions；三平台完整回归、正式构建、六安装资产和哈希成功后才确认发行完成喵~
