@@ -1475,3 +1475,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 原始文件分别完整备份在上述两个目录各自的 `alunixa-x-retirement-backups` 内，备份内容逐字节匹配修改前文件，未进入 Git；实际结果经 TOML/JSON 语义比较，除指定退役项外完全相同，`LiveConfigSemanticDiff=PASS`、`ProviderSnapshotsCleaned=PASS`、`OtherSettingsPreserved=PASS` 喵~
 - 清理过程中没有读取/改写笔记数据库或其他任务记录，没有启动当前 Codex/Helper/CDP；当前运行窗口仍可能保留既有提示和工具，需用户方便时重启以丢弃内存中的旧能力喵~
 - 最终 Rust 命令最初误写集成目标 `installer`，Cargo 在执行前报不存在，已改为实际目标 `installers`，正在执行 core lib、切换回归、安装器、管理器契约和全目标编译；没有跳过失败产品测试或重复启动同一测试进程喵~
+- 最终 core lib 首轮真实退出 `101`：`304` 通过、`1` 失败、`1` 既有 ignored；失败来自新增旧配置 fixture 缺少 `RelayProfile.name` 必填字段，补齐样例而不放宽产品解析规则，创建修改前检查点 `e3ad0c9` 后重新验证喵~
+- 版本 `1.0.14` 的前端生产构建和 Release YAML 解析已真实退出 `0`，上下文恢复后仅在正确新仓库继续测试，不重复执行真实配置清理或重启当前实例喵~

@@ -3070,7 +3070,7 @@ experimental_bearer_token = "sk-existing""#
             json!({
                 "codexAppExperimentalContext":true,
                 "relayCommonConfigContents":old, "relayContextConfigContents":old,
-                "relayProfiles":[{"id":"x","configContents":old}], "unrelatedCustomKey":42
+                "relayProfiles":[{"id":"x","name":"Legacy fixture","configContents":old}], "unrelatedCustomKey":42
             })
             .to_string(),
         )
