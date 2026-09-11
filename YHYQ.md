@@ -1495,3 +1495,14 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已把高级提示词扫描放到同一启动门禁：检查 settings 中保存文本、`model_instructions_file` 指向的外部/托管文件、托管提示词和 `.last-good` 备份的普通文件属性、UTF-8、大小及 NUL 字符；外部用户文件只读不覆盖，托管引用关闭时不允许残留喵~
 - 启动器正常首次启动与已有 Codex 激活路径均接入校验；校验日志只记录文件/区段计数和修复数量，不记录配置正文、凭据或提示词内容喵~
 - 已完成 `startup_audit` 三项隔离回归和 `codex_instructions` 九项回归，全部通过；此前一次错误的 Cargo 多测试过滤参数被 Cargo 在执行前拒绝，未运行错误命令，已改为分开执行喵~
+
+## 2026-09-11 · 核验上下文中断后的真实完成状态
+
+- 用户要求核验上一轮是否真的完成，指出进度停在“补齐供应商名称字段后继续验证并通过 GitHub Actions 构建发布”之前；本轮重新读取指定任务上下文、正确仓库和本文件，不把旧任务的最终回复直接当作证据喵~
+- 实际项目为 `D:\Cursor\AlunixaX`，远端为 `Alunixa-Code/Alunixa-X`；当前不是停在旧测试失败处，旧清理任务对应的 `v1.0.14` 已存在并与远端 `main` 对齐，产品提交和 annotated tag 解引用均为 `bce4d4126b870a948b7a4fd4d5e2ee233cd5a975` 喵~
+- 通过 GitHub CLI 重新核验 `v1.0.14` 发行页：非草稿、非预发布、于 `2026-09-11T10:14:53Z` 发布，六个资产全部 `uploaded` 且体积非零；发行地址为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.14` 喵~
+- 重新核验正式 Actions `34586642157`：整体 `completed/success`，`verify-version`、Windows x64、macOS x64、macOS arm64 与 `Publish GitHub Release` 全部 success，只有复用既有构建的分支按设计 skipped；head SHA 与 `v1.0.14` 一致喵~
+- 重新读取真实本机配置但不输出正文或凭据：`C:\Users\Administrator\.codex\config.toml` 与 `C:\Users\Administrator\.codex-session-delete\settings.json` 均解析成功，退役上下文/MCP/token-budget 关键字命中数均为 `0`；两个备份目录均存在且各有一份备份文件喵~
+- 为保护当前未发布的启动审计工作，先将当时已有修改和 `startup_audit.rs` 建立检查点 `089a8a4`；之后完整 core lib 为 `311 passed / 0 failed / 1 ignored`，relay switch `9/9`、installer `13/13`、manager Windows `24/24` 全部通过，`cargo fmt --all -- --check` 与 `cargo check --workspace --all-targets --locked` 也通过喵~
+- 因此结论分为两部分：**实验性上下文删除、本机配置清理及 `v1.0.14` 发布已经完成**；但“每次启动前全面配置与高级提示词审计”是之后新增的未发布工作，当前本地 `main` 为 `089a8a4`、领先远端三次提交，`Cargo.toml` 仍为 `1.0.14`，这部分不能声称已经通过 GitHub Actions 发布喵~
+- 本轮没有重启 Codex、修改真实配置、启动新的 GitHub Actions 或创建新版本标签；当前仓库代码已在检查点保存，后续若要交付启动审计，需要另行提升版本、补齐发行说明并走新的三平台 Actions 发布流程喵~
