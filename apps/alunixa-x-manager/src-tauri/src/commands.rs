@@ -4013,6 +4013,17 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     if settings.active_aggregate_relay_profile().is_some() {
         let response = apply_aggregate_relay_injection_to_home(&home);
         if response.status == "ok" {
+            if let Err(error) =
+                alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(&home, &settings)
+            {
+                return failed(
+                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
+                    relay_payload(
+                        alunixa_x_core::relay_config::relay_status_from_home(&home),
+                        None,
+                    ),
+                );
+            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_relay_injection.aggregate",
@@ -4028,6 +4039,17 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
             settings.computer_use_guard_enabled,
         ) {
             Ok(result) => {
+                if let Err(error) =
+                    alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
+                        &home, &settings,
+                    )
+                {
+                    let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+                    return failed(
+                        &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
+                        relay_payload(status, result.backup_path),
+                    );
+                }
                 finish_codex_app_state_after_provider_switch(
                     &home,
                     "manager.apply_relay_injection.profile",
@@ -4086,6 +4108,15 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
         alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     ) {
         Ok(result) => {
+            if let Err(error) =
+                alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(&home, &settings)
+            {
+                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+                return failed(
+                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
+                    relay_payload(status, result.backup_path),
+                );
+            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_relay_injection.generated",
@@ -4181,6 +4212,17 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
             settings.computer_use_guard_enabled,
         ) {
             Ok(result) => {
+                if let Err(error) =
+                    alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
+                        &home, &settings,
+                    )
+                {
+                    let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+                    return failed(
+                        &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
+                        relay_payload(status, result.backup_path),
+                    );
+                }
                 finish_codex_app_state_after_provider_switch(
                     &home,
                     "manager.apply_pure_api_injection.profile",
@@ -4229,6 +4271,15 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
         alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     ) {
         Ok(result) => {
+            if let Err(error) =
+                alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(&home, &settings)
+            {
+                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+                return failed(
+                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
+                    relay_payload(status, result.backup_path),
+                );
+            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_pure_api_injection.generated",
@@ -4291,6 +4342,15 @@ pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
     .then_some(relay.auth_contents.as_str());
     match alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents) {
         Ok(result) => {
+            if let Err(error) =
+                alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(&home, &settings)
+            {
+                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+                return failed(
+                    &format!("官方配置已恢复，但同步 Agent 能力配置失败：{error}"),
+                    relay_payload(status, result.backup_path),
+                );
+            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.clear_relay_injection.after",

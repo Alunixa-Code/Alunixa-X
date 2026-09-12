@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use toml_edit::{DocumentMut, Item, Table, TableLike};
 
-use crate::settings::{RelayContextSelection, RelayProfile, RelayProtocol};
+use crate::settings::{BackendSettings, RelayContextSelection, RelayProfile, RelayProtocol};
 
 const RELAY_PROVIDER: &str = "custom";
 const LEGACY_RELAY_PROVIDERS: &[&str] = &["AlunixaX", "CodexPP"];
@@ -171,6 +171,18 @@ pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result
     std::fs::create_dir_all(home)?;
     crate::settings::atomic_write(&config_path, updated.as_bytes())?;
     Ok(true)
+}
+
+pub fn sync_codex_agent_capabilities_in_home(
+    home: &Path,
+    settings: &BackendSettings,
+) -> anyhow::Result<bool> {
+    let mut changed = set_codex_sub_agent_max_threads_in_home(
+        home,
+        settings.codex_app_sub_agent_max_threads,
+    )?;
+    changed |= set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
+    Ok(changed)
 }
 
 pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Result<()> {

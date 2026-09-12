@@ -508,6 +508,8 @@ pub fn migrate_active_profile_after_chatgpt_login(
         settings.computer_use_guard_enabled,
     )
     .context("写入官方混合供应商失败")?;
+    crate::relay_config::sync_codex_agent_capabilities_in_home(home, &settings)
+        .context("同步官方混合供应商后的 Agent 能力配置失败")?;
     store.save(&settings).context("保存官方混合供应商失败")?;
     Ok(settings)
 }
@@ -566,6 +568,8 @@ pub fn clear_chatgpt_login_after_logout(
         )
         .context("恢复退出登录后的当前供应商失败")?;
     }
+    crate::relay_config::sync_codex_agent_capabilities_in_home(home, &settings)
+        .context("同步退出登录后的 Agent 能力配置失败")?;
     store
         .save(&settings)
         .context("保存退出登录后的供应商设置失败")?;
