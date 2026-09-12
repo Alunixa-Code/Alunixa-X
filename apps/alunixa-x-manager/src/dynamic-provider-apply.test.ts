@@ -52,7 +52,26 @@ test("restoring official mode only prepares files for the next startup", () => {
 
   assert.ok(start >= 0);
   assert.match(officialRestore, /clear_relay_config_to_home_with_auth/);
+  assert.match(officialRestore, /sync_codex_agent_capabilities_in_home/);
   assert.match(officialRestore, /下次通过 Alunixa X 启动器启动 Codex 时完整应用/);
   assert.doesNotMatch(officialRestore, /apply_current_runtime_config_and_models/);
   assert.doesNotMatch(officialRestore, /dynamic_apply_failed/);
+});
+
+test("direct provider writers preserve the managed Agent capability config", () => {
+  const applyStart = commandsSource.indexOf("pub fn apply_relay_injection");
+  const pureApiStart = commandsSource.indexOf("pub fn apply_pure_api_injection");
+  const clearStart = commandsSource.indexOf("pub async fn clear_relay_injection");
+
+  assert.ok(applyStart >= 0);
+  assert.ok(pureApiStart > applyStart);
+  assert.ok(clearStart > pureApiStart);
+  assert.match(
+    commandsSource.slice(applyStart, pureApiStart),
+    /sync_codex_agent_capabilities_in_home/,
+  );
+  assert.match(
+    commandsSource.slice(pureApiStart, clearStart),
+    /sync_codex_agent_capabilities_in_home/,
+  );
 });
