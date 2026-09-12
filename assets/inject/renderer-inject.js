@@ -2104,7 +2104,8 @@
     let disposed = false;
     queue.remove = async function (threadId, messageId, ...rest) {
       const result = await original.remove.call(this, threadId, messageId, ...rest);
-      if (!disposed && enabled() && result?.serverSubmission?.id === messageId) {
+      if (!disposed && enabled() && typeof messageId === "string" && messageId.length > 0
+          && result?.serverSubmission?.id === messageId) {
         if (removed.size >= 256) removed.delete(removed.keys().next().value);
         removed.set(keyFor(threadId, messageId), Date.now());
       }

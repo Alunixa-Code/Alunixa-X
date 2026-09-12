@@ -96,6 +96,25 @@ test("missing or consumed rows without a successful local delete are never repla
   assert.equal(h.writes.length, 0);
 });
 
+test("missing deletion arguments cannot turn a fresh submission into an edit", async () => {
+  const h = harness();
+  h.api.patch(h.queue);
+  await (h.queue.remove as Function)("t");
+  await h.queue.enqueue("t", { id: "fresh" });
+  assert.equal(h.writes[0].method, "thread/queue/add");
+  assert.equal(h.writes[0].position, undefined);
+});
+
+test("manager discovery finds registry maps without looping through cyclic values", () => {
+  const collect = new Function(`${functions("collectAppServerRequestCandidatesFromModule")};
+    return collectAppServerRequestCandidatesFromModule;`)();
+  const manager = { turnCoordinator: {} };
+  const registry = new Map<any, any>([["remote", manager]]);
+  registry.set("cycle", registry);
+  const candidates = collect({ signal: { get: () => registry } });
+  assert.equal(candidates.filter((candidate: any) => candidate === manager).length, 1);
+});
+
 test("network failure after add is not retried and its deletion marker is consumed", async () => {
   const h = harness();
   h.api.patch(h.queue);

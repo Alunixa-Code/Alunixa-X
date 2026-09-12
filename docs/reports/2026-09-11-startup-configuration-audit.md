@@ -27,7 +27,7 @@
 - relay switch：`9/9` 通过喵~
 - installer：`13/13` 通过喵~
 - manager Windows：`24/24` 通过喵~
-- manager 前端全量：`80/80` 通过；Fast 模式、启动审计、高级提示词内容校验和供应商写入保留专项均通过喵~
+- manager 前端全量：`93/93` 通过；Fast 模式、启动审计、高级提示词内容校验、供应商写入保留和队列编辑专项均通过喵~
 - official remote：`8/8` 通过，覆盖官方登录迁移与退出登录后的 Agent 能力同步喵~
 - `cargo fmt --all -- --check` 和 `cargo check --workspace --all-targets --locked` 通过喵~
 - 不连接或重启当前 Codex、Helper、CDP，不读取或改写用户真实配置内容喵~

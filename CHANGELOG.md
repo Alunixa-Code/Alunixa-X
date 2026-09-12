@@ -1,5 +1,6 @@
 ## 1.0.16 - 2026-09-12
 
+- 修复新版 Codex 运行中编辑排队消息后提交报 `Error creating chat / App-server queued follow-up no longer exists`：识别本地已成功删除的旧队列 ID，以新增方式重新排队并保留编辑正文、附件上下文与顺序；没有删除证据或网络写入结果不明时不自动重放，避免重复发送喵~
 - Agent 能力新增独立的“Fast 模式”开关，与原有只控制界面服务档位的 Fast 按钮分开；开启后自动在 Codex `config.toml` 写入 `[features] fast_mode = true`，关闭后只移除该托管项并保留同表其他设置喵~
 - 设置保存、完整配置导入、恢复默认、供应商切换、官方登录迁移、纯 API/聚合/中转直接写入和每次启动前审计都使用同一 Fast 配置同步逻辑，避免供应商重写覆盖 Agent 能力设定喵~
 - 每次启动 Codex 或重新激活已有实例前继续全面检查 `config.toml`、Agent 能力开关与 `features` 表结构、线程上限、供应商配置、MCP、WSS、`auth.json`、`hooks.json`、保存的配置片段和退役项喵~
