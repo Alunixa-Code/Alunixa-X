@@ -2021,6 +2021,9 @@
       if (!value || typeof value !== "object" || seen.has(value)) return;
       seen.add(value);
       candidates.push(value);
+      if (value instanceof Map) {
+        for (const nested of Array.from(value.values()).slice(0, 120)) push(nested);
+      }
     };
     for (const value of Object.values(module || {})) {
       push(value);
@@ -2081,6 +2084,101 @@
     } catch {
       return "";
     }
+  }
+
+  function patchCodexQueuedFollowUpQueue(queue) {
+    if (!queue || typeof queue !== "object") return false;
+    if (queue.__alunixaXQueuedFollowUpEditPatch === "1") return true;
+    const methods = ["read", "enqueue", "remove", "restore", "dispose"];
+    if (!Object.isExtensible(queue) || !methods.every((name) =>
+      typeof queue[name] === "function" && Object.getOwnPropertyDescriptor(queue, name)?.writable === true
+    )) return false;
+    const source = codexModuleFunctionSource(queue.enqueue);
+    // Match the broken native contract, not a particular minified name or app build.
+    if (!source.includes("App-server queued follow-up no longer exists")
+        || !source.includes("thread/queue/update")) return false;
+    const original = Object.fromEntries(methods.map((name) => [name, queue[name]]));
+    const removed = new Map();
+    const keyFor = (threadId, messageId) => JSON.stringify([threadId, messageId]);
+    const enabled = () => alunixaXBackendSettings.enhancementsEnabled !== false;
+    let disposed = false;
+    queue.remove = async function (threadId, messageId, ...rest) {
+      const result = await original.remove.call(this, threadId, messageId, ...rest);
+      if (!disposed && enabled() && result?.serverSubmission?.id === messageId) {
+        if (removed.size >= 256) removed.delete(removed.keys().next().value);
+        removed.set(keyFor(threadId, messageId), Date.now());
+      }
+      return result;
+    };
+    queue.enqueue = async function (threadId, message, position, ...rest) {
+      const key = keyFor(threadId, position?.messageId);
+      const removedAt = removed.get(key);
+      const shouldRequeue = !disposed && enabled() && removedAt != null
+        && Date.now() - removedAt < 30 * 60 * 1000
+        && !original.read.call(this, threadId)?.some((item) => item.id === position.messageId);
+      if (!shouldRequeue) return original.enqueue.call(this, threadId, message, position, ...rest);
+      // A confirmed local deletion is an edit draft, not an existing server row.
+      // Consume before awaiting: never retry an ambiguous write or add twice.
+      removed.delete(key);
+      const { messageId, ...insertionPosition } = position;
+      const result = await original.enqueue.call(this, threadId, message, insertionPosition, ...rest);
+      sendAlunixaXDiagnostic("queued_follow_up_edit_requeued", { status: result?.status || "" });
+      return result;
+    };
+    queue.restore = function (threadId, snapshot, ...rest) {
+      // Undo assigns a new server ID; an old edit ID must not be replayed afterwards.
+      removed.delete(keyFor(threadId, snapshot?.message?.id));
+      return original.restore.call(this, threadId, snapshot, ...rest);
+    };
+    queue.dispose = function (...args) {
+      disposed = true;
+      removed.clear();
+      return original.dispose.apply(this, args);
+    };
+    queue.__alunixaXQueuedFollowUpEditPatch = "1";
+    return true;
+  }
+
+  function patchCodexQueuedFollowUpCoordinator(candidate) {
+    const coordinator = candidate?.turnCoordinator || candidate;
+    if (!coordinator || typeof coordinator.setServerQueue !== "function"
+        || typeof coordinator.sendMessage !== "function"
+        || typeof coordinator.removeQueuedMessage !== "function") return false;
+    patchCodexQueuedFollowUpQueue(coordinator.serverQueue);
+    if (coordinator.__alunixaXQueuedFollowUpEditPatch === "1") return true;
+    if (!Object.isExtensible(coordinator)
+        || Object.getOwnPropertyDescriptor(coordinator, "setServerQueue")?.writable !== true) return false;
+    const original = coordinator.setServerQueue;
+    coordinator.setServerQueue = function (queue, ...rest) {
+      const result = original.call(this, queue, ...rest);
+      if (!this.disposed) patchCodexQueuedFollowUpQueue(this.serverQueue);
+      return result;
+    };
+    coordinator.__alunixaXQueuedFollowUpEditPatch = "1";
+    return true;
+  }
+
+  let codexQueuedFollowUpDiscovery = { key: "", attempts: 0, at: 0, pending: null };
+
+  function installCodexQueuedFollowUpEditPatch() {
+    if (!alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false) return;
+    if (codexQueuedFollowUpDiscovery.pending) return;
+    const key = `${window.location.href}\n${codexAppAssetCandidateUrls().join("\n")}`;
+    if (key !== codexQueuedFollowUpDiscovery.key) {
+      codexQueuedFollowUpDiscovery = { key, attempts: 0, at: 0, pending: null };
+    }
+    const state = codexQueuedFollowUpDiscovery;
+    if (state.attempts >= 8 || (state.attempts > 0 && Date.now() - state.at < 30000)) return;
+    state.attempts += 1;
+    state.at = Date.now();
+    state.pending = loadAppServerRequestCandidates().then(({ candidates }) => {
+      const count = candidates.filter(patchCodexQueuedFollowUpCoordinator).length;
+      if (count > 0 && state.attempts === 1) {
+        sendAlunixaXDiagnostic("queued_follow_up_edit_patch_ready", { coordinatorCount: count });
+      }
+    }).catch(() => {
+      // Optional compatibility: keep native behavior, never retry a user submission.
+    }).finally(() => { state.pending = null; });
   }
 
   function codexSettingStorageFromModule(module, allowLegacyExports = false) {
@@ -7645,6 +7743,7 @@
 
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
+    patchCodexQueuedFollowUpCoordinator(client);
     if (client.__alunixaXModelRequestPatch === codexDynamicModelPatchInstance) return true;
     const originalSendRequest = client.__alunixaXModelOriginalSendRequest || client.sendRequest.bind(client);
     client.__alunixaXModelOriginalSendRequest = originalSendRequest;
@@ -11656,6 +11755,7 @@
   }
 
   function scanDeferred() {
+    installCodexQueuedFollowUpEditPatch();
     if (pluginPatchDisabledInRelayMode()) {
       clearPluginPatchArtifacts();
     } else {
