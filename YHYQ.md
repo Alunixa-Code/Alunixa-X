@@ -1570,3 +1570,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 入口核查发现 `relay_switch` 已在供应商切换后同步子代理上限和 Fast，但管理器的 `apply_relay_injection`、`apply_pure_api_injection`、聚合切换和清除入口在直接写入后没有立即重新同步 Fast；这些路径可能在下次启动前短暂丢失 `features.fast_mode`，需要补齐喵~
 - `launcher` 的供应商重写、WSS 处理和退出官方登录路径最终会经过启动审计，但实时管理器/官方登录迁移入口也应在写入成功后保持 Agent 能力配置一致喵~
 - 补齐供应商写入后的 Agent 能力同步后，Rust 定向回归通过：`startup_audit` 9/9、`official_remote` 8/8、`relay_switch` 9/9，说明启动审计、官方登录迁移和供应商切换均能保持 Fast/Agent 能力设定喵~
+- 管理器 Windows 契约测试已通过 `24/24`，包含供应商注入入口、启动前顺序、发行工作流和 Fast/Agent 能力相关静态契约喵~
+- 当前供应商写入同步补丁已完成编译验证，下一步补充入口契约并开始全量工作区回归喵~
