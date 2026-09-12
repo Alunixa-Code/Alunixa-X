@@ -520,6 +520,8 @@ pub struct BackendSettings {
     pub codex_app_native_menu_localization: bool,
     #[serde(rename = "codexAppServiceTierControls", default)]
     pub codex_app_service_tier_controls: bool,
+    #[serde(rename = "codexAppFastMode", default)]
+    pub codex_app_fast_mode: bool,
     #[serde(
         rename = "codexAppSubAgentMaxThreads",
         default = "default_codex_sub_agent_max_threads",
@@ -700,6 +702,7 @@ impl Default for BackendSettings {
             codex_app_native_menu_placement: true,
             codex_app_native_menu_localization: true,
             codex_app_service_tier_controls: false,
+            codex_app_fast_mode: false,
             codex_app_sub_agent_max_threads: default_codex_sub_agent_max_threads(),
             codex_app_pet_real_mouse_look: false,
             codex_app_stepwise_enabled: false,
@@ -1707,6 +1710,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppNativeMenuPlacement");
     merge_bool_setting(target, source, "codexAppNativeMenuLocalization");
     merge_bool_setting(target, source, "codexAppServiceTierControls");
+    merge_bool_setting(target, source, "codexAppFastMode");
     if let Some(value) = source
         .get("codexAppSubAgentMaxThreads")
         .and_then(Value::as_u64)

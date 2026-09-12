@@ -52,6 +52,10 @@ pub fn audit_and_repair_before_launch(
     report.repaired(crate::relay_config::repair_stale_feature_entries_in_home(
         home,
     )?);
+    report.repaired(crate::relay_config::set_codex_fast_mode_in_home(
+        home,
+        settings.codex_app_fast_mode,
+    )?);
     report.repaired(
         crate::relay_config::set_codex_sub_agent_max_threads_in_home(
             home,
@@ -111,6 +115,7 @@ fn audit_config(
 ) -> anyhow::Result<()> {
     let doc = parse_config(contents)?;
     audit_retired_context(&doc)?;
+    audit_agent_capability_config(&doc, settings, report)?;
 
     let expected_threads = crate::settings::clamp_codex_sub_agent_max_threads(
         settings.codex_app_sub_agent_max_threads,
@@ -154,6 +159,27 @@ fn audit_config(
         report.checked_section();
     }
 
+    Ok(())
+}
+
+fn audit_agent_capability_config(
+    doc: &DocumentMut,
+    settings: &BackendSettings,
+    report: &mut StartupAuditReport,
+) -> anyhow::Result<()> {
+    let actual_fast_mode = doc
+        .get("features")
+        .and_then(Item::as_table_like)
+        .and_then(|features| features.get("fast_mode"))
+        .and_then(Item::as_bool);
+    report.checked_section();
+    if settings.codex_app_fast_mode {
+        if actual_fast_mode != Some(true) {
+            bail!("启动前 Agent 能力校验失败：Fast 模式已开启但 features.fast_mode 不为 true");
+        }
+    } else if actual_fast_mode.is_some() {
+        bail!("启动前 Agent 能力校验失败：Fast 模式已关闭但 features.fast_mode 仍残留");
+    }
     Ok(())
 }
 

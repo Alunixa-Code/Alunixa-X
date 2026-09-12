@@ -347,12 +347,19 @@ impl BridgeSettingsService for CoreSettingsService {
 
     async fn set_settings(&self, payload: Value) -> anyhow::Result<BackendSettings> {
         let update_sub_agent_limit = payload.get("codexAppSubAgentMaxThreads").is_some();
+        let update_fast_mode = payload.get("codexAppFastMode").is_some();
         let update_codex_auto_update_policy = payload.get("codexAppDisableAutoUpdate").is_some();
         let settings = self.store.update(payload)?;
         if update_sub_agent_limit {
             crate::relay_config::set_codex_sub_agent_max_threads_in_home(
                 &crate::relay_config::default_codex_home_dir(),
                 settings.codex_app_sub_agent_max_threads,
+            )?;
+        }
+        if update_fast_mode {
+            crate::relay_config::set_codex_fast_mode_in_home(
+                &crate::relay_config::default_codex_home_dir(),
+                settings.codex_app_fast_mode,
             )?;
         }
         if update_codex_auto_update_policy {

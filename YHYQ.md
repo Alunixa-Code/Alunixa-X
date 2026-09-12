@@ -1547,3 +1547,11 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 用户要求在 Agent 能力中增加 Fast 按钮选项，打开后自动在 Codex `config.toml` 写入 `[features] fast_mode = true`，关闭后应同步移除 Alunixa X 管理的该项而不影响其他配置喵~
 - 用户同时要求每次启动 Codex 的检测范围扩展到 Agent 能力开关/设定配置，以及高级提示词文件是否已创建、内容是否有效和引用是否正确喵~
 - 本轮将在 `D:\Cursor\AlunixaX` 继续开发，先复用现有启动审计与配置写入链路，使用隔离 fixture 回归，不修改当前运行中的 Codex、Helper、CDP 或真实配置喵~
+
+## 2026-09-12 · Fast 模式配置实现第一阶段
+
+- 已在 BackendSettings 和管理器表单加入独立的 `codexAppFastMode` 开关，和已有仅控制界面服务档位按钮的 `codexAppServiceTierControls` 分开，避免两个 Fast 行为混淆喵~
+- 已新增 Codex live 配置同步函数，开启时在 `[features]` 写入 `fast_mode = true`，关闭时只移除 Alunixa X 管理的 `fast_mode`，保留同一 `[features]` 下的其他键和其他配置喵~
+- 已接入设置保存、完整配置导入、恢复默认、桥接设置更新、供应商切换和启动前审计链路，避免供应商重写后丢失 Fast 配置喵~
+- 已把启动前高级提示词扫描扩展为拒绝空内容，托管文件会先从现有正文、last-good 或模板恢复，外部用户文件只读检查不覆盖喵~
+- 已把启动审计加入 Fast 模式与 `features.fast_mode` 的一致性校验；当前尚未完成专项测试、全量回归、版本发布或 GitHub Actions 构建喵~

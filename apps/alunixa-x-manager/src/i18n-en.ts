@@ -263,6 +263,7 @@ export const EN_PLAIN: Record<string, string> = {
   "Codex增强": "Codex enhancements",
   "Debug 端口": "Debug port",
   "Fast 按钮": "Fast button",
+  "Fast 模式": "Fast mode",
   "GitHub Release 更新": "GitHub Release update",
   "GitHub Release 检查": "GitHub Release check",
   "Helper 端口": "Helper port",
@@ -689,6 +690,8 @@ export const EN_PLAIN: Record<string, string> = {
   "释放并注册内置缓存": "Extract and register embedded cache",
   "显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。":
     "Show the service-tier toggle; prefer the current model's service-tier metadata for Fast support, with legacy compatibility.",
+  "开启后在 Codex config.toml 的 [features] 写入 fast_mode = true；关闭后移除 Alunixa X 管理的该项。":
+    "When enabled, write fast_mode = true under [features] in Codex config.toml; when disabled, remove only the entry managed by Alunixa X.",
   "暂无": "None",
   "暂无启动状态。": "No launch status yet.",
   "暂无描述。": "No description.",

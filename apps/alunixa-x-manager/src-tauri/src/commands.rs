@@ -1233,6 +1233,13 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             )
             .map(|_| ())
         })
+        .and_then(|_| {
+            alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
+                &alunixa_x_core::relay_config::default_codex_home_dir(),
+                settings.codex_app_fast_mode,
+            )
+            .map(|_| ())
+        })
         .and_then(|_| remove_retired_context_config())
         .and_then(|_| {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
@@ -1339,6 +1346,10 @@ pub fn import_full_config(path: String) -> CommandResult<Value> {
             let policy_result = SettingsStore::default().load().and_then(|settings| {
                 alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
                     settings.codex_app_disable_auto_update,
+                )?;
+                alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    settings.codex_app_fast_mode,
                 )?;
                 apply_codex_instructions_policy(&settings)?;
                 apply_codex_hook_policy(&settings)?;
@@ -2837,6 +2848,13 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
                 settings.codex_app_disable_auto_update,
             )
+        })
+        .and_then(|_| {
+            alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
+                &alunixa_x_core::relay_config::default_codex_home_dir(),
+                settings.codex_app_fast_mode,
+            )
+            .map(|_| ())
         })
         .and_then(|_| apply_codex_instructions_policy(&settings))
         .and_then(|_| apply_codex_hook_policy(&settings))

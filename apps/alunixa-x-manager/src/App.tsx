@@ -206,6 +206,7 @@ type BackendSettings = {
   codexAppNativeMenuPlacement: boolean;
   codexAppNativeMenuLocalization: boolean;
   codexAppServiceTierControls: boolean;
+  codexAppFastMode: boolean;
   codexAppPetRealMouseLook: boolean;
   codexAppStepwiseEnabled: boolean;
   codexAppStepwiseDirectSend: boolean;
@@ -968,6 +969,7 @@ const defaultSettings: BackendSettings = {
   codexAppNativeMenuPlacement: true,
   codexAppNativeMenuLocalization: true,
   codexAppServiceTierControls: false,
+  codexAppFastMode: false,
   codexAppPetRealMouseLook: false,
   codexAppStepwiseEnabled: false,
   codexAppStepwiseDirectSend: false,
@@ -4875,6 +4877,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("插件列表全量展示")} detail={t("进入插件页后自动连续展开“更多”，尽量一次显示完整插件列表。")} checked={form.codexAppPluginAutoExpand} disabled={!masterEnabled || !patchMode} onChange={(value) => setEnhanceFlag("codexAppPluginAutoExpand", value)} />
               <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
               <FeatureToggle title={t("Fast 按钮")} detail={t("显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。")} checked={form.codexAppServiceTierControls} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppServiceTierControls", value)} />
+              <FeatureToggle title={t("Fast 模式")} detail={t("开启后在 Codex config.toml 的 [features] 写入 fast_mode = true；关闭后移除 Alunixa X 管理的该项。")} checked={form.codexAppFastMode} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
               <div className="feature-action-row">
                 <div>
                   <strong>{t("官方远端插件缓存")}</strong>

@@ -139,6 +139,40 @@ pub fn set_codex_sub_agent_max_threads_in_home(
     Ok(true)
 }
 
+pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result<bool> {
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !enabled => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("读取 {} 失败", config_path.to_string_lossy()));
+        }
+    };
+    let mut doc = parse_toml_document(&existing)?;
+
+    if enabled {
+        let features = table_mut_or_insert(&mut doc, "features")?;
+        if features.get("fast_mode").and_then(Item::as_bool) != Some(true) {
+            features["fast_mode"] = toml_edit::value(true);
+        }
+    } else if let Some(features) = table_mut_if_exists(&mut doc, "features") {
+        features.remove("fast_mode");
+        if features.is_empty() {
+            doc.as_table_mut().remove("features");
+        }
+    }
+
+    let updated = ensure_trailing_newline(doc.to_string());
+    if updated == normalize_config_text_for_write(&existing) {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(home)?;
+    crate::settings::atomic_write(&config_path, updated.as_bytes())?;
+    Ok(true)
+}
+
 pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Result<()> {
     std::fs::create_dir_all(home)?;
     let config_path = home.join("config.toml");

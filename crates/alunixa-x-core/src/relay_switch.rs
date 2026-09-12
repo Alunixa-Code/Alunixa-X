@@ -158,6 +158,7 @@ fn apply_selected_relay_profile(
         home,
         settings.codex_app_sub_agent_max_threads,
     )?;
+    crate::relay_config::set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
     crate::retired_context::remove_from_home(home)?;
     let status = relay_config_status_from_home(home);
     if relay.relay_mode == RelayMode::PureApi && !status.configured {

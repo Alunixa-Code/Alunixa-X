@@ -216,6 +216,9 @@ fn scan_instruction_text(text: &str) -> anyhow::Result<()> {
     if text.as_bytes().len() as u64 > MAX_INSTRUCTIONS_BYTES {
         anyhow::bail!("启动前高级提示词扫描失败：提示词内容超过大小限制");
     }
+    if text.trim().is_empty() {
+        anyhow::bail!("启动前高级提示词扫描失败：提示词文件内容为空");
+    }
     if text.contains('\0') {
         anyhow::bail!("启动前高级提示词扫描失败：提示词内容包含 NUL 字符");
     }
