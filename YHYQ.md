@@ -1572,3 +1572,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 补齐供应商写入后的 Agent 能力同步后，Rust 定向回归通过：`startup_audit` 9/9、`official_remote` 8/8、`relay_switch` 9/9，说明启动审计、官方登录迁移和供应商切换均能保持 Fast/Agent 能力设定喵~
 - 管理器 Windows 契约测试已通过 `24/24`，包含供应商注入入口、启动前顺序、发行工作流和 Fast/Agent 能力相关静态契约喵~
 - 当前供应商写入同步补丁已完成编译验证，下一步补充入口契约并开始全量工作区回归喵~
+- 新增入口契约后首次全量前端测试为 `79/80`，唯一失败是既有静态断言仍寻找已被统一 helper 替换的 `set_codex_fast_mode_in_home`；实现本身已编译，需将断言更新为 `sync_codex_agent_capabilities_in_home`，不是产品逻辑失败喵~
