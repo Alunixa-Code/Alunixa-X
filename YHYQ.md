@@ -1565,3 +1565,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - `cargo fmt --all`、`git diff --check` 均通过且未产生格式化差异喵~
 - 分开的 Rust 专项测试均通过：`startup_audit` 9/9、`codex_instructions` 12/12、`relay_config set_codex_fast_mode` 2/2 喵~
 - 首次执行管理器筛选测试时在仓库根目录运行 `npm test`，因根目录没有 `package.json` 被 npm 在执行前拒绝，未运行前端测试；后续改在实际管理器包目录执行喵~
+- 为定位前端测试入口曾递归扫描所有 `package.json`，因包含 `node_modules` 输出过多而主动中止；随后直接读取 `apps\alunixa-x-manager\package.json`，确认测试脚本位于该目录喵~
