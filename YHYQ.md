@@ -1567,3 +1567,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 首次执行管理器筛选测试时在仓库根目录运行 `npm test`，因根目录没有 `package.json` 被 npm 在执行前拒绝，未运行前端测试；后续改在实际管理器包目录执行喵~
 - 为定位前端测试入口曾递归扫描所有 `package.json`，因包含 `node_modules` 输出过多而主动中止；随后直接读取 `apps\alunixa-x-manager\package.json`，确认测试脚本位于该目录喵~
 - 在实际目录 `apps\alunixa-x-manager` 重新运行前端筛选命令，管理器测试最终 `79/79` 通过、`0` 失败；Node 将带竖线的模式作为完整参数传入，实际覆盖了全部前端测试，结果更强于目标筛选喵~
+- 入口核查发现 `relay_switch` 已在供应商切换后同步子代理上限和 Fast，但管理器的 `apply_relay_injection`、`apply_pure_api_injection`、聚合切换和清除入口在直接写入后没有立即重新同步 Fast；这些路径可能在下次启动前短暂丢失 `features.fast_mode`，需要补齐喵~
+- `launcher` 的供应商重写、WSS 处理和退出官方登录路径最终会经过启动审计，但实时管理器/官方登录迁移入口也应在写入成功后保持 Agent 能力配置一致喵~
