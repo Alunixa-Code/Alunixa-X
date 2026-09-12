@@ -49,7 +49,7 @@ test("startup audit covers managed Fast mode and advanced instructions", () => {
   const audit = readFileSync(
     new URL("../../../crates/alunixa-x-core/src/startup_audit.rs", import.meta.url), "utf8",
   );
-  assert.match(audit, /set_codex_fast_mode_in_home/);
+  assert.match(audit, /sync_codex_agent_capabilities_in_home/);
   assert.match(audit, /audit_agent_capability_config/);
   assert.match(audit, /audit_model_instructions_before_launch/);
   const instructions = readFileSync(
