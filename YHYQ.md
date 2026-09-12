@@ -1596,3 +1596,21 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 版本一致性通过；确认远端仍为公开且未归档的 `Alunixa-Code/Alunixa-X`，main 基线 `033a8a6c7f1fc8e05b2ac9490ef9599b712d32ff`，本地及远端无 v1.0.16，现有最近三轮 Release Actions 均已结束，无本版重复任务喵~
 - 本次推送变更：Agent Fast 配置开关、供应商写入后的能力同步、增强启动/高级提示词审计、运行中队列编辑旧 ID 修复、隔离原生复现脚本及对应测试/说明；使用 skip-ci 的最终验收提交原子推送 main 与 annotated v1.0.16，再仅派发一次正式 Release Actions，避免同一版本重复构建喵~
 - main 与 annotated v1.0.16 已原子推送，产品提交为 `cfedbe0f35e1581c95bc39b3b98161843e879c13`，唯一正式 Release Actions 为 `34697355458`；派发后首个列表尚未索引出新任务，但 workflow 命令已返回该运行 ID，因此按 ID 继续跟踪，不重复派发喵~
+
+## 2026-09-12 · v1.0.16 正式发行完成
+
+- 唯一正式 Actions 34697355458 已 completed/success，版本检查、Windows x64、macOS x64、macOS arm64 和发布 job 103565451320 全部成功；没有移动标签或重复派发喵~
+- Windows 权威 job 103563045770：前端 93/93；Rust 38 套件 1052 passed / 0 failed / 1 ignored，ignored 为父测试显式使用的既有隔离 JSON-RPC 子进程入口；此前 CLI 在整轮运行尚未完成时拒绝读取 job 日志，现已在正式完成后读取确认喵~
+- Release ID 387590363，发布时间 09/12/2026 14:06:17，非草稿、非预发布；六项资产唯一、非零且 uploaded，GitHub digest 与对应发行说明 SHA-256 逐项一致，NotesAndHashes=PASS，匿名 releases/latest 指向同一版本和六资产喵~
+- 产品提交 cfedbe0f35e1581c95bc39b3b98161843e879c13，annotated tag 对象 dffddd18f03e84f26ff3db074059bf4260228cc3，解引用与正式 Actions head 一致；发行包含 Fast 模式、Agent/高级提示词启动审计与队列编辑兼容修复及详细说明喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.16-macos-arm64.dmg` | 32531696 | `077d5a59d171d61ed7290f87e031e34b28d3698067f26376ee9f7bbb7acef92e` |
+| `Alunixa-X-1.0.16-macos-arm64.zip` | 27696740 | `90949ce14742ddb5692597999767f1c9cb625fdf9497abf2cd5437e7d9ba65cc` |
+| `Alunixa-X-1.0.16-macos-x64.dmg` | 33770586 | `612c8ca16b4859116d03031f33b7180df42dd8dbdf04749b637b0a57a3ddfffa` |
+| `Alunixa-X-1.0.16-macos-x64.zip` | 28234043 | `6bbf8c74045918a1e5dcd7fb6705a4f74e5b233340a4e3777c0849de197aa62a` |
+| `Alunixa-X-1.0.16-windows-x64-setup.exe` | 20872644 | `ca6dca0536613aa17ef315af4f7d8e273f7395526e382168781d80257587775b` |
+| `Alunixa-X-1.0.16-windows-x64.zip` | 26642214 | `d14fc0dab848c741a8b4b9cdb087eef6d2b9d42ed701b6c24878695f4d6ca48f` |
+
+- 全程没有重启当前 Codex、Helper 或 CDP，没有热注入当前窗口或改写真实 config/auth；新版安装后下一次经 Alunixa X 启动或重新激活应用配置与补丁，既有已提交消息/任务历史保持不变喵~
