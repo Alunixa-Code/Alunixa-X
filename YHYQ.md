@@ -1595,3 +1595,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 发布前最终验证：Rust 资源嵌入/桥接回归 `92/92` 通过，`cargo check --workspace --all-targets --locked`、formatter 和 diff 检查通过；此前 Rust workspace 全量无失败，最新 JS 改动由前端 `93/93` 和桥接回归覆盖喵~
 - 版本一致性通过；确认远端仍为公开且未归档的 `Alunixa-Code/Alunixa-X`，main 基线 `033a8a6c7f1fc8e05b2ac9490ef9599b712d32ff`，本地及远端无 v1.0.16，现有最近三轮 Release Actions 均已结束，无本版重复任务喵~
 - 本次推送变更：Agent Fast 配置开关、供应商写入后的能力同步、增强启动/高级提示词审计、运行中队列编辑旧 ID 修复、隔离原生复现脚本及对应测试/说明；使用 skip-ci 的最终验收提交原子推送 main 与 annotated v1.0.16，再仅派发一次正式 Release Actions，避免同一版本重复构建喵~
+- main 与 annotated v1.0.16 已原子推送，产品提交为 `cfedbe0f35e1581c95bc39b3b98161843e879c13`，唯一正式 Release Actions 为 `34697355458`；派发后首个列表尚未索引出新任务，但 workflow 命令已返回该运行 ID，因此按 ID 继续跟踪，不重复派发喵~
