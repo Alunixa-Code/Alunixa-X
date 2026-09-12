@@ -29,3 +29,31 @@ test("saving unrelated Agent capabilities uses a preserving instructions policy"
   assert.match(save, /sync_model_instructions_after_settings_save/);
   assert.doesNotMatch(save, /and_then\(\|_\| apply_codex_instructions_policy/);
 });
+
+test("Fast mode is a separate Agent capability backed by config.toml", () => {
+  const manager = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.match(manager, /codexAppFastMode: boolean/);
+  assert.match(manager, /title=\{t\("Fast 模式"\)\}/);
+  const settings = readFileSync(
+    new URL("../../../crates/alunixa-x-core/src/settings.rs", import.meta.url), "utf8",
+  );
+  assert.match(settings, /rename = "codexAppFastMode"/);
+  const relay = readFileSync(
+    new URL("../../../crates/alunixa-x-core/src/relay_config.rs", import.meta.url), "utf8",
+  );
+  assert.match(relay, /set_codex_fast_mode_in_home/);
+  assert.match(relay, /fast_mode/);
+});
+
+test("startup audit covers managed Fast mode and advanced instructions", () => {
+  const audit = readFileSync(
+    new URL("../../../crates/alunixa-x-core/src/startup_audit.rs", import.meta.url), "utf8",
+  );
+  assert.match(audit, /set_codex_fast_mode_in_home/);
+  assert.match(audit, /audit_agent_capability_config/);
+  assert.match(audit, /audit_model_instructions_before_launch/);
+  const instructions = readFileSync(
+    new URL("../../../crates/alunixa-x-core/src/codex_instructions.rs", import.meta.url), "utf8",
+  );
+  assert.match(instructions, /提示词文件内容为空/);
+});

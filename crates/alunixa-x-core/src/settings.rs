@@ -3019,6 +3019,7 @@ experimental_bearer_token = "sk-existing""#
             "codexAppThreadIdBadge": true,
             "codexAppNativeMenuLocalization": false,
             "codexAppServiceTierControls": true,
+            "codexAppFastMode": true,
             "codexAppResponsesIdNegotiation": true,
             "codexAppExperimentalContext": true,
             "codexAppSharedTerminalRetentionMinutes": 4,
@@ -3049,6 +3050,7 @@ experimental_bearer_token = "sk-existing""#
         assert_eq!(updated.codex_app_shared_terminal_retention_minutes, 4);
         assert_eq!(updated.codex_app_sub_agent_max_threads, 7);
         assert!(updated.codex_app_service_tier_controls);
+        assert!(updated.codex_app_fast_mode);
         assert!(updated.codex_app_pet_real_mouse_look);
         assert!(updated.codex_goals_enabled);
         assert_eq!(updated.relay_base_url, "https://relay.example.test/v1");

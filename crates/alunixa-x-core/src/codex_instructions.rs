@@ -48,12 +48,14 @@ pub fn audit_model_instructions_before_launch(
     let config_path = home.join("config.toml");
     let config = read_optional_text(&config_path)?.unwrap_or_default();
     let doc = parse_config(&config)?;
-    let reference = doc
-        .get("model_instructions_file")
-        .and_then(Item::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let reference = match doc.get("model_instructions_file") {
+        Some(item) => item
+            .as_str()
+            .context("启动前高级提示词扫描失败：model_instructions_file 必须是字符串")?
+            .trim()
+            .to_string(),
+        None => String::new(),
+    };
     let managed_reference = is_managed_reference(&reference, home);
     if enabled && reference.is_empty() {
         anyhow::bail!("启动前高级提示词扫描失败：已启用但 model_instructions_file 缺失");
@@ -69,13 +71,15 @@ pub fn audit_model_instructions_before_launch(
         audit.files_scanned += 1;
     }
 
-    for path in [
-        managed_instructions_path(home),
-        home.join(MANAGED_DIRECTORY).join(BACKUP_FILE),
-    ] {
-        if path.is_file() {
-            scan_instruction_file(&path)?;
-            audit.files_scanned += 1;
+    if enabled || managed_reference {
+        for path in [
+            managed_instructions_path(home),
+            home.join(MANAGED_DIRECTORY).join(BACKUP_FILE),
+        ] {
+            if path.is_file() {
+                scan_instruction_file(&path)?;
+                audit.files_scanned += 1;
+            }
         }
     }
     if !instructions.trim().is_empty() {
@@ -469,5 +473,53 @@ mod tests {
             DEFAULT_INSTRUCTIONS
         );
         assert!(!ensure_model_instructions_before_launch(temp.path(), true, "").unwrap());
+    }
+
+    #[test]
+    fn startup_audit_rejects_empty_external_instruction_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let external = temp.path().join("custom-prompt.md");
+        std::fs::write(&external, b" \n\t").unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            format!(
+                "model_instructions_file = \"{}\"\n",
+                external.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+
+        let error = audit_model_instructions_before_launch(temp.path(), false, "").unwrap_err();
+
+        assert!(error.to_string().contains("内容为空"));
+    }
+
+    #[test]
+    fn disabled_retained_empty_managed_file_does_not_block_launch() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(MANAGED_DIRECTORY)).unwrap();
+        std::fs::write(
+            temp.path().join(MANAGED_DIRECTORY).join(MANAGED_FILE),
+            b" \n\t",
+        )
+        .unwrap();
+
+        let audit = audit_model_instructions_before_launch(temp.path(), false, "").unwrap();
+
+        assert_eq!(audit.files_scanned, 0);
+    }
+
+    #[test]
+    fn startup_audit_rejects_malformed_instruction_reference() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model_instructions_file = true\n",
+        )
+        .unwrap();
+
+        let error = audit_model_instructions_before_launch(temp.path(), false, "").unwrap_err();
+
+        assert!(error.to_string().contains("必须是字符串"));
     }
 }

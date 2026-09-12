@@ -167,11 +167,14 @@ fn audit_agent_capability_config(
     settings: &BackendSettings,
     report: &mut StartupAuditReport,
 ) -> anyhow::Result<()> {
-    let actual_fast_mode = doc
-        .get("features")
-        .and_then(Item::as_table_like)
-        .and_then(|features| features.get("fast_mode"))
-        .and_then(Item::as_bool);
+    let actual_fast_mode = if let Some(features_item) = doc.get("features") {
+        let features = features_item
+            .as_table_like()
+            .context("启动前 Agent 能力校验失败：features 必须是 TOML table")?;
+        features.get("fast_mode").and_then(Item::as_bool)
+    } else {
+        None
+    };
     report.checked_section();
     if settings.codex_app_fast_mode {
         if actual_fast_mode != Some(true) {
@@ -466,5 +469,58 @@ mod tests {
         assert!(crate::codex_instructions::managed_instructions_path(home).is_file());
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
         assert!(config.contains("model_instructions_file"));
+    }
+
+    #[test]
+    fn audit_repairs_fast_mode_and_keeps_other_agent_features() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        std::fs::write(
+            home.join("config.toml"),
+            "[features]\ngoals = true\nfast_mode = false\n",
+        )
+        .unwrap();
+        let settings = BackendSettings {
+            enhancements_enabled: false,
+            relay_profiles_enabled: false,
+            codex_app_fast_mode: true,
+            ..BackendSettings::default()
+        };
+
+        let report =
+            audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
+
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let parsed = config.parse::<toml::Value>().unwrap();
+        assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(true));
+        assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+        assert!(report.repaired_items >= 1);
+    }
+
+    #[test]
+    fn audit_removes_fast_mode_when_agent_capability_is_disabled() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        std::fs::write(home.join("config.toml"), "[features]\nfast_mode = true\n").unwrap();
+        let settings = settings_without_owned_runtime_features();
+
+        audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
+
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(!config.contains("fast_mode"));
+    }
+
+    #[test]
+    fn audit_rejects_malformed_features_table() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        std::fs::write(home.join("config.toml"), "features = \"invalid\"\n").unwrap();
+        let settings = settings_without_owned_runtime_features();
+
+        let error = audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher"))
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("features 必须是 TOML table"));
     }
 }

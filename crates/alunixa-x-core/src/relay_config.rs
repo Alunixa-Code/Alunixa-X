@@ -153,11 +153,11 @@ pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result
     let mut doc = parse_toml_document(&existing)?;
 
     if enabled {
-        let features = table_mut_or_insert(&mut doc, "features")?;
+        let features = table_like_mut_or_insert(&mut doc, "features")?;
         if features.get("fast_mode").and_then(Item::as_bool) != Some(true) {
-            features["fast_mode"] = toml_edit::value(true);
+            features.insert("fast_mode", toml_edit::value(true));
         }
-    } else if let Some(features) = table_mut_if_exists(&mut doc, "features") {
+    } else if let Some(features) = table_like_mut_if_exists(&mut doc, "features") {
         features.remove("fast_mode");
         if features.is_empty() {
             doc.as_table_mut().remove("features");
@@ -333,6 +333,25 @@ fn table_mut_or_insert<'a>(doc: &'a mut DocumentMut, key: &str) -> anyhow::Resul
 
 fn table_mut_if_exists<'a>(doc: &'a mut DocumentMut, key: &str) -> Option<&'a mut Table> {
     doc.get_mut(key).and_then(Item::as_table_mut)
+}
+
+fn table_like_mut_or_insert<'a>(
+    doc: &'a mut DocumentMut,
+    key: &str,
+) -> anyhow::Result<&'a mut dyn TableLike> {
+    if !doc.as_table().contains_key(key) {
+        doc[key] = toml_edit::table();
+    }
+    doc.get_mut(key)
+        .and_then(Item::as_table_like_mut)
+        .ok_or_else(|| anyhow::anyhow!("{key} 必须是 TOML table"))
+}
+
+fn table_like_mut_if_exists<'a>(
+    doc: &'a mut DocumentMut,
+    key: &str,
+) -> Option<&'a mut dyn TableLike> {
+    doc.get_mut(key).and_then(Item::as_table_like_mut)
 }
 
 pub fn relay_status_from_home(home: &Path) -> RelayStatus {

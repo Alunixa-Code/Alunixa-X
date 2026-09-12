@@ -10,7 +10,7 @@ use alunixa_x_core::relay_config::{
     clear_relay_config_to_home_with_auth, delete_context_entry_from_common_config,
     extract_common_config_from_config, filter_common_config_for_selection,
     list_context_entries_from_common_config, normalize_relay_profile_for_storage,
-    relay_config_status_from_home, sanitize_common_config_contents,
+    relay_config_status_from_home, sanitize_common_config_contents, set_codex_fast_mode_in_home,
     set_codex_goals_feature_in_home, set_codex_imagegen_mcp_in_home,
     set_codex_sub_agent_max_threads_in_home, strip_common_config_from_config,
     sync_live_config_context_entries, upsert_context_entry_in_common_config,
@@ -1649,6 +1649,48 @@ fn set_codex_sub_agent_max_threads_preserves_config_and_clamps_value() {
     assert_eq!(parsed["agents"]["max_threads"].as_integer(), Some(50));
 }
 
+#[test]
+fn set_codex_fast_mode_writes_and_removes_only_managed_feature() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        "model = \"gpt-5.5\"\n\n[features]\ngoals = true\n",
+    )
+    .unwrap();
+
+    assert!(set_codex_fast_mode_in_home(temp.path(), true).unwrap());
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    let parsed = config.parse::<toml::Value>().unwrap();
+    assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(true));
+    assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+
+    assert!(set_codex_fast_mode_in_home(temp.path(), false).unwrap());
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    let parsed = config.parse::<toml::Value>().unwrap();
+    assert!(parsed["features"].get("fast_mode").is_none());
+    assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+}
+
+#[test]
+fn set_codex_fast_mode_preserves_inline_feature_table() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("config.toml"),
+        "model = \"gpt-5.5\"\nfeatures = { goals = true }\n",
+    )
+    .unwrap();
+
+    set_codex_fast_mode_in_home(temp.path(), true).unwrap();
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    let parsed = config.parse::<toml::Value>().unwrap();
+    assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(true));
+    assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+
+    set_codex_fast_mode_in_home(temp.path(), false).unwrap();
+    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    let parsed = config.parse::<toml::Value>().unwrap();
+    assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+}
 #[test]
 fn set_codex_goals_feature_tolerates_invalid_existing_toml() {
     let temp = tempfile::tempdir().unwrap();
