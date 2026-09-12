@@ -1574,3 +1574,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前供应商写入同步补丁已完成编译验证，下一步补充入口契约并开始全量工作区回归喵~
 - 新增入口契约后首次全量前端测试为 `79/80`，唯一失败是既有静态断言仍寻找已被统一 helper 替换的 `set_codex_fast_mode_in_home`；实现本身已编译，需将断言更新为 `sync_codex_agent_capabilities_in_home`，不是产品逻辑失败喵~
 - 修正启动审计静态契约后，管理器前端全量测试最终 `80/80` 通过、`0` 失败喵~
+- 全量 Rust 工作区回归已完成且全部通过：core `317 passed / 0 failed / 1 ignored`，data、manager、launcher 及所有集成测试均无失败，包含 manager lib `33/33`、Windows 契约 `24/24`、relay config `121/121`、launcher `80/80` 喵~
+- 本次全量编译在本机 Windows Cargo 环境完成，没有使用 WSL，也没有修改真实 Codex 配置或重启正在运行的 Codex 喵~
