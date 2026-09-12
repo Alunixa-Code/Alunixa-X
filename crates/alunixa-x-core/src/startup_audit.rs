@@ -52,9 +52,9 @@ pub fn audit_and_repair_before_launch(
     report.repaired(crate::relay_config::repair_stale_feature_entries_in_home(
         home,
     )?);
-    report.repaired(
-        crate::relay_config::sync_codex_agent_capabilities_in_home(home, settings)?,
-    );
+    report.repaired(crate::relay_config::sync_codex_agent_capabilities_in_home(
+        home, settings,
+    )?);
 
     let hooks = crate::codex_hooks::apply_alunixa_x_hooks_in_home(settings, launcher_path, home)?;
     report.repaired(hooks.installed > 0 || hooks.removed > 0);
