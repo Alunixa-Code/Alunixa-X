@@ -10,7 +10,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- main 与 annotated v1.0.17 已原子推送，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；正式发行尚在构建中喵~
+- v1.0.17 已正式发布，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；后续本地提交仅记录验收喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
 
@@ -44,7 +44,9 @@
 
 ## 10. Deployment and Operations
 - 唯一远端 `Alunixa-Code/Alunixa-X`，正式工作流 `release-assets.yml` 喵~
-- 当前唯一 v1.0.17 Actions `34744977463`，head 7478e7f，版本门禁 success，Windows job 103691133361、macOS x64 103691133375、arm64 103691133353；禁止重复派发或移动标签喵~
+- v1.0.17 唯一 Actions `34744977463` 全部 success，Windows job 103691133361、macOS x64 103691133375、arm64 103691133353、发布 103693272939 成功；禁止重复派发或移动标签喵~
+- Release ID `387828405`，发布于 `2026-09-13T07:39:16Z`，非草稿/非预发布；六项安装资产与说明哈希、匿名 latest 均 PASS，完整资产名称/字节数/SHA-256 在 YHYQ.md 喵~
+- 正式 Windows 前端 98/98，Rust 38 套件 1058 passed/0 failed/1 ignored，已从完成的 CI 日志核验喵~
 - v1.0.16 Actions `34697355458` success；Release ID `387590363`，时间 `2026-09-12T14:06:17Z`，六资产与发行说明 SHA-256 已核验喵~
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
@@ -60,14 +62,14 @@
 
 ## 13. Completed Work
 - 实验性上下文移除和真实配置清理 v1.0.14，启动审计 v1.0.15，Fast/能力同步/高级提示词增强/队列编辑修复 v1.0.16 喵~
-- v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验代码完成，本地全套验证通过，等待正式 CI 喵~
+- v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
-- 等待现有 Actions 34744977463 完成，验收六资产及哈希并记录，不重复构建喵~
+- 本次需求无待完成产品工作；用户安装 v1.0.17 后可在供应商详情显式选择启动模型并保存，当前运行实例不自动重启喵~
 
 ## 15. Known Bugs and Limitations
 - 已确认：非启动模型的窗口写入 model-catalogs，根配置只跟随启动模型；真实 astra 1050000/1000000 已保存，当前启动模型 terra 为 272000/271000 喵~
-- 以上预览/残留/单位问题已在本地 v1.0.17 修复并验证，当前真实配置未改动，尚未安装新版喵~
+- 以上预览/残留/单位问题已在正式 v1.0.17 修复并验证，当前真实配置未改动，尚未替用户安装新版喵~
 - 禁止在根目录直接 npm test（没有 package.json）；必须 --prefix 或正确工作目录喵~
 - 旧运行中队列记录没有补丁捕获的删除证据时不盲目重放喵~
 
@@ -87,17 +89,18 @@
 - 用户：供应商设置上下文窗口后保存，配置文件没变仍为手动 config，怀疑配置保护逻辑错误喵~
 - 已定位分歧；旧前端五项失败，Rust 两项失败（清空窗口残留、单位解析失败）已复现；正常显式保存覆盖手动旧窗口和非启动模型目录更新原先通过喵~
 - 前端已改用选中 custom model 生成预览，公共配置合并后再应用显式窗口；支持带注释表头避免误改嵌套配置；启动模型现在可显式选择喵~
-- Rust 修复后 relay_switch 13/13；前端全量 98/98、TypeScript 和 i18n 854/854 + 80/80 通过；新增数值边界及回读错误测试待完整回归喵~
-- CHANGELOG 与 docs/releases/v1.0.17.md 已补齐修复内容、行为区别及不影响真实运行实例的边界，接下来完整 workspace 回归喵~
-- tools/verify-context-save-ui.py 为 headless 生产 UI + 内存 Tauri fixture 验证，不访问真实后端；正在验证启动选择、编辑窗口、预览和提交请求喵~
+- Rust relay_switch 13/13；前端 98/98、TypeScript、i18n 854/854 + 80/80、完整 workspace 和三平台 CI 全部通过喵~
+- CHANGELOG 与 docs/releases/v1.0.17.md 已补齐修复内容、行为区别及不影响真实运行实例的边界，发行包含该说明喵~
+- tools/verify-context-save-ui.py 验证 headless 生产 UI + 内存 Tauri fixture 的启动选择、编辑窗口、预览和提交请求 PASS，不访问真实后端喵~
 - 第一次 UI smoke 点卡片标题不会打开详情，定位到明确“编辑”按钮后修正测试选择器；非产品失败，隔离服务器已自动退出；本地完整 Rust 已完成编译并正在运行套件喵~
 - 更正：with_server.py 在 Windows shell=True 只结束外层 shell，遗留本轮两个 Python HTTP server，第二轮 ERR_EMPTY_RESPONSE；改用脚本进程内 ThreadingHTTPServer 随 finally 清理，回收精确匹配本轮 18742 fixture 的进程，不动其他服务喵~
-- 最终状态：完整本地回归及 headless UI 均通过；正式产品已推送，Actions 34744977463 进行中，等待正式结果喵~
+- 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 跟踪 Actions 34744977463，长等待 gh run watch --interval 90，不重复派发喵~
-- 成功后检查 Release 非草稿/预发布、六安装资产及 SHA-256/匿名 latest，更新 XJ/YHYQ 并提交验收日志，删除本轮临时日志喵~
+- 不需要重建/重复发布 1.0.17；需要根配置采用 astra 窗口时，安装新版后在“启动模型”显式选择 gpt-6-astra，再保存其窗口/阈值喵~
+- 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
 - 2026-09-13：未发现 XJ.md，依据完整项目日志和 Git 元数据补建；现有历史和所有配置保持不变喵~
 - 2026-09-13：完成上下文保存/预览一致性修复、初步失败→通过回归、版本 1.0.17 与发行说明，等待最终全套验证和正式 CI 喵~
+- 2026-09-13：本地完整回归、生产 UI smoke、三平台 Actions、六资产 Release 与哈希/匿名 latest 全部验收完成喵~

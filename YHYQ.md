@@ -1636,3 +1636,19 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本次推送变更：自定义模型窗口/阈值预览与保存一致、K/M 小数单位和溢出处理、清空/禁用旧值清理、显式启动模型选择、保存后/启动前回读校验、失败→通过测试和详细发行说明；不改依赖、不改真实 config/auth，不重启用户 Codex 喵~
 - 发布前确认远端为公开未归档 Alunixa-Code/Alunixa-X，main cfedbe0，v1.0.17 无现存标签和 Actions；以 skip-ci 最终验收提交原子推送 main 与 annotated tag，仅派发一次正式 release-assets.yml 喵~
 - main 与 annotated v1.0.17 已原子推送；产品提交 7478e7f08f5bb13bf4ed860448e710354678aa83，tag 对象 264fb290f27282d028f68635c6d69f05c09bfd4b；唯一正式 Actions 34744977463，版本门禁已 success，后续只跟踪该轮，不移动标签或重复派发喵~
+
+## 2026-09-13 · v1.0.17 正式发行验收
+
+- 唯一正式 Actions 34744977463 completed/success，Windows x64、macOS x64、macOS arm64 与发布 job 103693272939 全部 success；产品提交 7478e7f08f5bb13bf4ed860448e710354678aa83，annotated tag 264fb290f27282d028f68635c6d69f05c09bfd4b，解引用与 Actions 完全一致喵~
+- Windows 权威 job 103691133361 日志确认前端 98/98，Rust 38 套件 1058 passed/0 failed/1 ignored；ignored 为父测试显式使用的既有 fake JSON-RPC 子进程入口喵~
+- Release ID 387828405，发布于 2026-09-13T07:39:16Z，非草稿/非预发布，六资产唯一、非零、uploaded 且 digest 与对应说明 SHA-256 一致；构建来源/提交正确，匿名 latest 返回同一发行和六资产，NotesAndHashes=PASS，AnonymousLatest=PASS 喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.17-macos-arm64.dmg` | 32536032 | `9cbd03454ccbb1952e100ace621a013edd33e48c7fa0f95b653e16151ee0a7a5` |
+| `Alunixa-X-1.0.17-macos-arm64.zip` | 27680240 | `058c391bd0e03605d8b6c7416bb59400419424dc1def412ff178920ece50f37e` |
+| `Alunixa-X-1.0.17-macos-x64.dmg` | 33701910 | `66d787b153bbb0a488eeb55450ad91a2d7a85ac0c3016d2b25dd408fe2ceb2be` |
+| `Alunixa-X-1.0.17-macos-x64.zip` | 28182852 | `db097d6955556754bcee85f9a3fb6691635fbf85d0722056bf95835a851c15f9` |
+| `Alunixa-X-1.0.17-windows-x64-setup.exe` | 20930582 | `81b4ff58f0947e9b6f749dcc8d734354b22c71cce663a1a9a051a901eba9c6b0` |
+| `Alunixa-X-1.0.17-windows-x64.zip` | 26753294 | `a0dc16eefb1d34bfa3e5c29a88e36b0e7a38bfb78e85ebf313bfbe05bffedea3` |
+- 验收脚本曾使用 PowerShell 自动变量同名 matches，后续正则使显示套件数变为 1；已独立重读日志并以 testResults 确认实际 38 套件，1058 passed/0 failed/1 ignored 不受影响，日志套件数已更正喵~
