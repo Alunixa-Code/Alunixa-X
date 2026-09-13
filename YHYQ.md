@@ -1652,3 +1652,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 | `Alunixa-X-1.0.17-windows-x64-setup.exe` | 20930582 | `81b4ff58f0947e9b6f749dcc8d734354b22c71cce663a1a9a051a901eba9c6b0` |
 | `Alunixa-X-1.0.17-windows-x64.zip` | 26753294 | `a0dc16eefb1d34bfa3e5c29a88e36b0e7a38bfb78e85ebf313bfbe05bffedea3` |
 - 验收脚本曾使用 PowerShell 自动变量同名 matches，后续正则使显示套件数变为 1；已独立重读日志并以 testResults 确认实际 38 套件，1058 passed/0 failed/1 ignored 不受影响，日志套件数已更正喵~
+
+- 最终交付：正式 v1.0.17 已完成，不替用户安装或重启；没有改写用户真实 config/auth，没有下载正式安装资产，已清理本轮 7 份临时红/绿测试、构建及 Actions 等待日志；保留可复用依赖和构建缓存，不重复已被拒绝的缓存清理喵~
