@@ -7222,12 +7222,19 @@ function CustomModelsRelayProfileEditor({
           <Input value={profile.name} onChange={(event) => onProfileChange({ ...profile, name: event.currentTarget.value })} />
         </Field>
         <Field className="relay-field-config-model" label={t("启动模型")}>
-          <Input
-            readOnly
-            value={profile.lastUsedModel || models[0]?.model || ""}
-            placeholder={t("排序第一项")}
-          />
+          <select
+            className="field-select"
+            aria-label={t("启动模型")}
+            value={profile.lastUsedModel || ""}
+            onChange={(event) => applyModels(models, { lastUsedModel: event.currentTarget.value })}
+          >
+            <option value="">{t("排序第一项")}</option>
+            {models.filter((model) => model.model.trim()).map((model) => (
+              <option key={model.id} value={model.model.trim()}>{model.model}</option>
+            ))}
+          </select>
           <p className="field-hint">{t("优先使用上次有效模型；没有历史记录时使用排序第一项。")}</p>
+          <p className="field-hint">{t("保存时 config.toml 的窗口与压缩阈值跟随启动模型；其他模型的设置写入模型目录，不会自动切换启动模型。")}</p>
         </Field>
         <Field className="relay-field-goals" label={t("Codex 目标")}>
           <label className="inline-toggle">
@@ -8574,7 +8581,7 @@ function parseContextEntries(commonConfig: string, kind: ContextKind, tableName:
 }
 
 function tomlTablePathFromLine(line: string): string[] | null {
-  const match = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+  const match = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
   if (!match) return null;
   return parseTomlDottedPath(match[1].trim());
 }
@@ -8743,8 +8750,8 @@ function setCodexGoalsFeatureInConfig(configContents: string, enabled: boolean):
 function effectiveRelayConfigPreview(profile: RelayProfile, settings: BackendSettings, contextProfile = profile): string {
   const entries = contextEntriesForProfile(settings, contextProfile);
   const isolatedConfig = stripContextEntriesFromConfig(profile.configContents, entries);
-  const configWithLimits = applyContextLimitPreview(isolatedConfig, profile);
-  return joinTomlSectionsRootFirst([configWithLimits, settings.relayCommonConfigContents || "", selectedContextConfigToml(entries)]);
+  const mergedConfig = joinTomlSectionsRootFirst([isolatedConfig, settings.relayCommonConfigContents || "", selectedContextConfigToml(entries)]);
+  return applyContextLimitPreview(mergedConfig, profile);
 }
 
 function selectedContextConfigToml(entries: CodexContextEntries): string {
@@ -8886,38 +8893,27 @@ function contextHeaderFromLine(line: string): { kind: ContextKind; id: string } 
 }
 
 function applyContextLimitPreview(configContents: string, profile: RelayProfile): string {
-  const replacements: Array<[string, string]> = [
-    ["model_context_window", profile.contextWindow],
-    ["model_auto_compact_token_limit", profile.autoCompactLimit],
-  ];
-  let lines = configContents.split(/\r?\n/);
-
-  for (const [key, value] of replacements) {
-    const trimmed = value.trim();
-    if (!trimmed) continue;
-    let replaced = false;
-    lines = lines.map((line) => {
-      if (!replaced && new RegExp(`^\\s*${key}\\s*=`).test(line)) {
-        replaced = true;
-        return `${key} = ${trimmed}`;
-      }
-      return line;
-    });
-    if (!replaced) {
-      const firstTable = lines.findIndex((line) => /^\s*\[[^\]]+\]\s*$/.test(line));
-      const insertAt = firstTable >= 0 ? firstTable : lines.length;
-      lines.splice(insertAt, 0, `${key} = ${trimmed}`);
-    }
+  const custom = isCustomModelsRelayProfile(profile);
+  const selected = custom
+    ? profile.customModels.find((model) => model.model.trim().toLowerCase() === profile.lastUsedModel.trim().toLowerCase())
+      || profile.customModels[0]
+    : profile;
+  const window = parseContextWindowTokens(selected?.contextWindow || "");
+  let config = configContents;
+  if (window != null) {
+    config = setRootTomlIntKey(config, "model_context_window", String(window));
+  } else if (custom) {
+    config = removeRootTomlKey(config, "model_context_window");
   }
-
-  return ensureTrailingNewline(lines.join("\n").trimEnd());
+  return setRootTomlIntKey(config, "model_auto_compact_token_limit",
+    selected?.autoCompactEnabled ? selected.autoCompactLimit : "");
 }
 
 function removeRootTomlKey(contents: string, key: string): string {
   const lines: string[] = [];
   let inRoot = true;
   for (const line of contents.split(/\r?\n/)) {
-    if (/^\s*\[[^\]]+\]\s*$/.test(line)) inRoot = false;
+    if (tomlTablePathFromLine(line) || /^\s*\[\[/.test(line)) inRoot = false;
     if (inRoot && new RegExp(`^\\s*${key}\\s*=`).test(line)) continue;
     lines.push(line);
   }
@@ -8988,7 +8984,7 @@ function dedupeTomlRootLines(rootParts: string[]): string[] {
 
 function splitTomlRootAndTables(section: string): { root: string; tables: string } {
   const lines = section.trim().split(/\r?\n/);
-  const firstTable = lines.findIndex((line) => /^\s*\[[^\]]+\]\s*$/.test(line));
+  const firstTable = lines.findIndex((line) => tomlTablePathFromLine(line) || /^\s*\[\[/.test(line));
   if (firstTable < 0) return { root: lines.join("\n"), tables: "" };
   return {
     root: lines.slice(0, firstTable).join("\n"),
@@ -9815,7 +9811,7 @@ function setRootTomlIntKey(contents: string, key: string, value: string): string
 
 function setRootTomlLine(contents: string, key: string, lineText: string): string {
   const lines = contents.split(/\r?\n/);
-  const firstTable = lines.findIndex((line) => /^\s*\[[^\]]+\]\s*$/.test(line));
+  const firstTable = lines.findIndex((line) => tomlTablePathFromLine(line) || /^\s*\[\[/.test(line));
   const rootEnd = firstTable >= 0 ? firstTable : lines.length;
   for (let index = 0; index < rootEnd; index += 1) {
     if (new RegExp(`^\\s*${key}\\s*=`).test(lines[index])) {

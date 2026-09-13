@@ -5,6 +5,7 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "保存时 config.toml 的窗口与压缩阈值跟随启动模型；其他模型的设置写入模型目录，不会自动切换启动模型。": "On save, config.toml uses the startup model's context window and compaction threshold. Other model settings are saved to the model catalog without changing the startup model.",
   "Token 与模型使用统计": "Token and model usage",
   "累计 Token": "Total tokens",
   "Token 已用": "Tokens used",
