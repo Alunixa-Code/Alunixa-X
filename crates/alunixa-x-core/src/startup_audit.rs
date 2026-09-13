@@ -518,4 +518,38 @@ mod tests {
 
         assert!(error.contains("features 必须是 TOML table"));
     }
+
+    #[test]
+    fn startup_audit_detects_context_override_that_disagrees_with_startup_model() {
+        use crate::relay_config::verify_profile_context_limits_in_config as verify;
+        let profile = crate::settings::RelayProfile {
+            relay_mode: crate::settings::RelayMode::CustomModels,
+            custom_models: vec![crate::settings::CustomRelayModel {
+                id: "large".into(),
+                model: "large".into(),
+                context_window: "1.05M".into(),
+                auto_compact_enabled: true,
+                auto_compact_limit: "1000000".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        for text in [
+            "model_context_window = 272000\nmodel_auto_compact_token_limit = 271000\n",
+            "model_context_window = '1050000'\nmodel_auto_compact_token_limit = 1000000\n",
+            "model_context_window = 1050000\n",
+        ] {
+            assert!(
+                verify(&profile, text)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("回读校验失败")
+            );
+        }
+        verify(
+            &profile,
+            "model_context_window = 1050000\nmodel_auto_compact_token_limit = 1000000\n",
+        )
+        .unwrap();
+    }
 }

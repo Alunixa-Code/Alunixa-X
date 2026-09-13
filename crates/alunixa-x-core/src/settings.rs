@@ -2292,6 +2292,35 @@ fn unique_temp_path_for(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn context_window_units_are_exact_bounded_and_do_not_overflow() {
+        use super::parse_context_window_tokens as parse;
+        for (input, expected) in [
+            ("1M", 1_000_000),
+            ("1.05M", 1_050_000),
+            ("272K", 272_000),
+            ("1.5k", 1_500),
+            ("0.000001M", 1),
+            ("1050000", 1_050_000),
+        ] {
+            assert_eq!(parse(input), Some(expected), "{input}");
+        }
+        for input in [
+            "",
+            "0",
+            "-1",
+            "1e6",
+            "NaN",
+            "1..5M",
+            "1.",
+            "0.0000001M",
+            "18446744073709551615M",
+            "9223372036854775808",
+        ] {
+            assert_eq!(parse(input), None, "{input}");
+        }
+    }
+
     use super::*;
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering};
