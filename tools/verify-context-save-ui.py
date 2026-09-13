@@ -1,6 +1,11 @@
 """Headless production-UI check with an in-memory Tauri boundary; no live Codex."""
 import json
 import sys
+from contextlib import contextmanager
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from threading import Thread
 from playwright.sync_api import sync_playwright
 
 
@@ -46,14 +51,34 @@ INIT = r"""
 })();
 """
 
-with sync_playwright() as p:
+@contextmanager
+def server_url():
+    if len(sys.argv) > 1:
+        yield sys.argv[1]
+        return
+    directory = Path(__file__).resolve().parents[1] / "apps/alunixa-x-manager/dist"
+    class QuietHandler(SimpleHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(QuietHandler, directory=str(directory)))
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join()
+
+
+with server_url() as url, sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     try:
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         errors = []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.add_init_script(INIT)
-        page.goto(sys.argv[1], wait_until="networkidle")
+        page.goto(url, wait_until="networkidle")
         page.get_by_role("button", name="供应商配置", exact=True).click()
         page.locator('[data-relay-profile-id="fixture"]').get_by_title("编辑", exact=True).click()
         selector = page.get_by_role("combobox", name="启动模型", exact=True)

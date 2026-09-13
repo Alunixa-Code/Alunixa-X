@@ -87,6 +87,7 @@
 - CHANGELOG 与 docs/releases/v1.0.17.md 已补齐修复内容、行为区别及不影响真实运行实例的边界，接下来完整 workspace 回归喵~
 - tools/verify-context-save-ui.py 为 headless 生产 UI + 内存 Tauri fixture 验证，不访问真实后端；正在验证启动选择、编辑窗口、预览和提交请求喵~
 - 第一次 UI smoke 点卡片标题不会打开详情，定位到明确“编辑”按钮后修正测试选择器；非产品失败，隔离服务器已自动退出；本地完整 Rust 已完成编译并正在运行套件喵~
+- 更正：with_server.py 在 Windows shell=True 只结束外层 shell，遗留本轮两个 Python HTTP server，第二轮 ERR_EMPTY_RESPONSE；改用脚本进程内 ThreadingHTTPServer 随 finally 清理，回收精确匹配本轮 18742 fixture 的进程，不动其他服务喵~
 
 ## 20. Next Steps
 - 修复 preview 使用选中模型、清空/禁用清理、K/M 数值规范化、提供显式启动模型选择；不把编辑其他模型当作切换模型喵~
