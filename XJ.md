@@ -85,6 +85,7 @@
 - 前端已改用选中 custom model 生成预览，公共配置合并后再应用显式窗口；支持带注释表头避免误改嵌套配置；启动模型现在可显式选择喵~
 - Rust 修复后 relay_switch 13/13；前端全量 98/98、TypeScript 和 i18n 854/854 + 80/80 通过；新增数值边界及回读错误测试待完整回归喵~
 - CHANGELOG 与 docs/releases/v1.0.17.md 已补齐修复内容、行为区别及不影响真实运行实例的边界，接下来完整 workspace 回归喵~
+- tools/verify-context-save-ui.py 为 headless 生产 UI + 内存 Tauri fixture 验证，不访问真实后端；正在验证启动选择、编辑窗口、预览和提交请求喵~
 
 ## 20. Next Steps
 - 修复 preview 使用选中模型、清空/禁用清理、K/M 数值规范化、提供显式启动模型选择；不把编辑其他模型当作切换模型喵~
