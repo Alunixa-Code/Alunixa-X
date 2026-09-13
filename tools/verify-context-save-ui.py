@@ -55,7 +55,7 @@ with sync_playwright() as p:
         page.add_init_script(INIT)
         page.goto(sys.argv[1], wait_until="networkidle")
         page.get_by_role("button", name="供应商配置", exact=True).click()
-        page.get_by_text("Context fixture", exact=True).first.click()
+        page.locator('[data-relay-profile-id="fixture"]').get_by_title("编辑", exact=True).click()
         selector = page.get_by_role("combobox", name="启动模型", exact=True)
         selector.wait_for()
         selector.select_option("large")
