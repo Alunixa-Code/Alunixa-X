@@ -132,6 +132,8 @@ fn audit_config(
 
     if settings.relay_profiles_enabled {
         let profile = settings.active_relay_profile();
+        crate::relay_config::verify_profile_context_limits_in_config(&profile, contents)?;
+        report.checked_section();
         let status = crate::relay_config::relay_config_status_from_home(home);
         match profile.relay_mode {
             crate::settings::RelayMode::Official if !profile.official_mix_api_key => {

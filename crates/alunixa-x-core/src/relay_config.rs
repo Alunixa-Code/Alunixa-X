@@ -1940,11 +1940,13 @@ fn apply_context_limits_to_config(
     auto_compact_limit: &str,
 ) -> anyhow::Result<String> {
     let mut doc = parse_toml_document(config_text)?;
-    if let Some(value) = parse_optional_positive_u64(context_window, "上下文大小")? {
-        doc["model_context_window"] = toml_edit::value(value as i64);
+    if !context_window.trim().is_empty() {
+        let value = crate::settings::parse_context_window_tokens(context_window)
+            .context("上下文大小必须是有效正数，可使用 K/M 单位")?;
+        doc["model_context_window"] = toml_edit::value(i64::try_from(value)?);
     }
     if let Some(value) = parse_optional_positive_u64(auto_compact_limit, "压缩上下文大小")? {
-        doc["model_auto_compact_token_limit"] = toml_edit::value(value as i64);
+        doc["model_auto_compact_token_limit"] = toml_edit::value(i64::try_from(value)?);
     } else {
         doc.as_table_mut().remove("model_auto_compact_token_limit");
     }
@@ -1973,8 +1975,14 @@ fn apply_profile_context_limits_to_config(
         } else {
             ""
         };
+        let mut doc = parse_toml_document(config_text)?;
+        // An empty custom-model override means use that model's native default,
+        // not an inherited root override from the previous selected model.
+        if selected.context_window.trim().is_empty() {
+            doc.as_table_mut().remove("model_context_window");
+        }
         return apply_context_limits_to_config(
-            config_text,
+            &doc.to_string(),
             &selected.context_window,
             compact_limit,
         );
@@ -1985,6 +1993,30 @@ fn apply_profile_context_limits_to_config(
         &profile.context_window,
         &profile.effective_auto_compact_limit(),
     )
+}
+
+pub fn verify_profile_context_limits_in_config(
+    profile: &RelayProfile,
+    config_text: &str,
+) -> anyhow::Result<()> {
+    if matches!(profile.relay_mode, crate::settings::RelayMode::Aggregate)
+        || (profile.relay_mode == crate::settings::RelayMode::Official
+            && !profile.official_mix_api_key)
+    {
+        return Ok(());
+    }
+    let actual = parse_toml_document(config_text)?;
+    let expected = parse_toml_document(&apply_profile_context_limits_to_config(
+        profile,
+        config_text,
+    )?)?;
+    for key in ["model_context_window", "model_auto_compact_token_limit"] {
+        let value = |doc: &DocumentMut| doc.get(key).map(|item| item.as_integer());
+        if value(&actual) != value(&expected) {
+            anyhow::bail!("上下文配置回读校验失败：{key} 与启动模型设定不一致");
+        }
+    }
+    Ok(())
 }
 
 fn apply_model_catalog_to_config(
@@ -2889,6 +2921,18 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
     profile.migrate_legacy_auto_compact_fields();
     if profile.relay_mode == crate::settings::RelayMode::CustomModels {
         normalize_custom_models_profile(profile)?;
+        if let Some(selected) = profile.default_custom_model().cloned() {
+            profile.context_window =
+                crate::settings::parse_context_window_tokens(&selected.context_window)
+                    .map(|value| value.to_string())
+                    .unwrap_or_default();
+            profile.auto_compact_enabled = selected.auto_compact_enabled;
+            profile.auto_compact_limit = if selected.auto_compact_enabled {
+                selected.auto_compact_limit
+            } else {
+                String::new()
+            };
+        }
         let completed_config = complete_relay_profile_config(profile)?;
         profile.config_contents =
             apply_profile_context_limits_to_config(profile, &completed_config)?;
@@ -2901,18 +2945,6 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         );
         profile.upstream_base_url.clear();
         profile.api_key = "alunixa-x-custom".to_string();
-        if let Some(default_model) = profile.default_custom_model().cloned() {
-            profile.model = default_model.model;
-            if default_model.auto_compact_enabled {
-                if let Some(window) =
-                    crate::settings::parse_context_window_tokens(&default_model.context_window)
-                {
-                    profile.context_window = window.to_string();
-                    profile.auto_compact_enabled = true;
-                    profile.auto_compact_limit = default_model.auto_compact_limit;
-                }
-            }
-        }
         return Ok(());
     }
     if profile.auto_compact_enabled {

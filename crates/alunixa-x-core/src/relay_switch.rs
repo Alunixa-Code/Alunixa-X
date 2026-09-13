@@ -156,6 +156,10 @@ fn apply_selected_relay_profile(
     };
     crate::relay_config::sync_codex_agent_capabilities_in_home(home, settings)?;
     crate::retired_context::remove_from_home(home)?;
+    crate::relay_config::verify_profile_context_limits_in_config(
+        &relay,
+        &std::fs::read_to_string(home.join("config.toml"))?,
+    )?;
     let status = relay_config_status_from_home(home);
     if relay.relay_mode == RelayMode::PureApi && !status.configured {
         anyhow::bail!(

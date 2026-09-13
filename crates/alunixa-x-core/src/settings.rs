@@ -1095,12 +1095,28 @@ pub fn parse_context_window_tokens(value: &str) -> Option<u64> {
         Some(_) => (trimmed, 1u64),
         None => return None,
     };
-    num_part
-        .trim()
+    let number = num_part.trim();
+    let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+        || (number.contains('.') && fraction.is_empty())
+    {
+        return None;
+    }
+    let fraction = fraction.trim_end_matches('0');
+    let scale = 10u64.checked_pow(fraction.len().try_into().ok()?)?;
+    let fractional = if fraction.is_empty() {
+        0
+    } else {
+        fraction.parse::<u64>().ok()?.checked_mul(multiplier)? / scale
+    };
+    whole
         .parse::<u64>()
-        .ok()
-        .map(|value| value * multiplier)
-        .filter(|value| *value > 0)
+        .ok()?
+        .checked_mul(multiplier)?
+        .checked_add(fractional)
+        .filter(|value| *value > 0 && *value <= i64::MAX as u64)
 }
 
 pub fn auto_compact_limit_from_percent(context_window: u64, percent: u8) -> u64 {
