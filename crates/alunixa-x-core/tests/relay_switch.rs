@@ -545,3 +545,111 @@ experimental_bearer_token = "alunixa-x-custom"
         ..RelayProfile::default()
     }
 }
+
+#[test]
+fn saving_active_custom_window_updates_disk_and_preserves_external_instructions() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let settings = BackendSettings {
+        active_relay_id: "custom".into(),
+        relay_profiles: vec![custom_models_profile("custom")],
+        ..BackendSettings::default()
+    };
+    switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
+    let config_path = home.join("config.toml");
+    let original = std::fs::read_to_string(&config_path).unwrap();
+    let manual = format!(
+        "model_instructions_file = 'external.md'\n{}",
+        original.replace("model_context_window = 500000", "model_context_window = 777000")
+    );
+    std::fs::write(&config_path, manual).unwrap();
+    std::fs::write(home.join("external.md"), "Keep this external prompt.").unwrap();
+    let mut edited = store.load().unwrap();
+    edited.relay_profiles[0].custom_models[0].context_window = "1050000".into();
+    edited.relay_profiles[0].custom_models[0].auto_compact_limit = "1000000".into();
+
+    let result = switch_relay_profile_in_home(&store, &home, edited, "custom").unwrap();
+    let live: toml::Value = std::fs::read_to_string(&config_path).unwrap().parse().unwrap();
+    assert_eq!(live["model_context_window"].as_integer(), Some(1_050_000));
+    assert_eq!(live["model_auto_compact_token_limit"].as_integer(), Some(1_000_000));
+    assert_eq!(live["model_instructions_file"].as_str(), Some("external.md"));
+    assert!(result.backup_path.is_some());
+    assert_eq!(store.load().unwrap().relay_profiles[0].context_window, "1050000");
+    assert_eq!(std::fs::read_to_string(home.join("external.md")).unwrap(), "Keep this external prompt.");
+}
+
+#[test]
+fn clearing_selected_custom_window_removes_stale_root_and_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let settings = BackendSettings {
+        active_relay_id: "custom".into(),
+        relay_profiles: vec![custom_models_profile("custom")],
+        ..BackendSettings::default()
+    };
+    switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
+    let mut edited = store.load().unwrap();
+    let model = &mut edited.relay_profiles[0].custom_models[0];
+    model.context_window.clear();
+    model.auto_compact_enabled = false;
+    model.auto_compact_limit.clear();
+    switch_relay_profile_in_home(&store, &home, edited, "custom").unwrap();
+    let live: toml::Value = std::fs::read_to_string(home.join("config.toml")).unwrap().parse().unwrap();
+    assert!(live.get("model_context_window").is_none());
+    assert!(live.get("model_auto_compact_token_limit").is_none());
+    let saved = store.load().unwrap().active_relay_profile();
+    assert!(saved.context_window.is_empty());
+    assert!(!saved.auto_compact_enabled);
+    assert!(saved.auto_compact_limit.is_empty());
+}
+
+#[test]
+fn custom_window_units_save_as_numeric_config_when_compaction_is_disabled() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let mut profile = custom_models_profile("custom");
+    profile.custom_models[0].context_window = "1.05M".into();
+    profile.custom_models[0].auto_compact_enabled = false;
+    let settings = BackendSettings {
+        active_relay_id: "custom".into(),
+        relay_profiles: vec![profile],
+        ..BackendSettings::default()
+    };
+    switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
+    let live: toml::Value = std::fs::read_to_string(home.join("config.toml")).unwrap().parse().unwrap();
+    assert_eq!(live["model_context_window"].as_integer(), Some(1_050_000));
+    assert!(live.get("model_auto_compact_token_limit").is_none());
+    let saved = store.load().unwrap().active_relay_profile();
+    assert_eq!(saved.context_window, "1050000");
+    assert!(!saved.auto_compact_enabled);
+    assert!(saved.auto_compact_limit.is_empty());
+}
+
+#[test]
+fn editing_other_custom_model_updates_its_catalog_without_switching_startup_model() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let settings = BackendSettings {
+        active_relay_id: "custom".into(),
+        relay_profiles: vec![custom_models_profile("custom")],
+        ..BackendSettings::default()
+    };
+    switch_relay_profile_in_home(&store, &home, settings, "").unwrap();
+    let mut edited = store.load().unwrap();
+    edited.relay_profiles[0].custom_models[1].context_window = "1050000".into();
+    edited.relay_profiles[0].custom_models[1].auto_compact_limit = "1000000".into();
+    switch_relay_profile_in_home(&store, &home, edited, "custom").unwrap();
+    let live: toml::Value = std::fs::read_to_string(home.join("config.toml")).unwrap().parse().unwrap();
+    assert_eq!(live["model"].as_str(), Some("grok-4.5"));
+    assert_eq!(live["model_context_window"].as_integer(), Some(500_000));
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join(live["model_catalog_json"].as_str().unwrap())).unwrap()
+    ).unwrap();
+    let other = catalog["models"].as_array().unwrap().iter().find(|m| m["slug"] == "gpt-5.6-sol").unwrap();
+    assert_eq!(other["context_window"], 1_050_000);
+    assert_eq!(other["auto_compact_token_limit"], 1_000_000);
+}
