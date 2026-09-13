@@ -1635,3 +1635,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 最终本地 Rust 全量 38 套件 1058 passed/0 failed/1 ignored（core 319），前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite、版本/品牌、fmt 和 diff 检查通过，cargo check workspace/all-targets/locked 退出 0 喵~
 - 本次推送变更：自定义模型窗口/阈值预览与保存一致、K/M 小数单位和溢出处理、清空/禁用旧值清理、显式启动模型选择、保存后/启动前回读校验、失败→通过测试和详细发行说明；不改依赖、不改真实 config/auth，不重启用户 Codex 喵~
 - 发布前确认远端为公开未归档 Alunixa-Code/Alunixa-X，main cfedbe0，v1.0.17 无现存标签和 Actions；以 skip-ci 最终验收提交原子推送 main 与 annotated tag，仅派发一次正式 release-assets.yml 喵~
+- main 与 annotated v1.0.17 已原子推送；产品提交 7478e7f08f5bb13bf4ed860448e710354678aa83，tag 对象 264fb290f27282d028f68635c6d69f05c09bfd4b；唯一正式 Actions 34744977463，版本门禁已 success，后续只跟踪该轮，不移动标签或重复派发喵~

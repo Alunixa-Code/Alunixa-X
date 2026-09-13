@@ -10,7 +10,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- 本地 main，版本已提升至 1.0.17（提交 b02b3fe），未推送或发行；已发布基线仍为 1.0.16 / `cfedbe0f35e1581c95bc39b3b98161843e879c13` 喵~
+- main 与 annotated v1.0.17 已原子推送，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；正式发行尚在构建中喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
 
@@ -44,6 +44,7 @@
 
 ## 10. Deployment and Operations
 - 唯一远端 `Alunixa-Code/Alunixa-X`，正式工作流 `release-assets.yml` 喵~
+- 当前唯一 v1.0.17 Actions `34744977463`，head 7478e7f，版本门禁 success，Windows job 103691133361、macOS x64 103691133375、arm64 103691133353；禁止重复派发或移动标签喵~
 - v1.0.16 Actions `34697355458` success；Release ID `387590363`，时间 `2026-09-12T14:06:17Z`，六资产与发行说明 SHA-256 已核验喵~
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
@@ -62,7 +63,7 @@
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验代码完成，本地全套验证通过，等待正式 CI 喵~
 
 ## 14. Pending Work
-- 原子推送 main 与 v1.0.17，唯一正式 Actions 三平台构建发行，验收六资产及哈希并记录喵~
+- 等待现有 Actions 34744977463 完成，验收六资产及哈希并记录，不重复构建喵~
 
 ## 15. Known Bugs and Limitations
 - 已确认：非启动模型的窗口写入 model-catalogs，根配置只跟随启动模型；真实 astra 1050000/1000000 已保存，当前启动模型 terra 为 272000/271000 喵~
@@ -91,10 +92,10 @@
 - tools/verify-context-save-ui.py 为 headless 生产 UI + 内存 Tauri fixture 验证，不访问真实后端；正在验证启动选择、编辑窗口、预览和提交请求喵~
 - 第一次 UI smoke 点卡片标题不会打开详情，定位到明确“编辑”按钮后修正测试选择器；非产品失败，隔离服务器已自动退出；本地完整 Rust 已完成编译并正在运行套件喵~
 - 更正：with_server.py 在 Windows shell=True 只结束外层 shell，遗留本轮两个 Python HTTP server，第二轮 ERR_EMPTY_RESPONSE；改用脚本进程内 ThreadingHTTPServer 随 finally 清理，回收精确匹配本轮 18742 fixture 的进程，不动其他服务喵~
-- 最终状态：完整本地回归及 headless UI 均通过；开始正式发行前检查，v1.0.17 无现有标签/Actions，远端 main 仍为 cfedbe0 喵~
+- 最终状态：完整本地回归及 headless UI 均通过；正式产品已推送，Actions 34744977463 进行中，等待正式结果喵~
 
 ## 20. Next Steps
-- 提交本地验收说明（skip ci），annotated v1.0.17 原子推送后只派发一次 release-assets.yml，并等待运行结束喵~
+- 跟踪 Actions 34744977463，长等待 gh run watch --interval 90，不重复派发喵~
 - 成功后检查 Release 非草稿/预发布、六安装资产及 SHA-256/匿名 latest，更新 XJ/YHYQ 并提交验收日志，删除本轮临时日志喵~
 
 ## 21. Change Log
