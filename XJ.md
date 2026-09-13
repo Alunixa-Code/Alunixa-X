@@ -37,6 +37,8 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- v1.0.17 本地完整 workspace 38 套件 1058 passed/0 failed/1 ignored（core 319），cargo check all-targets、formatter、diff、版本/品牌检查通过喵~
+- 前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite 构建通过；headless 生产 UI 的启动模型选择、窗口编辑、预览、Tauri 提交参数验证 PASS（后端为内存 fixture），服务器及浏览器已关闭喵~
 - v1.0.16 正式前端 93/93；Windows 权威 Rust 38 套件 1052 passed/0 failed/1 ignored，ignored 为父测试显式使用的子进程入口喵~
 - `tools/verify-native-queued-followup.mjs <app.asar>` 在隔离内存 fixture 验证原生队列编辑错误，不操作真实运行实例喵~
 
@@ -57,13 +59,14 @@
 
 ## 13. Completed Work
 - 实验性上下文移除和真实配置清理 v1.0.14，启动审计 v1.0.15，Fast/能力同步/高级提示词增强/队列编辑修复 v1.0.16 喵~
+- v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验代码完成，本地全套验证通过，等待正式 CI 喵~
 
 ## 14. Pending Work
-- 查清用户设置窗口并保存但 config 保留手动旧值的原因，隔离复现、最小修复、回归、按要求构建发行喵~
+- 原子推送 main 与 v1.0.17，唯一正式 Actions 三平台构建发行，验收六资产及哈希并记录喵~
 
 ## 15. Known Bugs and Limitations
 - 已确认：非启动模型的窗口写入 model-catalogs，根配置只跟随启动模型；真实 astra 1050000/1000000 已保存，当前启动模型 terra 为 272000/271000 喵~
-- 缺陷：自定义模型预览依赖旧汇总字段，空窗口保留旧 root，压缩关闭时汇总不刷新，1M 校验与 root 整数解析不一致；正在修复喵~
+- 以上预览/残留/单位问题已在本地 v1.0.17 修复并验证，当前真实配置未改动，尚未安装新版喵~
 - 禁止在根目录直接 npm test（没有 package.json）；必须 --prefix 或正确工作目录喵~
 - 旧运行中队列记录没有补丁捕获的删除证据时不盲目重放喵~
 
@@ -88,10 +91,11 @@
 - tools/verify-context-save-ui.py 为 headless 生产 UI + 内存 Tauri fixture 验证，不访问真实后端；正在验证启动选择、编辑窗口、预览和提交请求喵~
 - 第一次 UI smoke 点卡片标题不会打开详情，定位到明确“编辑”按钮后修正测试选择器；非产品失败，隔离服务器已自动退出；本地完整 Rust 已完成编译并正在运行套件喵~
 - 更正：with_server.py 在 Windows shell=True 只结束外层 shell，遗留本轮两个 Python HTTP server，第二轮 ERR_EMPTY_RESPONSE；改用脚本进程内 ThreadingHTTPServer 随 finally 清理，回收精确匹配本轮 18742 fixture 的进程，不动其他服务喵~
+- 最终状态：完整本地回归及 headless UI 均通过；开始正式发行前检查，v1.0.17 无现有标签/Actions，远端 main 仍为 cfedbe0 喵~
 
 ## 20. Next Steps
-- 修复 preview 使用选中模型、清空/禁用清理、K/M 数值规范化、提供显式启动模型选择；不把编辑其他模型当作切换模型喵~
-- 提升 1.0.17、更新发行说明和日志，完整 workspace 测试/构建后通过唯一 Actions 发布；真实配置保持只读喵~
+- 提交本地验收说明（skip ci），annotated v1.0.17 原子推送后只派发一次 release-assets.yml，并等待运行结束喵~
+- 成功后检查 Release 非草稿/预发布、六安装资产及 SHA-256/匿名 latest，更新 XJ/YHYQ 并提交验收日志，删除本轮临时日志喵~
 
 ## 21. Change Log
 - 2026-09-13：未发现 XJ.md，依据完整项目日志和 Git 元数据补建；现有历史和所有配置保持不变喵~

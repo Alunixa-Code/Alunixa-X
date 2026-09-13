@@ -1631,3 +1631,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 新增单位解析溢出/小数边界和启动回读失配测试；准备 v1.0.17，远端 main 仍为 v1.0.16 产品提交，v1.0.17 标签未占用，不升级依赖、不修改真实配置喵~
 - 前端生产构建与品牌/格式检查通过；新增 headless 浏览器 smoke 首轮误点卡片标题未进入详情，已按组件实际事件绑定改为明确“编辑”按钮，隔离服务器正常退出，不涉及真实 Codex 喵~
 - Windows with_server.py 用 shell=True 启动导致外层 shell 结束后残留两次本轮 fixture Python server，第二次页面 ERR_EMPTY_RESPONSE；已核验并只回收命令行精确匹配本轮 18742 fixture 的两个子进程，改用进程内随机端口 HTTP server + finally 关闭，未触碰其他服务喵~
+- Headless 生产 UI 最终 PASS：显式切换启动模型、编辑窗口/阈值、预览和提交给 Tauri 的参数均正确；无真实后端连接，浏览器和进程内 fixture server 已退出喵~
+- 最终本地 Rust 全量 38 套件 1058 passed/0 failed/1 ignored（core 319），前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite、版本/品牌、fmt 和 diff 检查通过，cargo check workspace/all-targets/locked 退出 0 喵~
+- 本次推送变更：自定义模型窗口/阈值预览与保存一致、K/M 小数单位和溢出处理、清空/禁用旧值清理、显式启动模型选择、保存后/启动前回读校验、失败→通过测试和详细发行说明；不改依赖、不改真实 config/auth，不重启用户 Codex 喵~
+- 发布前确认远端为公开未归档 Alunixa-Code/Alunixa-X，main cfedbe0，v1.0.17 无现存标签和 Actions；以 skip-ci 最终验收提交原子推送 main 与 annotated tag，仅派发一次正式 release-assets.yml 喵~
