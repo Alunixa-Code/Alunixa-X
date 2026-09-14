@@ -1724,3 +1724,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 临时日志清理命令已验证目标在本项目 .tmp 内，但执行环境在运行前拒绝了包含 Remove-Item 的命令，因此未删除任何文件；随后只读确认六份 v1.0.18 专属日志仍在，总计 1437821 字节，不换工具绕过或声称清理成功喵~
 - 六份保留日志为 .tmp/v1.0.18-protocol.log、v1.0.18-frontend.log、v1.0.18-actions-watch.log、v1.0.18-ci-windows.log、v1.0.18-ci-macos-arm64.log、v1.0.18-ci-macos-x64.log，均为本轮验收产物；可复用依赖/构建缓存及所有用户文件保持不变喵~
 - 只读 Git 验证确认标签之后仅 XJ.md/YHYQ.md 本地审计差异，产品源码和发行文档均已推送；发行页已提交 Codex 右侧预览，工具返回 queued，不冒称已显示喵~
+
+## 2026-09-14 · 生图模型管理与 AX 搜索入口
+
+- 用户要求左侧新增“生图模型”，支持 API/Key/Model 多配置、拖动上下排列，首项为默认模型并显示“默认”标记；补充要求 Windows/macOS 系统搜索 AX 能找到应用喵~
+- 两次用户主动中断后检查工作树仍干净，没有本轮残留 Cargo 进程；完整读取 XJ.md 和近期 YHYQ.md，通用记忆无相关命中，修改前检查点 b448544 喵~
+- 审阅现有 imagegen_mcp（原默认 gpt-image-2，走 Helper）、设置原子存储、Tauri 与 React 导航/dnd-kit、NSIS 和 DMG 安装路径；复用现有主题和依赖，不影响真实运行实例喵~
+- 生图配置存入现有 settings 的有序 imageModels，使用独立脱敏命令及乐观并发校验；MCP 每次调用读取首项默认，生成/编辑都走选定模型的 API/Key，未配置时保持原 Helper 回退喵~
+- AX 采用可被索引的实际名称：Windows 开始菜单增设 AX 别名并支持维护修复/卸载；macOS bundle 名加 (AX)，同时适配旧名和混合安装路径，保持 bundle ID 不变喵~
+- 已读取前端设计、React、WebUI 测试和 OpenAI Docs 技能；web 官方查询没有返回正文，后续以实际代码和隔离接口契约验证，不编造官方查证结果喵~
