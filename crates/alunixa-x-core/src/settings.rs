@@ -1497,11 +1497,14 @@ impl SettingsStore {
         edits: Vec<crate::image_models::ImageModelEdit>,
     ) -> anyhow::Result<crate::image_models::ImageModelsSnapshot> {
         self.with_lock(true, || {
-            let mut settings = self.load_unlocked()?;
-            settings.image_models =
+            let settings = self.load_unlocked()?;
+            let image_models =
                 crate::image_models::apply_edits(&settings.image_models, expected_revision, edits)?;
-            self.save_unlocked(&settings)?;
-            Ok(crate::image_models::snapshot(&settings.image_models))
+            // Touch only this section, including when another version stored unknown fields.
+            let mut raw = self.load_raw_object()?;
+            raw.insert("imageModels".into(), serde_json::to_value(&image_models)?);
+            atomic_write_unique(&self.path, &serde_json::to_vec_pretty(&raw)?)?;
+            Ok(crate::image_models::snapshot(&image_models))
         })
     }
 

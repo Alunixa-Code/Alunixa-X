@@ -198,6 +198,34 @@ fn store_persists_add_edit_reorder_delete_and_retains_unrelated_settings() {
 }
 
 #[test]
+fn targeted_image_edits_preserve_unknown_and_unrelated_raw_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("settings.json");
+    let original = json!({
+        "imageModels": [model("a"), model("b")],
+        "codexAppPath": "keep-app",
+        "futureExtension": {"nested": [false, 42, "opaque-value"], "enabled": true},
+        "codexExtraArgs": ["--example", "  keep exact whitespace  "]
+    });
+    std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+    let store = SettingsStore::new(path.clone());
+    store
+        .save_image_models(
+            &snapshot(&store.load().unwrap().image_models).revision,
+            edits(&[model("b"), model("a")]),
+        )
+        .unwrap();
+    let mut actual: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(actual["imageModels"][0]["id"], "b");
+    actual["imageModels"] = original["imageModels"].clone();
+    assert_eq!(
+        actual, original,
+        "independent saves must not rewrite other sections"
+    );
+}
+
+#[test]
 fn stale_general_settings_and_concurrent_image_saves_cannot_overwrite_new_order() {
     let temp = tempfile::tempdir().unwrap();
     let store = SettingsStore::new(temp.path().join("settings.json"));

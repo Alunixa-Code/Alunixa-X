@@ -197,10 +197,10 @@ def main():
             expect(rows.first.get_by_text("默认", exact=True)).to_be_visible()
             assert models[0]["name"] == "日常插画"
 
-            page.screenshot(path=str(ROOT / ".tmp/image-models-ui-dark.png"), full_page=True)
+            page.screenshot(path=str(ROOT / ".tmp/image-models-ui-dark.png"), full_page=True, animations="disabled")
             page.get_by_role("button", name="切换到浅色", exact=True).click()
             page.set_viewport_size({"width": 960, "height": 720})
-            page.screenshot(path=str(ROOT / ".tmp/image-models-ui-light.png"), full_page=True)
+            page.screenshot(path=str(ROOT / ".tmp/image-models-ui-light.png"), full_page=True, animations="disabled")
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal overflow"
 
             # Delete default promotes the next; deleting all restores fallback.
