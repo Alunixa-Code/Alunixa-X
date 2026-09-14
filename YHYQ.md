@@ -1661,3 +1661,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已确认项目根目录 D:\Cursor\AlunixaX，main 初始干净，完整读取 XJ.md、读取 YHYQ.md 历史并建立修改前检查点 a9a50ac 喵~
 - 初次联合读取历史输出过大，已改为单独完整读取 XJ.md 和定向源码索引；通用记忆索引没有本项目直接适用的协议记录，不沿用旧 CodexPP 实现喵~
 - 已定位 6506 行 protocol_proxy.rs 和现有专项测试，联网核对官方协议说明；只在隔离 fixture 验证，不重启或热注入真实 Codex、不写真实 config/auth 喵~
+- 新增独立协议保真回归 13 项，在旧实现上全部失败，确认用户报告对应的真实转换缺陷；旧代码还把无关联工具结果降为 user、将非法参数包装为 input 字段，均会改变模型看到的语义喵~
+- 新增 fidelity 能力/历史校验，开始实现自包含原生回放、去全局签名缓存、唯一工具 ID、严格 SSE/UTF-8/JSON 与正确结束状态；第一轮修改后的编译和专项回归进行中喵~
+- OpenAI Responses incomplete 事件 sequence_number、Anthropic signature_delta、Google Part thought_signature 均读取官方 SDK 类型文件（HTTP 200）；无依赖升级、无真实 API 请求喵~

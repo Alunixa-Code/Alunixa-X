@@ -86,6 +86,10 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+- 首批隔离回归 `protocol_fidelity` 在旧实现上 13/13 失败，逐项证实尾部 usage 丢失、EOF/JSON/UTF-8 静默成功、工具身份提前生成、incomplete 错发 completed、跨会话 Gemini ID 冲突及签名丢失喵~
+- 已开始修复：新增 `protocol_proxy/fidelity.rs` 请求能力门禁和自包含原生回放项；不支持项明确失败，Anthropic/Gemini 原始内容和签名通过 opaque reasoning 回放项保存，不再依赖全局 Gemini 签名缓存喵~
+- 流式状态机正在补充严格解码/帧解析、单终态、序号、尾部用量、思考/正文分段及工具完整性校验；当前编译/专项回归进行中，尚未宣称通过喵~
+- 官方 OpenAI、Anthropic、Google SDK 类型文件通过 HTTPS 200 核验；web 工具未返回正文，实际核对的是官方仓库类型定义，不依据空搜索结果作判断喵~
 - 2026-09-14 当前任务：审计 `crates/alunixa-x-core/src/protocol_proxy.rs` 的 Responses/Chat/Completions/Anthropic/Gemini 转换和代理重试链路，保持原生 Responses 透传喵~
 - 修改前检查点 `a9a50ac`，开始时 main 工作树干净；已完整读取本文件并读取 YHYQ.md 最新历史，不触碰运行实例和真实配置喵~
 - 原则：支持的语义和原始数据应完整保留，不支持的有损转换明确失败，不能伪装成功、把工具结果降为用户消息或重放结果不明的请求喵~

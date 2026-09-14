@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::Context;
@@ -12,6 +11,12 @@ use serde_json::{Value, json};
 
 use crate::relay_rotation::{RotationContext, RotationEvent};
 use crate::settings::{RelayProtocol, SettingsStore};
+
+mod fidelity;
+
+pub fn is_protocol_conversion_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<fidelity::ConversionError>().is_some()
+}
 
 pub const DEFAULT_PROTOCOL_PROXY_PORT: u16 = 57321;
 const UPSTREAM_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -37,7 +42,6 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "user",
 ];
 const ERROR_BODY_PREVIEW_LIMIT: usize = 1024;
-const GEMINI_SIGNATURE_CACHE_LIMIT: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChatReasoningStyle {
@@ -136,6 +140,12 @@ pub fn local_responses_proxy_base_url(port: u16) -> String {
 }
 
 pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
+    let body = fidelity::prepare_history(body, "chat")?;
+    responses_to_chat_completions_for_wire(body, "chat")
+}
+
+fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Result<Value> {
+    fidelity::validate_request(&body, wire)?;
     let mut result = json!({});
 
     if let Some(model) = body.get("model") {
@@ -187,6 +197,17 @@ pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
     }
 
     apply_chat_reasoning_options(&mut result, &body, model);
+    fidelity::map_text_format(&mut result, &body)?;
+    for key in [
+        "thinking",
+        "enable_thinking",
+        "reasoning_effort",
+        "reasoning_split",
+    ] {
+        if let Some(value) = body.get(key) {
+            result[key] = value.clone();
+        }
+    }
 
     let tool_context = build_codex_tool_context(body.get("tools"));
     let mut has_chat_tools = false;
@@ -223,7 +244,10 @@ pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
 }
 
 pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
-    let chat = responses_to_chat_completions(body)?;
+    let chat = responses_to_chat_completions_for_wire(body, "completions")?;
+    if chat.get("response_format").is_some() || chat.get("verbosity").is_some() {
+        return fidelity::reject("legacy Completions cannot represent structured text options");
+    }
     let mut prompt = String::new();
     for message in chat
         .get("messages")
@@ -268,7 +292,15 @@ pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
 }
 
 pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
-    let chat = responses_to_chat_completions(body)?;
+    let body = fidelity::prepare_history(body, "anthropic")?;
+    let chat = responses_to_chat_completions_for_wire(body, "anthropic")?;
+    if chat
+        .get("response_format")
+        .is_some_and(|v| v["type"] != "text")
+        || chat.get("verbosity").is_some()
+    {
+        return fidelity::reject("Anthropic text options require a native provider configuration");
+    }
     let mut system = Vec::new();
     let mut messages = Vec::new();
     for message in chat
@@ -294,19 +326,20 @@ pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
                 "content": [{
                     "type": "tool_result",
                     "tool_use_id": message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
-                    "content": chat_content_text(message.get("content").unwrap_or(&Value::Null))
+                    "content": message.get("content").filter(|v| v.is_array())
+                        .map(anthropic_content_parts).map(Value::Array)
+                        .unwrap_or_else(|| json!(chat_content_text(message.get("content").unwrap_or(&Value::Null))))
                 }]
             }));
             continue;
         }
 
+        if let Some(native) = message.get("_native") {
+            messages.push(json!({"role":"assistant","content":native}));
+            continue;
+        }
         let mut content = anthropic_content_parts(message.get("content").unwrap_or(&Value::Null));
         if role == "assistant" {
-            if let Some(reasoning) = extract_reasoning_field_text(message) {
-                if !reasoning.is_empty() {
-                    content.insert(0, json!({ "type": "text", "text": reasoning }));
-                }
-            }
             if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
                 for tool_call in tool_calls {
                     let function = tool_call.get("function").unwrap_or(&Value::Null);
@@ -387,11 +420,18 @@ pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
             _ => json!({ "type": "auto" }),
         };
     }
+    if chat.get("parallel_tool_calls") == Some(&json!(false)) {
+        if result.get("tool_choice").is_none() {
+            result["tool_choice"] = json!({"type":"auto"});
+        }
+        result["tool_choice"]["disable_parallel_tool_use"] = json!(true);
+    }
     Ok(result)
 }
 
 pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value> {
-    let chat = responses_to_chat_completions(body)?;
+    let body = fidelity::prepare_history(body, "gemini")?;
+    let chat = responses_to_chat_completions_for_wire(body, "gemini")?;
     let mut system_parts = Vec::new();
     let mut contents = Vec::new();
     let mut tool_names = BTreeMap::<String, String>::new();
@@ -434,6 +474,17 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
             continue;
         }
 
+        if let Some(native) = message.get("_native") {
+            for (id, name) in message["_native_tool_names"]
+                .as_object()
+                .into_iter()
+                .flatten()
+            {
+                tool_names.insert(id.clone(), name.as_str().unwrap_or("").to_string());
+            }
+            contents.push(json!({"role":"model","parts":native}));
+            continue;
+        }
         let mut parts = gemini_content_parts(message.get("content").unwrap_or(&Value::Null));
         if role == "assistant" {
             if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
@@ -445,7 +496,7 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
                         .unwrap_or("tool");
                     let call_id = tool_call.get("id").and_then(Value::as_str).unwrap_or(name);
                     tool_names.insert(call_id.to_string(), name.to_string());
-                    let mut part = json!({
+                    let part = json!({
                         "functionCall": {
                             "name": name,
                             "args": parse_json_or_string(
@@ -453,9 +504,6 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
                             )
                         }
                     });
-                    if let Some(signature) = gemini_thought_signature(call_id) {
-                        part["thoughtSignature"] = json!(signature);
-                    }
                     parts.push(part);
                 }
             }
@@ -493,6 +541,22 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
             json!([stop])
         };
     }
+    if chat.get("verbosity").is_some() {
+        return fidelity::reject("Gemini cannot represent text.verbosity");
+    }
+    if let Some(format) = chat.get("response_format") {
+        match format["type"].as_str() {
+            Some("json_object") => {
+                generation_config["responseMimeType"] = json!("application/json")
+            }
+            Some("json_schema") => {
+                generation_config["responseMimeType"] = json!("application/json");
+                generation_config["responseJsonSchema"] = format["json_schema"]["schema"].clone();
+            }
+            Some("text") => {}
+            _ => return fidelity::reject("unsupported Gemini structured output format"),
+        }
+    }
     if generation_config
         .as_object()
         .is_some_and(|object| !object.is_empty())
@@ -517,6 +581,23 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
         if !declarations.is_empty() {
             result["tools"] = json!([{ "functionDeclarations": declarations }]);
         }
+    }
+    if let Some(choice) = chat.get("tool_choice") {
+        let config = match choice.as_str() {
+            Some("none") => json!({"mode":"NONE"}),
+            Some("required") => json!({"mode":"ANY"}),
+            Some("auto") => json!({"mode":"AUTO"}),
+            _ => {
+                let Some(name) = choice.pointer("/function/name").and_then(Value::as_str) else {
+                    return fidelity::reject("unsupported Gemini tool_choice");
+                };
+                json!({"mode":"ANY","allowedFunctionNames":[name]})
+            }
+        };
+        result["toolConfig"] = json!({"functionCallingConfig":config});
+    }
+    if chat.get("parallel_tool_calls") == Some(&json!(false)) {
+        return fidelity::reject("Gemini cannot guarantee parallel_tool_calls=false");
     }
     Ok(result)
 }
@@ -544,20 +625,31 @@ pub fn anthropic_message_to_response_with_request(
     body: Value,
     original_request: &Value,
 ) -> anyhow::Result<Value> {
-    chat_completion_to_response_with_request(
+    let native = body.get("content").cloned().unwrap_or_else(|| json!([]));
+    validate_anthropic_blocks(&native)?;
+    let mut response = chat_completion_to_response_with_request(
         anthropic_message_to_chat_completion(body),
         original_request,
-    )
+    )?;
+    fidelity::attach_replay(&mut response, "anthropic", native);
+    Ok(response)
 }
 
 pub fn gemini_generate_content_to_response_with_request(
     body: Value,
     original_request: &Value,
 ) -> anyhow::Result<Value> {
-    chat_completion_to_response_with_request(
+    let native = body
+        .pointer("/candidates/0/content/parts")
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    validate_gemini_response(&body)?;
+    let mut response = chat_completion_to_response_with_request(
         gemini_generate_content_to_chat_completion(body, original_request),
         original_request,
-    )
+    )?;
+    fidelity::attach_replay(&mut response, "gemini", native);
+    Ok(response)
 }
 
 fn chat_completion_to_response_with_context(
@@ -569,12 +661,24 @@ fn chat_completion_to_response_with_context(
         .get("choices")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow::anyhow!("chat response missing choices"))?;
+    if choices.len() != 1 {
+        return fidelity::reject("Responses requires exactly one upstream choice");
+    }
     let choice = choices
         .first()
         .ok_or_else(|| anyhow::anyhow!("chat response choices is empty"))?;
     let message = choice
         .get("message")
         .ok_or_else(|| anyhow::anyhow!("chat response choice missing message"))?;
+    validate_chat_message(message)?;
+    if response_status(choice.get("finish_reason").and_then(Value::as_str)) == "completed" {
+        for tool in message["tool_calls"].as_array().into_iter().flatten() {
+            fidelity::validate_arguments(&tool["function"]["arguments"])?;
+        }
+        if let Some(tool) = message.get("function_call") {
+            fidelity::validate_arguments(&tool["arguments"])?;
+        }
+    }
 
     let response_id = response_id_from_chat_id(body.get("id").and_then(Value::as_str));
     let mut output = Vec::new();
@@ -599,10 +703,18 @@ fn chat_completion_to_response_with_context(
         "usage": chat_usage_to_responses_usage(body.get("usage"))
     });
 
-    if choice.get("finish_reason").and_then(Value::as_str) == Some("length") {
-        response["incomplete_details"] = json!({ "reason": "max_output_tokens" });
+    if response["status"] == "incomplete" {
+        response["incomplete_details"] = json!({ "reason": incomplete_reason(choice.get("finish_reason").and_then(Value::as_str)) });
+        for item in response["output"].as_array_mut().into_iter().flatten() {
+            if item.get("status").is_some() {
+                item["status"] = json!("incomplete");
+            }
+        }
     }
     copy_response_request_fields(&mut response, original_request);
+    if message.get("reasoning_details").is_some() {
+        fidelity::attach_replay(&mut response, "chat", message.clone());
+    }
 
     Ok(response)
 }
@@ -736,10 +848,7 @@ fn gemini_generate_content_to_chat_completion(body: Value, original_request: &Va
         }
         if let Some(call) = part.get("functionCall") {
             let name = call.get("name").and_then(Value::as_str).unwrap_or("tool");
-            let call_id = format!("call_gemini_{index}");
-            if let Some(signature) = part.get("thoughtSignature").and_then(Value::as_str) {
-                remember_gemini_thought_signature(&call_id, signature);
-            }
+            let call_id = format!("call_gemini_{}_{}", uuid::Uuid::new_v4().simple(), index);
             tool_calls.push(json!({
                 "id": call_id,
                 "type": "function",
@@ -875,6 +984,7 @@ pub struct ChatSseToResponsesConverter {
     utf8_remainder: Vec<u8>,
     state: ChatSseState,
     failed: bool,
+    sequence_number: u64,
 }
 
 impl Default for ChatSseToResponsesConverter {
@@ -884,6 +994,7 @@ impl Default for ChatSseToResponsesConverter {
             utf8_remainder: Vec::new(),
             state: ChatSseState::default(),
             failed: false,
+            sequence_number: 0,
         }
     }
 }
@@ -897,39 +1008,63 @@ impl ChatSseToResponsesConverter {
     }
 
     pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
-        append_utf8_safe(&mut self.buffer, &mut self.utf8_remainder, bytes);
+        if self.is_completed() {
+            return Vec::new();
+        }
+        if append_utf8_safe(&mut self.buffer, &mut self.utf8_remainder, bytes).is_err() {
+            return self.fail(
+                "Invalid UTF-8 in upstream stream".into(),
+                Some("invalid_stream_encoding".into()),
+            );
+        }
         let mut output = String::new();
         while let Some(block) = take_sse_block(&mut self.buffer) {
             if block.trim().is_empty() {
                 continue;
             }
             self.handle_block(&block, &mut output);
-            if self.failed {
+            if self.is_completed() {
                 break;
             }
         }
-        output.into_bytes()
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn finish(&mut self) -> Vec<u8> {
+        if self.is_completed() {
+            return Vec::new();
+        }
         if !self.utf8_remainder.is_empty() {
-            self.buffer
-                .push_str(&String::from_utf8_lossy(&self.utf8_remainder));
-            self.utf8_remainder.clear();
+            return self.fail(
+                "Truncated UTF-8 in upstream stream".into(),
+                Some("invalid_stream_encoding".into()),
+            );
         }
 
         let mut output = String::new();
-        if !self.failed {
-            self.state.finalize_into(&mut output);
+        if !self.buffer.trim().is_empty() {
+            let block = std::mem::take(&mut self.buffer);
+            self.handle_block(&block, &mut output);
         }
-        output.into_bytes()
+        if !self.is_completed() {
+            if self.state.finish_reason.is_some() {
+                self.state.finalize_into(&mut output);
+            } else {
+                self.state.failed_into(
+                    &mut output,
+                    "Upstream stream ended before a terminal event".into(),
+                    Some("incomplete_upstream_stream".into()),
+                );
+            }
+        }
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
         let mut output = String::new();
         self.state.failed_into(&mut output, message, error_type);
         self.failed = true;
-        output.into_bytes()
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn is_completed(&self) -> bool {
@@ -939,7 +1074,7 @@ impl ChatSseToResponsesConverter {
     fn handle_block(&mut self, block: &str, output: &mut String) {
         let mut event_name: Option<String> = None;
         let mut data_parts = Vec::new();
-        for line in block.lines() {
+        for line in block.split(['\r', '\n']) {
             if let Some(event) = strip_sse_field(line, "event") {
                 event_name = Some(event.trim().to_string());
             }
@@ -958,6 +1093,12 @@ impl ChatSseToResponsesConverter {
         }
 
         let Ok(chunk) = serde_json::from_str::<Value>(&data) else {
+            self.state.failed_into(
+                output,
+                "Invalid JSON in upstream SSE data".into(),
+                Some("invalid_stream_event".into()),
+            );
+            self.failed = true;
             return;
         };
         if event_name.as_deref() == Some("error") || chunk.get("error").is_some() {
@@ -977,6 +1118,11 @@ pub struct NativeSseToResponsesConverter {
     state: ChatSseState,
     failed: bool,
     next_tool_index: usize,
+    sequence_number: u64,
+    native_blocks: BTreeMap<usize, Value>,
+    native_arguments: BTreeMap<usize, String>,
+    native_parts: Vec<Value>,
+    native_usage: Value,
 }
 
 impl NativeSseToResponsesConverter {
@@ -988,11 +1134,24 @@ impl NativeSseToResponsesConverter {
             state: ChatSseState::with_request(original_request),
             failed: false,
             next_tool_index: 0,
+            sequence_number: 0,
+            native_blocks: BTreeMap::new(),
+            native_arguments: BTreeMap::new(),
+            native_parts: Vec::new(),
+            native_usage: json!({}),
         }
     }
 
     pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
-        append_utf8_safe(&mut self.buffer, &mut self.utf8_remainder, bytes);
+        if self.is_completed() {
+            return Vec::new();
+        }
+        if append_utf8_safe(&mut self.buffer, &mut self.utf8_remainder, bytes).is_err() {
+            return self.fail(
+                "Invalid UTF-8 in upstream stream".into(),
+                Some("invalid_stream_encoding".into()),
+            );
+        }
         let mut output = String::new();
         while let Some(block) = take_sse_block(&mut self.buffer) {
             if block.trim().is_empty() {
@@ -1003,14 +1162,18 @@ impl NativeSseToResponsesConverter {
                 break;
             }
         }
-        output.into_bytes()
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn finish(&mut self) -> Vec<u8> {
+        if self.is_completed() {
+            return Vec::new();
+        }
         if !self.utf8_remainder.is_empty() {
-            self.buffer
-                .push_str(&String::from_utf8_lossy(&self.utf8_remainder));
-            self.utf8_remainder.clear();
+            return self.fail(
+                "Truncated UTF-8 in upstream stream".into(),
+                Some("invalid_stream_encoding".into()),
+            );
         }
         let mut output = String::new();
         if !self.failed && !self.state.completed {
@@ -1019,17 +1182,27 @@ impl NativeSseToResponsesConverter {
                 self.handle_block(&block, &mut output);
             }
             if !self.state.completed {
-                self.state.finalize_into(&mut output);
+                if self.wire_api == UpstreamWireApi::Completions
+                    && self.state.finish_reason.is_some()
+                {
+                    self.state.finalize_into(&mut output);
+                } else {
+                    self.state.failed_into(
+                        &mut output,
+                        "Upstream stream ended before its terminal event".into(),
+                        Some("incomplete_upstream_stream".into()),
+                    );
+                }
             }
         }
-        output.into_bytes()
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
         let mut output = String::new();
         self.state.failed_into(&mut output, message, error_type);
         self.failed = true;
-        output.into_bytes()
+        sequence_sse(output, &mut self.sequence_number)
     }
 
     pub fn is_completed(&self) -> bool {
@@ -1046,6 +1219,12 @@ impl NativeSseToResponsesConverter {
             return;
         }
         let Ok(value) = serde_json::from_str::<Value>(&data) else {
+            self.state.failed_into(
+                output,
+                "Invalid JSON in upstream SSE data".into(),
+                Some("invalid_stream_event".into()),
+            );
+            self.failed = true;
             return;
         };
         if event_name.as_deref() == Some("error") || value.get("error").is_some() {
@@ -1089,12 +1268,6 @@ impl NativeSseToResponsesConverter {
             "usage": value.get("usage").cloned().unwrap_or(Value::Null)
         });
         self.state.handle_chat_chunk_into(&chunk, output);
-        if value
-            .pointer("/choices/0/finish_reason")
-            .is_some_and(|reason| !reason.is_null())
-        {
-            self.state.finalize_into(output);
-        }
     }
 
     fn handle_anthropic_event(
@@ -1109,6 +1282,7 @@ impl NativeSseToResponsesConverter {
         match event_type {
             "message_start" => {
                 let message = value.get("message").unwrap_or(value);
+                self.native_usage = message.get("usage").cloned().unwrap_or_else(|| json!({}));
                 self.state.handle_chat_chunk_into(
                     &json!({
                         "id": message.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
@@ -1122,6 +1296,16 @@ impl NativeSseToResponsesConverter {
             "content_block_start" => {
                 let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 let block = value.get("content_block").unwrap_or(&Value::Null);
+                if validate_anthropic_blocks(&json!([block])).is_err()
+                    || self.native_blocks.insert(index, block.clone()).is_some()
+                {
+                    self.state.failed_into(
+                        output,
+                        "Unsupported or duplicate Anthropic block".into(),
+                        Some("invalid_stream_event".into()),
+                    );
+                    return;
+                }
                 match block.get("type").and_then(Value::as_str).unwrap_or("") {
                     "text" => {
                         if let Some(text) = block.get("text").and_then(Value::as_str) {
@@ -1156,6 +1340,41 @@ impl NativeSseToResponsesConverter {
             "content_block_delta" => {
                 let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
                 let delta = value.get("delta").unwrap_or(&Value::Null);
+                let Some(block) = self.native_blocks.get_mut(&index) else {
+                    self.state.failed_into(
+                        output,
+                        "Anthropic delta has no matching block".into(),
+                        Some("invalid_stream_event".into()),
+                    );
+                    return;
+                };
+                let (field, delta_field) = match delta["type"].as_str() {
+                    Some("text_delta") => ("text", "text"),
+                    Some("thinking_delta") => ("thinking", "thinking"),
+                    Some("signature_delta") => ("signature", "signature"),
+                    Some("input_json_delta") => ("", "partial_json"),
+                    _ => {
+                        self.state.failed_into(
+                            output,
+                            "Unsupported Anthropic delta type".into(),
+                            Some("unsupported_stream_event".into()),
+                        );
+                        return;
+                    }
+                };
+                let fragment = delta[delta_field].as_str().unwrap_or("");
+                if field.is_empty() {
+                    self.native_arguments
+                        .entry(index)
+                        .or_default()
+                        .push_str(fragment);
+                } else {
+                    block[field] = json!(format!(
+                        "{}{}",
+                        block[field].as_str().unwrap_or(""),
+                        fragment
+                    ));
+                }
                 match delta.get("type").and_then(Value::as_str).unwrap_or("") {
                     "text_delta" => self.push_chat_text_delta(
                         delta.get("text").and_then(Value::as_str).unwrap_or(""),
@@ -1190,21 +1409,77 @@ impl NativeSseToResponsesConverter {
                     }]
                 });
                 if let Some(usage) = value.get("usage") {
-                    chunk["usage"] = anthropic_usage_to_chat_usage(Some(usage));
+                    if let (Some(target), Some(incoming)) =
+                        (self.native_usage.as_object_mut(), usage.as_object())
+                    {
+                        target.extend(incoming.clone());
+                    }
+                    chunk["usage"] = anthropic_usage_to_chat_usage(Some(&self.native_usage));
                 }
                 self.state.handle_chat_chunk_into(&chunk, output);
             }
-            "message_stop" => self.state.finalize_into(output),
+            "message_stop" => {
+                for (index, arguments) in &self.native_arguments {
+                    let Ok(input) = serde_json::from_str::<Value>(arguments) else {
+                        self.state.failed_into(
+                            output,
+                            "Invalid Anthropic tool input JSON".into(),
+                            Some("invalid_tool_arguments".into()),
+                        );
+                        return;
+                    };
+                    if let Some(block) = self.native_blocks.get_mut(index) {
+                        block["input"] = input;
+                    }
+                }
+                self.state.native_replay = Some((
+                    "anthropic",
+                    json!(self.native_blocks.values().collect::<Vec<_>>()),
+                ));
+                self.state.finalize_into(output);
+            }
+            "content_block_stop" => {
+                let index = value["index"].as_u64().unwrap_or(0) as usize;
+                if self
+                    .native_blocks
+                    .get(&index)
+                    .is_some_and(|b| b["type"] == "tool_use")
+                {
+                    if self.tools_arguments_empty(index) {
+                        self.push_chat_tool_delta(index, None, None, "{}", output);
+                    }
+                }
+            }
+            "ping" => {}
             "error" => {
                 let (message, error_type) = extract_chat_sse_error(value);
                 self.state.failed_into(output, message, error_type);
                 self.failed = true;
             }
-            _ => {}
+            _ => self.state.failed_into(
+                output,
+                "Unsupported Anthropic event".into(),
+                Some("unsupported_stream_event".into()),
+            ),
         }
     }
 
+    fn tools_arguments_empty(&self, index: usize) -> bool {
+        self.state
+            .tools
+            .get(&index)
+            .is_some_and(|t| t.arguments.is_empty())
+    }
+
     fn handle_gemini_chunk(&mut self, value: &Value, output: &mut String) {
+        if validate_gemini_response(value).is_err() {
+            self.state.failed_into(
+                output,
+                "Unsupported Gemini response content".into(),
+                Some("unsupported_stream_event".into()),
+            );
+            return;
+        }
         if let Some(error) = value.get("error") {
             let (message, error_type) = extract_chat_sse_error(error);
             self.state.failed_into(output, message, error_type);
@@ -1224,6 +1499,7 @@ impl NativeSseToResponsesConverter {
             .and_then(Value::as_array)
         {
             for part in parts {
+                self.native_parts.push(part.clone());
                 if let Some(text) = part.get("text").and_then(Value::as_str) {
                     if part
                         .get("thought")
@@ -1238,10 +1514,8 @@ impl NativeSseToResponsesConverter {
                 if let Some(call) = part.get("functionCall") {
                     let index = self.next_tool_index;
                     self.next_tool_index += 1;
-                    let call_id = format!("call_gemini_{index}");
-                    if let Some(signature) = part.get("thoughtSignature").and_then(Value::as_str) {
-                        remember_gemini_thought_signature(&call_id, signature);
-                    }
+                    let call_id =
+                        format!("call_gemini_{}_{}", uuid::Uuid::new_v4().simple(), index);
                     tool_calls.push(json!({
                         "index": index,
                         "id": call_id,
@@ -1288,6 +1562,7 @@ impl NativeSseToResponsesConverter {
         }
         self.state.handle_chat_chunk_into(&chunk, output);
         if finish_reason.is_some() {
+            self.state.native_replay = Some(("gemini", json!(self.native_parts)));
             self.state.finalize_into(output);
         }
     }
@@ -1925,13 +2200,13 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                         "attempt": attempt + 1,
                         "candidateCount": relay_count,
                         "headerTimeoutSeconds": header_timeout.as_secs(),
-                        "willFailover": has_more_candidates,
+                        "willFailover": has_more_candidates && is_retryable_connection_error(&error),
                         "connectionRetried": connection_retried,
                         "error": sanitized_upstream_error(&error)
                     }),
                 );
                 crate::relay_rotation::record_relay_request_failure(&settings);
-                if has_more_candidates {
+                if has_more_candidates && is_retryable_connection_error(&error) {
                     continue;
                 }
                 return Err(error).with_context(|| {
@@ -3228,6 +3503,7 @@ struct ChatSseState {
     finish_reason: Option<String>,
     tool_context: CodexToolContext,
     original_request: Option<Value>,
+    native_replay: Option<(&'static str, Value)>,
 }
 
 impl Default for ChatSseState {
@@ -3235,7 +3511,7 @@ impl Default for ChatSseState {
         Self {
             response_started: false,
             completed: false,
-            response_id: "resp_compat".to_string(),
+            response_id: format!("resp_{}", uuid::Uuid::new_v4().simple()),
             model: String::new(),
             created_at: 0,
             next_output_index: 0,
@@ -3248,6 +3524,7 @@ impl Default for ChatSseState {
             finish_reason: None,
             tool_context: CodexToolContext::default(),
             original_request: None,
+            native_replay: None,
         }
     }
 }
@@ -3262,8 +3539,13 @@ impl ChatSseState {
     }
 
     fn handle_chat_chunk_into(&mut self, chunk: &Value, output: &mut String) {
-        if let Some(id) = chunk.get("id").and_then(Value::as_str) {
-            self.response_id = response_id_from_chat_id(Some(id));
+        if self.completed {
+            return;
+        }
+        if !self.response_started {
+            if let Some(id) = chunk.get("id").and_then(Value::as_str) {
+                self.response_id = response_id_from_chat_id(Some(id));
+            }
         }
         if let Some(model) = chunk.get("model").and_then(Value::as_str) {
             if !model.is_empty() {
@@ -3278,6 +3560,18 @@ impl ChatSseState {
         if let Some(usage) = chunk.get("usage").filter(|value| !value.is_null()) {
             self.latest_usage = Some(chat_usage_to_responses_usage(Some(usage)));
         }
+        if chunk
+            .get("choices")
+            .and_then(Value::as_array)
+            .is_some_and(|choices| choices.len() > 1)
+        {
+            self.failed_into(
+                output,
+                "Multiple upstream choices cannot be merged into one response".into(),
+                Some("unsupported_stream_event".into()),
+            );
+            return;
+        }
 
         let Some(choice) = chunk
             .get("choices")
@@ -3288,6 +3582,14 @@ impl ChatSseState {
         };
 
         if let Some(delta) = choice.get("delta") {
+            if validate_chat_delta(delta).is_err() {
+                self.failed_into(
+                    output,
+                    "Unsupported upstream chat delta".into(),
+                    Some("unsupported_stream_event".into()),
+                );
+                return;
+            }
             if let Some(reasoning) = chat_delta_reasoning_text(delta) {
                 self.push_reasoning_delta_into(&reasoning, output);
             }
@@ -3301,15 +3603,30 @@ impl ChatSseState {
             if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
                 self.flush_inline_think_at_boundary_into(output);
                 self.finalize_reasoning_into(output);
+                self.finalize_text_into(output);
                 for tool_call in tool_calls {
                     self.push_tool_call_delta_into(tool_call, output);
                 }
+            }
+            if let Some(function_call) = delta.get("function_call") {
+                let id = self
+                    .tools
+                    .get(&0)
+                    .map(|t| t.call_id.clone())
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4().simple()));
+                self.flush_inline_think_at_boundary_into(output);
+                self.finalize_reasoning_into(output);
+                self.finalize_text_into(output);
+                self.push_tool_call_delta_into(
+                    &json!({"index":0,"id":id,"function":function_call}),
+                    output,
+                );
             }
         }
 
         if let Some(finish_reason) = choice.get("finish_reason").and_then(Value::as_str) {
             self.finish_reason = Some(finish_reason.to_string());
-            self.finalize_into(output);
         }
     }
 
@@ -3414,9 +3731,16 @@ impl ChatSseState {
     }
 
     fn push_reasoning_delta_into(&mut self, delta: &str, output: &mut String) {
+        if delta.is_empty() {
+            return;
+        }
+        self.finalize_text_into(output);
+        if self.reasoning.done {
+            self.reasoning = ReasoningItemState::default();
+        }
         if !self.reasoning.added {
             let output_index = self.next_output_index();
-            let item_id = format!("rs_{}", self.response_id);
+            let item_id = format!("rs_{}_{}", self.response_id, output_index);
             self.reasoning.output_index = Some(output_index);
             self.reasoning.item_id = item_id.clone();
             self.reasoning.added = true;
@@ -3465,9 +3789,12 @@ impl ChatSseState {
     }
 
     fn push_text_delta_into(&mut self, delta: &str, output: &mut String) {
+        if self.text.done {
+            self.text = TextItemState::default();
+        }
         if !self.text.added {
             let output_index = self.next_output_index();
-            let item_id = format!("{}_msg", self.response_id);
+            let item_id = format!("{}_msg_{}", self.response_id, output_index);
             self.text.output_index = Some(output_index);
             self.text.item_id = item_id.clone();
             self.text.added = true;
@@ -3536,6 +3863,23 @@ impl ChatSseState {
         let mut item_id = String::new();
         let mut pending_arguments = String::new();
 
+        if let Some(existing) = self.tools.get(&chat_index) {
+            if existing.added
+                && (id_delta
+                    .as_ref()
+                    .is_some_and(|id| !id.is_empty() && id != &existing.call_id)
+                    || name_delta
+                        .as_ref()
+                        .is_some_and(|name| !name.is_empty() && name != &existing.name))
+            {
+                self.failed_into(
+                    output,
+                    "Tool identity changed after its first event".into(),
+                    Some("invalid_tool_identity".into()),
+                );
+                return;
+            }
+        }
         {
             let state = self.tools.entry(chat_index).or_default();
             if let Some(id) = id_delta {
@@ -3550,7 +3894,7 @@ impl ChatSseState {
                 state.arguments.push_str(&args_delta);
             }
 
-            if !state.added && (!state.call_id.is_empty() || !state.name.is_empty()) {
+            if !state.added && !state.call_id.is_empty() && !state.name.is_empty() {
                 should_add = true;
                 pending_arguments = state.arguments.clone();
             } else if state.added {
@@ -3618,19 +3962,70 @@ impl ChatSseState {
         self.flush_inline_think_at_boundary_into(output);
         self.finalize_reasoning_into(output);
         self.finalize_text_into(output);
-        self.finalize_tools_into(output);
 
         let status = response_status(self.finish_reason.as_deref());
+        if status == "completed" {
+            let mut ids = BTreeSet::new();
+            for tool in self.tools.values() {
+                if tool.call_id.is_empty()
+                    || tool.name.is_empty()
+                    || !ids.insert(tool.call_id.clone())
+                    || fidelity::validate_arguments(&json!(tool.arguments)).is_err()
+                {
+                    self.failed_into(
+                        output,
+                        "Incomplete, duplicate or invalid tool call; execution was not finalized"
+                            .into(),
+                        Some("invalid_tool_call".into()),
+                    );
+                    return;
+                }
+            }
+            self.finalize_tools_into(output);
+        } else {
+            for tool in self.tools.values() {
+                let mut item = response_tool_call_item(
+                    &tool.call_id,
+                    &tool.name,
+                    &tool.arguments,
+                    &self.tool_context,
+                );
+                item["status"] = json!("incomplete");
+                self.output_items
+                    .push((tool.output_index.unwrap_or(self.next_output_index), item));
+            }
+        }
+        if let Some((wire, native)) = self.native_replay.take() {
+            let item = fidelity::replay_item(wire, native, self.completed_output_items());
+            let output_index = self.next_output_index();
+            push_sse(
+                output,
+                "response.output_item.added",
+                json!({"type":"response.output_item.added","output_index":output_index,"item":item}),
+            );
+            push_sse(
+                output,
+                "response.output_item.done",
+                json!({"type":"response.output_item.done","output_index":output_index,"item":item}),
+            );
+            self.output_items.push((output_index, item));
+        }
         let mut response = self.base_response(status, self.completed_output_items());
         if status == "incomplete" {
-            response["incomplete_details"] = json!({ "reason": "max_output_tokens" });
+            response["incomplete_details"] =
+                json!({ "reason": incomplete_reason(self.finish_reason.as_deref()) });
         }
         copy_response_request_fields(&mut response, self.original_request.as_ref());
+        let event = if status == "incomplete" {
+            "response.incomplete"
+        } else {
+            "response.completed"
+        };
         push_sse(
             output,
-            "response.completed",
+            event,
             json!({
-                "type": "response.completed",
+                "type": event,
                 "response": response
             }),
         );
@@ -3777,6 +4172,13 @@ impl ChatSseState {
     }
 
     fn failed_into(&mut self, output: &mut String, message: String, error_type: Option<String>) {
+        if self.completed {
+            return;
+        }
+        self.ensure_response_started_into(output);
+        self.flush_inline_think_at_boundary_into(output);
+        self.finalize_reasoning_into(output);
+        self.finalize_text_into(output);
         self.completed = true;
         let mut error = json!({ "message": message });
         if let Some(error_type) = error_type.filter(|value| !value.is_empty()) {
@@ -3792,6 +4194,7 @@ impl ChatSseState {
                 "response": response
             }),
         );
+        output.push_str("data: [DONE]\n\n");
     }
 
     fn completed_output_items(&self) -> Vec<Value> {
@@ -3820,27 +4223,41 @@ impl ChatSseState {
 }
 
 fn take_sse_block(buffer: &mut String) -> Option<String> {
-    let lf = buffer.find("\n\n").map(|index| (index, 2));
-    let crlf = buffer.find("\r\n\r\n").map(|index| (index, 4));
-    let (index, delimiter_len) = match (lf, crlf) {
-        (Some(left), Some(right)) => {
-            if left.0 <= right.0 {
-                left
-            } else {
-                right
-            }
+    let bytes = buffer.as_bytes();
+    let mut cursor = 0;
+    let mut line_start = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'\r' && bytes[cursor] != b'\n' {
+            cursor += 1;
+            continue;
         }
-        (Some(value), None) | (None, Some(value)) => value,
-        (None, None) => return None,
-    };
-    let block = buffer[..index].to_string();
-    buffer.drain(..index + delimiter_len);
-    Some(block)
+        let end = cursor;
+        if bytes[cursor] == b'\r' && cursor + 1 == bytes.len() {
+            // A CRLF may be split between network chunks.
+            return None;
+        }
+        cursor += if bytes[cursor] == b'\r' && bytes.get(cursor + 1) == Some(&b'\n') {
+            2
+        } else {
+            1
+        };
+        if end == line_start {
+            let block = buffer[..line_start].to_string();
+            buffer.drain(..cursor);
+            return Some(block);
+        }
+        line_start = cursor;
+    }
+    None
 }
 
-fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, bytes: &[u8]) {
+fn append_utf8_safe(
+    buffer: &mut String,
+    remainder: &mut Vec<u8>,
+    bytes: &[u8],
+) -> anyhow::Result<()> {
     if bytes.is_empty() {
-        return;
+        return Ok(());
     }
     let mut combined = Vec::new();
     if !remainder.is_empty() {
@@ -3859,10 +4276,33 @@ fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, bytes: &[u8]) 
             if error.error_len().is_none() {
                 remainder.extend_from_slice(&combined[valid..]);
             } else {
-                buffer.push_str(&String::from_utf8_lossy(&combined[valid..]));
+                anyhow::bail!("invalid UTF-8");
             }
         }
     }
+    if buffer.len() > 16 * 1024 * 1024 {
+        anyhow::bail!("upstream frame exceeds buffer limit");
+    }
+    Ok(())
+}
+
+fn sequence_sse(output: String, sequence: &mut u64) -> Vec<u8> {
+    let mut result = String::with_capacity(output.len());
+    for block in output.split("\n\n").filter(|block| !block.is_empty()) {
+        let (event, data) = sse_event_and_data(block);
+        if let Some(mut value) = data
+            .as_deref()
+            .and_then(|data| serde_json::from_str::<Value>(data).ok())
+        {
+            value["sequence_number"] = json!(*sequence);
+            *sequence += 1;
+            push_sse(&mut result, event.as_deref().unwrap_or("message"), value);
+        } else {
+            result.push_str(block);
+            result.push_str("\n\n");
+        }
+    }
+    result.into_bytes()
 }
 
 fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
@@ -3873,7 +4313,7 @@ fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
 fn sse_event_and_data(block: &str) -> (Option<String>, Option<String>) {
     let mut event_name = None;
     let mut data_parts = Vec::new();
-    for line in block.lines() {
+    for line in block.split(['\r', '\n']) {
         if let Some(event) = strip_sse_field(line, "event") {
             event_name = Some(event.trim().to_string());
         }
@@ -4001,31 +4441,6 @@ fn parse_json_or_string(value: &str) -> Value {
     }
 }
 
-fn gemini_signature_cache() -> &'static Mutex<BTreeMap<String, String>> {
-    static CACHE: OnceLock<Mutex<BTreeMap<String, String>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
-}
-
-fn remember_gemini_thought_signature(call_id: &str, signature: &str) {
-    if call_id.is_empty() || signature.is_empty() {
-        return;
-    }
-    let Ok(mut cache) = gemini_signature_cache().lock() else {
-        return;
-    };
-    if cache.len() >= GEMINI_SIGNATURE_CACHE_LIMIT {
-        cache.clear();
-    }
-    cache.insert(call_id.to_string(), signature.to_string());
-}
-
-fn gemini_thought_signature(call_id: &str) -> Option<String> {
-    gemini_signature_cache()
-        .lock()
-        .ok()
-        .and_then(|cache| cache.get(call_id).cloned())
-}
-
 fn anthropic_usage_to_chat_usage(usage: Option<&Value>) -> Value {
     let usage = usage.unwrap_or(&Value::Null);
     let input_tokens = usage
@@ -4103,6 +4518,101 @@ fn gemini_finish_reason(reason: &str, has_tools: bool) -> &'static str {
 
 fn chat_delta_reasoning_text(delta: &Value) -> Option<String> {
     extract_reasoning_field_text(delta)
+}
+
+fn validate_chat_message(message: &Value) -> anyhow::Result<()> {
+    let Some(object) = message.as_object() else {
+        return fidelity::reject("upstream assistant message must be an object");
+    };
+    for key in object.keys() {
+        if !matches!(
+            key.as_str(),
+            "role"
+                | "content"
+                | "refusal"
+                | "tool_calls"
+                | "function_call"
+                | "reasoning_content"
+                | "reasoning"
+                | "reasoning_text"
+                | "reasoning_details"
+                | "reasoning_summary"
+                | "summary"
+        ) {
+            return fidelity::reject(&format!("unsupported upstream assistant field {key}"));
+        }
+    }
+    if let Some(parts) = message.get("content").and_then(Value::as_array) {
+        for part in parts {
+            if !matches!(
+                part["type"].as_str(),
+                Some("text" | "output_text" | "refusal")
+            ) {
+                return fidelity::reject("unsupported upstream content part");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_chat_delta(delta: &Value) -> anyhow::Result<()> {
+    validate_chat_message(delta)?;
+    if delta
+        .get("content")
+        .is_some_and(|v| !v.is_null() && !v.is_string())
+    {
+        return fidelity::reject("non-text chat stream delta");
+    }
+    if delta.get("reasoning_details").is_some() {
+        return fidelity::reject("opaque reasoning_details streaming requires native Responses");
+    }
+    Ok(())
+}
+
+fn validate_anthropic_blocks(blocks: &Value) -> anyhow::Result<()> {
+    let Some(blocks) = blocks.as_array() else {
+        return fidelity::reject("Anthropic content must be an array");
+    };
+    for block in blocks {
+        if !matches!(
+            block["type"].as_str(),
+            Some("text" | "thinking" | "redacted_thinking" | "tool_use")
+        ) {
+            return fidelity::reject("unsupported Anthropic content block");
+        }
+    }
+    Ok(())
+}
+
+fn validate_gemini_response(body: &Value) -> anyhow::Result<()> {
+    if body
+        .get("promptFeedback")
+        .is_some_and(|v| v.get("blockReason").is_some())
+    {
+        return fidelity::reject("Gemini prompt was blocked without a response candidate");
+    }
+    let candidates = body.get("candidates").and_then(Value::as_array);
+    if candidates.is_some_and(|c| c.len() > 1) {
+        return fidelity::reject("multiple Gemini candidates cannot be merged");
+    }
+    for part in body
+        .pointer("/candidates/0/content/parts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if part.as_object().is_none_or(|o| {
+            o.keys().any(|key| {
+                !matches!(
+                    key.as_str(),
+                    "text" | "thought" | "thoughtSignature" | "functionCall"
+                )
+            })
+        }) {
+            return fidelity::reject("unsupported Gemini output part");
+        }
+    }
+    Ok(())
 }
 
 enum ThinkPrefixDecision {
@@ -4270,6 +4780,26 @@ fn append_responses_item(
     seen_tool_call_ids: &mut BTreeSet<String>,
 ) {
     match item.get("type").and_then(Value::as_str) {
+        Some("alunixa_native_message") => {
+            flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
+            flush_reasoning(messages, pending_reasoning);
+            let mut names = json!({});
+            let native = item.get("native").cloned().unwrap_or(Value::Null);
+            let mut message = if native.is_object() {
+                native
+            } else {
+                json!({"role":"assistant","content":"","_native":native})
+            };
+            for call in item["calls"].as_array().into_iter().flatten() {
+                let id = call["call_id"].as_str().unwrap_or("");
+                seen_tool_call_ids.insert(id.to_string());
+                names[id] = json!(responses_history_function_name(call));
+            }
+            if message.get("_native").is_some() {
+                message["_native_tool_names"] = names;
+            }
+            messages.push(message);
+        }
         Some("function_call") => {
             let name = responses_history_function_name(item);
             if name.is_empty() {
@@ -4631,14 +5161,32 @@ fn responses_content_to_chat_content(_role: &str, content: &Value) -> Value {
             }
             "input_image" => {
                 if let Some(image_url) = part.get("image_url") {
-                    let image_url = if image_url.is_object() {
+                    let mut image_url = if image_url.is_object() {
                         image_url.clone()
                     } else {
                         json!({ "url": image_url.as_str().unwrap_or_default() })
                     };
+                    if let Some(detail) = part.get("detail") {
+                        image_url["detail"] = detail.clone();
+                    }
                     chat_parts.push(json!({ "type": "image_url", "image_url": image_url }));
                     has_non_text_part = true;
                 }
+            }
+            "input_audio" => {
+                let audio = part.get("input_audio").cloned().unwrap_or_else(|| {
+                    let mut value = part.clone();
+                    value.as_object_mut().unwrap().remove("type");
+                    value
+                });
+                chat_parts.push(json!({"type":"input_audio","input_audio":audio}));
+                has_non_text_part = true;
+            }
+            "input_file" => {
+                let mut file = part.clone();
+                file.as_object_mut().unwrap().remove("type");
+                chat_parts.push(json!({"type":"file","file":file}));
+                has_non_text_part = true;
             }
             _ => {}
         }
@@ -5401,6 +5949,9 @@ fn chat_reasoning_text(message: &Value) -> Option<String> {
                 return Some(reasoning);
             }
         }
+        if let Some(reasoning) = strip_leading_think_open_tag(content) {
+            return Some(reasoning);
+        }
     }
 
     None
@@ -5411,7 +5962,13 @@ fn chat_message_to_response_output_item(message: &Value, response_id: &str) -> O
     if let Some(text) = message.get("content").and_then(Value::as_str) {
         let text = split_leading_think_block(text)
             .map(|(_reasoning, answer)| answer)
-            .unwrap_or_else(|| text.to_string());
+            .unwrap_or_else(|| {
+                if strip_leading_think_open_tag(text).is_some() {
+                    String::new()
+                } else {
+                    text.to_string()
+                }
+            });
         if !text.is_empty() {
             content.push(json!({ "type": "output_text", "text": text, "annotations": [] }));
         }
@@ -5489,7 +6046,7 @@ fn chat_tool_call_to_response_item(
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
-        .unwrap_or_else(|| format!("call_{index}"));
+        .unwrap_or_else(|| format!("call_{}_{}", uuid::Uuid::new_v4().simple(), index));
     let function = tool_call.get("function").unwrap_or(&Value::Null);
     let name = function.get("name").and_then(Value::as_str).unwrap_or("");
     let arguments = responses_arguments_to_chat(function.get("arguments").unwrap_or(&json!({})));
@@ -5500,11 +6057,12 @@ fn chat_legacy_function_call_to_response_item(
     function_call: &Value,
     tool_context: &CodexToolContext,
 ) -> Value {
+    let fallback_id = format!("call_{}", uuid::Uuid::new_v4().simple());
     let call_id = function_call
         .get("id")
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
-        .unwrap_or("call_0");
+        .unwrap_or(&fallback_id);
     let name = function_call
         .get("name")
         .and_then(Value::as_str)
@@ -5587,6 +6145,11 @@ fn push_tool_call_done_sse(
     tool_context: &CodexToolContext,
 ) {
     if tool_context.is_custom_tool_proxy(&state.name) {
+        let input = reconstruct_custom_tool_call_input_with_context(
+            tool_context,
+            &state.name,
+            &state.arguments,
+        );
         push_sse(
             output,
             "response.custom_tool_call_input.delta",
@@ -5595,11 +6158,17 @@ fn push_tool_call_done_sse(
                 "item_id": format!("ctc_{}", state.call_id),
                 "call_id": state.call_id,
                 "output_index": output_index,
-                "delta": reconstruct_custom_tool_call_input_with_context(
-                    tool_context,
-                    &state.name,
-                    &state.arguments
-                )
+                "delta": input
+            }),
+        );
+        push_sse(
+            output,
+            "response.custom_tool_call_input.done",
+            json!({
+                "type":"response.custom_tool_call_input.done",
+                "item_id":format!("ctc_{}",state.call_id),
+                "output_index":output_index,
+                "input":input
             }),
         );
         return;
@@ -5922,8 +6491,16 @@ fn effective_cache_creation_tokens(
 
 fn response_status(finish_reason: Option<&str>) -> &'static str {
     match finish_reason {
-        Some("length") => "incomplete",
+        Some("length" | "content_filter") => "incomplete",
         _ => "completed",
+    }
+}
+
+fn incomplete_reason(finish_reason: Option<&str>) -> &'static str {
+    if finish_reason == Some("content_filter") {
+        "content_filter"
+    } else {
+        "max_output_tokens"
     }
 }
 
@@ -6295,22 +6872,10 @@ fn copy_response_request_fields(response: &mut Value, original_request: Option<&
 
 fn responses_arguments_to_chat(value: &Value) -> String {
     match value {
-        Value::String(text) => normalize_chat_tool_arguments_string(text),
+        Value::String(text) => text.clone(),
         Value::Object(_) => canonical_json_string(value),
         Value::Null => "{}".to_string(),
         other => canonical_json_string(&json!({ "input": other })),
-    }
-}
-
-fn normalize_chat_tool_arguments_string(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return "{}".to_string();
-    }
-    match serde_json::from_str::<Value>(trimmed) {
-        Ok(Value::Object(_)) => trimmed.to_string(),
-        Ok(value) => canonical_json_string(&json!({ "input": value })),
-        Err(_) => canonical_json_string(&json!({ "input": text })),
     }
 }
 
