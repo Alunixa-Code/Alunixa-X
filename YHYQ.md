@@ -1755,3 +1755,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 准备未占用的 v1.0.19，更新中英 README、CHANGELOG 和详细发行说明，明确默认热读取、兼容 Images API、AX 安装/旧名兼容及系统索引边界；版本只改项目自身，不升级第三方依赖喵~
 - 版本准备提交 3b190d7：四个 workspace 包、前端与 Tauri 均升至 1.0.19，锁文件对比确认仅项目自身版本变化，新增行凭据扫描 PASS；前端 103/103、TS、i18n 894/894 + 81/81、品牌、Vite 与最终 UI smoke PASS，截图已目视检查且无未实现全局 fixture 调用喵~
 - workspace 正在执行 3b190d7 全量；收尾补查发现独立生图保存仍通过完整 typed settings 序列化，未知扩展字段会丢失，已改为锁内只更新 raw JSON 的 imageModels，并新增其他字段完整保留回归；等待现有 Cargo 退出后才执行后续编译，不并行占用测试 exe，不把前轮作为最后修改的全量验证喵~
+- 首轮 workspace 退出 101，新增 raw-settings 测试链接旧 core 复现其他原始字段丢失；macOS 打包静态测试仍有两个 create_app 断言使用旧应用名，已改为 (AX)，保留 launcher 隐藏/manager 可见断言，不删测试或跳过门禁；已确认原 Cargo 退出，开始最终冻结源码串行全量喵~

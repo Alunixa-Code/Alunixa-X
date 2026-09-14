@@ -193,10 +193,10 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
     assert!(script.contains("Alunixa-X-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"Alunixa X Launch\" \"AlunixaXLauncher\" \"$BINARY_DIR/alunixa-x\" \"io.github.alunixacode.alunixax.launcher\" \"true\""
+        "create_app \"Alunixa X Launch (AX)\" \"AlunixaXLauncher\" \"$BINARY_DIR/alunixa-x\" \"io.github.alunixacode.alunixax.launcher\" \"true\""
     ));
     assert!(script.contains(
-        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-manager\" \"io.github.alunixacode.alunixax\" \"false\""
+        "create_app \"Alunixa X (AX)\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-manager\" \"io.github.alunixacode.alunixax\" \"false\""
     ));
     assert!(script.contains("$BINARY_DIR/alunixa-x-imagegen-mcp"));
     assert!(script.contains("Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"));
