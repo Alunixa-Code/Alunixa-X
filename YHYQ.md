@@ -1675,3 +1675,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 首轮全量暴露测试隔离问题：HTTP 500/断连两种场景复用了 RequestRoundRobin 聚合 ID，第二次按设计轮换到节点 B，被错误断言为重放并导致同进程 Mutex 中毒；改用独立 ID，仍断言 B 不被连接，不削弱产品保证喵~
 - 第二轮编译在首轮测试仍使用 exe 时获得 Cargo 编译锁，导致 Windows LNK1104 和首轮 storage_adapter os error 32，测试 exe 当时未执行；记录为本轮调度失误，后续严格串行，不能冒充产品测试通过喵~
 - 当前两轮 cargo test 都已结束，cargo check 已输出成功；接下来仅启动一轮最终源码全量回归，完成后再取统计、清理临时验证日志和提交收尾记录喵~
+
+## 2026-09-14 · 协议保真修复本地验收完成
+
+- 最终严格串行命令 `cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 已退出 0，39 套件 1090 passed / 0 failed / 1 ignored；其中新增 protocol_fidelity 31/31、protocol_proxy 71/71，合计 102 项协议回归全通过喵~
+- 该结果来自最后一次冻结源码验收，不使用前两轮混合编译或文件锁失败结果；HTTP 500/已接收后断连不重放 fixture 使用独立轮换 ID 后通过，storage_adapter 也已实际执行通过喵~
+- 前端 98/98、TypeScript、cargo check --workspace --all-targets --locked、fmt、diff、品牌和 i18n 854/854 + 80/80 全通过；唯一 ignored 为既有父测试启动的 JSON-RPC 子进程入口，没有新增跳过测试喵~
+- 源码检查点：a9a50ac 修改前，dad0288 / c452fa8 分阶段保真修复，1881887 原生回放与 HTTP/流式完整修复，a11f41e fixture 轮换状态隔离；版本仍 1.0.17，本轮未推送、未发布或安装喵~
+- 已同步 XJ.md、Unreleased CHANGELOG 与 docs/protocol-fidelity.md 的能力边界、错误/重试契约和验证说明；不声称所有真实模型已实测或运行中的 Codex 已应用补丁喵~
+- 收尾仅清理本轮四份已结束验证日志，保留可复用依赖/构建缓存，不删除用户文件、不重启 Codex/Helper/CDP、不写真实 config/auth 喵~

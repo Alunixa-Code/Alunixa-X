@@ -10,7 +10,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- 2026-09-14 本地进行协议保真修复，版本号仍为 1.0.17，未推送、未发布、未替换已运行实例；历史正式发行状态见下文喵~
+- 2026-09-14 协议保真修复已完成本地源码与完整验收，版本号仍为 1.0.17，未推送、未发布、未替换已运行实例；历史正式发行状态见下文喵~
 - v1.0.17 已正式发布，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；后续本地提交仅记录验收喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
@@ -39,6 +39,8 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- 2026-09-14 最终冻结源码：`cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 退出 0，39 套件 1090 passed / 0 failed / 1 ignored；含 protocol_fidelity 31/31、protocol_proxy 71/71，共 102 项协议回归通过喵~
+- 本轮前端 98/98、TypeScript、cargo check workspace/all-targets/locked、fmt、diff、品牌和 i18n 854/854 + 80/80 全通过；ignored 为原有父测试显式使用的 JSON-RPC 子进程入口，未新增忽略项喵~
 - 2026-09-14 第一阶段协议验证：新增保真 13/13、既有协议 70/70 通过；旧测试中“丢弃/降级/过早结束/依赖进程缓存”的断言已改为保真或明确拒绝契约喵~
 - v1.0.17 本地完整 workspace 38 套件 1058 passed/0 failed/1 ignored（core 319），cargo check all-targets、formatter、diff、版本/品牌检查通过喵~
 - 前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite 构建通过；headless 生产 UI 的启动模型选择、窗口编辑、预览、Tauri 提交参数验证 PASS（后端为内存 fixture），服务器及浏览器已关闭喵~
@@ -60,24 +62,31 @@
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
 
 ## 12. APIs, Interfaces, and Data Formats
+- 原生回放使用 reasoning.encrypted_content 中版本化 `alunixa-x-replay-v1:` Base64 JSON，携带 wire/native/items 并核对所覆盖历史；不等同于加密，不作为对话正文或诊断日志输出喵~
+- 不支持输入返回 400/unsupported_protocol_conversion，上游无效响应返回结构化 502；SSE 终态互斥、有序号、截断工具不发执行完成，已停止生成但缺终止帧时 5 秒截止且不重放喵~
 - 设置 JSON camelCase；Codex 配置 TOML；`model_context_window`、`model_auto_compact_token_limit` 为上下文/压缩相关项喵~
 - `codexAppFastMode` 控制 `[features] fast_mode=true`，独立于原有 Fast 服务档位 UI 按钮喵~
 - 运行中队列补丁只对本地成功删除的旧 ID 转为新增，不重放结果不明的网络请求喵~
 
 ## 13. Completed Work
+- 2026-09-14：完成思考/工具输出分型、签名原生回放、SSE/UTF-8/JSON/usage/终态、工具身份/参数完整性、不确定 POST 禁止重放、能力门禁、JSON-to-SSE 和 102 项协议回归，工作区 1090 项通过喵~
 - 实验性上下文移除和真实配置清理 v1.0.14，启动审计 v1.0.15，Fast/能力同步/高级提示词增强/队列编辑修复 v1.0.16 喵~
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
-- 2026-09-14 新需求：修复本地协议转换的数据丢失、思考/执行输出串入正文、乱码、卡思考及重复调用，完成隔离回归喵~
+- 本轮源码修复和本地验收已完成；真实模型/供应商逐一实测、正式版本发布和用户安装均未执行，不能把当前运行实例说成已应用补丁喵~
 
 ## 15. Known Bugs and Limitations
+- 跨协议不能等价表达的服务端工具、私有字段、状态引用、phase/channel、旧 Completions 工具/思考等明确拒绝；不通过静默删除字段实现“兼容”，具体矩阵见 docs/protocol-fidelity.md 喵~
+- 没有可用原生回放依据的签名历史、跨协议/被编辑的回放内容，以及尚不能可靠拼装的 reasoning_details 流会明确失败；未宣称覆盖所有真实模型或私有扩展喵~
 - 已确认：非启动模型的窗口写入 model-catalogs，根配置只跟随启动模型；真实 astra 1050000/1000000 已保存，当前启动模型 terra 为 272000/271000 喵~
 - 以上预览/残留/单位问题已在正式 v1.0.17 修复并验证，当前真实配置未改动，尚未替用户安装新版喵~
 - 禁止在根目录直接 npm test（没有 package.json）；必须 --prefix 或正确工作目录喵~
 - 旧运行中队列记录没有补丁捕获的删除证据时不盲目重放喵~
 
 ## 16. Design Decisions
+- 协议保真优先于表面成功：保留原始参数和结构化类型，只在能力能够表达时转换；未知结果不重放，不根据普通正文启发式删除“调试内容”喵~
+- 原生签名随历史自包含携带，避免全局缓存被清空、重启失效或跨会话撞 ID；严格校验后才恢复，不猜测缺失内容喵~
 - 自有配置精确同步，第三方/用户文件保留；明确编辑与后台回填须区别处理喵~
 - 新旧仓库不可混用，旧路径无效时使用已确认的当前项目根目录喵~
 
@@ -88,10 +97,13 @@
 - gh run view --log 在整轮运行未完成时可能拒绝，等待同一运行完成后取日志，不重复派发喵~
 
 ## 18. Rollback and Recovery
+- 本轮修改前 `a9a50ac`；核心阶段 `dad0288`、`c452fa8`，最终产品修复 `1881887`，fixture 隔离修正 `a11f41e`；当前正式稳定发行 v1.0.17，针对性 revert 即可回滚本地未发布改动喵~
 - 修改前 `a50b13a`；产品稳定基线 tag v1.0.16；必要时使用针对性 revert，不 reset --hard，不覆盖其他修改喵~
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+- **最终状态（2026-09-14）**：源码修复与验收完成，严格串行最终 workspace 退出 0、1090/0/1，协议 31+71 全通过；前端、类型/编译/格式/品牌/i18n 检查全通过喵~
+- XJ.md、YHYQ.md、CHANGELOG Unreleased 和协议说明已同步；未发布、未安装、未重启用户 Codex，以下为已结束的阶段历史而非当前待办喵~
 - 首轮全量非成功：新增不重放 fixture 共享轮换 ID 导致一项失败及同进程锁中毒；并发重编译占用测试 exe 导致 storage_adapter 未执行，后轮 LNK1104 失败，均不作为最终验证结果喵~
 - 已定位并修复 fixture 身份隔离问题；两轮旧 cargo test 均已退出，接下来只串行跑一次最终 workspace，不再并发写测试可执行文件喵~
 - 收尾审计增加上游非 assistant 角色拒绝、失败流保留半截工具参数且不发可执行 done、HTTP ID 协商仅允许 400/422 且响应含输出时禁止重试；最新保真用例共 31 项，需用最终源码重新验收喵~
@@ -119,11 +131,12 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 当前优先：分别审计请求/历史、流式状态机、HTTP 重试；先添加能复现的回归，再修复并跑专项与全量测试喵~
+- 当前源码工作无需继续修补或重复测试；如用户要求交付安装版，再核查远端版本、升级至未占用版本并执行唯一正式 GitHub Actions/Release 流程，不能覆盖已有标签喵~
 - 不需要重建/重复发布 1.0.17；需要根配置采用 astra 窗口时，安装新版后在“启动模型”显式选择 gpt-6-astra，再保存其窗口/阈值喵~
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-14 验收：本地协议保真修复完成，最终 39 套件 1090 passed / 0 failed / 1 ignored，协议 102/102、前端 98/98 及编译/类型/格式/品牌/i18n 全通过；未改真实配置或运行实例喵~
 - 2026-09-14：启动协议保真修复，创建修改前检查点 a9a50ac；联网核对官方 Responses、Claude streaming 和 Gemini thought signature 契约，不存储凭据或真实对话喵~
 - 2026-09-13：未发现 XJ.md，依据完整项目日志和 Git 元数据补建；现有历史和所有配置保持不变喵~
 - 2026-09-13：完成上下文保存/预览一致性修复、初步失败→通过回归、版本 1.0.17 与发行说明，等待最终全套验证和正式 CI 喵~

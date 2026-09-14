@@ -51,9 +51,12 @@
 
 ## 验证与回滚
 
+- 2026-09-14 最终本地验收：Rust 工作区 39 套件，1090 passed / 0 failed / 1 ignored；保真 31/31 + 既有协议 71/71，前端 98/98，类型/编译/格式/品牌/国际化检查全部通过喵~
+- 最终验证严格串行执行，避免 Windows 正在运行的测试 exe 与下一轮链接冲突；前序失败的构建不计入成功结果，未在真实模型账户或运行窗口中验证喵~
+
 ```powershell
 cargo test -p alunixa-x-core --test protocol_fidelity --test protocol_proxy --locked --no-fail-fast -- --test-threads=1
-cargo test --workspace --locked --no-fail-fast -- --test-threads=1
+cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1
 cargo check --workspace --all-targets --locked
 cargo fmt --all -- --check
 npm --prefix apps/alunixa-x-manager test
