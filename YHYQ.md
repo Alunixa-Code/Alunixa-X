@@ -1760,3 +1760,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 前端最终 103/103、TypeScript、i18n 894/894 + 81/81、Vite、品牌、formatter、diff、版本 metadata 与无依赖升级检查通过；最终 UI smoke 再次退出 0，鼠标/键盘/默认顺序/Key 保留/失败回滚/增删改/导航保护/主题布局 PASS，fixture 服务及浏览器由 finally 关闭喵~
 - 发布前再次实查 origin/main 仍 44c41ea、v1.0.19 标签未占用；本次推送明确包含生图模型多配置/默认热读取/数据保留/凭据隔离、AX 跨平台安装入口和维护修复、对应回归及中英使用说明，保留 v1.0.18 全部协议保真修复，准备唯一正式三平台 Actions 喵~
 - `cargo check --workspace --all-targets --locked -j 2` 在最终测试退出后串行完成，退出 0、56.54 秒，无编译告警或 exe 文件占用；全部发布前本地门禁已完成喵~
+- 已原子推送 main 与 annotated v1.0.19，产品提交 4c5b6a82e58175d743c9a7b72a4b490ee7ea8dc6，tag 对象 8d83226a9a23ffd1067fb83dfef86afe1c2aaf4f；远端 main/tag 解引用均核对一致，不移动 v1.0.18 喵~
+- 仅派发一次 release-assets.yml，正式 Actions 34833120719，workflow_dispatch ref=v1.0.19、head SHA 与标签一致；版本门禁已成功，Windows 103940848589、macOS x64 103940848578、arm64 103940848581 开始构建，未复用旧二进制喵~
+- GitHub push 仍提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮没有升级第三方依赖或宣称已完成依赖专项修复；接下来只等待同一正式运行并核验发布结果喵~
