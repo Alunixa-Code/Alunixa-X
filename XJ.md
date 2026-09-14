@@ -11,10 +11,10 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- 当前开发生图模型配置与 AX 搜索入口，基于 v1.0.18；恢复后已提交上轮遗留补充修复和 UI 验证脚本，检查点 `bf3ddde`，无残留本项目 Cargo/测试进程，本轮尚未发布喵~
+- v1.0.19 生图模型配置与 AX 搜索入口实现及本地最终验收完成，冻结产品代码检查点 2334162；40 套件 1112/0/1、前端 103/103 与生产 UI PASS，准备 push / 三平台 Actions / Release，尚未发布喵~
 - 2026-09-14 v1.0.18 已正式发布并完成验收，产品提交 `44c41ea99125d4f1064ee7e636755f8ff0141fad`，annotated tag 对象 `dc9758baf645be15f62874ce502732b3e882db36`；唯一 Actions `34814836183` completed/success，六安装资产及哈希/匿名 latest 全通过，未替换已运行实例喵~
 - 上一正式发行 v1.0.17 的产品提交为 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；历史标签和资产保持不变喵~
-- v1.0.18 协议产品源码已推送；当前本地新增提交 `a7eed7b` / `bf3ddde` 包含生图模型、AX 入口及补充测试，尚待最终验收及新版本发行喵~
+- v1.0.18 协议产品源码已推送；当前新增生图/AX 产品已升至 1.0.19，相关说明齐全，远端 main 仍 44c41ea 且 v1.0.19 尚未占用，待正式推送喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
 
@@ -39,11 +39,15 @@
 - 密码、API key、token、auth.json 正文均不保存到项目记忆或公开日志喵~
 
 ## 8. Development Commands
+- 生图 UI：`python tools/verify-image-models-ui.py`，需要 Python Playwright/Chromium 与已构建前端；脚本自管随机端口/浏览器、仅内存 Tauri fixture，截图在 `.tmp/image-models-ui-{dark,light}.png` 喵~
 - 根目录：`cargo test --workspace --locked --no-fail-fast -- --test-threads=1`，`cargo check --workspace --all-targets --locked`，`cargo fmt --all -- --check` 喵~
 - 前端：`npm --prefix apps/alunixa-x-manager test`、`npm --prefix apps/alunixa-x-manager run check`、`npm --prefix apps/alunixa-x-manager run vite:build` 喵~
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- v1.0.19 全目标 `cargo check --workspace --all-targets --locked -j 2` 已退出 0（56.54 秒），与最终测试串行执行，无 Windows exe 占用或编译告警喵~
+- v1.0.19 最终严格串行完整 workspace（2334162）退出 0：40 套件 1112 passed/0 failed/1 ignored；生图配置 13/13、MCP 8/8、安装契约 16/16、协议 31+71 全通过；先前混合编译失败不作为最终结果喵~
+- v1.0.19 前端 103/103、TypeScript、i18n 894/894 + 81/81、Vite、生产 UI 鼠标/键盘/失败回滚/增删改/刷新持久化/导航保护、深浅主题截图目视验收 PASS；没有未实现全局 fixture 调用或真实模型账户请求喵~
 - v1.0.18 正式 CI 日志已独立核验：Windows 39 套件 1090 passed / 0 failed / 1 ignored，macOS x64/arm64 各 39 套件 1066 passed / 0 failed / 1 ignored，前端均 98/98；平台差异来自条件编译测试，唯一 ignored 仍为既有父测试调用的子进程入口喵~
 - v1.0.18 版本升级后复验：Cargo locked metadata 四包、前端及 Tauri 版本一致；协议 31/31 + 71/71、前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite、fmt、品牌及新增行凭据扫描全部 PASS 喵~
 - 2026-09-14 最终冻结源码：`cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 退出 0，39 套件 1090 passed / 0 failed / 1 ignored；含 protocol_fidelity 31/31、protocol_proxy 71/71，共 102 项协议回归通过喵~
@@ -65,12 +69,15 @@
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
 ## 11. Important Files
+- `image_models.rs` 有序配置/校验/脱敏/并发修订；`imagegen_mcp.rs` 每次调用读取默认/显式选择及生成编辑/凭据隔离；`ImageModelsScreen.tsx` 独立页面；`tests/image_models.rs` 配置/备份/原始字段保留回归喵~
 - `docs/protocol-fidelity.md` 记录保真边界和协议契约；`tests/protocol_fidelity.rs` 为新增独立回归，不依赖真实模型账户喵~
 - `settings.rs` 设置合并与保存；`relay_config.rs` TOML 和上下文/模型窗口；`relay_switch.rs` 供应商切换回填喵~
 - `App.tsx` 供应商表单；`commands.rs` 保存与切换入口；`startup_audit.rs` 启动检查；`codex_instructions.rs` 高级提示词保护与恢复喵~
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
 
 ## 12. APIs, Interfaces, and Data Formats
+- 生图 `imageModels: [{ id, name, baseUrl, apiKey, model }]` 有序数组首项为默认；UI `load_image_models` 返回 `{models:[{id,name,baseUrl,model,hasApiKey}],revision}`，`save_image_models(revision,models)` 中 `apiKey:null` 按 ID 保留原值，冲突拒绝；锁内仅替换原始 JSON 的 imageModels，保留其他及未知字段喵~
+- MCP `image_gen` 省略 model/profile_id 使用首项，显式 profile_id 区分同名模型，未配置时沿旧 Helper/gpt-image-2 回退；兼容 Images API 生成 JSON/编辑 multipart，首启需增强总开关，独立生图无需对话供应商开关喵~
 - 原生回放使用 reasoning.encrypted_content 中版本化 `alunixa-x-replay-v1:` Base64 JSON，携带 wire/native/items 并核对所覆盖历史；不等同于加密，不作为对话正文或诊断日志输出喵~
 - 不支持输入返回 400/unsupported_protocol_conversion，上游无效响应返回结构化 502；SSE 终态互斥、有序号、截断工具不发执行完成，已停止生成但缺终止帧时 5 秒截止且不重放喵~
 - 设置 JSON camelCase；Codex 配置 TOML；`model_context_window`、`model_auto_compact_token_limit` 为上下文/压缩相关项喵~
@@ -78,13 +85,14 @@
 - 运行中队列补丁只对本地成功删除的旧 ID 转为新增，不重放结果不明的网络请求喵~
 
 ## 13. Completed Work
+- 2026-09-14：生图模型独立栏目、拖拽/键盘/上下移/默认徽标、并发保存/Key 保留/未知字段保留、MCP 默认热读取/生成编辑及凭据隔离、Windows AX 别名、macOS AX 新旧名兼容/维护 companion 和完整本地验收完成，待正式发行喵~
 - 2026-09-14：v1.0.18 产品修复已 push，三平台正式全量回归/构建成功，六安装资产发布、说明正文/哈希/来源/公开 latest 已验收；未安装或重启用户 Codex 喵~
 - 2026-09-14：完成思考/工具输出分型、签名原生回放、SSE/UTF-8/JSON/usage/终态、工具身份/参数完整性、不确定 POST 禁止重放、能力门禁、JSON-to-SSE 和 102 项协议回归，工作区 1090 项通过喵~
 - 实验性上下文移除和真实配置清理 v1.0.14，启动审计 v1.0.15，Fast/能力同步/高级提示词增强/队列编辑修复 v1.0.16 喵~
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
-- 当前待办：审核既有实现、完成最新源码全量及 UI 验收、补齐发行说明，随后 push / Actions 三平台构建 / 新版本 Release 验收喵~
+- 当前待办：v1.0.19 产品提交和标签推送、唯一正式 Actions 三平台全量构建、六资产及发布说明/哈希/公开 latest 验收；不自动安装或重启喵~
 - 用户要求的修复、push、Actions 构建与 Release 发布已完成；真实模型逐一实测和用户安装不在本轮已完成项中，不把当前旧进程描述为已加载新版喵~
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
@@ -121,6 +129,7 @@
 
 ## 19. Current Task
 ### 进行中：生图模型配置与 AX 搜索
+- **当前结论**：最终冻结源码 2334162 全量已完成 1112/0/1，产品及发行说明准备完成；下列实现/首轮失败为历史，下一步只做发布门禁和正式 CI，不再次修改或重编译运行中的测试喵~
 - 首轮 workspace 退出 101：新增 raw-settings 回归链接的是先前编译的 core，确实复现未知字段被丢；另有 macOS packager 测试的两个 create_app 名称仍写旧名，已同步 (AX) 且保留 true/false 可见性断言；无链接占用错误，现冻结源码准备最终串行全量喵~
 - 版本已升级为 1.0.19，3b190d7 源码 workspace 全量正在运行；前端 103/103、TS、i18n 894/894 + 81/81、品牌、Vite 与生产 UI smoke 已 PASS，深浅截图均已检查，无真实请求或全局 fixture 错误喵~
 - 最后一处数据保留检查发现独立保存会重新序列化整个 BackendSettings，可能丢未知扩展字段；已改为锁内只替换原始 JSON 的 imageModels，新增“其他原始字段完全保留”回归，当前全量不能覆盖这项后续修改，需等待退出后串行复验/最终 CI 全量喵~
@@ -177,7 +186,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 完成本轮功能和隔离验收，更新本文件、YHYQ.md 与发行说明并提交；结合用户本任务的 push/构建/发布要求准备新版本，不重复发布 v1.0.18，不移动旧标签喵~
+- 推送已验收 v1.0.19，使用同一产品提交的 annotated tag，仅派发一次 release-assets.yml；等待三平台测试与构建完成后核验全部六资产/说明/哈希/匿名 latest，并更新记忆记录，不移动旧标签喵~
 - 不再构建或重复发布 v1.0.18；用户可从正式 Release 下载并在合适时机重新经 Alunixa X 启动，以加载本地协议修复，当前任务不自动安装/重启喵~
 - 如后续遇到特定供应商兼容错误，依据协议错误及不含密钥/真实对话的最小 fixture 补充回归，不能为通过请求而恢复静默丢弃或不确定重放喵~
 - 六份本轮临时日志处于环境拒绝删除状态，保留记录，不重复清理尝试；依赖告警另作专项评估，不混入已冻结的 v1.0.18 喵~
@@ -185,6 +194,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-14 发布门禁：最终 2334162 workspace 40 套件 1112/0/1、前端 103/103、UI 和其余本地验证 PASS；四包/前端/Tauri 1.0.19 一致、依赖无升级、远端 main 未变且标签空闲，准备唯一正式发行喵~
 - 2026-09-14 发布准备：补齐生图模型使用方式、AX 安装入口/旧名兼容、模型默认规则及验证边界；计划 v1.0.19，执行最新源码全量测试后再推送喵~
 - 2026-09-14 接续检查点 bf3ddde：保存独立 MCP 启用、macOS 同级 AX 应用优先启动和隔离 UI 脚本；开始最终验收与发行收尾喵~
 - 2026-09-14 新任务：生图模型 MCP 默认配置/拖拽排序与 Windows/macOS AX 搜索入口，检查点 b448544；启动实现，未触碰真实配置和运行实例喵~

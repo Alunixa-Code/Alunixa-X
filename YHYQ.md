@@ -1756,3 +1756,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 版本准备提交 3b190d7：四个 workspace 包、前端与 Tauri 均升至 1.0.19，锁文件对比确认仅项目自身版本变化，新增行凭据扫描 PASS；前端 103/103、TS、i18n 894/894 + 81/81、品牌、Vite 与最终 UI smoke PASS，截图已目视检查且无未实现全局 fixture 调用喵~
 - workspace 正在执行 3b190d7 全量；收尾补查发现独立生图保存仍通过完整 typed settings 序列化，未知扩展字段会丢失，已改为锁内只更新 raw JSON 的 imageModels，并新增其他字段完整保留回归；等待现有 Cargo 退出后才执行后续编译，不并行占用测试 exe，不把前轮作为最后修改的全量验证喵~
 - 首轮 workspace 退出 101，新增 raw-settings 测试链接旧 core 复现其他原始字段丢失；macOS 打包静态测试仍有两个 create_app 断言使用旧应用名，已改为 (AX)，保留 launcher 隐藏/manager 可见断言，不删测试或跳过门禁；已确认原 Cargo 退出，开始最终冻结源码串行全量喵~
+- 最终冻结源码检查点 2334162：`cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 退出 0，40 套件 1112 passed/0 failed/1 ignored；生图配置 13/13、MCP 8/8、安装契约 16/16、协议 31/31 + 71/71 全通过，唯一 ignored 仍为原有测试父进程显式调用的子进程入口喵~
+- 前端最终 103/103、TypeScript、i18n 894/894 + 81/81、Vite、品牌、formatter、diff、版本 metadata 与无依赖升级检查通过；最终 UI smoke 再次退出 0，鼠标/键盘/默认顺序/Key 保留/失败回滚/增删改/导航保护/主题布局 PASS，fixture 服务及浏览器由 finally 关闭喵~
+- 发布前再次实查 origin/main 仍 44c41ea、v1.0.19 标签未占用；本次推送明确包含生图模型多配置/默认热读取/数据保留/凭据隔离、AX 跨平台安装入口和维护修复、对应回归及中英使用说明，保留 v1.0.18 全部协议保真修复，准备唯一正式三平台 Actions 喵~
+- `cargo check --workspace --all-targets --locked -j 2` 在最终测试退出后串行完成，退出 0、56.54 秒，无编译告警或 exe 文件占用；全部发布前本地门禁已完成喵~
