@@ -1694,3 +1694,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 初次历史联合输出过大，后续只读取必要范围；静态测试指针中的 windows.rs 路径不存在，仅为只读搜索路径错误，没有改变代码或执行测试喵~
 - 更新 workspace/Cargo.lock、前端 package/package-lock 和 Tauri 版本至 1.0.18，将 Unreleased 转为正式版本条目，新增详细发行说明，涵盖保真、类型隔离、流式结束、签名回放、不重放及能力边界，不升级依赖喵~
 - 仅 origin 为产品发布目标；发现 legacy-codexpp 是指向已不存在旧目录的历史本地 remote，本轮不使用或移除，已更正项目记忆中的“唯一远端”措辞喵~
+- 版本准备提交为 8bf82c4；版本升级后的协议专项退出 0，protocol_fidelity 31/31 + protocol_proxy 71/71；前端 98/98、TypeScript、i18n 854/854 + 80/80 和 Vite 生产构建均通过喵~
+- Cargo locked metadata 的四个 workspace 包、package/package-lock 和 Tauri 版本均为 1.0.18，发行标题/CHANGELOG、fmt、品牌、diff 和新增行凭据扫描 PASS；lockfile 只改四个项目自身包版本，未升级依赖喵~
+- 本次推送范围：协议数据保真、思考/正文/工具类型隔离、原生签名回放、流式解码与终态/尾部用量、防重复工具执行和不确定 POST 禁止重放、102 项协议回归、版本及详细说明；不改真实配置或运行实例喵~
+- 发布前再次确认远端 main 未变且 v1.0.18 未占用；将以 skip-ci 最终提交原子推送 main 和 annotated tag，然后仅派发一次 release-assets.yml，由三平台全量测试和构建完成正式发布喵~

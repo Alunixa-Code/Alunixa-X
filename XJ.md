@@ -10,7 +10,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- 2026-09-14 用户追加“修复、push、构建、发布”；协议修复已有本地完整验收，当前准备 v1.0.18，版本清单和发行说明已更新，尚未推送或发布，未替换已运行实例喵~
+- 2026-09-14 v1.0.18 发布前本地门禁全部通过，准备原子推送 main 与新标签并派发唯一正式 Actions，尚未发布、未替换已运行实例喵~
 - v1.0.17 已正式发布，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；后续本地提交仅记录验收喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
@@ -39,6 +39,7 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- v1.0.18 版本升级后复验：Cargo locked metadata 四包、前端及 Tauri 版本一致；协议 31/31 + 71/71、前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite、fmt、品牌及新增行凭据扫描全部 PASS 喵~
 - 2026-09-14 最终冻结源码：`cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 退出 0，39 套件 1090 passed / 0 failed / 1 ignored；含 protocol_fidelity 31/31、protocol_proxy 71/71，共 102 项协议回归通过喵~
 - 本轮前端 98/98、TypeScript、cargo check workspace/all-targets/locked、fmt、diff、品牌和 i18n 854/854 + 80/80 全通过；ignored 为原有父测试显式使用的 JSON-RPC 子进程入口，未新增忽略项喵~
 - 2026-09-14 第一阶段协议验证：新增保真 13/13、既有协议 70/70 通过；旧测试中“丢弃/降级/过早结束/依赖进程缓存”的断言已改为保真或明确拒绝契约喵~
@@ -74,7 +75,7 @@
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
-- v1.0.18 版本门禁、发布前快速复验、唯一正式三平台 Actions、六资产 Release 和哈希验收待执行；真实模型逐一实测和用户安装不在本轮已完成项中喵~
+- v1.0.18 唯一正式三平台 Actions、六资产 Release 和哈希验收待执行；本地版本门禁及快速复验已通过，真实模型逐一实测和用户安装不在本轮已完成项中喵~
 
 ## 15. Known Bugs and Limitations
 - 跨协议不能等价表达的服务端工具、私有字段、状态引用、phase/channel、旧 Completions 工具/思考等明确拒绝；不通过静默删除字段实现“兼容”，具体矩阵见 docs/protocol-fidelity.md 喵~
@@ -103,6 +104,7 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+- **发布前门禁完成**：准备提交并推送协议保真/类型隔离/原生回放/SSE 完整性/防不确定重放及 102 项协议回归，版本自身升级至 1.0.18，不含依赖升级；主分支和标签将使用同一产品提交喵~
 - **当前发布任务（2026-09-14）**：已实查 GitHub，最近正式发行 v1.0.17，远端 main 为 7478e7f，v1.0.18 标签未占用、最近五轮正式 Actions 均已完成；接续已有修复准备 v1.0.18 喵~
 - 已将 workspace/Cargo.lock、manager package/package-lock、Tauri 一致升级至 1.0.18，Unreleased 转正式版本条目并新增 `docs/releases/v1.0.18.md`，以下“未发布”修复记录为上一阶段历史喵~
 - **最终状态（2026-09-14）**：源码修复与验收完成，严格串行最终 workspace 退出 0、1090/0/1，协议 31+71 全通过；前端、类型/编译/格式/品牌/i18n 检查全通过喵~
@@ -134,12 +136,13 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 完成 1.0.18 版本一致性、协议专项及前端构建门禁；提交清晰变更说明，以 skip-ci 最终提交原子推送 main 与 annotated v1.0.18，再仅派发一次正式 release-assets.yml 喵~
+- 已完成 1.0.18 本地门禁；以 skip-ci 最终验收提交原子推送 main 与 annotated v1.0.18，再仅派发一次正式 release-assets.yml，不能重复派发或移动已有标签喵~
 - 记录唯一 run ID 后跟踪原运行，不重复派发；待三平台测试、构建和发布成功后，核对标签解引用、Actions head、六资产、说明 SHA-256 与匿名 latest，再更新本文件并提交验收记录喵~
 - 不需要重建/重复发布 1.0.17；需要根配置采用 astra 窗口时，安装新版后在“启动模型”显式选择 gpt-6-astra，再保存其窗口/阈值喵~
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-14 发布门禁：版本准备提交 8bf82c4 后，协议 102/102、前端 98/98、类型/i18n/生产构建/版本/品牌/格式/凭据扫描均通过，远端 main 未变且 v1.0.18 仍未占用喵~
 - 2026-09-14 发布准备：用户要求 push/构建/发布；读取记忆并核对 GitHub，建立检查点 9133669，准备未占用的 v1.0.18 和详细协议保真发行说明，尚未推送喵~
 - 2026-09-14 验收：本地协议保真修复完成，最终 39 套件 1090 passed / 0 failed / 1 ignored，协议 102/102、前端 98/98 及编译/类型/格式/品牌/i18n 全通过；未改真实配置或运行实例喵~
 - 2026-09-14：启动协议保真修复，创建修改前检查点 a9a50ac；联网核对官方 Responses、Claude streaming 和 Gemini thought signature 契约，不存储凭据或真实对话喵~
