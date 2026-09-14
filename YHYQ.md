@@ -1701,3 +1701,26 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - main 与 annotated v1.0.18 已原子推送，产品提交 44c41ea99125d4f1064ee7e636755f8ff0141fad、tag 对象 dc9758baf645be15f62874ce502732b3e882db36，远端 main/tag 解引用均已核对一致喵~
 - 唯一正式 release-assets.yml 已派发，CLI 返回 Actions 34814836183；立即列表尚未索引新运行，按已知 ID 继续等待，不再次派发喵~
 - GitHub push 同时提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮保持依赖锁定，未将协议修复当作依赖审计完成，已记录待后续专项评估喵~
+
+## 2026-09-14 · v1.0.18 正式发行验收
+
+- 唯一正式 Actions 34814836183 已 completed/success，版本门禁、Windows x64、macOS x64、macOS arm64 和发布 job 103887682566 全成功；工作流等待命令退出 0，没有重复派发、复用旧二进制或移动标签喵~
+- 产品提交 44c41ea99125d4f1064ee7e636755f8ff0141fad，annotated tag 对象 dc9758baf645be15f62874ce502732b3e882db36；远端 main、tag 解引用和 Actions head 完全一致喵~
+- 正式完成后读取三平台 CI 日志：Windows job 103883290529 为 Rust 39 套件 1090 passed/0 failed/1 ignored；macOS arm64 job 103883290531 和 x64 job 103883290600 各 39 套件 1066 passed/0 failed/1 ignored；三平台前端均 98/98 喵~
+- 唯一 ignored 为父测试显式使用的既有 JSON-RPC 子进程入口，没有新增跳过项；本地 v1.0.18 协议 31/31 + 71/71 已复验通过，正式 CI 又完整执行全部 workspace 喵~
+- Release ID 388200755，发布于 2026-09-14T07:07:07Z（新加坡时间 2026-09-14 15:07:07），非草稿/非预发布；六资产唯一、非零、uploaded，GitHub digest 与工作流直接计算并写入说明的 SHA-256 全部一致喵~
+- 已逐字规范化换行核验正式发行说明以前置提交的 docs/releases/v1.0.18.md 正文开始，包含正确产品 SHA 和 Actions 来源；匿名 releases/latest 返回 v1.0.18、同一 Release ID 和六资产，ReleaseNotesAndHashes/AnonymousLatest/ActionsAndTag 均 PASS 喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.18-windows-x64-setup.exe` | 21021066 | `15e45e9935bc6a8f02cfc1eb0e0552abcb8f83bed4a066bfbff28789e044a444` |
+| `Alunixa-X-1.0.18-windows-x64.zip` | 26881144 | `26087e9c076955a28f0479362ddf9cc982b367a3c5c0e7686b1793265cac7921` |
+| `Alunixa-X-1.0.18-macos-x64.dmg` | 33931755 | `5d110f96353b21fd2d1b948db95afc74db0d29ed556d7678c35a220ef7b196dc` |
+| `Alunixa-X-1.0.18-macos-x64.zip` | 28362425 | `c5c8b2839441e3e20f6b8eba4b7667fddc0cd4d689a8c744f1f99a9568ab2767` |
+| `Alunixa-X-1.0.18-macos-arm64.dmg` | 32642137 | `b9172382f79e22666dcd47a9652abdb5318d72fe775be1635f89fa91fee43f2b` |
+| `Alunixa-X-1.0.18-macos-arm64.zip` | 27786060 | `09226df876bdf7446f763c05af0e9425afae5b0c20c047b06aa9a2409c7ba4b9` |
+
+- 本轮没有下载安装包、升级依赖、改写真实 config/auth、重启 Codex/Helper/CDP 或热注入当前窗口；安装新版并在合适时机重新经 Alunixa X 启动后才会使用新版协议实现喵~
+- 临时日志清理命令已验证目标在本项目 .tmp 内，但执行环境在运行前拒绝了包含 Remove-Item 的命令，因此未删除任何文件；随后只读确认六份 v1.0.18 专属日志仍在，总计 1437821 字节，不换工具绕过或声称清理成功喵~
+- 六份保留日志为 .tmp/v1.0.18-protocol.log、v1.0.18-frontend.log、v1.0.18-actions-watch.log、v1.0.18-ci-windows.log、v1.0.18-ci-macos-arm64.log、v1.0.18-ci-macos-x64.log，均为本轮验收产物；可复用依赖/构建缓存及所有用户文件保持不变喵~
+- 只读 Git 验证确认标签之后仅 XJ.md/YHYQ.md 本地审计差异，产品源码和发行文档均已推送；发行页已提交 Codex 右侧预览，工具返回 queued，不冒称已显示喵~
