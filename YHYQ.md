@@ -1698,3 +1698,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - Cargo locked metadata 的四个 workspace 包、package/package-lock 和 Tauri 版本均为 1.0.18，发行标题/CHANGELOG、fmt、品牌、diff 和新增行凭据扫描 PASS；lockfile 只改四个项目自身包版本，未升级依赖喵~
 - 本次推送范围：协议数据保真、思考/正文/工具类型隔离、原生签名回放、流式解码与终态/尾部用量、防重复工具执行和不确定 POST 禁止重放、102 项协议回归、版本及详细说明；不改真实配置或运行实例喵~
 - 发布前再次确认远端 main 未变且 v1.0.18 未占用；将以 skip-ci 最终提交原子推送 main 和 annotated tag，然后仅派发一次 release-assets.yml，由三平台全量测试和构建完成正式发布喵~
+- main 与 annotated v1.0.18 已原子推送，产品提交 44c41ea99125d4f1064ee7e636755f8ff0141fad、tag 对象 dc9758baf645be15f62874ce502732b3e882db36，远端 main/tag 解引用均已核对一致喵~
+- 唯一正式 release-assets.yml 已派发，CLI 返回 Actions 34814836183；立即列表尚未索引新运行，按已知 ID 继续等待，不再次派发喵~
+- GitHub push 同时提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮保持依赖锁定，未将协议修复当作依赖审计完成，已记录待后续专项评估喵~
