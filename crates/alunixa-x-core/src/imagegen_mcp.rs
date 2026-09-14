@@ -436,23 +436,35 @@ async fn extract_image_outputs(
         let Some(url) = item.get("url").and_then(Value::as_str) else {
             continue;
         };
-        let parsed = reqwest::Url::parse(url).context("图片响应 URL 无效")?;
-        if !matches!(parsed.scheme(), "http" | "https") {
-            anyhow::bail!("图片响应 URL 仅支持 HTTP/HTTPS");
+        let parsed = reqwest::Url::parse(url).map_err(|_| anyhow::anyhow!("图片响应 URL 无效"))?;
+        if !matches!(parsed.scheme(), "http" | "https")
+            || !parsed.username().is_empty()
+            || parsed.password().is_some()
+        {
+            anyhow::bail!("图片响应 URL 仅支持无嵌入凭据的 HTTP/HTTPS 地址");
         }
         let response = client
             .get(parsed)
             .send()
             .await
-            .context("下载生成图片失败")?;
-        let response = response.error_for_status().context("下载生成图片失败")?;
+            .map_err(|_| anyhow::anyhow!("下载生成图片失败，未自动重新生成"))?;
+        if !response.status().is_success() {
+            anyhow::bail!(
+                "下载生成图片返回 HTTP {}，未自动重新生成",
+                response.status().as_u16()
+            );
+        }
         let content_type = response
             .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .filter(|value| value.starts_with("image/"))
             .map(str::to_string);
-        let bytes = response.bytes().await?.to_vec();
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|_| anyhow::anyhow!("读取生成图片失败，未自动重新生成"))?
+            .to_vec();
         outputs.push(ImageOutput {
             mime_type: content_type.unwrap_or_else(|| detect_image_mime(&bytes).to_string()),
             bytes,
@@ -825,6 +837,31 @@ mod tests {
             assert!(error.contains(&format!("HTTP {}", &status[..3])));
             assert!(!error.contains("fixture-key"));
             assert!(!error.contains("reflected"));
+            assert_eq!(worker.join().unwrap().len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_image_downloads_do_not_echo_signed_urls_or_save_redirect_bodies() {
+        for status in [
+            "500 Internal Server Error",
+            "307 Temporary Redirect\r\nLocation: http://127.0.0.1:9/do-not-follow",
+        ] {
+            let (base, worker) = image_fixture_server(1, status, |_, _| "not an image".into());
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap();
+            let payload = json!({"data":[{"url":format!("{base}/image?token=fixture-secret")}]});
+            let error = extract_image_outputs(&client, &payload)
+                .await
+                .err()
+                .unwrap();
+            let message = format!("{error:#}");
+            assert!(message.contains(&format!("HTTP {}", &status[..3])));
+            assert!(!message.contains("fixture-secret"));
+            assert!(!message.contains(&base));
             assert_eq!(worker.join().unwrap().len(), 1);
         }
     }

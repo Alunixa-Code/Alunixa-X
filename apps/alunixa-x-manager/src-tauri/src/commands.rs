@@ -56,9 +56,22 @@ pub struct OverviewPayload {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SettingsPayload {
+    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub settings_path: String,
     pub user_scripts: Value,
+}
+
+fn serialize_manager_settings<S: serde::Serializer>(
+    settings: &BackendSettings,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut value = serde_json::to_value(settings).map_err(serde::ser::Error::custom)?;
+    // This independently managed section is only exposed through its redacted snapshot.
+    if let Some(object) = value.as_object_mut() {
+        object.remove("imageModels");
+    }
+    value.serialize(serializer)
 }
 
 #[tauri::command]
@@ -5005,6 +5018,34 @@ fn default_log_lines() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn general_settings_responses_never_expose_independent_image_keys() {
+        let payload = SettingsPayload {
+            settings: BackendSettings {
+                image_models: vec![alunixa_x_core::image_models::ImageModel {
+                    id: "fixture".into(),
+                    name: "Images".into(),
+                    base_url: "https://images.example.invalid/v1".into(),
+                    api_key: "fixture-image-secret".into(),
+                    model: "image-fixture".into(),
+                }],
+                codex_app_path: "preserved-app".into(),
+                ..Default::default()
+            },
+            settings_path: "fixture-settings.json".into(),
+            user_scripts: json!({}),
+        };
+        let value = serde_json::to_value(&payload).unwrap();
+        assert!(value["settings"].get("imageModels").is_none());
+        assert!(!value.to_string().contains("fixture-image-secret"));
+        assert_eq!(value["settings"]["codexAppPath"], "preserved-app");
+        // Only the UI projection is redacted; storage and backups keep the original key.
+        assert_eq!(
+            payload.settings.image_models[0].api_key,
+            "fixture-image-secret"
+        );
+    }
 
     fn codex_home_env_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

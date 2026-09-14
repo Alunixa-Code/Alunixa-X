@@ -118,24 +118,31 @@ pub fn uninstall_app_bundles(_options: &InstallOptions) -> anyhow::Result<()> {
 
 #[cfg(target_os = "macos")]
 fn write_bundle(bundle: &MacosAppBundle) -> anyhow::Result<()> {
+    let (source, target_name) = match (&bundle.binary_source, &bundle.binary_target_name) {
+        (Some(source), Some(target_name)) => (source, target_name),
+        _ => anyhow::bail!("macOS bundle is missing its binary source"),
+    };
+    validate_binary_source(source)?;
+    let imagegen_source = if target_name == SILENT_BINARY {
+        let companion = source
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("alunixa-x-imagegen-mcp");
+        // Validate all required inputs before modifying an existing app bundle.
+        validate_binary_source(&companion)?;
+        Some(companion)
+    } else {
+        None
+    };
     let contents = bundle.app_path.join("Contents");
     let macos = contents.join("MacOS");
     let resources = contents.join("Resources");
     fs::create_dir_all(&macos)?;
     fs::create_dir_all(&resources)?;
     fs::write(contents.join("Info.plist"), &bundle.info_plist)?;
-    if let (Some(source), Some(target_name)) = (&bundle.binary_source, &bundle.binary_target_name) {
-        validate_binary_source(source)?;
-        let target = macos.join(target_name);
-        if source != &target {
-            fs::copy(source, &target)?;
-        }
-        validate_binary_source(&target)?;
-        let mut permissions = fs::metadata(&target)?.permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(target, permissions)?;
-    } else {
-        anyhow::bail!("macOS bundle is missing its binary source");
+    copy_bundle_binary(source, &macos.join(target_name))?;
+    if let Some(companion) = imagegen_source {
+        copy_bundle_binary(&companion, &macos.join("alunixa-x-imagegen-mcp"))?;
     }
     let executable = macos.join(executable_name_from_plist(&bundle.info_plist));
     fs::write(&executable, &bundle.launch_script)?;
@@ -143,6 +150,18 @@ fn write_bundle(bundle: &MacosAppBundle) -> anyhow::Result<()> {
     permissions.set_mode(0o755);
     fs::set_permissions(executable, permissions)?;
     copy_icon(&resources)?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_bundle_binary(source: &Path, target: &Path) -> anyhow::Result<()> {
+    if source != target {
+        fs::copy(source, target)?;
+    }
+    validate_binary_source(target)?;
+    let mut permissions = fs::metadata(target)?.permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(target, permissions)?;
     Ok(())
 }
 
@@ -253,4 +272,62 @@ fn info_plist(display_name: &str, executable_name: &str, identifier_suffix: &str
 </dict>
 </plist>"#
     )
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maintenance_installs_ax_launcher_with_executable_imagegen_companion() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        fs::create_dir(&source).unwrap();
+        let launcher = source.join(SILENT_BINARY);
+        let companion = source.join("alunixa-x-imagegen-mcp");
+        fs::write(&launcher, vec![0xab; 2048]).unwrap();
+        fs::write(&companion, vec![0xcd; 2048]).unwrap();
+        let bundle = build_app_bundle(
+            &InstallOptions {
+                install_root: Some(temp.path().join("Applications")),
+                launcher_path: Some(launcher),
+                ..Default::default()
+            },
+            false,
+        );
+        write_bundle(&bundle).unwrap();
+        let installed = bundle
+            .app_path
+            .join("Contents/MacOS/alunixa-x-imagegen-mcp");
+        assert_eq!(fs::read(&installed).unwrap(), fs::read(&companion).unwrap());
+        assert_eq!(
+            fs::metadata(installed).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        assert!(bundle.app_path.ends_with("Alunixa X Launch (AX).app"));
+    }
+
+    #[test]
+    fn missing_imagegen_companion_does_not_modify_existing_bundle() {
+        let temp = tempfile::tempdir().unwrap();
+        let launcher = temp.path().join(SILENT_BINARY);
+        fs::write(&launcher, vec![0xab; 2048]).unwrap();
+        let bundle = build_app_bundle(
+            &InstallOptions {
+                install_root: Some(temp.path().join("Applications")),
+                launcher_path: Some(launcher),
+                ..Default::default()
+            },
+            false,
+        );
+        let contents = bundle.app_path.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(contents.join("Info.plist"), "keep-existing").unwrap();
+        assert!(write_bundle(&bundle).is_err());
+        assert_eq!(
+            fs::read_to_string(contents.join("Info.plist")).unwrap(),
+            "keep-existing"
+        );
+        assert!(!contents.join("MacOS").exists());
+    }
 }

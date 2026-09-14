@@ -33,6 +33,12 @@ INIT = r"""
       if(cmd==="relay_status")return ok({configured:false,authenticated:false});
       if(cmd==="list_codex_context_entries")return ok({mcpServers:[],skills:[],plugins:[]});
       if(cmd==="detect_env_conflicts")return ok({conflicts:[]});
+      if(cmd==="startup_options")return ok({showUpdate:false});
+      if(cmd==="check_update")return ok({currentVersion:"1.0.18",latestVersion:"1.0.18",hasUpdate:false});
+      if(cmd==="load_provider_sync_targets")return ok({targets:[]});
+      if(cmd==="load_pending_provider_import")return ok({pending:null});
+      if(cmd==="load_pending_dream_skin_community")return ok({versionId:""});
+      if(cmd==="remote_plugin_marketplace_status")return ok({codexHome:"fixture",configRegistered:true,needsRepair:false,pluginCount:0,skillCount:0});
       if(cmd==="plugin:event|listen")return 1;
       if(cmd==="write_diagnostic_event"||cmd==="plugin:event|unlisten")return ok();
       throw new Error("Isolated fixture: unsupported "+cmd);
@@ -133,12 +139,6 @@ def main():
               return Math.abs(new DOMMatrix(row.style.transform).m42) > 10;
             }""")
             page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
-            print("KEYBOARD_DRAG_STATE=" + json.dumps(page.evaluate("""() => ({
-              announcements: [...document.querySelectorAll('[role="status"]')].map(node => node.textContent),
-              rows: [...document.querySelectorAll('[data-image-model-id]')].map(row => ({
-                id:row.dataset.imageModelId, transform:row.style.transform, top:row.getBoundingClientRect().top
-              }))
-            })"""), ensure_ascii=False))
             page.keyboard.press("Space")
             expect(rows.first).to_have_attribute("data-image-model-id", "a")
             assert [model["apiKey"] for model in models] == ["fixture-key-a", "fixture-key-b"]
@@ -189,6 +189,8 @@ def main():
             page.get_by_role("button", name="刷新当前页面", exact=True).click()
             page.get_by_role("button", name="放弃编辑", exact=True).click()
             expect(page.get_by_role("form", name="生图模型编辑")).to_have_count(0)
+            expect(rows).to_have_count(3)
+            expect(rows.first.get_by_text("默认", exact=True)).to_be_visible()
             assert models[0]["name"] == "日常插画"
 
             page.screenshot(path=str(ROOT / ".tmp/image-models-ui-dark.png"), full_page=True)
