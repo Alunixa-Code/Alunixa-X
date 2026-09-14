@@ -2063,7 +2063,11 @@ async fn aggregate_proxy_does_not_replay_an_ambiguous_post_failure() {
             }
         });
         let settings = aggregate_proxy_settings(
-            "no-replay",
+            if abrupt_disconnect {
+                "no-replay-disconnect"
+            } else {
+                "no-replay-http-500"
+            },
             format!("http://{first_addr}/v1"),
             format!("http://{second_addr}/v1"),
         );

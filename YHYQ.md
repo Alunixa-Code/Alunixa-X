@@ -1672,3 +1672,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 添加 Unreleased 变更说明与 docs/protocol-fidelity.md，明确保真和不支持项的错误边界，不宣称所有真实供应商已实测，不发布或替换运行中的版本喵~
 - 收尾修复上游 tool/debug/system/user 角色不得流入 assistant 正文，失败流保留原始半截工具参数但不发送可执行 done；HTTP ID 前缀协商限制为 400/422，响应已有输出则拒绝重放喵~
 - 完整 workspace 首轮在 Windows 并行链接持续推进，尚未结束；因该轮编译期间补了最后边界，将以冻结后的源码再做最终验收，避免把旧编译结果当作最终通过喵~
+- 首轮全量暴露测试隔离问题：HTTP 500/断连两种场景复用了 RequestRoundRobin 聚合 ID，第二次按设计轮换到节点 B，被错误断言为重放并导致同进程 Mutex 中毒；改用独立 ID，仍断言 B 不被连接，不削弱产品保证喵~
+- 第二轮编译在首轮测试仍使用 exe 时获得 Cargo 编译锁，导致 Windows LNK1104 和首轮 storage_adapter os error 32，测试 exe 当时未执行；记录为本轮调度失误，后续严格串行，不能冒充产品测试通过喵~
+- 当前两轮 cargo test 都已结束，cargo check 已输出成功；接下来仅启动一轮最终源码全量回归，完成后再取统计、清理临时验证日志和提交收尾记录喵~
