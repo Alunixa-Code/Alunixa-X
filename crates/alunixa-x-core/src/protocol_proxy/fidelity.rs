@@ -82,10 +82,28 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
             "response_format",
             "seed",
             "service_tier",
+            "metadata",
+            "user",
+            "prompt_cache_key",
+            "prompt_cache_retention",
+            "safety_identifier",
+            "enable_thinking",
+            "reasoning_split",
         ] {
             if body.get(key).is_some_and(|v| !v.is_null()) {
                 return reject(&format!("{wire} cannot represent {key}"));
             }
+        }
+    }
+    if let Some(instructions) = body.get("instructions").filter(|v| !v.is_null()) {
+        if !instructions.is_string()
+            && !instructions.as_array().is_some_and(|parts| {
+                parts
+                    .iter()
+                    .all(|p| p.is_string() || p.get("text").is_some_and(Value::is_string))
+            })
+        {
+            return reject("unsupported instruction content");
         }
     }
     let input = body.get("input").unwrap_or(&Value::Null);
@@ -113,6 +131,11 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 }
             }
             "message" => {
+                if item.get("phase").is_some_and(|v| !v.is_null())
+                    || item.get("channel").is_some_and(|v| !v.is_null())
+                {
+                    return reject("message phase or channel requires native Responses");
+                }
                 let role = item.get("role").and_then(Value::as_str).unwrap_or("user");
                 if !matches!(
                     role,
@@ -123,6 +146,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 validate_content(item.get("content").unwrap_or(&Value::Null), wire)?;
             }
             "function_call" | "custom_tool_call" | "tool_call" => {
+                if kind == "tool_call" && item.get("tool_use").is_none() {
+                    return reject("legacy tool_call requires tool_use");
+                }
                 if wire == "completions" {
                     return reject("legacy Completions cannot represent tool history");
                 }
@@ -163,7 +189,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .unwrap_or(&Value::Null);
                 if content.is_array() {
                     validate_content(content, wire)?;
-                    if wire == "chat"
+                    if matches!(wire, "chat" | "gemini")
                         && content.as_array().unwrap().iter().any(|part| {
                             !matches!(
                                 part["type"].as_str(),
@@ -171,7 +197,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                             )
                         })
                     {
-                        return reject("Chat tool results cannot represent non-text content");
+                        return reject("this protocol cannot represent non-text tool results");
                     }
                 }
             }
@@ -180,6 +206,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     return reject(
                         "opaque reasoning belongs to a different or unavailable native protocol",
                     );
+                }
+                if wire == "completions" {
+                    return reject("legacy Completions cannot represent reasoning history");
                 }
                 if wire != "chat" && responses_reasoning_text(item).is_some_and(|s| !s.is_empty()) {
                     return reject("native reasoning requires its original signed replay item");
@@ -200,7 +229,8 @@ fn validate_content(content: &Value, wire: &str) -> anyhow::Result<()> {
     };
     for part in parts {
         match part["type"].as_str() {
-            Some("text" | "input_text" | "output_text" | "refusal") => {}
+            Some("text" | "input_text" | "output_text") => {}
+            Some("refusal") if wire == "chat" => {}
             Some("input_image") if wire != "completions" => {
                 if part.get("image_url").is_none() {
                     return reject("image file_id has no cross-provider representation");
@@ -300,6 +330,9 @@ pub(super) fn attach_replay(response: &mut Value, wire: &str, native: Value) {
 }
 
 pub(super) fn prepare_history(mut body: Value, wire: &str) -> anyhow::Result<Value> {
+    if body.get("input").is_some_and(Value::is_object) {
+        body["input"] = json!([body["input"]]);
+    }
     let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return Ok(body);
     };
@@ -372,6 +405,56 @@ pub(super) fn prepare_history(mut body: Value, wire: &str) -> anyhow::Result<Val
     }
     *items = rebuilt;
     Ok(body)
+}
+
+pub(super) fn native_reasoning_options(body: &Value, wire: &str) -> anyhow::Result<Value> {
+    let mut options = json!({});
+    let reasoning = body.get("reasoning").filter(|v| !v.is_null());
+    if reasoning.is_some_and(|v| {
+        v.as_object()
+            .is_none_or(|o| o.keys().any(|k| k != "effort" && k != "summary"))
+    }) {
+        return reject("unsupported native reasoning option");
+    }
+    let effort = body
+        .pointer("/reasoning/effort")
+        .or_else(|| body.get("reasoning_effort"))
+        .and_then(Value::as_str);
+    if wire == "anthropic" {
+        if let Some(thinking) = body.get("thinking") {
+            options["thinking"] = thinking.clone();
+        }
+        if let Some(effort) = effort {
+            match effort {
+                "none" | "disabled" => options["thinking"] = json!({"type":"disabled"}),
+                "low" | "medium" | "high" | "max" => {
+                    if options.get("thinking").is_none() {
+                        options["thinking"] = json!({"type":"adaptive"});
+                    }
+                    options["output_config"] = json!({"effort":effort});
+                }
+                _ => return reject("unsupported Anthropic reasoning effort"),
+            }
+        }
+    } else if wire == "gemini" {
+        if body.get("thinking").is_some() {
+            return reject("Anthropic-style thinking options cannot be sent to Gemini");
+        }
+        if reasoning.is_some() || effort.is_some() {
+            let mut config = json!({"includeThoughts":true});
+            if let Some(effort) = effort {
+                match effort {
+                    "none" | "disabled" => config["thinkingBudget"] = json!(0),
+                    "minimal" | "low" | "medium" | "high" => {
+                        config["thinkingLevel"] = json!(effort.to_ascii_uppercase())
+                    }
+                    _ => return reject("unsupported Gemini reasoning effort"),
+                }
+            }
+            options = config;
+        }
+    }
+    Ok(options)
 }
 
 pub(super) fn map_text_format(result: &mut Value, body: &Value) -> anyhow::Result<()> {

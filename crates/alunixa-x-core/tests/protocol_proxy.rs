@@ -2013,7 +2013,7 @@ async fn aggregate_proxy_fails_over_to_next_member_in_same_request() {
     let second_addr = second.local_addr().unwrap();
     let first_server = tokio::spawn(respond_once(
         first,
-        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 11\r\ncontent-type: application/json\r\n\r\n{\"error\":1}",
+        "HTTP/1.1 429 Too Many Requests\r\ncontent-length: 11\r\ncontent-type: application/json\r\n\r\n{\"error\":1}",
     ));
     let second_server = tokio::spawn(respond_once(
         second,
@@ -2037,6 +2037,53 @@ async fn aggregate_proxy_fails_over_to_next_member_in_same_request() {
     assert_eq!(body.as_ref(), br#"{"id":"resp_1","object":"response"}"#);
     first_server.await.unwrap();
     second_server.await.unwrap();
+}
+
+#[tokio::test]
+async fn aggregate_proxy_does_not_replay_an_ambiguous_post_failure() {
+    let _lock = settings_path_test_lock().lock().unwrap();
+    for abrupt_disconnect in [false, true] {
+        let first = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let first_addr = first.local_addr().unwrap();
+        let second = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let second_addr = second.local_addr().unwrap();
+        let first_server = tokio::spawn(async move {
+            if abrupt_disconnect {
+                let (mut socket, _) = first.accept().await.unwrap();
+                let mut buffer = [0; 8192];
+                use tokio::io::AsyncReadExt;
+                assert!(socket.read(&mut buffer).await.unwrap() > 0);
+                // The request reached the peer; its result is unknown.
+            } else {
+                respond_once(first, "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 11\r\ncontent-type: application/json\r\n\r\n{\"error\":1}").await;
+            }
+        });
+        let settings = aggregate_proxy_settings(
+            "no-replay",
+            format!("http://{first_addr}/v1"),
+            format!("http://{second_addr}/v1"),
+        );
+        let result = open_responses_proxy_request_with_settings(
+            r#"{"model":"gpt-5-mini","input":"hi"}"#,
+            settings,
+        )
+        .await;
+        if abrupt_disconnect {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(result.unwrap().status_code, 500);
+        }
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), second.accept())
+                .await
+                .is_err()
+        );
+        first_server.await.unwrap();
+    }
 }
 
 #[tokio::test]

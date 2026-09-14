@@ -10,6 +10,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- 2026-09-14 本地进行协议保真修复，版本号仍为 1.0.17，未推送、未发布、未替换已运行实例；历史正式发行状态见下文喵~
 - v1.0.17 已正式发布，产品提交 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；后续本地提交仅记录验收喵~
 - 2026-09-13 工作树原先干净，新增窗口保存问题调查前检查点 `a50b13a` 喵~
 - 环境提供的 `D:\Cursor\CodexPP` 已不存在，不在该目录执行或重建旧仓库喵~
@@ -20,6 +21,7 @@
 - `assets/inject` 原生界面注入；`tools` 验证脚本；`docs/releases` 发行说明；`.github/workflows` CI 喵~
 
 ## 5. Architecture
+- `protocol_proxy.rs` 处理协议路由、转换和 SSE 状态机，新增子模块 `protocol_proxy/fidelity.rs` 处理能力校验及自包含原生回放，`launcher.rs` 负责 HTTP 错误/SSE 交付与超时喵~
 - 前端表单通过 Tauri commands 调用 core SettingsStore/relay_switch/relay_config；启动器最后执行 startup_audit 门禁喵~
 - 设置快照与真实 CODEX_HOME/config.toml 分开，供应商切换含回填、保存、原子写入及回滚逻辑喵~
 
@@ -52,6 +54,7 @@
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
 ## 11. Important Files
+- `docs/protocol-fidelity.md` 记录保真边界和协议契约；`tests/protocol_fidelity.rs` 为新增独立回归，不依赖真实模型账户喵~
 - `settings.rs` 设置合并与保存；`relay_config.rs` TOML 和上下文/模型窗口；`relay_switch.rs` 供应商切换回填喵~
 - `App.tsx` 供应商表单；`commands.rs` 保存与切换入口；`startup_audit.rs` 启动检查；`codex_instructions.rs` 高级提示词保护与恢复喵~
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
@@ -87,6 +90,11 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+- 收尾审计增加上游非 assistant 角色拒绝、失败流保留半截工具参数且不发可执行 done、HTTP ID 协商仅允许 400/422 且响应含输出时禁止重试；最新保真用例共 31 项，需用最终源码重新验收喵~
+- 第一轮 workspace 已进入并行 Windows 链接阶段，进程正常推进；其编译期间补了上述最后边界，不能把第一轮结果直接当最终源码全量验收喵~
+- 最新进度：第二阶段保真 26/26、既有协议 70/70 通过，随后新增 Gemini 原始函数 ID、缺失 response_id、ID 协商输出后不重放及 HTTP 结果不明不切换回归；完整 workspace 正在运行，前端 98/98 已通过喵~
+- HTTP 已区分不支持输入的 400 和上游错误的 502；支持上游 JSON 对流请求的 SSE 交付；生成已停止后仍不结束的流有独立 5 秒截止时间，不被心跳续期喵~
+- 本轮仅本地修复，CHANGELOG 使用 Unreleased，没有修改版本或已发行标签；尚未作真实供应商/运行窗口验收喵~
 - 13 项原始失败已全部修复并通过，原有协议专项 70/70 通过；额外修复缓存 token 口径、流式 refusal 类型和函数名分片，正在接入 HTTP 可区分错误与追加原生流回放/异常边界测试喵~
 - 首批隔离回归 `protocol_fidelity` 在旧实现上 13/13 失败，逐项证实尾部 usage 丢失、EOF/JSON/UTF-8 静默成功、工具身份提前生成、incomplete 错发 completed、跨会话 Gemini ID 冲突及签名丢失喵~
 - 已开始修复：新增 `protocol_proxy/fidelity.rs` 请求能力门禁和自包含原生回放项；不支持项明确失败，Anthropic/Gemini 原始内容和签名通过 opaque reasoning 回放项保存，不再依赖全局 Gemini 签名缓存喵~

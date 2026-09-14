@@ -40,6 +40,9 @@ const EXTRA_CHAT_PASSTHROUGH_FIELDS: &[&str] = &[
     "stream_options",
     "top_logprobs",
     "user",
+    "prompt_cache_key",
+    "prompt_cache_retention",
+    "safety_identifier",
 ];
 const ERROR_BODY_PREVIEW_LIMIT: usize = 1024;
 
@@ -161,7 +164,7 @@ fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Re
     }
 
     if let Some(input) = body.get("input") {
-        append_responses_input(input, &mut messages);
+        append_responses_input(input, &mut messages)?;
     }
     normalize_chat_messages(&mut messages);
     let messages = collapse_system_messages_to_head(messages);
@@ -244,6 +247,18 @@ fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Re
 }
 
 pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
+    if [
+        "reasoning",
+        "thinking",
+        "reasoning_effort",
+        "enable_thinking",
+        "reasoning_split",
+    ]
+    .iter()
+    .any(|key| body.get(*key).is_some_and(|v| !v.is_null()))
+    {
+        return fidelity::reject("legacy Completions cannot represent reasoning controls");
+    }
     let chat = responses_to_chat_completions_for_wire(body, "completions")?;
     if chat.get("response_format").is_some() || chat.get("verbosity").is_some() {
         return fidelity::reject("legacy Completions cannot represent structured text options");
@@ -292,6 +307,7 @@ pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
 }
 
 pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
+    let native_options = fidelity::native_reasoning_options(&body, "anthropic")?;
     let body = fidelity::prepare_history(body, "anthropic")?;
     let chat = responses_to_chat_completions_for_wire(body, "anthropic")?;
     if chat
@@ -373,6 +389,10 @@ pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
         "messages": messages,
         "stream": chat.get("stream").cloned().unwrap_or_else(|| json!(false))
     });
+    result
+        .as_object_mut()
+        .unwrap()
+        .extend(native_options.as_object().unwrap().clone());
     if !system.is_empty() {
         result["system"] = json!(system.join("\n\n"));
     }
@@ -430,11 +450,13 @@ pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
 }
 
 pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value> {
+    let thinking_config = fidelity::native_reasoning_options(&body, "gemini")?;
     let body = fidelity::prepare_history(body, "gemini")?;
     let chat = responses_to_chat_completions_for_wire(body, "gemini")?;
     let mut system_parts = Vec::new();
     let mut contents = Vec::new();
     let mut tool_names = BTreeMap::<String, String>::new();
+    let mut tool_wire_ids = BTreeMap::<String, Value>::new();
 
     for message in chat
         .get("messages")
@@ -462,7 +484,7 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
                 .get(call_id)
                 .cloned()
                 .unwrap_or_else(|| "tool".to_string());
-            contents.push(json!({
+            let mut tool_result = json!({
                 "role": "user",
                 "parts": [{
                     "functionResponse": {
@@ -470,7 +492,11 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
                         "response": { "result": chat_content_text(message.get("content").unwrap_or(&Value::Null)) }
                     }
                 }]
-            }));
+            });
+            if let Some(id) = tool_wire_ids.get(call_id) {
+                tool_result["parts"][0]["functionResponse"]["id"] = id.clone();
+            }
+            contents.push(tool_result);
             continue;
         }
 
@@ -481,6 +507,13 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
                 .flatten()
             {
                 tool_names.insert(id.clone(), name.as_str().unwrap_or("").to_string());
+            }
+            for (id, wire_id) in message["_native_tool_wire_ids"]
+                .as_object()
+                .into_iter()
+                .flatten()
+            {
+                tool_wire_ids.insert(id.clone(), wire_id.clone());
             }
             contents.push(json!({"role":"model","parts":native}));
             continue;
@@ -522,6 +555,9 @@ pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value
         result["systemInstruction"] = json!({ "parts": system_parts });
     }
     let mut generation_config = json!({});
+    if thinking_config.as_object().is_some_and(|o| !o.is_empty()) {
+        generation_config["thinkingConfig"] = thinking_config;
+    }
     if let Some(value) = chat
         .get("max_tokens")
         .or_else(|| chat.get("max_completion_tokens"))
@@ -800,11 +836,11 @@ fn anthropic_message_to_chat_completion(body: Value) -> Value {
     if !tool_calls.is_empty() {
         message["tool_calls"] = json!(tool_calls);
     }
-    let finish_reason = match body.get("stop_reason").and_then(Value::as_str) {
-        Some("max_tokens") => "length",
-        Some("tool_use") => "tool_calls",
-        _ => "stop",
-    };
+    let finish_reason = anthropic_finish_reason(
+        body.get("stop_reason")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    );
     json!({
         "id": body.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
         "created": 0,
@@ -871,11 +907,13 @@ fn gemini_generate_content_to_chat_completion(body: Value, original_request: &Va
     if !tool_calls.is_empty() {
         message["tool_calls"] = json!(tool_calls);
     }
-    let finish_reason = match candidate.get("finishReason").and_then(Value::as_str) {
-        Some("MAX_TOKENS") => "length",
-        Some("STOP") | None if !tool_calls.is_empty() => "tool_calls",
-        _ => "stop",
-    };
+    let finish_reason = gemini_finish_reason(
+        candidate
+            .get("finishReason")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        !tool_calls.is_empty(),
+    );
     json!({
         "id": body
             .get("responseId")
@@ -1072,21 +1110,8 @@ impl ChatSseToResponsesConverter {
     }
 
     fn handle_block(&mut self, block: &str, output: &mut String) {
-        let mut event_name: Option<String> = None;
-        let mut data_parts = Vec::new();
-        for line in block.split(['\r', '\n']) {
-            if let Some(event) = strip_sse_field(line, "event") {
-                event_name = Some(event.trim().to_string());
-            }
-            if let Some(data) = strip_sse_field(line, "data") {
-                data_parts.push(data.to_string());
-            }
-        }
-
-        if data_parts.is_empty() {
-            return;
-        }
-        let data = data_parts.join("\n");
+        let (event_name, data) = sse_event_and_data(block);
+        let Some(data) = data else { return };
         if data.trim() == "[DONE]" {
             self.state.finalize_into(output);
             return;
@@ -1363,6 +1388,19 @@ impl NativeSseToResponsesConverter {
                     }
                 };
                 let fragment = delta[delta_field].as_str().unwrap_or("");
+                let expected = match field {
+                    "text" => "text",
+                    "thinking" | "signature" => "thinking",
+                    _ => "tool_use",
+                };
+                if block["type"] != expected {
+                    self.state.failed_into(
+                        output,
+                        "Anthropic delta type does not match its block".into(),
+                        Some("invalid_stream_event".into()),
+                    );
+                    return;
+                }
                 if field.is_empty() {
                     self.native_arguments
                         .entry(index)
@@ -1660,6 +1698,17 @@ impl UpstreamSseToResponsesConverter {
         match self {
             Self::Chat(converter) => converter.is_completed(),
             Self::Native(converter) => converter.is_completed(),
+        }
+    }
+
+    pub fn is_waiting_for_terminal_event(&self) -> bool {
+        match self {
+            Self::Chat(converter) => {
+                !converter.is_completed() && converter.state.finish_reason.is_some()
+            }
+            Self::Native(converter) => {
+                !converter.is_completed() && converter.state.finish_reason.is_some()
+            }
         }
     }
 }
@@ -2149,6 +2198,8 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             upstream_request_parts(&relay, request_json.clone()).await?;
         if wire_api == UpstreamWireApi::Responses && is_responses_compact_proxy_path(request_path) {
             endpoint = responses_compact_url(&relay.base_url);
+        } else if is_responses_compact_proxy_path(request_path) {
+            return fidelity::reject("Responses compaction requires a native Responses provider");
         }
         let has_more_candidates = attempt + 1 < relay_count;
         let header_timeout = response_header_timeout(is_stream);
@@ -2230,7 +2281,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 "attempt": attempt + 1,
                 "candidateCount": relay_count,
                 "headerTimeoutSeconds": header_timeout.as_secs(),
-                "willFailover": has_more_candidates && !(200..300).contains(&status_code)
+                "willFailover": has_more_candidates && matches!(status_code, 401 | 403 | 429)
             }),
         );
         crate::relay_rotation::record_relay_request_event(
@@ -2247,10 +2298,11 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             .and_then(|value| value.to_str().ok())
             .unwrap_or("")
             .to_string();
-        if (200..300).contains(&status_code) || !has_more_candidates {
+        if !matches!(status_code, 401 | 403 | 429) || !has_more_candidates {
             return Ok(UpstreamProxyResponse {
                 status_code,
-                is_stream: is_stream || content_type.contains("text/event-stream"),
+                is_stream: content_type.contains("text/event-stream")
+                    || (is_stream && !content_type.contains("application/json")),
                 content_type,
                 wire_api,
                 response: upstream,
@@ -2619,6 +2671,35 @@ pub fn repair_responses_item_ids_for_upstream_error(
     request_body: &str,
     upstream_error: &str,
 ) -> Option<ResponsesItemIdRetryRepair> {
+    if serde_json::from_str::<Value>(upstream_error)
+        .ok()
+        .is_some_and(|value| {
+            value
+                .get("output")
+                .or_else(|| value.pointer("/response/output"))
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty())
+        })
+    {
+        return None;
+    }
+    // A late validation-looking error must never replay a request that already emitted output.
+    for block in upstream_error.replace("\r\n", "\n").split("\n\n") {
+        let (event, data) = sse_event_and_data(block);
+        let parsed = data.and_then(|data| serde_json::from_str::<Value>(&data).ok());
+        let kind = event
+            .as_deref()
+            .or_else(|| parsed.as_ref().and_then(|v| v["type"].as_str()));
+        if kind.is_some_and(|kind| {
+            kind.starts_with("response.")
+                && !matches!(
+                    kind,
+                    "response.created" | "response.in_progress" | "response.failed"
+                )
+        }) {
+            return None;
+        }
+    }
     let has_direct_id_error = upstream_error.contains("Invalid 'input[")
         && upstream_error.contains("Expected an ID that begins with '");
     if !upstream_error.contains("invalid_id_prefix") && !has_direct_id_error {
@@ -3426,8 +3507,150 @@ pub fn chat_sse_to_responses_sse_with_request(input: &str, original_request: &Va
     String::from_utf8(output).unwrap_or_default()
 }
 
+/// A provider may answer a streaming request with JSON. Keep the downstream wire contract.
+pub fn response_to_sse(response: &Value) -> anyhow::Result<Vec<u8>> {
+    let mut output = String::new();
+    let mut initial = response.clone();
+    initial["status"] = json!("in_progress");
+    initial["output"] = json!([]);
+    for event in ["response.created", "response.in_progress"] {
+        push_sse(&mut output, event, json!({"type":event,"response":initial}));
+    }
+    for (index, item) in response["output"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        let kind = item["type"].as_str().unwrap_or("");
+        if !matches!(
+            kind,
+            "message" | "reasoning" | "function_call" | "custom_tool_call"
+        ) {
+            return fidelity::reject("unsupported response item in JSON-to-SSE conversion");
+        }
+        let mut added = item.clone();
+        if kind == "message" {
+            added["content"] = json!([]);
+        }
+        if kind == "reasoning" {
+            added["summary"] = json!([]);
+        }
+        if kind == "function_call" {
+            added["arguments"] = json!("");
+        }
+        if kind == "custom_tool_call" {
+            added["input"] = json!("");
+        }
+        push_sse(
+            &mut output,
+            "response.output_item.added",
+            json!({"type":"response.output_item.added","output_index":index,"item":added}),
+        );
+        if kind == "message" {
+            for (part_index, part) in item["content"].as_array().into_iter().flatten().enumerate() {
+                let refusal = part["type"] == "refusal";
+                let field = if refusal { "refusal" } else { "text" };
+                let event = if refusal {
+                    "response.refusal"
+                } else {
+                    "response.output_text"
+                };
+                let mut empty = part.clone();
+                empty[field] = json!("");
+                push_sse(
+                    &mut output,
+                    "response.content_part.added",
+                    json!({"type":"response.content_part.added","item_id":item["id"],"output_index":index,"content_index":part_index,"part":empty}),
+                );
+                push_sse(
+                    &mut output,
+                    &format!("{event}.delta"),
+                    json!({"type":format!("{event}.delta"),"item_id":item["id"],"output_index":index,"content_index":part_index,"delta":part[field]}),
+                );
+                let mut done = json!({"type":format!("{event}.done"),"item_id":item["id"],"output_index":index,"content_index":part_index});
+                done[field] = part[field].clone();
+                push_sse(&mut output, &format!("{event}.done"), done);
+                push_sse(
+                    &mut output,
+                    "response.content_part.done",
+                    json!({"type":"response.content_part.done","item_id":item["id"],"output_index":index,"content_index":part_index,"part":part}),
+                );
+            }
+        } else if kind == "reasoning" {
+            for (summary_index, part) in
+                item["summary"].as_array().into_iter().flatten().enumerate()
+            {
+                push_sse(
+                    &mut output,
+                    "response.reasoning_summary_part.added",
+                    json!({"type":"response.reasoning_summary_part.added","item_id":item["id"],"output_index":index,"summary_index":summary_index,"part":{"type":"summary_text","text":""}}),
+                );
+                push_sse(
+                    &mut output,
+                    "response.reasoning_summary_text.delta",
+                    json!({"type":"response.reasoning_summary_text.delta","item_id":item["id"],"output_index":index,"summary_index":summary_index,"delta":part["text"]}),
+                );
+                push_sse(
+                    &mut output,
+                    "response.reasoning_summary_text.done",
+                    json!({"type":"response.reasoning_summary_text.done","item_id":item["id"],"output_index":index,"summary_index":summary_index,"text":part["text"]}),
+                );
+                push_sse(
+                    &mut output,
+                    "response.reasoning_summary_part.done",
+                    json!({"type":"response.reasoning_summary_part.done","item_id":item["id"],"output_index":index,"summary_index":summary_index,"part":part}),
+                );
+            }
+        } else if item["status"] == "completed" && response["status"] == "completed" {
+            let field = if kind == "function_call" {
+                "arguments"
+            } else {
+                "input"
+            };
+            let event = if kind == "function_call" {
+                "response.function_call_arguments"
+            } else {
+                "response.custom_tool_call_input"
+            };
+            push_sse(
+                &mut output,
+                &format!("{event}.delta"),
+                json!({"type":format!("{event}.delta"),"item_id":item["id"],"output_index":index,"delta":item[field]}),
+            );
+            let mut done =
+                json!({"type":format!("{event}.done"),"item_id":item["id"],"output_index":index});
+            done[field] = item[field].clone();
+            push_sse(&mut output, &format!("{event}.done"), done);
+        } else {
+            continue;
+        }
+        push_sse(
+            &mut output,
+            "response.output_item.done",
+            json!({"type":"response.output_item.done","output_index":index,"item":item}),
+        );
+    }
+    let event = match response["status"].as_str() {
+        Some("completed") => "response.completed",
+        Some("incomplete") => "response.incomplete",
+        _ => "response.failed",
+    };
+    push_sse(
+        &mut output,
+        event,
+        json!({"type":event,"response":response}),
+    );
+    output.push_str("data: [DONE]\n\n");
+    Ok(sequence_sse(output, &mut 0))
+}
+
 pub fn response_id_from_chat_id(id: Option<&str>) -> String {
-    let id = id.unwrap_or("compat");
+    let Some(id) = id.filter(|id| {
+        !id.is_empty() && !matches!(*id, "cmpl_compat" | "msg_compat" | "gemini_compat")
+    }) else {
+        return format!("resp_{}", uuid::Uuid::new_v4().simple());
+    };
     if id.starts_with("resp_") {
         id.to_string()
     } else {
@@ -3543,6 +3766,17 @@ impl ChatSseState {
         if self.completed {
             return;
         }
+        if chunk
+            .get("choices")
+            .is_none_or(|choices| !choices.is_array())
+        {
+            self.failed_into(
+                output,
+                "Upstream chat event is missing choices".into(),
+                Some("invalid_stream_event".into()),
+            );
+            return;
+        }
         if !self.response_started {
             if let Some(id) = chunk.get("id").and_then(Value::as_str) {
                 self.response_id = response_id_from_chat_id(Some(id));
@@ -3632,6 +3866,17 @@ impl ChatSseState {
         }
 
         if let Some(finish_reason) = choice.get("finish_reason").and_then(Value::as_str) {
+            if !matches!(
+                finish_reason,
+                "stop" | "length" | "content_filter" | "tool_calls" | "function_call"
+            ) {
+                self.failed_into(
+                    output,
+                    "Unknown upstream finish reason".into(),
+                    Some("unsupported_stream_event".into()),
+                );
+                return;
+            }
             self.finish_reason = Some(finish_reason.to_string());
         }
     }
@@ -3647,6 +3892,8 @@ impl ChatSseState {
                 match leading_think_prefix_decision(&self.inline_think.buffer) {
                     ThinkPrefixDecision::NeedMore => {}
                     ThinkPrefixDecision::Reasoning => {
+                        let buffer = self.inline_think.buffer.trim_start();
+                        self.inline_think.buffer = buffer[THINK_OPEN_TAG.len()..].to_string();
                         self.inline_think.mode = InlineThinkMode::Reasoning;
                         self.drain_complete_inline_think_into(output);
                     }
@@ -3666,15 +3913,31 @@ impl ChatSseState {
     }
 
     fn drain_complete_inline_think_into(&mut self, output: &mut String) {
-        let Some((reasoning, answer)) = split_leading_think_block(&self.inline_think.buffer) else {
+        let Some(close) = self.inline_think.buffer.find(THINK_CLOSE_TAG) else {
+            // Emit reasoning promptly, keeping only a possible split closing delimiter.
+            let keep = (1..THINK_CLOSE_TAG.len())
+                .rev()
+                .find(|len| self.inline_think.buffer.ends_with(&THINK_CLOSE_TAG[..*len]))
+                .unwrap_or(0);
+            let available = self.inline_think.buffer.len() - keep;
+            let reasoning = self.inline_think.buffer[..available].to_string();
+            self.inline_think.buffer.drain(..available);
+            if !reasoning.is_empty() {
+                self.push_reasoning_delta_into(&reasoning, output);
+            }
             return;
         };
+        let reasoning = self.inline_think.buffer[..close].to_string();
+        let answer = strip_think_answer_separator(
+            &self.inline_think.buffer[close + THINK_CLOSE_TAG.len()..],
+        )
+        .to_string();
         self.inline_think.mode = InlineThinkMode::Text;
         self.inline_think.buffer.clear();
         if !reasoning.is_empty() {
             self.push_reasoning_delta_into(&reasoning, output);
-            self.finalize_reasoning_into(output);
         }
+        self.finalize_reasoning_into(output);
         if !answer.is_empty() {
             self.push_text_delta_into(&answer, output);
         }
@@ -3694,19 +3957,8 @@ impl ChatSseState {
             InlineThinkMode::Reasoning => {
                 let buffered = std::mem::take(&mut self.inline_think.buffer);
                 self.inline_think.mode = InlineThinkMode::Text;
-                if let Some((reasoning, answer)) = split_leading_think_block(&buffered) {
-                    if !reasoning.is_empty() {
-                        self.push_reasoning_delta_into(&reasoning, output);
-                        self.finalize_reasoning_into(output);
-                    }
-                    if !answer.is_empty() {
-                        self.push_text_delta_into(&answer, output);
-                    }
-                    return;
-                }
-                let reasoning = strip_leading_think_open_tag(&buffered).unwrap_or(buffered);
-                if !reasoning.is_empty() {
-                    self.push_reasoning_delta_into(&reasoning, output);
+                if !buffered.is_empty() {
+                    self.push_reasoning_delta_into(&buffered, output);
                     self.finalize_reasoning_into(output);
                 }
             }
@@ -4218,7 +4470,18 @@ impl ChatSseState {
         if let Some(error_type) = error_type.filter(|value| !value.is_empty()) {
             error["type"] = json!(error_type);
         }
-        let mut response = self.base_response("failed", self.completed_output_items());
+        let mut partial_output = self.completed_output_items();
+        for tool in self.tools.values().filter(|tool| !tool.done) {
+            let mut item = response_tool_call_item(
+                &tool.call_id,
+                &tool.name,
+                &tool.arguments,
+                &self.tool_context,
+            );
+            item["status"] = json!("incomplete");
+            partial_output.push(item);
+        }
+        let mut response = self.base_response("failed", partial_output);
         response["error"] = error;
         push_sse(
             output,
@@ -4347,7 +4610,7 @@ fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
 fn sse_event_and_data(block: &str) -> (Option<String>, Option<String>) {
     let mut event_name = None;
     let mut data_parts = Vec::new();
-    for line in block.split(['\r', '\n']) {
+    for line in block.trim_start_matches('\u{feff}').split(['\r', '\n']) {
         if let Some(event) = strip_sse_field(line, "event") {
             event_name = Some(event.trim().to_string());
         }
@@ -4444,7 +4707,6 @@ fn gemini_content_parts(content: &Value) -> Vec<Value> {
                     } else {
                         Some(json!({
                             "fileData": {
-                                "mimeType": "application/octet-stream",
                                 "fileUri": url
                             }
                         }))
@@ -4581,6 +4843,12 @@ fn validate_chat_message(message: &Value) -> anyhow::Result<()> {
     let Some(object) = message.as_object() else {
         return fidelity::reject("upstream assistant message must be an object");
     };
+    if message
+        .get("role")
+        .is_some_and(|role| !role.is_null() && role != "assistant")
+    {
+        return fidelity::reject("upstream message role is not assistant");
+    }
     for key in object.keys() {
         if !matches!(
             key.as_str(),
@@ -4658,6 +4926,14 @@ fn validate_gemini_response(body: &Value) -> anyhow::Result<()> {
         .into_iter()
         .flatten()
     {
+        if let Some(call) = part.get("functionCall") {
+            if call.as_object().is_none_or(|o| {
+                o.keys()
+                    .any(|key| !matches!(key.as_str(), "name" | "args" | "id"))
+            }) {
+                return fidelity::reject("unsupported Gemini function call fields");
+            }
+        }
         if part.as_object().is_none_or(|o| {
             o.keys().any(|key| {
                 !matches!(
@@ -4792,7 +5068,7 @@ fn truncate_error_preview(input: &str) -> String {
     input.chars().take(ERROR_BODY_PREVIEW_LIMIT).collect()
 }
 
-fn append_responses_input(input: &Value, messages: &mut Vec<Value>) {
+fn append_responses_input(input: &Value, messages: &mut Vec<Value>) -> anyhow::Result<()> {
     match input {
         Value::String(text) => messages.push(json!({ "role": "user", "content": text })),
         Value::Array(items) => {
@@ -4806,7 +5082,7 @@ fn append_responses_input(input: &Value, messages: &mut Vec<Value>) {
                     &mut pending_tool_calls,
                     &mut pending_reasoning,
                     &mut seen_tool_call_ids,
-                );
+                )?;
             }
             flush_tool_calls(messages, &mut pending_tool_calls, &mut pending_reasoning);
             flush_reasoning(messages, &mut pending_reasoning);
@@ -4821,12 +5097,13 @@ fn append_responses_input(input: &Value, messages: &mut Vec<Value>) {
                 &mut pending_tool_calls,
                 &mut pending_reasoning,
                 &mut seen_tool_call_ids,
-            );
+            )?;
             flush_tool_calls(messages, &mut pending_tool_calls, &mut pending_reasoning);
             flush_reasoning(messages, &mut pending_reasoning);
         }
         _ => {}
     }
+    Ok(())
 }
 
 fn append_responses_item(
@@ -4835,32 +5112,47 @@ fn append_responses_item(
     pending_tool_calls: &mut Vec<Value>,
     pending_reasoning: &mut Vec<String>,
     seen_tool_call_ids: &mut BTreeSet<String>,
-) {
+) -> anyhow::Result<()> {
     match item.get("type").and_then(Value::as_str) {
         Some("alunixa_native_message") => {
             flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
             flush_reasoning(messages, pending_reasoning);
             let mut names = json!({});
+            let mut wire_ids = json!({});
             let native = item.get("native").cloned().unwrap_or(Value::Null);
+            let native_calls: Vec<Value> = native
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|part| part.get("functionCall").cloned())
+                .collect();
             let mut message = if native.is_object() {
                 native
             } else {
                 json!({"role":"assistant","content":"","_native":native})
             };
-            for call in item["calls"].as_array().into_iter().flatten() {
+            for (index, call) in item["calls"].as_array().into_iter().flatten().enumerate() {
                 let id = call["call_id"].as_str().unwrap_or("");
                 seen_tool_call_ids.insert(id.to_string());
-                names[id] = json!(responses_history_function_name(call));
+                names[id] = native_calls
+                    .get(index)
+                    .and_then(|call| call.get("name"))
+                    .cloned()
+                    .unwrap_or_else(|| json!(responses_history_function_name(call)));
+                if let Some(wire_id) = native_calls.get(index).and_then(|call| call.get("id")) {
+                    wire_ids[id] = wire_id.clone();
+                }
             }
             if message.get("_native").is_some() {
                 message["_native_tool_names"] = names;
+                message["_native_tool_wire_ids"] = wire_ids;
             }
             messages.push(message);
         }
         Some("function_call") => {
             let name = responses_history_function_name(item);
             if name.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             let call_id = item
                 .get("call_id")
@@ -4868,7 +5160,7 @@ fn append_responses_item(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             if call_id.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             seen_tool_call_ids.insert(call_id.to_string());
             pending_tool_calls.push(json!({
@@ -4883,16 +5175,10 @@ fn append_responses_item(
         Some("function_call_output") => {
             let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
             if call_id.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             if !seen_tool_call_ids.contains(call_id) {
-                flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
-                flush_reasoning(messages, pending_reasoning);
-                messages.push(orphan_tool_output_message(
-                    call_id,
-                    item.get("output").unwrap_or(&Value::Null),
-                ));
-                return;
+                return fidelity::reject("orphan tool output requires matching call history");
             }
             flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
             messages.push(json!({
@@ -4902,19 +5188,19 @@ fn append_responses_item(
             }));
         }
         Some("custom_tool_call") => {
-            let name = item.get("name").and_then(Value::as_str).unwrap_or("");
+            let name = responses_history_function_name(item);
             let input = item
                 .get("input")
                 .or_else(|| item.get("arguments"))
                 .unwrap_or(&Value::Null);
-            let (name, arguments) = build_custom_tool_call_history(name, input);
+            let (name, arguments) = build_custom_tool_call_history(&name, input);
             let call_id = item
                 .get("call_id")
                 .or_else(|| item.get("id"))
                 .and_then(Value::as_str)
                 .unwrap_or("");
             if call_id.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             seen_tool_call_ids.insert(call_id.to_string());
             pending_tool_calls.push(json!({
@@ -4929,16 +5215,10 @@ fn append_responses_item(
         Some("custom_tool_call_output") => {
             let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
             if call_id.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             if !seen_tool_call_ids.contains(call_id) {
-                flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
-                flush_reasoning(messages, pending_reasoning);
-                messages.push(orphan_tool_output_message(
-                    call_id,
-                    item.get("output").unwrap_or(&Value::Null),
-                ));
-                return;
+                return fidelity::reject("orphan tool output requires matching call history");
             }
             flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
             messages.push(json!({
@@ -4956,7 +5236,7 @@ fn append_responses_item(
                     .and_then(Value::as_str)
                     .unwrap_or("");
                 if call_id.is_empty() {
-                    return;
+                    return fidelity::reject("invalid tool history item");
                 }
                 seen_tool_call_ids.insert(call_id.to_string());
                 pending_tool_calls.push(json!({
@@ -4979,13 +5259,11 @@ fn append_responses_item(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             if call_id.is_empty() {
-                return;
+                return fidelity::reject("invalid tool history item");
             }
             let output = content.get("content").unwrap_or(content);
             if !seen_tool_call_ids.contains(call_id) {
-                flush_reasoning(messages, pending_reasoning);
-                messages.push(orphan_tool_output_message(call_id, output));
-                return;
+                return fidelity::reject("orphan tool output requires matching call history");
             }
             messages.push(json!({
                 "role": "tool",
@@ -5024,16 +5302,7 @@ fn append_responses_item(
             }
         }
     }
-}
-
-fn orphan_tool_output_message(call_id: &str, output: &Value) -> Value {
-    json!({
-        "role": "user",
-        "content": format!(
-            "Function call output ({call_id}): {}",
-            response_output_text(output)
-        )
-    })
+    Ok(())
 }
 
 fn normalize_chat_messages(messages: &mut [Value]) {
@@ -5106,6 +5375,12 @@ fn flush_tool_calls(
 
     if let Some(last) = messages.last_mut() {
         if last.get("role").and_then(Value::as_str) == Some("assistant") {
+            if !pending_reasoning.is_empty() {
+                append_reasoning_to_assistant_message(
+                    last,
+                    &std::mem::take(pending_reasoning).join("\n"),
+                );
+            }
             merge_tool_calls_into_message(last, std::mem::take(pending_tool_calls));
             return;
         }

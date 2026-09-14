@@ -1991,21 +1991,27 @@ async fn handle_protocol_proxy_connection(
                         .and_then(serde_json::Value::as_str),
                     &error,
                 );
-                let body = serde_json::to_vec(
-                    &serde_json::json!({                     "status": "failed",                     "message": error.to_string()                 }),
-                )?;
-                write_http_response(
-                    stream,
-                    "502 Bad Gateway",
-                    "application/json; charset=utf-8",
-                    &body,
-                )
-                .await?;
+                let invalid_request = crate::protocol_proxy::is_protocol_conversion_error(&error)
+                    || error.downcast_ref::<serde_json::Error>().is_some();
+                let status = if invalid_request {
+                    "400 Bad Request"
+                } else {
+                    "502 Bad Gateway"
+                };
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "error":{
+                        "type":if invalid_request { "invalid_request_error" } else { "upstream_error" },
+                        "code":if invalid_request { "unsupported_protocol_conversion" } else { "upstream_request_failed" },
+                        "message":error.to_string()
+                    }
+                }))?;
+                write_http_response(stream, status, "application/json; charset=utf-8", &body)
+                    .await?;
                 log_helper_response(
                     "helper.protocol_proxy_failed",
                     method,
                     path,
-                    "502 Bad Gateway",
+                    status,
                     remote_addr_text,
                 );
                 stream.shutdown().await?;
@@ -2027,6 +2033,7 @@ async fn handle_protocol_proxy_connection(
         let negotiation_enabled = responses_id_negotiation_enabled();
         if failed.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses
             && negotiation_enabled
+            && matches!(failed_status_code, 400 | 422)
         {
             if let Some(repair) =
                 crate::protocol_proxy::repair_responses_item_ids_for_upstream_error(
@@ -2203,21 +2210,32 @@ async fn handle_protocol_proxy_connection(
         .ok_or_else(|| anyhow::anyhow!("无法为上游协议创建流转换器"))?;
         let mut bytes_stream = upstream.response.bytes_stream();
         let mut stream_failed = false;
+        let mut terminal_deadline = None;
         loop {
-            let next = match tokio::time::timeout(
-                crate::protocol_proxy::upstream_stream_idle_timeout(),
-                bytes_stream.next(),
-            )
-            .await
-            {
+            let deadline = terminal_deadline.unwrap_or_else(|| {
+                tokio::time::Instant::now() + crate::protocol_proxy::upstream_stream_idle_timeout()
+            });
+            let next = match tokio::time::timeout_at(deadline, bytes_stream.next()).await {
                 Ok(next) => next,
                 Err(_) => {
                     let failed = converter.fail(
-                        format!(
-                            "上游流超过 {} 秒没有新数据",
-                            crate::protocol_proxy::upstream_stream_idle_timeout().as_secs()
+                        if terminal_deadline.is_some() {
+                            "上游已经停止生成但未结束流，保留已收到的数据且不自动重放请求"
+                                .to_string()
+                        } else {
+                            format!(
+                                "上游流超过 {} 秒没有新数据",
+                                crate::protocol_proxy::upstream_stream_idle_timeout().as_secs()
+                            )
+                        },
+                        Some(
+                            if terminal_deadline.is_some() {
+                                "missing_stream_terminator"
+                            } else {
+                                "stream_idle_timeout"
+                            }
+                            .to_string(),
                         ),
-                        Some("stream_idle_timeout".to_string()),
                     );
                     if !failed.is_empty() {
                         stream.write_all(&failed).await?;
@@ -2237,6 +2255,10 @@ async fn handle_protocol_proxy_connection(
                     }
                     if converter.is_completed() {
                         break;
+                    }
+                    if converter.is_waiting_for_terminal_event() && terminal_deadline.is_none() {
+                        terminal_deadline =
+                            Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
                     }
                 }
                 Err(error) => {
@@ -2291,38 +2313,67 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let upstream_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
     let fallback_request = serde_json::json!({});
     let original_request = request_json.as_ref().unwrap_or(&fallback_request);
-    let response_json = match upstream.wire_api {
-        crate::protocol_proxy::UpstreamWireApi::ChatCompletions => {
-            crate::protocol_proxy::chat_completion_to_response_with_request(
-                upstream_json,
-                original_request,
-            )?
+    let conversion = (|| -> anyhow::Result<serde_json::Value> {
+        let upstream_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
+        match upstream.wire_api {
+            crate::protocol_proxy::UpstreamWireApi::ChatCompletions => {
+                crate::protocol_proxy::chat_completion_to_response_with_request(
+                    upstream_json,
+                    original_request,
+                )
+            }
+            crate::protocol_proxy::UpstreamWireApi::Completions => {
+                crate::protocol_proxy::completion_to_response_with_request(
+                    upstream_json,
+                    original_request,
+                )
+            }
+            crate::protocol_proxy::UpstreamWireApi::AnthropicMessages => {
+                crate::protocol_proxy::anthropic_message_to_response_with_request(
+                    upstream_json,
+                    original_request,
+                )
+            }
+            crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent => {
+                crate::protocol_proxy::gemini_generate_content_to_response_with_request(
+                    upstream_json,
+                    original_request,
+                )
+            }
+            crate::protocol_proxy::UpstreamWireApi::Responses
+            | crate::protocol_proxy::UpstreamWireApi::AudioTranscriptions
+            | crate::protocol_proxy::UpstreamWireApi::Transparent => Ok(upstream_json),
         }
-        crate::protocol_proxy::UpstreamWireApi::Completions => {
-            crate::protocol_proxy::completion_to_response_with_request(
-                upstream_json,
-                original_request,
-            )?
+    })();
+    let response_json = match conversion {
+        Ok(response) => response,
+        Err(error) => {
+            let body = serde_json::to_vec(&serde_json::json!({"error":{
+                "type":"upstream_protocol_error","code":"invalid_upstream_response","message":error.to_string()
+            }}))?;
+            write_http_response(
+                stream,
+                "502 Bad Gateway",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            stream.shutdown().await?;
+            return Ok(());
         }
-        crate::protocol_proxy::UpstreamWireApi::AnthropicMessages => {
-            crate::protocol_proxy::anthropic_message_to_response_with_request(
-                upstream_json,
-                original_request,
-            )?
-        }
-        crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent => {
-            crate::protocol_proxy::gemini_generate_content_to_response_with_request(
-                upstream_json,
-                original_request,
-            )?
-        }
-        crate::protocol_proxy::UpstreamWireApi::Responses
-        | crate::protocol_proxy::UpstreamWireApi::AudioTranscriptions
-        | crate::protocol_proxy::UpstreamWireApi::Transparent => upstream_json,
     };
+    if original_request
+        .get("stream")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        let body = crate::protocol_proxy::response_to_sse(&response_json)?;
+        write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &body).await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
     log_helper_response(

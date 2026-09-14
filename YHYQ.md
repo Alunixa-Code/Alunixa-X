@@ -1666,3 +1666,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - OpenAI Responses incomplete 事件 sequence_number、Anthropic signature_delta、Google Part thought_signature 均读取官方 SDK 类型文件（HTTP 200）；无依赖升级、无真实 API 请求喵~
 - 第一轮修复为保真回归 12/13、既有协议 63/70；唯一新增失败为缓存 token 被旧口径再减一次，已修正 Responses input_tokens 包含缓存，并保留供应商原始 usage 扩展字段喵~
 - 更新了七项依赖旧有损行为的测试契约，不再期待孤立工具结果降级、非法参数重写、提前结束或全局签名缓存；复测新增 13/13、既有协议 70/70 全部通过喵~
+- 第二阶段补齐流式签名/redacted 回放、原生思考控制、refusal 类型、分片函数名、快速思考增量、回放编辑/跨协议拒绝和 JSON-to-SSE 交付；专项 26/26 + 70/70 通过喵~
+- HTTP 改为明确 400/502/SSE failed，不把协议错误注入正文；POST 结果不明的断连/超时/500 不自动切换重放，认证和限流拒绝仍可有界切换，ID 协商在出现输出后禁止重试喵~
+- 随后增加 Gemini 原始函数名/ID 回放、缺失响应 ID 唯一性、已输出后 ID 协商禁止重试、HTTP 500/已接收后断连不切换测试，开始完整 workspace 回归；前端 98/98 已通过喵~
+- 添加 Unreleased 变更说明与 docs/protocol-fidelity.md，明确保真和不支持项的错误边界，不宣称所有真实供应商已实测，不发布或替换运行中的版本喵~
+- 收尾修复上游 tool/debug/system/user 角色不得流入 assistant 正文，失败流保留原始半截工具参数但不发送可执行 done；HTTP ID 前缀协商限制为 400/422，响应已有输出则拒绝重放喵~
+- 完整 workspace 首轮在 Windows 并行链接持续推进，尚未结束；因该轮编译期间补了最后边界，将以冻结后的源码再做最终验收，避免把旧编译结果当作最终通过喵~
