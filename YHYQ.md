@@ -1664,3 +1664,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 新增独立协议保真回归 13 项，在旧实现上全部失败，确认用户报告对应的真实转换缺陷；旧代码还把无关联工具结果降为 user、将非法参数包装为 input 字段，均会改变模型看到的语义喵~
 - 新增 fidelity 能力/历史校验，开始实现自包含原生回放、去全局签名缓存、唯一工具 ID、严格 SSE/UTF-8/JSON 与正确结束状态；第一轮修改后的编译和专项回归进行中喵~
 - OpenAI Responses incomplete 事件 sequence_number、Anthropic signature_delta、Google Part thought_signature 均读取官方 SDK 类型文件（HTTP 200）；无依赖升级、无真实 API 请求喵~
+- 第一轮修复为保真回归 12/13、既有协议 63/70；唯一新增失败为缓存 token 被旧口径再减一次，已修正 Responses input_tokens 包含缓存，并保留供应商原始 usage 扩展字段喵~
+- 更新了七项依赖旧有损行为的测试契约，不再期待孤立工具结果降级、非法参数重写、提前结束或全局签名缓存；复测新增 13/13、既有协议 70/70 全部通过喵~

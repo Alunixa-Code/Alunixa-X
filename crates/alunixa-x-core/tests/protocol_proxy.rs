@@ -206,7 +206,10 @@ fn responses_request_converts_to_all_supported_upstream_protocols() {
         }]
     });
 
-    let completions = responses_to_completions(request.clone()).unwrap();
+    assert!(responses_to_completions(request.clone()).is_err());
+    let mut legacy_request = request.clone();
+    legacy_request.as_object_mut().unwrap().remove("tools");
+    let completions = responses_to_completions(legacy_request).unwrap();
     assert!(
         completions["prompt"]
             .as_str()
@@ -267,21 +270,13 @@ fn gemini_tool_thought_signature_is_preserved_for_followup() {
     .unwrap();
     let call_id = response["output"][0]["call_id"].as_str().unwrap();
 
+    let mut history = response["output"].as_array().unwrap().clone();
+    history.push(json!({
+        "type":"function_call_output","call_id":call_id,"output":"found"
+    }));
     let followup = responses_to_gemini_generate_content(json!({
         "model": "gemini-3-pro",
-        "input": [
-            {
-                "type": "function_call",
-                "call_id": call_id,
-                "name": "lookup",
-                "arguments": "{\"query\":\"rust\"}"
-            },
-            {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": "found"
-            }
-        ]
+        "input": history
     }))
     .unwrap();
 
@@ -786,9 +781,6 @@ fn responses_request_maps_codex_custom_and_namespace_tools_to_chat_functions() {
                         }
                     }
                 ]
-            },
-            {
-                "type": "web_search"
             }
         ],
         "tool_choice": {
@@ -808,7 +800,7 @@ fn responses_request_maps_codex_custom_and_namespace_tools_to_chat_functions() {
         .collect();
     assert!(names.contains(&"exec"));
     assert!(names.contains(&"mcp__vscode_mcp__open_file"));
-    assert!(names.contains(&"web_search"));
+    assert!(!names.contains(&"web_search"));
     assert_eq!(
         converted["tools"][0]["function"]["parameters"]["properties"]["input"]["type"],
         "string"
@@ -1002,7 +994,7 @@ fn responses_input_replays_custom_and_legacy_tool_history() {
 }
 
 #[test]
-fn responses_input_flattens_namespace_function_history_and_skips_invalid_tool_items() {
+fn responses_input_flattens_valid_namespace_function_history() {
     let converted = responses_to_chat_completions(json!({
         "model": "gpt-5-mini",
         "input": [
@@ -1017,15 +1009,6 @@ fn responses_input_flattens_namespace_function_history_and_skips_invalid_tool_it
                 "type": "function_call_output",
                 "call_id": "call_ns",
                 "output": "saved"
-            },
-            {
-                "type": "function_call",
-                "call_id": "missing_name",
-                "arguments": "{}"
-            },
-            {
-                "type": "function_call_output",
-                "output": "orphan"
             }
         ]
     }))
@@ -1040,8 +1023,8 @@ fn responses_input_flattens_namespace_function_history_and_skips_invalid_tool_it
 }
 
 #[test]
-fn responses_input_sanitizes_invalid_function_call_arguments_history() {
-    let converted = responses_to_chat_completions(json!({
+fn responses_input_rejects_invalid_function_call_arguments_history() {
+    let result = responses_to_chat_completions(json!({
         "model": "gpt-5-mini",
         "input": [
             {
@@ -1071,30 +1054,18 @@ fn responses_input_sanitizes_invalid_function_call_arguments_history() {
                 }
             }
         ]
-    }))
-    .unwrap();
-
-    let calls = converted["messages"][0]["tool_calls"].as_array().unwrap();
-    for call in calls {
-        let arguments = call["function"]["arguments"].as_str().unwrap();
-        serde_json::from_str::<serde_json::Value>(arguments)
-            .expect("chat tool call arguments must always be valid JSON");
-    }
-    assert_eq!(
-        calls[0]["function"]["arguments"],
-        "{\"input\":\"{foo: \\\"bar\\\"}\"}"
+    }));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid tool argument JSON")
     );
-    assert_eq!(
-        calls[1]["function"]["arguments"],
-        "{\"input\":\"raw text with \\\"quotes\\\" and \\\\slashes\"}"
-    );
-    assert_eq!(calls[2]["function"]["arguments"], "{\"input\":[1,2,3]}");
-    assert_eq!(calls[3]["function"]["arguments"], "{\"ok\":true}");
 }
 
 #[test]
-fn responses_input_downgrades_orphan_tool_outputs_to_user_messages() {
-    let converted = responses_to_chat_completions(json!({
+fn responses_input_rejects_orphan_tool_outputs_without_changing_their_role() {
+    let result = responses_to_chat_completions(json!({
         "model": "gpt-5-mini",
         "input": [
             {
@@ -1112,20 +1083,12 @@ fn responses_input_downgrades_orphan_tool_outputs_to_user_messages() {
                 "output": "custom output without a matching call"
             }
         ]
-    }))
-    .unwrap();
-
-    assert_eq!(converted["messages"][0]["role"], "assistant");
-    assert!(converted["messages"][0].get("tool_calls").is_none());
-    assert_eq!(converted["messages"][1]["role"], "user");
-    assert_eq!(
-        converted["messages"][1]["content"],
-        "Function call output (missing_call): tool output without a matching call"
-    );
-    assert_eq!(converted["messages"][2]["role"], "user");
-    assert_eq!(
-        converted["messages"][2]["content"],
-        "Function call output (missing_custom): custom output without a matching call"
+    }));
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("orphan or duplicate tool output")
     );
 }
 
@@ -1310,10 +1273,13 @@ fn chat_completion_response_accepts_responses_style_usage_fields() {
     }))
     .unwrap();
 
-    assert_eq!(converted["usage"]["input_tokens"], 7);
+    assert_eq!(converted["usage"]["input_tokens"], 12);
     assert_eq!(converted["usage"]["output_tokens"], 3);
     assert_eq!(converted["usage"]["total_tokens"], 15);
-    assert!(converted["usage"].get("input_tokens_details").is_none());
+    assert_eq!(
+        converted["usage"]["input_tokens_details"]["cached_tokens"],
+        1
+    );
     assert_eq!(converted["usage"]["cache_read_input_tokens"], 1);
     assert_eq!(converted["usage"]["cache_creation_input_tokens"], 4);
 }
@@ -1528,7 +1494,7 @@ fn chat_completion_response_maps_gemini_and_claude_cache_usage_like_ccx() {
         }
     }))
     .unwrap();
-    assert_eq!(gemini["usage"]["input_tokens"], 15);
+    assert_eq!(gemini["usage"]["input_tokens"], 20);
     assert_eq!(gemini["usage"]["output_tokens"], 7);
     assert_eq!(gemini["usage"]["total_tokens"], 27);
     assert_eq!(gemini["usage"]["input_tokens_details"]["cached_tokens"], 5);
@@ -1547,13 +1513,13 @@ fn chat_completion_response_maps_gemini_and_claude_cache_usage_like_ccx() {
         }
     }))
     .unwrap();
-    assert_eq!(claude["usage"]["input_tokens"], 10);
+    assert_eq!(claude["usage"]["input_tokens"], 22);
     assert_eq!(claude["usage"]["total_tokens"], 25);
     assert_eq!(claude["usage"]["cache_read_input_tokens"], 2);
     assert_eq!(claude["usage"]["cache_creation_5m_input_tokens"], 4);
     assert_eq!(claude["usage"]["cache_creation_1h_input_tokens"], 6);
     assert_eq!(claude["usage"]["cache_ttl"], "mixed");
-    assert!(claude["usage"].get("input_tokens_details").is_none());
+    assert_eq!(claude["usage"]["input_tokens_details"]["cached_tokens"], 2);
 }
 
 #[test]
@@ -1714,15 +1680,19 @@ fn chat_sse_converter_handles_partial_chunks_and_utf8_boundaries() {
 }
 
 #[test]
-fn chat_stream_finishes_on_finish_reason_without_done_marker() {
+fn chat_stream_finishes_at_eof_after_finish_reason_without_done_marker() {
     let mut converter = ChatSseToResponsesConverter::default();
-    let output = converter.push_bytes(
+    let mut output = converter.push_bytes(
         br#"data: {"id":"chatcmpl_terminal","model":"grok-4","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}
 
 "#,
     );
+    assert!(
+        !converter.is_completed(),
+        "finish_reason can precede the usage trailer"
+    );
+    output.extend(converter.finish());
     let output = String::from_utf8(output).unwrap();
-
     assert!(converter.is_completed());
     assert!(output.contains("\"delta\":\"done\""));
     assert!(output.contains("event: response.completed"));

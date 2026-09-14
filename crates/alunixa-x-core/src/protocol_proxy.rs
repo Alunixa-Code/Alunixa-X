@@ -3450,6 +3450,7 @@ struct TextItemState {
     text: String,
     added: bool,
     done: bool,
+    refusal: bool,
 }
 
 #[derive(Debug, Default)]
@@ -3598,6 +3599,11 @@ impl ChatSseState {
                 if !content.is_empty() {
                     self.push_content_delta_into(content, output);
                 }
+            }
+            if let Some(refusal) = delta.get("refusal").and_then(Value::as_str) {
+                self.flush_inline_think_at_boundary_into(output);
+                self.finalize_reasoning_into(output);
+                self.push_message_delta_into(refusal, true, output);
             }
 
             if let Some(tool_calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -3789,9 +3795,20 @@ impl ChatSseState {
     }
 
     fn push_text_delta_into(&mut self, delta: &str, output: &mut String) {
+        self.push_message_delta_into(delta, false, output);
+    }
+
+    fn push_message_delta_into(&mut self, delta: &str, refusal: bool, output: &mut String) {
+        if delta.is_empty() {
+            return;
+        }
+        if self.text.added && self.text.refusal != refusal {
+            self.finalize_text_into(output);
+        }
         if self.text.done {
             self.text = TextItemState::default();
         }
+        self.text.refusal = refusal;
         if !self.text.added {
             let output_index = self.next_output_index();
             let item_id = format!("{}_msg_{}", self.response_id, output_index);
@@ -3821,7 +3838,7 @@ impl ChatSseState {
                     "item_id": self.text.item_id,
                     "output_index": output_index,
                     "content_index": 0,
-                    "part": { "type": "output_text", "text": "", "annotations": [] }
+                    "part": if refusal { json!({"type":"refusal","refusal":""}) } else { json!({ "type": "output_text", "text": "", "annotations": [] }) }
                 }),
             );
         }
@@ -3830,9 +3847,13 @@ impl ChatSseState {
         let output_index = self.text.output_index.unwrap_or(0);
         push_sse(
             output,
-            "response.output_text.delta",
+            if refusal {
+                "response.refusal.delta"
+            } else {
+                "response.output_text.delta"
+            },
             json!({
-                "type": "response.output_text.delta",
+                "type": if refusal { "response.refusal.delta" } else { "response.output_text.delta" },
                 "item_id": self.text.item_id,
                 "output_index": output_index,
                 "content_index": 0,
@@ -3883,18 +3904,24 @@ impl ChatSseState {
         {
             let state = self.tools.entry(chat_index).or_default();
             if let Some(id) = id_delta {
-                state.call_id = id;
+                if state.call_id != id {
+                    state.call_id.push_str(&id);
+                }
             }
             if let Some(name) = name_delta {
-                if !name.is_empty() {
-                    state.name = name;
+                if !name.is_empty() && state.name != name {
+                    state.name.push_str(&name);
                 }
             }
             if !args_delta.is_empty() {
                 state.arguments.push_str(&args_delta);
             }
 
-            if !state.added && !state.call_id.is_empty() && !state.name.is_empty() {
+            if !state.added
+                && !state.call_id.is_empty()
+                && !state.name.is_empty()
+                && !state.arguments.is_empty()
+            {
                 should_add = true;
                 pending_arguments = state.arguments.clone();
             } else if state.added {
@@ -4084,26 +4111,33 @@ impl ChatSseState {
             return;
         }
         let output_index = self.text.output_index.unwrap_or(0);
+        let part = if self.text.refusal {
+            json!({"type":"refusal","refusal":self.text.text})
+        } else {
+            json!({"type":"output_text","text":self.text.text,"annotations":[]})
+        };
         let item = json!({
             "id": self.text.item_id,
             "type": "message",
             "status": "completed",
             "role": "assistant",
-            "content": [{ "type": "output_text", "text": self.text.text, "annotations": [] }]
+            "content": [part]
         });
         self.output_items.push((output_index, item.clone()));
         self.text.done = true;
-        push_sse(
-            output,
-            "response.output_text.done",
-            json!({
-                "type": "response.output_text.done",
-                "item_id": self.text.item_id,
-                "output_index": output_index,
-                "content_index": 0,
-                "text": self.text.text
-            }),
-        );
+        let event = if self.text.refusal {
+            "response.refusal.done"
+        } else {
+            "response.output_text.done"
+        };
+        let mut text_done = json!({
+            "type": event,
+            "item_id": self.text.item_id,
+            "output_index": output_index,
+            "content_index": 0,
+        });
+        text_done[if self.text.refusal { "refusal" } else { "text" }] = json!(self.text.text);
+        push_sse(output, event, text_done);
         push_sse(
             output,
             "response.content_part.done",
@@ -4112,7 +4146,7 @@ impl ChatSseState {
                 "item_id": self.text.item_id,
                 "output_index": output_index,
                 "content_index": 0,
-                "part": { "type": "output_text", "text": self.text.text, "annotations": [] }
+                "part": part
             }),
         );
         push_sse(
@@ -4459,13 +4493,24 @@ fn anthropic_usage_to_chat_usage(usage: Option<&Value>) -> Value {
         .get("cache_creation_input_tokens")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    json!({
-        "prompt_tokens": input_tokens,
-        "completion_tokens": output_tokens,
-        "total_tokens": input_tokens + output_tokens + cache_creation,
-        "cache_read_input_tokens": cache_read,
-        "cache_creation_input_tokens": cache_creation
-    })
+    let mut result = if usage.is_object() {
+        usage.clone()
+    } else {
+        json!({})
+    };
+    result["prompt_tokens"] = json!(
+        input_tokens
+            .saturating_add(cache_read)
+            .saturating_add(cache_creation)
+    );
+    result["completion_tokens"] = json!(output_tokens);
+    result["total_tokens"] = json!(
+        input_tokens
+            .saturating_add(cache_read)
+            .saturating_add(cache_creation)
+            .saturating_add(output_tokens)
+    );
+    result
 }
 
 fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
@@ -4486,7 +4531,12 @@ fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
         .get("thoughtsTokenCount")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    json!({
+    let mut result = if usage.is_object() {
+        usage.clone()
+    } else {
+        json!({})
+    };
+    let normalized = json!({
         "promptTokenCount": prompt_tokens,
         "cachedContentTokenCount": cached_tokens,
         "candidatesTokenCount": completion_tokens,
@@ -4497,14 +4547,20 @@ fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
             .get("totalTokenCount")
             .and_then(Value::as_u64)
             .unwrap_or(prompt_tokens + completion_tokens + reasoning_tokens)
-    })
+    });
+    result
+        .as_object_mut()
+        .unwrap()
+        .extend(normalized.as_object().unwrap().clone());
+    result
 }
 
 fn anthropic_finish_reason(reason: &str) -> &'static str {
     match reason {
         "max_tokens" => "length",
         "tool_use" => "tool_calls",
-        _ => "stop",
+        "end_turn" | "stop_sequence" => "stop",
+        _ => "content_filter",
     }
 }
 
@@ -4512,7 +4568,8 @@ fn gemini_finish_reason(reason: &str, has_tools: bool) -> &'static str {
     match reason {
         "MAX_TOKENS" => "length",
         "STOP" if has_tools => "tool_calls",
-        _ => "stop",
+        "STOP" => "stop",
+        _ => "content_filter",
     }
 }
 
@@ -4841,7 +4898,7 @@ fn append_responses_item(
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": response_output_text(item.get("output").unwrap_or(&Value::Null))
+                "content": tool_output_content(item.get("output").unwrap_or(&Value::Null))
             }));
         }
         Some("custom_tool_call") => {
@@ -4887,7 +4944,7 @@ fn append_responses_item(
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": response_output_text(item.get("output").unwrap_or(&Value::Null))
+                "content": tool_output_content(item.get("output").unwrap_or(&Value::Null))
             }));
         }
         Some("tool_call") => {
@@ -4933,7 +4990,7 @@ fn append_responses_item(
             messages.push(json!({
                 "role": "tool",
                 "tool_call_id": call_id,
-                "content": response_output_text(output)
+                "content": tool_output_content(output)
             }));
         }
         Some("reasoning") => {
@@ -5155,7 +5212,8 @@ fn responses_content_to_chat_content(_role: &str, content: &Value) -> Value {
             "refusal" => {
                 if let Some(value) = part.get("refusal").and_then(Value::as_str) {
                     if !value.is_empty() {
-                        chat_parts.push(json!({ "type": "text", "text": value }));
+                        chat_parts.push(json!({ "type": "refusal", "refusal": value }));
+                        has_non_text_part = true;
                     }
                 }
             }
@@ -5198,7 +5256,7 @@ fn responses_content_to_chat_content(_role: &str, content: &Value) -> Value {
                 .iter()
                 .filter_map(|part| part.get("text").and_then(Value::as_str))
                 .collect::<Vec<_>>()
-                .join("\n"),
+                .concat(),
         );
     }
 
@@ -6399,7 +6457,7 @@ fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
 
     if let Some(value) = usage.get("input_tokens").and_then(Value::as_u64) {
         input_tokens = value;
-        input_tokens_include_cache = false;
+        input_tokens_include_cache = !has_claude_cache_fields;
     }
     if let Some(cache_read) = usage.get("cache_read_input_tokens").and_then(Value::as_u64) {
         cached_tokens = cache_read;
@@ -6414,16 +6472,15 @@ fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
     }
 
     let usage_input_tokens = if input_tokens_include_cache {
-        input_tokens.saturating_sub(
-            cached_tokens
-                + effective_cache_creation_tokens(
-                    cache_creation,
-                    cache_creation_5m,
-                    cache_creation_1h,
-                ),
-        )
+        input_tokens
     } else {
         input_tokens
+            .saturating_add(cached_tokens)
+            .saturating_add(effective_cache_creation_tokens(
+                cache_creation,
+                cache_creation_5m,
+                cache_creation_1h,
+            ))
     };
     let should_recalculate_total = usage.get("total_tokens").is_none()
         || cached_tokens > 0
@@ -6431,24 +6488,26 @@ fn chat_usage_to_responses_usage(usage: Option<&Value>) -> Value {
             > 0
         || usage.get("promptTokenCount").is_some();
     let total_tokens = if should_recalculate_total {
-        usage_input_tokens
-            + output_tokens
-            + cached_tokens
-            + effective_cache_creation_tokens(cache_creation, cache_creation_5m, cache_creation_1h)
+        usage_input_tokens.saturating_add(output_tokens)
     } else {
         usage
             .get("total_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(usage_input_tokens + output_tokens)
     };
-    let mut result = json!({
-        "input_tokens": usage_input_tokens,
-        "output_tokens": output_tokens,
-        "total_tokens": total_tokens
-    });
+    let mut result = usage.clone();
+    result["input_tokens"] = json!(usage_input_tokens);
+    result["output_tokens"] = json!(output_tokens);
+    result["total_tokens"] = json!(total_tokens);
 
-    if !has_claude_cache_fields && has_cache_details && cached_tokens > 0 {
-        result["input_tokens_details"] = json!({ "cached_tokens": cached_tokens });
+    if has_claude_cache_fields || has_cache_details || cached_tokens > 0 {
+        if !result["input_tokens_details"].is_object() {
+            result["input_tokens_details"] = usage
+                .get("prompt_tokens_details")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+        }
+        result["input_tokens_details"]["cached_tokens"] = json!(cached_tokens);
     }
     if let Some(details) = usage.get("completion_tokens_details") {
         result["output_tokens_details"] = details.clone();
@@ -6512,6 +6571,13 @@ fn response_output_text(value: &Value) -> String {
     }
 }
 
+fn tool_output_content(value: &Value) -> Value {
+    if value.is_array() {
+        responses_content_to_chat_content("tool", value)
+    } else {
+        json!(response_output_text(value))
+    }
+}
 fn build_custom_tool_call_history(name: &str, input: &Value) -> (String, String) {
     let input = response_output_text(input);
     if name == "apply_patch" || input.starts_with("*** Begin Patch") {

@@ -37,6 +37,7 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- 2026-09-14 第一阶段协议验证：新增保真 13/13、既有协议 70/70 通过；旧测试中“丢弃/降级/过早结束/依赖进程缓存”的断言已改为保真或明确拒绝契约喵~
 - v1.0.17 本地完整 workspace 38 套件 1058 passed/0 failed/1 ignored（core 319），cargo check all-targets、formatter、diff、版本/品牌检查通过喵~
 - 前端 98/98、TypeScript、i18n 854/854 + 80/80、Vite 构建通过；headless 生产 UI 的启动模型选择、窗口编辑、预览、Tauri 提交参数验证 PASS（后端为内存 fixture），服务器及浏览器已关闭喵~
 - v1.0.16 正式前端 93/93；Windows 权威 Rust 38 套件 1052 passed/0 failed/1 ignored，ignored 为父测试显式使用的子进程入口喵~
@@ -86,6 +87,7 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+- 13 项原始失败已全部修复并通过，原有协议专项 70/70 通过；额外修复缓存 token 口径、流式 refusal 类型和函数名分片，正在接入 HTTP 可区分错误与追加原生流回放/异常边界测试喵~
 - 首批隔离回归 `protocol_fidelity` 在旧实现上 13/13 失败，逐项证实尾部 usage 丢失、EOF/JSON/UTF-8 静默成功、工具身份提前生成、incomplete 错发 completed、跨会话 Gemini ID 冲突及签名丢失喵~
 - 已开始修复：新增 `protocol_proxy/fidelity.rs` 请求能力门禁和自包含原生回放项；不支持项明确失败，Anthropic/Gemini 原始内容和签名通过 opaque reasoning 回放项保存，不再依赖全局 Gemini 签名缓存喵~
 - 流式状态机正在补充严格解码/帧解析、单终态、序号、尾部用量、思考/正文分段及工具完整性校验；当前编译/专项回归进行中，尚未宣称通过喵~
