@@ -1,12 +1,14 @@
 #[cfg(target_os = "macos")]
+use super::{MANAGER_NAME, SILENT_NAME};
+#[cfg(target_os = "macos")]
 use std::fs;
 #[cfg(target_os = "macos")]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use super::{
-    InstallOptions, MACOS_MANAGER_NAME, MACOS_SILENT_NAME, MANAGER_BINARY, MANAGER_NAME,
-    MacosAppBundle, SILENT_BINARY, SILENT_NAME, install_root_or_default, option_or_current_exe,
+    InstallOptions, MACOS_MANAGER_NAME, MACOS_SILENT_NAME, MANAGER_BINARY, MacosAppBundle,
+    SILENT_BINARY, install_root_or_default, option_or_current_exe,
 };
 
 pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBundle {

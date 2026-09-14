@@ -620,6 +620,7 @@ mod tests {
 
     fn image_fixture_server(
         count: usize,
+        status: &'static str,
         responder: impl Fn(usize, &str) -> String + Send + 'static,
     ) -> (String, std::thread::JoinHandle<Vec<String>>) {
         use std::io::{Read, Write};
@@ -669,7 +670,7 @@ mod tests {
                 }
                 captured.push(String::from_utf8_lossy(&request).to_string());
                 let body = responder(index, &address_for_server);
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
             }
             captured
         });
@@ -688,7 +689,7 @@ mod tests {
 
     #[tokio::test]
     async fn configured_models_route_generation_and_edits_and_reload_default_without_restart() {
-        let (base, worker) = image_fixture_server(2, |_, _| {
+        let (base, worker) = image_fixture_server(2, "200 OK", |_, _| {
             json!({"data":[{"b64_json":"iVBORw0KGgo="}]}).to_string()
         });
         let temp = tempfile::tempdir().unwrap();
@@ -763,7 +764,7 @@ mod tests {
 
     #[tokio::test]
     async fn image_downloads_do_not_receive_the_configured_api_key() {
-        let (base, worker) = image_fixture_server(2, |index, base| {
+        let (base, worker) = image_fixture_server(2, "200 OK", |index, base| {
             if index == 0 {
                 json!({"data":[{"url":format!("{base}/generated.png")}]}).to_string()
             } else {
@@ -799,5 +800,32 @@ mod tests {
         assert!(image_request_target(&json!({"model":"unknown"}), &models).is_err());
         let target = image_request_target(&json!({"profile_id":"a"}), &models).unwrap();
         assert_eq!(target.model, "image-a");
+    }
+
+    #[tokio::test]
+    async fn configured_image_requests_never_follow_redirects_retry_or_echo_upstream_secrets() {
+        for status in [
+            "500 Internal Server Error",
+            "307 Temporary Redirect\r\nLocation: http://127.0.0.1:9/do-not-follow",
+        ] {
+            let (base, worker) = image_fixture_server(1, status, |_, _| {
+                json!({"error":"fixture-key-a reflected secret and prompt"}).to_string()
+            });
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap();
+            let target =
+                image_request_target(&json!({}), &[fixture_image_model("a", &base)]).unwrap();
+            let error = send_image_request(&client, &json!({}), "fixture", &[], &target)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(&format!("HTTP {}", &status[..3])));
+            assert!(!error.contains("fixture-key"));
+            assert!(!error.contains("reflected"));
+            assert_eq!(worker.join().unwrap().len(), 1);
+        }
     }
 }

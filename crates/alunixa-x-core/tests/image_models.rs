@@ -39,6 +39,21 @@ fn legacy_settings_have_no_image_override() {
 }
 
 #[test]
+fn independent_images_enable_mcp_without_changing_conversation_provider_switches() {
+    use alunixa_x_core::image_models::mcp_enabled;
+    let mut settings = BackendSettings {
+        relay_profiles_enabled: false,
+        ..Default::default()
+    };
+    assert!(!mcp_enabled(&settings));
+    settings.image_models = vec![model("a")];
+    assert!(mcp_enabled(&settings));
+    assert!(!settings.relay_profiles_enabled);
+    settings.enhancements_enabled = false;
+    assert!(!mcp_enabled(&settings));
+}
+
+#[test]
 fn ordering_is_default_and_explicit_selection_is_unambiguous() {
     let mut models = vec![model("a"), model("b")];
     assert_eq!(select_model(&models, None, None).unwrap().unwrap().id, "a");

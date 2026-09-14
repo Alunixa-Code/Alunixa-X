@@ -195,7 +195,7 @@ fn audit_imagegen_config(
     settings: &BackendSettings,
     helper_port: u16,
 ) -> anyhow::Result<()> {
-    let expected_enabled = settings.enhancements_enabled && settings.relay_profiles_enabled;
+    let expected_enabled = crate::image_models::mcp_enabled(settings);
     let server = doc
         .get("mcp_servers")
         .and_then(Item::as_table_like)

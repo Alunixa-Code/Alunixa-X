@@ -32,12 +32,13 @@ export function ImageModelsScreen({ onPendingChange }: {
 
   useEffect(() => {
     alive.current = true;
+    let cancelled = false;
     invoke<ImageModelsSnapshot>("load_image_models").then((result) => {
-      if (alive.current) setSnapshot(result);
+      if (!cancelled) setSnapshot(result);
     }).catch(() => {
-      if (alive.current) setError(t("读取生图模型失败，请刷新后重试；原配置未被替换。"));
+      if (!cancelled) setError(t("读取生图模型失败，请刷新后重试；原配置未被替换。"));
     });
-    return () => { alive.current = false; };
+    return () => { cancelled = true; alive.current = false; };
   }, []);
 
   useEffect(() => {
@@ -187,6 +188,7 @@ export function ImageModelsScreen({ onPendingChange }: {
         </SortableContext>
       </DndContext>
       <p className="image-models-note">{t("未配置生图模型时，继续使用当前对话供应商和原默认生图模型；不会自动切换或重试其他生图配置。")}</p>
+      <p className="image-models-note">{t("首次使用需保持增强功能开启，并通过 Alunixa X 启动 Codex 以加载 MCP；已加载的 MCP 无需重启即可读取后续配置。")}</p>
     </div>
   );
 }

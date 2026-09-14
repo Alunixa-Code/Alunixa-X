@@ -6,6 +6,7 @@
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
   "生图模型": "Image models",
+  "首次使用需保持增强功能开启，并通过 Alunixa X 启动 Codex 以加载 MCP；已加载的 MCP 无需重启即可读取后续配置。": "For first use, keep enhancements enabled and launch Codex through Alunixa X to load the MCP. Once loaded, it reads later configuration changes without restarting.",
   "生图模型尚未保存": "Unsaved image model",
   "离开或刷新会丢弃正在编辑的内容，已保存的配置不受影响。": "Leaving or refreshing will discard this edit. Saved configurations will not change.",
   "放弃编辑": "Discard edit",

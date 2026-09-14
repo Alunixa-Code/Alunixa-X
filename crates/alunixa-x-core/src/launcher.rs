@@ -902,7 +902,7 @@ impl LaunchHooks for DefaultLaunchHooks {
     ) -> anyhow::Result<()> {
         let home = crate::relay_config::default_codex_home_dir();
         let launcher_path = std::env::current_exe().context("无法解析 Alunixa X launcher 路径")?;
-        let enabled = settings.enhancements_enabled && settings.relay_profiles_enabled;
+        let enabled = crate::image_models::mcp_enabled(settings);
         let imagegen_mcp_path = imagegen_mcp_executable_path(&launcher_path);
         if enabled && !imagegen_mcp_path.is_file() {
             anyhow::bail!(

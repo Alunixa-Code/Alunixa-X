@@ -280,14 +280,22 @@ where
     {
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
         if let Some(bundle_id) = macos_companion_bundle_identifier_from_exe(&exe, binary) {
-            let launch_result = Command::new("/usr/bin/open")
-                .args(["-n", "-b", bundle_id, "--args"])
-                .args(&args)
-                .status();
+            let fallback = companion_binary_path_from_exe(&exe, binary);
+            let sibling_app = fallback.ancestors().find(|path| {
+                path.extension().and_then(OsStr::to_str) == Some("app") && path.is_dir()
+            });
+            let mut command = Command::new("/usr/bin/open");
+            command.arg("-n");
+            // Prefer the resolved sibling; Launch Services may still know an older bundle ID.
+            if let Some(app) = sibling_app {
+                command.arg(app);
+            } else {
+                command.args(["-b", bundle_id]);
+            }
+            let launch_result = command.arg("--args").args(&args).status();
             if launch_result.as_ref().is_ok_and(|status| status.success()) {
                 return Ok(format!("bundle:{bundle_id}"));
             }
-            let fallback = companion_binary_path_from_exe(&exe, binary);
             if !fallback.exists() {
                 let detail = launch_result
                     .map(|status| status.to_string())

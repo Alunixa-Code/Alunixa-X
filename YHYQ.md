@@ -1738,3 +1738,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 新增生图模型页面与左侧栏目，复用 dnd-kit/现有控件，支持拖拽和键盘/上下移、自动保存排序、首项默认徽标、增删改/密码框/未保存导航确认；AX 安装入口和 macOS 新旧名兼容已接入，当前尚未编译验收喵~
 - 已同步 AX macOS 文件名、显示名、旧名/混合安装的 companion 解析、NSIS 创建/卸载和三套 CI 路径，并新增配置/并发/备份/安装契约与 MCP HTTP 生成/编辑/下载凭据隔离回归喵~
 - 首轮 TypeScript 发现现有 Button 无 destructive variant，已改用既有 outline 与危险色样式；前端最终 103/103、TypeScript、i18n 893/893 + 81/81、品牌和 diff 检查全通过，正在准备 Rust/界面验收喵~
+- 第一轮 Rust 生图配置 11/11、安装契约 16/16、MCP 6/6 全通过；MCP fixture 验证生成与编辑走正确 API/Key/Model、重排后下次调用读取新默认、下载图片不携带 API Key喵~
+- 审计补齐生图独立启用规则：已有独立配置时无需打开对话供应商管理，仍遵守增强总开关；macOS 同时保留新旧安装时先以同级应用路径启动，避免 bundle ID 缓存启动旧版，移除 Windows 编译中的 macOS 专属未使用 import 告警喵~
+- 已新增 tools/verify-image-models-ui.py，在真实生产前端与内存 Tauri fixture 上验证拖拽/键盘、失败不变更默认、增删改/Key 留空、跨刷新持久化与编辑导航保护，测试执行中喵~
