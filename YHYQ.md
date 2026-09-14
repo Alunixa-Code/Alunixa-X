@@ -1763,3 +1763,27 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已原子推送 main 与 annotated v1.0.19，产品提交 4c5b6a82e58175d743c9a7b72a4b490ee7ea8dc6，tag 对象 8d83226a9a23ffd1067fb83dfef86afe1c2aaf4f；远端 main/tag 解引用均核对一致，不移动 v1.0.18 喵~
 - 仅派发一次 release-assets.yml，正式 Actions 34833120719，workflow_dispatch ref=v1.0.19、head SHA 与标签一致；版本门禁已成功，Windows 103940848589、macOS x64 103940848578、arm64 103940848581 开始构建，未复用旧二进制喵~
 - GitHub push 仍提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮没有升级第三方依赖或宣称已完成依赖专项修复；接下来只等待同一正式运行并核验发布结果喵~
+
+## 2026-09-14 · v1.0.19 正式发布验收完成
+
+- 唯一 Actions 34833120719 completed/success，Windows x64 103940848589、macOS x64 103940848578、macOS arm64 103940848581、发布 103945473751 全成功；等待进程退出 0，没有重复派发、复用旧二进制或移动既有标签喵~
+- 正式完成的三平台 CI 日志独立统计：Windows Rust 40 套件 1112 passed/0 failed/1 ignored；两种 macOS 均 40 套件 1090 passed/0 failed/1 ignored；三平台前端各 103/103，唯一 ignored 为原有测试子进程入口喵~
+- macOS 两项实际临时文件维护 companion 回归通过；三平台 raw JSON 未知字段保留、普通/切换/回填/上下文/诊断投影不泄露生图 Key 的测试均核验通过，macOS 新 AX bundle 结构/可执行文件/签名门禁也通过喵~
+- 产品提交 4c5b6a82e58175d743c9a7b72a4b490ee7ea8dc6，tag 对象 8d83226a9a23ffd1067fb83dfef86afe1c2aaf4f；远端 main/tag 解引用与 Actions head 完全一致；后续本地提交仅为验收记录喵~
+- Release ID 388319972，2026-09-14T10:43:54Z（新加坡时间 18:43:54）发布，非草稿/非预发布；六安装资产名称唯一、非零、uploaded，GitHub digest 与正式工作流写入正文的 SHA-256 全部匹配喵~
+- 发行正文逐字规范化换行后与 docs/releases/v1.0.19.md 匹配，含正确 SHA/Actions 来源；匿名 releases/latest 返回 v1.0.19、同一 Release ID 和六安装资产，ReleaseNotesAndHashes / AnonymousLatest / Actions / CI_LOG_VERIFICATION 全 PASS 喵~
+- 公开 web 页面再次确认 Release 标记 Latest 和正式 Actions Success；CI 的 Actions v4 Node 20 弃用/自动 Node 24 提示未导致失败，保留为后续独立升级工作，不修改本次冻结发行喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.19-windows-x64-setup.exe` | 21589806 | `c0dbaf726af2e446de277d7664e97168ee9fca56bccc20cd9de3e494ec546336` |
+| `Alunixa-X-1.0.19-windows-x64.zip` | 27301910 | `5ea57c8badfb823cb70d52116d43845db71f82ee4f287ec75a0336646bb5a546` |
+| `Alunixa-X-1.0.19-macos-x64.dmg` | 34416822 | `a1ddfdb041c03913f8c9bef8cb237c039d878ef7c10f02efcb7c1382b932da63` |
+| `Alunixa-X-1.0.19-macos-x64.zip` | 28766430 | `cc24643b85965fdded20924a23c0f911a65a1b59f298262999b8fca5474f7b61` |
+| `Alunixa-X-1.0.19-macos-arm64.dmg` | 33074259 | `8f6cab8e322841bd04a13fc35f10b51a07f02a533458b208762adac365a3f23e` |
+| `Alunixa-X-1.0.19-macos-arm64.zip` | 28200005 | `aabaaf6de16f43bfb9f239fe2922ff25a61646eb2f6cfe187a5b3859febc0372` |
+
+- 本轮未下载安装正式包、未修改真实 config/auth、未重启 Codex/Helper/CDP 或热注入；下一步只清理本轮已结束验证日志，保留截图和可复用缓存，先前拒绝清理的 v1.0.18 日志不再尝试删除喵~
+- 本轮精确清理日志命令被执行环境在执行前整体拒绝，连同前置审计提交也未执行；随后只读核对 13 本轮日志仍在，共 1,674,478 字节，旧 v1.0.18 六日志未变，不换工具或重复尝试删除喵~
+- 保留的本轮日志：image-models-frontend.log、image-models-mcp.log、image-models-rust.log、image-models-vite.log、v1.0.19-workspace.log、v1.0.19-workspace-final.log、v1.0.19-frontend.log、v1.0.19-vite.log、v1.0.19-check.log、v1.0.19-actions-watch.log、v1.0.19-ci-windows.log、v1.0.19-ci-macos-x64.log、v1.0.19-ci-macos-arm64.log，均在 .tmp 内；两张 UI 截图和复用缓存作为有用输出保留喵~
+- Release 页面已请求在 Codex 右侧浏览器预览，返回 queued，不能说已经显示；只读 Git diff 确认正式标签后差异仅 XJ.md/YHYQ.md，产品源码、版本、回归和发行说明均已推送并完成构建/发布喵~
