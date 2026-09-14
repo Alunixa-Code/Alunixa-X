@@ -1733,3 +1733,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 生图配置存入现有 settings 的有序 imageModels，使用独立脱敏命令及乐观并发校验；MCP 每次调用读取首项默认，生成/编辑都走选定模型的 API/Key，未配置时保持原 Helper 回退喵~
 - AX 采用可被索引的实际名称：Windows 开始菜单增设 AX 别名并支持维护修复/卸载；macOS bundle 名加 (AX)，同时适配旧名和混合安装路径，保持 bundle ID 不变喵~
 - 已读取前端设计、React、WebUI 测试和 OpenAI Docs 技能；web 官方查询没有返回正文，后续以实际代码和隔离接口契约验证，不编造官方查证结果喵~
+- 已实现 SettingsStore imageModels 有序存储、独立脱敏 Tauri 命令、API Key 保留与修订号防旧窗口覆盖，普通设置保存保留最新生图配置；完整配置备份自然包含该数组，不新增依赖喵~
+- MCP 改为每次调用读取已保存配置，默认首项、可选其他 model/profile_id，生成/编辑均使用选中 API/Key/Model；Key 只挂在目标 POST，禁止重定向和自动重试，不把上游原始错误体返回对话喵~
+- 新增生图模型页面与左侧栏目，复用 dnd-kit/现有控件，支持拖拽和键盘/上下移、自动保存排序、首项默认徽标、增删改/密码框/未保存导航确认；AX 安装入口和 macOS 新旧名兼容已接入，当前尚未编译验收喵~
+- 已同步 AX macOS 文件名、显示名、旧名/混合安装的 companion 解析、NSIS 创建/卸载和三套 CI 路径，并新增配置/并发/备份/安装契约与 MCP HTTP 生成/编辑/下载凭据隔离回归喵~
+- 首轮 TypeScript 发现现有 Button 无 destructive variant，已改用既有 outline 与危险色样式；前端最终 103/103、TypeScript、i18n 893/893 + 81/81、品牌和 diff 检查全通过，正在准备 Rust/界面验收喵~

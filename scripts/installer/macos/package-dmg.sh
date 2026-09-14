@@ -121,20 +121,20 @@ verify_app() {
 }
 
 prepare_icon
-create_app "Alunixa X Launch" "AlunixaXLauncher" "$BINARY_DIR/alunixa-x" "io.github.alunixacode.alunixax.launcher" "true"
-create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-manager" "io.github.alunixacode.alunixax" "false"
+create_app "Alunixa X Launch (AX)" "AlunixaXLauncher" "$BINARY_DIR/alunixa-x" "io.github.alunixacode.alunixax.launcher" "true"
+create_app "Alunixa X (AX)" "AlunixaX" "$BINARY_DIR/alunixa-x-manager" "io.github.alunixacode.alunixax" "false"
 if [ ! -x "$BINARY_DIR/alunixa-x-imagegen-mcp" ]; then
   echo "error: imagegen MCP companion not found or not executable: $BINARY_DIR/alunixa-x-imagegen-mcp" >&2
   exit 1
 fi
-cp "$BINARY_DIR/alunixa-x-imagegen-mcp" "$STAGE/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
-chmod +x "$STAGE/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
+cp "$BINARY_DIR/alunixa-x-imagegen-mcp" "$STAGE/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
+chmod +x "$STAGE/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
 
-sign_app "$STAGE/Alunixa X Launch.app"
-sign_app "$STAGE/Alunixa X.app"
+sign_app "$STAGE/Alunixa X Launch (AX).app"
+sign_app "$STAGE/Alunixa X (AX).app"
 
-verify_app "$STAGE/Alunixa X Launch.app"
-verify_app "$STAGE/Alunixa X.app"
+verify_app "$STAGE/Alunixa X Launch (AX).app"
+verify_app "$STAGE/Alunixa X (AX).app"
 
 ln -s /Applications "$STAGE/Applications"
 

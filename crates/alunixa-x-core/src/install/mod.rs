@@ -9,6 +9,10 @@ pub mod windows;
 
 pub const SILENT_NAME: &str = "Alunixa X Launch";
 pub const MANAGER_NAME: &str = "Alunixa X";
+pub const MACOS_SILENT_NAME: &str = "Alunixa X Launch (AX)";
+pub const MACOS_MANAGER_NAME: &str = "Alunixa X (AX)";
+pub const AX_SILENT_SHORTCUT: &str = "AX Launch - Alunixa X.lnk";
+pub const AX_MANAGER_SHORTCUT: &str = "AX - Alunixa X.lnk";
 pub const SILENT_BINARY: &str = "alunixa-x";
 pub const MANAGER_BINARY: &str = "alunixa-x-manager";
 pub const SILENT_BUNDLE_ID: &str = "io.github.alunixacode.alunixax.launcher";
@@ -80,7 +84,7 @@ pub fn shortcut_names() -> (&'static str, &'static str) {
 }
 
 pub fn app_bundle_names() -> (&'static str, &'static str) {
-    ("Alunixa X Launch.app", "Alunixa X.app")
+    ("Alunixa X Launch (AX).app", "Alunixa X (AX).app")
 }
 
 pub fn inspect_entrypoints() -> EntryPointState {
@@ -136,8 +140,14 @@ pub fn default_install_root() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let sys_apps = PathBuf::from("/Applications");
-        if sys_apps.join(format!("{SILENT_NAME}.app")).exists()
-            || sys_apps.join(format!("{MANAGER_NAME}.app")).exists()
+        if [
+            MACOS_SILENT_NAME,
+            MACOS_MANAGER_NAME,
+            SILENT_NAME,
+            MANAGER_NAME,
+        ]
+        .iter()
+        .any(|name| sys_apps.join(format!("{name}.app")).exists())
         {
             return Some(sys_apps);
         }
@@ -229,7 +239,15 @@ fn entrypoint_candidates(root: &Option<PathBuf>, manager: bool) -> Vec<PathBuf> 
     if cfg!(windows) {
         vec![root.join(format!("{name}.lnk"))]
     } else if cfg!(target_os = "macos") {
-        vec![root.join(format!("{name}.app"))]
+        let searchable = if manager {
+            MACOS_MANAGER_NAME
+        } else {
+            MACOS_SILENT_NAME
+        };
+        vec![
+            root.join(format!("{searchable}.app")),
+            root.join(format!("{name}.app")),
+        ]
     } else {
         vec![root.join(format!("{name}.desktop"))]
     }
@@ -298,8 +316,14 @@ pub fn macos_companion_bundle_identifier_from_exe(
     binary: &str,
 ) -> Option<&'static str> {
     let (_, app_name) = macos_applications_dir_and_app_name_from_exe(exe)?;
-    let known_bundle =
-        app_name == format!("{SILENT_NAME}.app") || app_name == format!("{MANAGER_NAME}.app");
+    let known_bundle = [
+        MACOS_SILENT_NAME,
+        MACOS_MANAGER_NAME,
+        SILENT_NAME,
+        MANAGER_NAME,
+    ]
+    .iter()
+    .any(|name| app_name == format!("{name}.app"));
     if !known_bundle {
         return None;
     }
@@ -326,17 +350,19 @@ pub fn companion_binary_path_from_exe(exe: &Path, binary: &str) -> PathBuf {
 fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> {
     let (applications_dir, app_name) = macos_applications_dir_and_app_name_from_exe(exe)?;
     if binary == SILENT_BINARY {
-        if app_name == format!("{SILENT_NAME}.app") {
+        if app_name == format!("{SILENT_NAME}.app")
+            || app_name == format!("{MACOS_SILENT_NAME}.app")
+        {
             return Some(macos_preferred_bundle_binary(
                 exe,
                 SILENT_BINARY,
                 "AlunixaXLauncher",
             ));
         }
-        let macos = applications_dir
-            .join(format!("{SILENT_NAME}.app"))
-            .join("Contents")
-            .join("MacOS");
+        let macos =
+            macos_companion_app_path(&applications_dir, &app_name, MACOS_SILENT_NAME, SILENT_NAME)
+                .join("Contents")
+                .join("MacOS");
         return Some(
             macos
                 .join(SILENT_BINARY)
@@ -346,17 +372,23 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
         );
     }
     if binary == MANAGER_BINARY {
-        if app_name == format!("{MANAGER_NAME}.app") {
+        if app_name == format!("{MANAGER_NAME}.app")
+            || app_name == format!("{MACOS_MANAGER_NAME}.app")
+        {
             return Some(macos_preferred_bundle_binary(
                 exe,
                 MANAGER_BINARY,
                 "AlunixaX",
             ));
         }
-        let macos = applications_dir
-            .join(format!("{MANAGER_NAME}.app"))
-            .join("Contents")
-            .join("MacOS");
+        let macos = macos_companion_app_path(
+            &applications_dir,
+            &app_name,
+            MACOS_MANAGER_NAME,
+            MANAGER_NAME,
+        )
+        .join("Contents")
+        .join("MacOS");
         return Some(
             macos
                 .join(MANAGER_BINARY)
@@ -366,6 +398,18 @@ fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> 
         );
     }
     None
+}
+
+fn macos_companion_app_path(dir: &Path, source_name: &str, current: &str, legacy: &str) -> PathBuf {
+    let current_path = dir.join(format!("{current}.app"));
+    let legacy_path = dir.join(format!("{legacy}.app"));
+    if current_path.exists() {
+        current_path
+    } else if legacy_path.exists() || !source_name.contains("(AX)") {
+        legacy_path
+    } else {
+        current_path
+    }
 }
 
 fn macos_preferred_bundle_binary(

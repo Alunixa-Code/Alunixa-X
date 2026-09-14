@@ -5,13 +5,17 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use super::{
-    InstallOptions, MANAGER_BINARY, MANAGER_NAME, MacosAppBundle, SILENT_BINARY, SILENT_NAME,
-    install_root_or_default, option_or_current_exe,
+    InstallOptions, MACOS_MANAGER_NAME, MACOS_SILENT_NAME, MANAGER_BINARY, MANAGER_NAME,
+    MacosAppBundle, SILENT_BINARY, SILENT_NAME, install_root_or_default, option_or_current_exe,
 };
 
 pub fn build_app_bundle(options: &InstallOptions, manager: bool) -> MacosAppBundle {
     let install_root = install_root_or_default(options);
-    let display_name = if manager { MANAGER_NAME } else { SILENT_NAME };
+    let display_name = if manager {
+        MACOS_MANAGER_NAME
+    } else {
+        MACOS_SILENT_NAME
+    };
     let executable_name = if manager {
         "AlunixaX"
     } else {
@@ -86,7 +90,12 @@ pub fn install_app_bundles(options: &InstallOptions) -> anyhow::Result<()> {
 #[cfg(target_os = "macos")]
 pub fn uninstall_app_bundles(options: &InstallOptions) -> anyhow::Result<()> {
     let install_root = install_root_or_default(options);
-    for name in [SILENT_NAME, MANAGER_NAME] {
+    for name in [
+        MACOS_SILENT_NAME,
+        MACOS_MANAGER_NAME,
+        SILENT_NAME,
+        MANAGER_NAME,
+    ] {
         let app = install_root.join(format!("{name}.app"));
         if app.exists() {
             fs::remove_dir_all(app)?;

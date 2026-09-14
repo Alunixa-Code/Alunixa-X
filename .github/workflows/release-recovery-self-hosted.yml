@@ -297,9 +297,9 @@ jobs:
               throw "DMG extraction failed for $Arch"
             }
 
-            $launcher = Join-Path $extractDir 'Alunixa X Launch.app\Contents\MacOS\AlunixaXLauncher'
-            $imagegen = Join-Path $extractDir 'Alunixa X Launch.app\Contents\MacOS\alunixa-x-imagegen-mcp'
-            $manager = Join-Path $extractDir 'Alunixa X.app\Contents\MacOS\AlunixaX'
+            $launcher = Join-Path $extractDir 'Alunixa X Launch (AX).app\Contents\MacOS\AlunixaXLauncher'
+            $imagegen = Join-Path $extractDir 'Alunixa X Launch (AX).app\Contents\MacOS\alunixa-x-imagegen-mcp'
+            $manager = Join-Path $extractDir 'Alunixa X (AX).app\Contents\MacOS\AlunixaX'
             Assert-MachOArchitecture -Path $launcher -ExpectedCpu $ExpectedCpu
             Assert-MachOArchitecture -Path $imagegen -ExpectedCpu $ExpectedCpu
             Assert-MachOArchitecture -Path $manager -ExpectedCpu $ExpectedCpu

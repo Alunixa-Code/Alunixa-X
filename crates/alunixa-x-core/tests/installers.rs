@@ -93,14 +93,18 @@ fn macos_bundle_metadata_contains_silent_and_manager_apps() {
     let silent = build_macos_app_bundle(&options, false);
     let manager = build_macos_app_bundle(&options, true);
 
-    assert!(silent.app_path.ends_with("Alunixa X Launch.app"));
-    assert!(manager.app_path.ends_with("Alunixa X.app"));
+    assert!(silent.app_path.ends_with("Alunixa X Launch (AX).app"));
+    assert!(manager.app_path.ends_with("Alunixa X (AX).app"));
     assert!(
         silent
             .info_plist
-            .contains("<string>Alunixa X Launch</string>")
+            .contains("<string>Alunixa X Launch (AX)</string>")
     );
-    assert!(manager.info_plist.contains("<string>Alunixa X</string>"));
+    assert!(
+        manager
+            .info_plist
+            .contains("<string>Alunixa X (AX)</string>")
+    );
     assert_eq!(silent.binary_target_name.as_deref(), Some("alunixa-x"));
     assert_eq!(
         manager.binary_target_name.as_deref(),
@@ -115,7 +119,7 @@ fn installer_exports_expected_two_entrypoint_names() {
     assert_eq!(shortcut_names(), ("Alunixa X Launch.lnk", "Alunixa X.lnk"));
     assert_eq!(
         app_bundle_names(),
-        ("Alunixa X Launch.app", "Alunixa X.app")
+        ("Alunixa X Launch (AX).app", "Alunixa X (AX).app")
     );
 }
 
@@ -126,7 +130,7 @@ fn macos_dmg_includes_applications_shortcut_for_drag_install() {
 
     assert!(script.contains("ln -s /Applications \"$STAGE/Applications\""));
     assert!(script.contains(
-        "cp \"$BINARY_DIR/alunixa-x-imagegen-mcp\" \"$STAGE/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp\""
+        "cp \"$BINARY_DIR/alunixa-x-imagegen-mcp\" \"$STAGE/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp\""
     ));
     assert!(script.contains("for binary_path in \"$app_dir/Contents/MacOS/\"*"));
 }
@@ -258,4 +262,69 @@ fn windows_default_install_root_uses_known_folder_before_userprofile_desktop() {
     } else {
         assert_eq!(strategy, "user-dirs-desktop");
     }
+}
+
+#[test]
+fn ax_windows_shortcuts_are_installed_repaired_and_uninstalled_by_name() {
+    use alunixa_x_core::install::{AX_MANAGER_SHORTCUT, AX_SILENT_SHORTCUT};
+    let nsis = include_str!("../../../scripts/installer/windows/AlunixaX.nsi");
+    for name in [AX_MANAGER_SHORTCUT, AX_SILENT_SHORTCUT] {
+        assert!(nsis.contains(&format!(
+            "CreateShortcut \"$SMPROGRAMS\\Alunixa X\\{name}\""
+        )));
+        assert!(nsis.contains(&format!("Delete \"$SMPROGRAMS\\Alunixa X\\{name}\"")));
+    }
+    let runtime = include_str!("../src/install/windows.rs");
+    assert!(runtime.contains("programs_dir()"));
+    assert!(runtime.contains("programs.join(AX_MANAGER_SHORTCUT)"));
+    assert!(runtime.contains("programs.join(AX_SILENT_SHORTCUT)"));
+    assert!(runtime.contains("remove_file(folder.join(name))"));
+}
+
+#[test]
+fn ax_macos_bundle_names_and_all_build_paths_remain_consistent() {
+    let (launcher, manager) = app_bundle_names();
+    let script = include_str!("../../../scripts/installer/macos/package-dmg.sh");
+    for app in [launcher, manager] {
+        assert!(app.contains("(AX)"));
+        assert!(script.contains(app));
+        assert!(include_str!("../../../.github/workflows/release-assets.yml").contains(app));
+        assert!(include_str!("../../../.github/workflows/pr-build.yml").contains(app));
+        assert!(
+            include_str!("../../../.github/workflows/release-recovery-self-hosted.yml")
+                .contains(app)
+        );
+    }
+    let exe = std::path::Path::new("/Applications/Alunixa X (AX).app/Contents/MacOS/AlunixaX");
+    assert_eq!(
+        macos_companion_bundle_identifier_from_exe(exe, SILENT_BINARY),
+        Some(SILENT_BUNDLE_ID)
+    );
+    assert_eq!(
+        companion_binary_path_from_exe(exe, SILENT_BINARY),
+        std::path::PathBuf::from(
+            "/Applications/Alunixa X Launch (AX).app/Contents/MacOS/AlunixaXLauncher"
+        )
+    );
+}
+
+#[test]
+fn ax_macos_mixed_old_and_new_bundle_paths_find_the_installed_companion() {
+    let temp = tempfile::tempdir().unwrap();
+    let legacy_launcher = temp.path().join("Alunixa X Launch.app/Contents/MacOS");
+    std::fs::create_dir_all(&legacy_launcher).unwrap();
+    let manager = temp
+        .path()
+        .join("Alunixa X (AX).app/Contents/MacOS/AlunixaX");
+    assert_eq!(
+        companion_binary_path_from_exe(&manager, SILENT_BINARY),
+        legacy_launcher.join("AlunixaXLauncher")
+    );
+    let new_launcher = temp.path().join("Alunixa X Launch (AX).app/Contents/MacOS");
+    std::fs::create_dir_all(&new_launcher).unwrap();
+    let legacy_manager = temp.path().join("Alunixa X.app/Contents/MacOS/AlunixaX");
+    assert_eq!(
+        companion_binary_path_from_exe(&legacy_manager, SILENT_BINARY),
+        new_launcher.join("AlunixaXLauncher")
+    );
 }

@@ -75,6 +75,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
+import { ImageModelsScreen } from "@/components/ImageModelsScreen";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
@@ -910,12 +911,13 @@ type WeixinQrResult = CommandResult<{
   hasToken: boolean;
 }>;
 
-type Route = "overview" | "relay" | "reasoning" | "remoteControl" | "weixin" | "dreamSkin" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
+type Route = "overview" | "relay" | "imageModels" | "reasoning" | "remoteControl" | "weixin" | "dreamSkin" | "relayEnvironment" | "sessions" | "context" | "enhance" | "zedRemote" | "userScripts" | "recommendations" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string }> = [
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
   { id: "relay", label: t("供应商配置"), icon: KeyRound },
+  { id: "imageModels", label: t("生图模型"), icon: Palette },
   { id: "reasoning", label: t("思考等级"), icon: BrainCircuit },
   { id: "remoteControl", label: t("手机远控"), icon: Smartphone },
   { id: "weixin", label: t("微信连接"), icon: ScanLine },
@@ -1055,6 +1057,8 @@ const defaultSettings: BackendSettings = {
 export function App() {
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
+  const imageModelsPending = useRef({ busy: false, dirty: false });
+  const [imageModelsRefresh, setImageModelsRefresh] = useState(0);
   const [notice, setNotice] = useState<{ title: string; message: string; status?: Status } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
     title: string;
@@ -1722,6 +1726,23 @@ export function App() {
   };
 
   const navigate = async (next: Route) => {
+    if (route === "imageModels") {
+      if (imageModelsPending.current.busy) return;
+      if (imageModelsPending.current.dirty) {
+        const discard = await new Promise<boolean>((resolve) => {
+          setConfirmDialog({
+            title: t("生图模型尚未保存"),
+            message: t("离开或刷新会丢弃正在编辑的内容，已保存的配置不受影响。"),
+            confirmText: t("放弃编辑"),
+            cancelText: t("继续编辑"),
+            resolve,
+          });
+        });
+        if (!discard) return;
+      }
+      imageModelsPending.current = { busy: false, dirty: false };
+    }
+    if (next === "imageModels") setImageModelsRefresh((value) => value + 1);
     setRoute(next);
     if (next === "overview") {
       await Promise.all([refreshOverview(true), refreshDashboardUsage()]);
@@ -3168,6 +3189,9 @@ export function App() {
           </div>
         </header>
         <section className="screen" key={route}>
+          {route === "imageModels" ? (
+            <ImageModelsScreen key={imageModelsRefresh} onPendingChange={(state) => { imageModelsPending.current = state; }} />
+          ) : null}
           {route === "overview" ? (
             <OverviewScreen
               overview={overview}
@@ -8434,6 +8458,7 @@ function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
     overview: t("模型、工具、Codex 与桌面运行时的统一控制面"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
+    imageModels: t("配置 MCP 生图 API，拖拽排列并选择默认模型"),
     reasoning: t("按供应商设置每个模型的最高思考等级"),
     remoteControl: t("连接 ChatGPT 账号并管理官方手机远控"),
     weixin: t("通过个人微信连接本机 Codex 会话"),

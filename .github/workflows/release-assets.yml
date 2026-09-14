@@ -225,14 +225,14 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Alunixa X Launch.app" "dist/macos/stage/Alunixa X.app"; do
+          for app in "dist/macos/stage/Alunixa X Launch (AX).app" "dist/macos/stage/Alunixa X (AX).app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
             plutil -lint "$app/Contents/Info.plist" >/dev/null
             codesign -dv "$app" >/dev/null 2>&1
           done
-          test -x "dist/macos/stage/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
+          test -x "dist/macos/stage/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
 
       - name: Upload macOS workflow artifact
         uses: actions/upload-artifact@v4
@@ -400,9 +400,9 @@ jobs:
             mkdir -p "$extract_dir" "$package_dir"
             7z x -y "$dmg" "-o${extract_dir}" >/dev/null
 
-            local launcher="$extract_dir/Alunixa X Launch.app/Contents/MacOS/AlunixaXLauncher"
-            local imagegen="$extract_dir/Alunixa X Launch.app/Contents/MacOS/alunixa-x-imagegen-mcp"
-            local manager="$extract_dir/Alunixa X.app/Contents/MacOS/AlunixaX"
+            local launcher="$extract_dir/Alunixa X Launch (AX).app/Contents/MacOS/AlunixaXLauncher"
+            local imagegen="$extract_dir/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
+            local manager="$extract_dir/Alunixa X (AX).app/Contents/MacOS/AlunixaX"
             test -f "$launcher"
             test -f "$imagegen"
             test -f "$manager"

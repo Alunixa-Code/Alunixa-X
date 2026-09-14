@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+use super::{AX_MANAGER_SHORTCUT, AX_SILENT_SHORTCUT};
 use super::{
     InstallOptions, MANAGER_BINARY, MANAGER_NAME, SILENT_BINARY, SILENT_NAME,
     install_root_or_default, option_or_current_exe,
@@ -83,6 +85,22 @@ pub fn install_shortcuts(options: &InstallOptions) -> anyhow::Result<()> {
         "Open Alunixa X management tool",
         PathBuf::from(&plan.manager_icon_path),
     )?;
+    let programs = crate::windows_integration::programs_dir()
+        .ok_or_else(|| anyhow::anyhow!("无法定位 Windows 开始菜单目录"))?
+        .join(MANAGER_NAME);
+    std::fs::create_dir_all(&programs)?;
+    create_entrypoint_shortcut(
+        programs.join(AX_MANAGER_SHORTCUT),
+        PathBuf::from(&plan.manager_path),
+        "AX - Open Alunixa X management tool",
+        PathBuf::from(&plan.manager_icon_path),
+    )?;
+    create_entrypoint_shortcut(
+        programs.join(AX_SILENT_SHORTCUT),
+        PathBuf::from(&plan.launcher_path),
+        "AX - Launch Alunixa X",
+        PathBuf::from(&plan.silent_icon_path),
+    )?;
     register_url_protocol(&plan.manager_path)?;
     write_uninstall_registration(&plan)?;
     Ok(())
@@ -93,6 +111,14 @@ pub fn uninstall_shortcuts(options: &InstallOptions) -> anyhow::Result<()> {
     let plan = build_windows_entrypoint_plan(options);
     let _ = std::fs::remove_file(&plan.silent_shortcut);
     let _ = std::fs::remove_file(&plan.manager_shortcut);
+    if let Some(programs) = crate::windows_integration::programs_dir() {
+        let folder = programs.join(MANAGER_NAME);
+        for name in [AX_MANAGER_SHORTCUT, AX_SILENT_SHORTCUT] {
+            let _ = std::fs::remove_file(folder.join(name));
+        }
+        // Only remove an empty owned folder; never recursively remove Start Menu items.
+        let _ = std::fs::remove_dir(folder);
+    }
     let _ = crate::windows_integration::delete_current_user_key(&format!(
         r"{URL_PROTOCOL_SUBKEY}\shell\open\command"
     ));

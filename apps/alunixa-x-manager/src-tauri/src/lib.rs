@@ -59,6 +59,8 @@ pub fn run() {
             commands::restart_alunixa_x,
             commands::load_settings,
             commands::save_settings,
+            commands::load_image_models,
+            commands::save_image_models,
             commands::weixin_connect_qr_start,
             commands::weixin_connect_qr_status,
             commands::weixin_connect_status,

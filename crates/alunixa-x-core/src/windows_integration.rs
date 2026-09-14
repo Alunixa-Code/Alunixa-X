@@ -35,8 +35,8 @@ use windows::Win32::System::Threading::{
 };
 #[cfg(windows)]
 use windows::Win32::UI::Shell::{
-    ExtractIconExW, FOLDERID_Desktop, IShellLinkW, KF_FLAG_DEFAULT, SHGetKnownFolderPath,
-    ShellExecuteW, ShellLink,
+    ExtractIconExW, FOLDERID_Desktop, FOLDERID_Programs, IShellLinkW, KF_FLAG_DEFAULT,
+    SHGetKnownFolderPath, ShellExecuteW, ShellLink,
 };
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWMINNOACTIVE;
@@ -144,6 +144,16 @@ pub fn create_shortcut(spec: &ShortcutSpec) -> anyhow::Result<()> {
 pub fn desktop_dir() -> Option<PathBuf> {
     unsafe {
         let path = SHGetKnownFolderPath(&FOLDERID_Desktop, KF_FLAG_DEFAULT, None).ok()?;
+        let value = path.to_string().ok().map(PathBuf::from);
+        CoTaskMemFree(Some(path.as_ptr().cast()));
+        value
+    }
+}
+
+#[cfg(windows)]
+pub fn programs_dir() -> Option<PathBuf> {
+    unsafe {
+        let path = SHGetKnownFolderPath(&FOLDERID_Programs, KF_FLAG_DEFAULT, None).ok()?;
         let value = path.to_string().ok().map(PathBuf::from);
         CoTaskMemFree(Some(path.as_ptr().cast()));
         value

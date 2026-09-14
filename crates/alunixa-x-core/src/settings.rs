@@ -440,6 +440,8 @@ impl Default for DreamSkinThemeConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BackendSettings {
+    #[serde(rename = "imageModels", default)]
+    pub image_models: Vec<crate::image_models::ImageModel>,
     #[serde(rename = "codexAppPath", default)]
     pub codex_app_path: String,
     #[serde(rename = "codexExtraArgs", default)]
@@ -665,6 +667,7 @@ pub struct BackendSettings {
 impl Default for BackendSettings {
     fn default() -> Self {
         Self {
+            image_models: Vec::new(),
             codex_app_path: String::new(),
             codex_extra_args: Vec::new(),
             provider_sync_enabled: false,
@@ -1478,7 +1481,28 @@ impl SettingsStore {
     }
 
     pub fn save(&self, settings: &BackendSettings) -> anyhow::Result<()> {
-        self.with_lock(true, || self.save_unlocked(settings))
+        self.with_lock(true, || {
+            let mut settings = settings.clone();
+            if self.path.exists() {
+                // Independent image-model edits must survive stale settings snapshots.
+                settings.image_models = self.load_unlocked()?.image_models;
+            }
+            self.save_unlocked(&settings)
+        })
+    }
+
+    pub fn save_image_models(
+        &self,
+        expected_revision: &str,
+        edits: Vec<crate::image_models::ImageModelEdit>,
+    ) -> anyhow::Result<crate::image_models::ImageModelsSnapshot> {
+        self.with_lock(true, || {
+            let mut settings = self.load_unlocked()?;
+            settings.image_models =
+                crate::image_models::apply_edits(&settings.image_models, expected_revision, edits)?;
+            self.save_unlocked(&settings)?;
+            Ok(crate::image_models::snapshot(&settings.image_models))
+        })
     }
 
     pub fn save_preserving_runtime_model_selection(
@@ -1488,6 +1512,7 @@ impl SettingsStore {
         self.with_lock(true, || {
             let mut settings = settings.clone();
             let current = self.load_unlocked()?;
+            settings.image_models = current.image_models.clone();
             preserve_runtime_model_selection(&mut settings, &current);
             self.save_unlocked(&settings)
         })
@@ -2063,6 +2088,7 @@ fn settings_to_object(settings: &BackendSettings) -> Map<String, Value> {
 fn normalize_settings_config_sections(
     mut settings: BackendSettings,
 ) -> anyhow::Result<BackendSettings> {
+    crate::image_models::normalize_models(&mut settings.image_models)?;
     settings.relay_common_config_contents =
         crate::retired_context::strip_config(&settings.relay_common_config_contents)?;
     settings.relay_context_config_contents =

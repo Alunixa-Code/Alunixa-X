@@ -155,7 +155,7 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Alunixa X Launch.app" "dist/macos/stage/Alunixa X.app"; do
+          for app in "dist/macos/stage/Alunixa X Launch (AX).app" "dist/macos/stage/Alunixa X (AX).app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"

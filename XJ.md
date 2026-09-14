@@ -121,6 +121,10 @@
 
 ## 19. Current Task
 ### 进行中：生图模型配置与 AX 搜索
+- 首轮前端 103/103、TypeScript、i18n 893/893 + 81/81、品牌检查全通过；已新增后端 11 项配置/并发/备份回归、3 项 AX 安装契约、MCP 真实 HTTP fixture，下一步串行执行 Rust 与 headless UI 验证喵~
+- 已同步 NSIS、macOS 打包及三套发布/恢复工作流中的 AX 新 bundle 路径，不减少原有测试/六资产门禁；首轮 TypeScript 发现控件没有 destructive variant，已改为既有 outline 样式并通过类型检查喵~
+- 已实现 imageModels 设置结构、脱敏快照/Key 留空保留/并发版本校验、定向保存与旧 settings 快照保护；MCP 的生成/编辑请求均接入首项默认和显式配置选择，每次调用重新加载，不重试或泄露 Key 到下载请求喵~
+- 已新增独立 ImageModelsScreen：增删改、密码框、拖拽/键盘/上下移、首项默认标记、自动保存排序、失败不提交新顺序、导航丢弃编辑确认；AX Windows 入口和 macOS 新旧名兼容已开始接入，尚未完成编译和验证喵~
 - 用户提出两项需求，中间两次主动中断均未造成源码变更；已读取完整 XJ.md 与近期 YHYQ.md，确认 main 干净并建立检查点 b448544 喵~
 - 已审阅 imagegen_mcp、SettingsStore、Tauri、导航/现有 dnd-kit、Windows/macOS 安装与发布脚本；接下来先接通配置到 MCP 的端到端链路，再测试系统安装名称和兼容路径喵~
 - 官方文档 web 查询未返回正文，不据此宣称已获得官方索引行为证明；以实际文件名 AX 和安装契约验证搜索入口，不假称当前未安装机器已经实测喵~

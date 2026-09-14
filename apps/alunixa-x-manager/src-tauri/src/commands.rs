@@ -61,6 +61,24 @@ pub struct SettingsPayload {
     pub user_scripts: Value,
 }
 
+#[tauri::command]
+pub fn load_image_models() -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
+    SettingsStore::default()
+        .load()
+        .map(|settings| alunixa_x_core::image_models::snapshot(&settings.image_models))
+        .map_err(|_| "读取生图模型配置失败，原有配置未被替换".to_string())
+}
+
+#[tauri::command]
+pub fn save_image_models(
+    revision: String,
+    models: Vec<alunixa_x_core::image_models::ImageModelEdit>,
+) -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
+    SettingsStore::default()
+        .save_image_models(&revision, models)
+        .map_err(|error| error.to_string())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeixinQrPayload {
