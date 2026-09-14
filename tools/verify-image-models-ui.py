@@ -16,6 +16,7 @@ INIT = r"""
   window.__imageSaveCalls = 0;
   window.__imageFailNext = false;
   window.__otherSaves = 0;
+  window.__unsupportedCommands = [];
   window.__TAURI_INTERNALS__ = {
     transformCallback: () => 1, unregisterCallback: () => {}, convertFileSrc: x => x,
     async invoke(cmd,args) {
@@ -27,20 +28,23 @@ INIT = r"""
       }
       if(cmd==="save_settings"){window.__otherSaves++;throw "unexpected general settings save";}
       if(cmd==="load_settings")return ok({settings:{codexAppPath:"",relayProfiles:[],enhancementsEnabled:true},user_scripts:{enabled:true,scripts:[]}});
-      if(cmd==="load_overview")return ok({current_version:"1.0.18",codex_app:{status:"not_checked"},
+      if(cmd==="load_overview")return ok({current_version:"1.0.19",codex_app:{status:"not_checked"},
         silent_shortcut:{status:"not_checked"},management_shortcut:{status:"not_checked"}});
       if(cmd==="read_relay_files")return ok({configContents:"",authContents:"{}",configPath:"fixture/config.toml",authPath:"fixture/auth.json"});
       if(cmd==="relay_status")return ok({configured:false,authenticated:false});
       if(cmd==="list_codex_context_entries")return ok({mcpServers:[],skills:[],plugins:[]});
-      if(cmd==="detect_env_conflicts")return ok({conflicts:[]});
+      if(cmd==="check_env_conflicts")return ok({conflicts:[]});
+      if(cmd==="dashboard_usage_analytics")return ok({sessionsScanned:0,turns:0,inputTokens:0,outputTokens:0,
+        cachedTokens:0,totalTokens:0,contextUsed:0,contextLimit:0,cacheHitRate:0,contextUsageRate:0,modelUsage:[]});
       if(cmd==="startup_options")return ok({showUpdate:false});
-      if(cmd==="check_update")return ok({currentVersion:"1.0.18",latestVersion:"1.0.18",hasUpdate:false});
+      if(cmd==="check_update")return ok({currentVersion:"1.0.19",latestVersion:"1.0.19",updateAvailable:false});
       if(cmd==="load_provider_sync_targets")return ok({targets:[]});
       if(cmd==="load_pending_provider_import")return ok({pending:null});
       if(cmd==="load_pending_dream_skin_community")return ok({versionId:""});
       if(cmd==="remote_plugin_marketplace_status")return ok({codexHome:"fixture",configRegistered:true,needsRepair:false,pluginCount:0,skillCount:0});
       if(cmd==="plugin:event|listen")return 1;
       if(cmd==="write_diagnostic_event"||cmd==="plugin:event|unlisten")return ok();
+      window.__unsupportedCommands.push(cmd);
       throw new Error("Isolated fixture: unsupported "+cmd);
     }
   };
@@ -209,6 +213,7 @@ def main():
                     expect(rows.first.get_by_text("默认", exact=True)).to_be_visible()
             expect(page.get_by_text("还没有独立的生图模型", exact=True)).to_be_visible()
             assert page.evaluate("window.__otherSaves") == 0
+            assert page.evaluate("window.__unsupportedCommands") == []
             assert not errors, errors
             print(json.dumps({"status": "PASS", "checks": [
                 "pointer drag", "keyboard drag", "persisted default", "masked keys",

@@ -44,7 +44,7 @@ Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop 
 | Provider network | Official, mixed API, pure API, aggregate rotation, per-model routing, Provider Doctor |
 | Model catalog | Per-model context windows, auto-compaction token limits, reasoning levels, image handling |
 | Full endpoint proxy | `/v1/**` HTTP, SSE, binary, multipart, large bodies, and Realtime WebSocket |
-| Image tool | Standalone `image_gen` MCP for generation, edits, multiple inputs, masks, and local outputs |
+| Image tool | Standalone `image_gen` MCP, multiple API/Key/Model profiles, drag-to-set default, generation, edits, masks, and local outputs |
 | Agent capabilities | Shared terminal, session operations, export, project move, Stepwise, memory, Goals, and scripts |
 | Connections | Remote Control, personal WeChat, Zed Remote, and existing-session recovery |
 | Extensions | MCP, Skills, Plugins, script marketplace, and DreamSkin themes |
@@ -62,6 +62,17 @@ The installer creates two entries:
 
 - **Alunixa X** opens the main control system.
 - **Alunixa X Launch** starts Codex Desktop with the saved provider and agent configuration.
+
+Windows also creates **AX - Alunixa X** and **AX Launch - Alunixa X** Start menu entries; macOS bundles are named **Alunixa X (AX)** and **Alunixa X Launch (AX)**, so installed apps can be found by searching `AX`, while legacy bundle names remain supported 喵~
+
+### Default image model
+
+Open **Image models** in the sidebar, add an OpenAI Images-compatible **API URL, API Key, and Model**, then drag the handles to reorder profiles; the first row is marked **Default** and ordering saves automatically 喵~
+
+- Generation and editing both use the selected profile without switching the conversation provider; an existing key is preserved when its edit field is left blank 喵~
+- Keep enhancements enabled and launch Codex through Alunixa X to load the MCP initially; an already loaded, updated MCP reads subsequent changes on every call without restarting 喵~
+- Omit `model` and `profile_id` to use the first profile; removing all profiles restores the previous provider/model fallback, with no automatic retry or failover between image profiles 喵~
+- Keys are excluded from model lists, general settings responses, and diagnostics; concurrent edits are rejected rather than silently overwriting another window's configuration 喵~
 
 ## Migrating from Codex+++
 

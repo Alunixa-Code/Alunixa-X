@@ -46,7 +46,7 @@ Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点
 | 供应商网络 | 官方登录、混合 API、纯 API、聚合轮转、单模型路由、Provider Doctor |
 | 模型目录 | 每模型上下文窗口、自动压缩 Token 阈值、思考等级、图片处理方式 |
 | 全端点代理 | `/v1/**` HTTP、SSE、二进制、multipart、大文件和 Realtime WebSocket |
-| 图片工具 | 独立 `image_gen` MCP，支持生成、编辑、多图、mask 与本地结果保存 |
+| 图片工具 | 独立 `image_gen` MCP，多组 API/Key/Model、拖拽设置默认模型，支持生成、编辑、多图、mask 与本地保存 |
 | Agent 能力 | 共享终端、会话操作、导出、项目移动、Stepwise、记忆、Goals 与用户脚本 |
 | 连接中心 | Remote Control、个人微信连接、Zed Remote 与已有会话恢复 |
 | 扩展系统 | MCP、Skills、Plugins、脚本市场和 DreamSkin 主题市场 |
@@ -66,6 +66,17 @@ Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点
 - **Alunixa X Launch**：按照已保存配置启动并接管 Codex Desktop。
 
 首次使用建议先打开 **Alunixa X**，确认 Codex 应用路径、供应商和模型，然后点击概览页的“启动 Agent 轨道”。
+
+安装新版后，Windows 开始菜单还会创建 **AX - Alunixa X** 与 **AX Launch - Alunixa X** 搜索入口；macOS 的应用文件名和显示名为 **Alunixa X (AX)** 与 **Alunixa X Launch (AX)**，安装到“应用程序”后可用 `AX` 搜索，旧名称仍兼容喵~
+
+### 配置默认生图模型
+
+打开左侧 **生图模型**，添加兼容 OpenAI Images 的 **API 地址、API Key、Model**；可保存多组，拖动手柄上下排列，最上方带 **默认** 标记的配置就是 MCP 默认模型，排序自动保存喵~
+
+- API 地址可填基础地址或 `/images/generations`、`/images/edits` 完整地址，生成和编辑请求使用所选配置的同一 API/Key/Model，不改变对话供应商喵~
+- 编辑已有配置时 Key 留空保留原值，列表不显示 Key；多个窗口发生修改冲突时要求刷新，不覆盖其他窗口的新配置喵~
+- 首次使用保持增强功能开启，并通过 Alunixa X 启动 Codex 加载 MCP；已经加载的新版 MCP 每次调用重新读取配置，后续保存或排序无需重启喵~
+- MCP 不显式传 `model` / `profile_id` 时使用首项；清空全部生图配置后恢复原对话供应商及原默认生图模型，不自动重试或轮换到其他生图配置喵~
 
 ## 从 Codex+++ 迁移
 

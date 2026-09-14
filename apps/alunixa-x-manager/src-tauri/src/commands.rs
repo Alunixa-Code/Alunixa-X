@@ -66,12 +66,18 @@ fn serialize_manager_settings<S: serde::Serializer>(
     settings: &BackendSettings,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let mut value = serde_json::to_value(settings).map_err(serde::ser::Error::custom)?;
+    manager_settings_value(settings)
+        .map_err(serde::ser::Error::custom)?
+        .serialize(serializer)
+}
+
+fn manager_settings_value(settings: &BackendSettings) -> serde_json::Result<Value> {
+    let mut value = serde_json::to_value(settings)?;
     // This independently managed section is only exposed through its redacted snapshot.
     if let Some(object) = value.as_object_mut() {
         object.remove("imageModels");
     }
-    value.serialize(serializer)
+    Ok(value)
 }
 
 #[tauri::command]
@@ -239,6 +245,7 @@ pub struct RelayFilesPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelaySwitchPayload {
+    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub relay: RelayPayload,
     pub settings_path: String,
@@ -254,12 +261,14 @@ pub struct RemotePairingStatusPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsBackfillPayload {
+    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextEntriesPayload {
+    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub entries: alunixa_x_core::relay_config::CodexContextEntries,
 }
@@ -4884,7 +4893,7 @@ fn diagnostics_report() -> String {
         "generatedAtMs": generated_at_ms,
         "version": alunixa_x_core::version::VERSION,
         "overview": overview.payload,
-        "settings": settings,
+        "settings": manager_settings_value(&settings).unwrap_or(Value::Null),
         "logs": {
             "diagnosticLogPath": alunixa_x_core::paths::default_diagnostic_log_path(),
             "latestStatusPath": alunixa_x_core::paths::default_latest_status_path()
@@ -5045,6 +5054,42 @@ mod tests {
             payload.settings.image_models[0].api_key,
             "fixture-image-secret"
         );
+        let settings = payload.settings;
+        for value in [
+            serde_json::to_value(SettingsBackfillPayload {
+                settings: settings.clone(),
+            })
+            .unwrap(),
+            serde_json::to_value(ContextEntriesPayload {
+                settings: settings.clone(),
+                entries: alunixa_x_core::relay_config::CodexContextEntries {
+                    mcp_servers: vec![],
+                    skills: vec![],
+                    plugins: vec![],
+                },
+            })
+            .unwrap(),
+            serde_json::to_value(RelaySwitchPayload {
+                settings: settings.clone(),
+                relay: RelayPayload {
+                    authenticated: false,
+                    auth_source: String::new(),
+                    account_label: None,
+                    config_path: String::new(),
+                    configured: false,
+                    requires_openai_auth: false,
+                    has_bearer_token: false,
+                    backup_path: None,
+                },
+                settings_path: String::new(),
+                user_scripts: json!({}),
+            })
+            .unwrap(),
+            json!({ "settings": manager_settings_value(&settings).unwrap() }),
+        ] {
+            assert!(value["settings"].get("imageModels").is_none());
+            assert!(!value.to_string().contains("fixture-image-secret"));
+        }
     }
 
     fn codex_home_env_guard() -> std::sync::MutexGuard<'static, ()> {
