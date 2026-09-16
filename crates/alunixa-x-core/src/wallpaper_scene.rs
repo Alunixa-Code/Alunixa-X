@@ -133,13 +133,20 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
       const electron = require?.("electron");
       if (!electron?.desktopCapturer) return JSON.stringify({status:"failed",message:"当前 Codex 未提供原生窗口捕获"});
       const {spawn} = require("node:child_process");
-      const run = (args) => new Promise((resolve,reject) => {
-        const child = spawn(options.engine,args,{windowsHide:true,stdio:"ignore",shell:false});
+      const quoteWindowsArg = value => '"' + value.replace(/(\\*)"/g,'$1$1\\"').replace(/(\\+)$/g,'$1$1') + '"';
+      const run = (args, rawProperties = false) => new Promise((resolve,reject) => {
+        // WE parses RAW~(...)~END directly from the Windows command line.
+        // Node's normal argv quoting escapes its JSON quotes and WE rejects it.
+        // Preserve only this fixed payload verbatim, quoting every other argument;
+        // ordinary file/title commands keep Node's normal safe argv encoding.
+        const verbatim = rawProperties && process.platform === "win32";
+        const argv = verbatim ? [...args.slice(0,-1).map(quoteWindowsArg),args.at(-1)] : args;
+        const child = spawn(options.engine,argv,{windowsHide:true,stdio:"ignore",shell:false,windowsVerbatimArguments:verbatim});
         // A first launch can keep running as the engine. Bound the wait without
         // killing that process; readiness is checked using the exact window.
         const timer = setTimeout(resolve,2000);
         child.once("error",error=>{clearTimeout(timer);reject(error);});
-        child.once("exit",code=>{clearTimeout(timer);code === 0 ? resolve() : reject(new Error("Wallpaper Engine command failed"));});
+        child.once("exit",code=>{clearTimeout(timer);code === 0 ? resolve() : reject(new Error(`Wallpaper Engine ${args[1]} (${code})`));});
       });
       const previous = globalThis.__alunixaXWallpaperScene;
       if (previous?.project === options.project && previous?.sourceId) return JSON.stringify({status:"ok",sourceId:previous.sourceId});
@@ -149,7 +156,7 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
       electron.app.once("will-quit",()=>{ void owned.close(); });
       try {
         await run(["-control","openWallpaper","-file",options.project,"-playInWindow",options.title,"-width","1280","-height","720"]);
-        if (options.muted) await run(["-control","applyProperties","-location",options.title,"-properties",'RAW~({"volume":0})~END']);
+        if (options.muted) await run(["-control","applyProperties","-location",options.title,"-properties",'RAW~({"volume":0})~END'],true);
         for (let attempt=0;attempt<24;attempt++) {
           const sources = await electron.desktopCapturer.getSources({types:["window"],thumbnailSize:{width:0,height:0},fetchWindowIcons:false});
           const source = sources.find(source=>source.name === options.title);
@@ -160,10 +167,10 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
           await new Promise(resolve=>setTimeout(resolve,500));
         }
         throw new Error("scene window not found");
-      } catch {
+      } catch (error) {
         await owned.close();
         if (globalThis.__alunixaXWallpaperScene === owned) delete globalThis.__alunixaXWallpaperScene;
-        return JSON.stringify({status:"failed",message:"场景渲染窗口未就绪，请先启动 Wallpaper Engine 并确认项目可播放"});
+        return JSON.stringify({status:"failed",message:`场景渲染窗口未就绪，请确认 Wallpaper Engine 和项目可播放 (${error?.message || "unknown"})`});
       }
     })()"#.replace("__OPTIONS__", &options.to_string())
 }

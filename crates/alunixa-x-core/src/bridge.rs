@@ -208,11 +208,36 @@ pub async fn install_bridge_with_disconnect(
     handler: BridgeHandler,
     new_document_scripts: &[String],
 ) -> anyhow::Result<BridgeDisconnect> {
+    install_bridge_with_wallpaper(
+        websocket_url, binding_name, handler, new_document_scripts, None,
+    ).await
+}
+
+/// Keep the private media transport on the bridge's supervised CDP connection.
+/// It is installed before any renderer script, survives navigation, and is
+/// recreated with the bridge on disconnect. The host CSP is never disabled.
+pub async fn install_bridge_with_wallpaper(
+    websocket_url: &str,
+    binding_name: &str,
+    handler: BridgeHandler,
+    new_document_scripts: &[String],
+    wallpaper: Option<crate::settings::BackendSettings>,
+) -> anyhow::Result<BridgeDisconnect> {
     let socket = connect_cdp_websocket(websocket_url).await?;
     let generation = next_bridge_generation(websocket_url);
     let mut session = CdpSession::new(socket)
         .with_handler(handler)
         .with_generation(generation.clone());
+    session.wallpaper = wallpaper;
+
+    if session.wallpaper.is_some() {
+        session.send_command(next_message_id(), "Fetch.enable", json!({
+            "patterns": [{
+                "urlPattern": format!("{}*", crate::wallpaper::APP_RESOURCE_BASE),
+                "requestStage": "Request"
+            }]
+        })).await?;
+    }
 
     session.send_command(1, "Runtime.enable", json!({})).await?;
     session
@@ -353,6 +378,7 @@ struct CdpSession<S> {
     binding_calls: VecDeque<Value>,
     handler: Option<BridgeHandler>,
     generation: Option<BridgeGeneration>,
+    wallpaper: Option<crate::settings::BackendSettings>,
 }
 
 impl<S> CdpSession<S>
@@ -370,6 +396,7 @@ where
             binding_calls: VecDeque::new(),
             handler: None,
             generation: None,
+            wallpaper: None,
         }
     }
 
@@ -493,6 +520,17 @@ where
 
         if value.get("method").and_then(Value::as_str) == Some("Runtime.bindingCalled") {
             self.binding_calls.push_back(value.clone());
+        }
+        // Handle paused resources even while waiting for installation/evaluate
+        // replies; otherwise a script awaiting a same-origin fetch can deadlock
+        // bridge installation. Only the registered private prefix is served.
+        if value.get("method").and_then(Value::as_str) == Some("Fetch.requestPaused")
+            && let Some(settings) = &self.wallpaper
+        {
+            let response = crate::wallpaper::cdp_response(&value["params"], settings).await;
+            self.send_command_without_wait(
+                next_message_id(), "Fetch.fulfillRequest", response,
+            ).await?;
         }
 
         Ok(Some(value))

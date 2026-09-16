@@ -3776,7 +3776,7 @@ async fn try_inject(
         debug_port,
         StatusStore::default(),
     )));
-    crate::bridge::install_bridge_with_disconnect(
+    crate::bridge::install_bridge_with_wallpaper(
         websocket_url,
         crate::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
@@ -3786,6 +3786,8 @@ async fn try_inject(
             )
         }),
         &[script],
+        (settings.enhancements_enabled && settings.codex_app_image_overlay_enabled)
+            .then_some(settings),
     )
     .await
 }

@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 已接入同一受监控 bridge CDP 连接的专用 Fetch 路由（先注册后注入，安装等待期间也服务资源）；Scene RAW 仅固定 JSON 使用 Windows verbatim、其他参数保持独立引用；renderer 新增真正解码就绪诊断与取消播放竞态过滤，等待编译和严格 CSP 实播验收喵~
 - 接续已完整读取本文件与最新操作记录，保留并提交 wallpaper.rs 初稿为 1d6865d；下一步接通 renderer CDP Fetch 专用路由、修正 Scene RAW 参数、添加严格 CSP Electron 实播验证，再完成全量回归与新补丁版本发行喵~
 - 已实证根因：Codex app:// CSP 拒绝 HTTP 媒体/iframe/fetch；静态图新 16 MiB 阈值导致大图从 data URI 回退到被拦 HTTP；旧测试去掉真实 CSP 因而漏验喵~
 - Scene 独立 Electron + 实际 WE 项目复现 openWallpaper=0 但 applyProperties=4，原因 Windows spawn 转义 RAW JSON；仅对此命令使用正确 verbatim argv 后 applyProperties=0 并获得精确自有 sourceId，窗口已定向关闭、不动桌面喵~

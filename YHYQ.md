@@ -1893,3 +1893,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 使用既有缓存 Electron 40.1.0 在项目 .tmp 创建自有隔离测试运行时，独立 profile/隐藏窗口实证 app:// 同源资源可通过 Fetch.fulfillRequest 加载且保持 CSP，不改当前运行 Codex；未新下载安装包喵~
 - 官方 Electron protocol 与 WE CLI 正文经 HTTPS读取；实际 WE 单独命名验证窗口：原生 openWallpaper 成功，applyProperties因 Windows转义 RAW JSON退出4；在隔离 Electron修正 RAW参数后返回0且捕获到精确自有窗口，测试结束逐一 closeWallpaper -location 回收，不发送全局stop/pause喵~
 - 2026-09-16 接续：完整读取 XJ.md、当前任务日志、现有 wallpaper.rs 差异和隔离 Electron probe，保留初稿并建立 1d6865d 检查点；该初稿尚未接入 CDP，不宣称修复完成，继续同源路由、实际解码/播放/Scene 捕获验证与补丁发行喵~
+- 已实现专用 app 同源资源路由与原 bridge 同连接生命周期，保留页面 CSP、不代理任意文件；修正 Scene RAW JSON Windows 转义；补充图片/视频实际解码就绪诊断和主动销毁的 AbortError 过滤，尚待当前源码验证喵~

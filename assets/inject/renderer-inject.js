@@ -646,8 +646,15 @@
     let video = null;
     let stream = null;
     let notice = null;
+    let image = null;
+    let ready = false;
     const abort = new AbortController();
     const timers = new Set();
+    const reportReady = () => {
+      if (stopped || ready) return;
+      ready = true;
+      sendAlunixaXDiagnostic("wallpaper_ready", { kind: config.kind || "image" });
+    };
     const reportFailure = (message) => {
       if (stopped || notice) return;
       sendAlunixaXDiagnostic("wallpaper_failed", { kind: config.kind, message });
@@ -664,7 +671,10 @@
     const syncPlayback = () => {
       if (!video || stopped) return;
       if (document.hidden || config.paused) video.pause();
-      else video.play().catch(() => reportFailure("壁纸播放失败，请检查视频编码或静音设置"));
+      else video.play().catch(error => {
+        if (!stopped && !document.hidden && !config.paused && error?.name !== "AbortError")
+          reportFailure("壁纸播放失败，请检查视频编码或静音设置");
+      });
     };
     const cleanup = () => {
       stopped = true;
@@ -672,6 +682,7 @@
       timers.forEach(clearTimeout);
       document.removeEventListener("visibilitychange", syncPlayback);
       window.removeEventListener("pagehide", cleanup);
+      if (image) { image.onload = image.onerror = null; image.src = ""; }
       if (video) {
         video.pause();
         video.srcObject = null;
@@ -698,6 +709,8 @@
         objectFit: ({ fill:"cover", stretch:"fill", center:"none", tile:"contain" })[fitMode] || "contain" });
       video.onerror = () => reportFailure("视频无法解码，请使用 MP4（H.264）或 WebM");
       video.onloadedmetadata = syncPlayback;
+      video.onloadeddata = reportReady;
+      video.onplaying = reportReady;
       overlay.appendChild(video);
       document.addEventListener("visibilitychange", syncPlayback);
       if (config.kind === "video") {
@@ -759,6 +772,10 @@
         backgroundImage: `url("${source.replace(/"/g, "%22")}")`,
         backgroundSize: fitStyles.size, backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
       });
+      image = new Image();
+      image.onload = reportReady;
+      image.onerror = () => reportFailure("壁纸图片无法加载，请重新选择有效的图片");
+      image.src = source;
     }
     sendAlunixaXDiagnostic("image_overlay_installed", { opacity, fitMode, kind:config.kind || "image" });
   }
