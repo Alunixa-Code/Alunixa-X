@@ -25,6 +25,7 @@
 - `assets/inject` 原生界面注入；`tools` 验证脚本；`docs/releases` 发行说明；`.github/workflows` CI 喵~
 
 ## 5. Architecture
+- 普通壁纸沿用 `codexAppImageOverlay*`，新增 muted/paused/enginePath；媒体导入状态目录，Helper 仅暴露当前选中的本地媒体和项目资源；图片/视频/隔离 Web 由 renderer 渲染，Windows Scene 由 WE 独立窗口经 Electron 精确捕获，不与 DreamSkin 混合实现喵~
 - 生图配置已存入既有 SettingsStore 的 imageModels 有序数组，独立 Tauri 命令做脱敏读取、带版本校验的定向保存；复用全量备份，不让普通设置的旧快照覆盖新生图配置喵~
 - MCP 每次调用重新读取 imageModels，默认首项，显式 model/profile_id 可选其他已配置项；没有配置时保留原 Helper 图片端点回退，不把 Key 写入 MCP schema/env 或下载图片请求喵~
 - `protocol_proxy.rs` 处理协议路由、转换和 SSE 状态机，新增子模块 `protocol_proxy/fidelity.rs` 处理能力校验及自包含原生回放，`launcher.rs` 负责 HTTP 错误/SSE 交付与超时喵~
@@ -82,6 +83,8 @@
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
 
 ## 12. APIs, Interfaces, and Data Formats
+- 壁纸 Tauri：`import_wallpaper_media(path)` 无损复制，`inspect_wallpaper(path)` 只读解析，均返回 `{kind,title,path,entry,root}`；`repair_codex_feature_config()` 返回是否修复，真实文件先备份再原子写入喵~
+- Helper：`/wallpaper/media` 支持 GET/HEAD/单 Range/416，`/wallpaper/web/<relative>` 只读当前项目且 CSP 网络来源限定该前缀，`/wallpaper/scene` 返回 waiting/ok+sourceId/failed；关闭壁纸时资源路由返回 404，不接受任意本地文件 query 喵~
 - 生图 `imageModels: [{ id, name, baseUrl, apiKey, model }]` 有序数组首项为默认；UI `load_image_models` 返回 `{models:[{id,name,baseUrl,model,hasApiKey}],revision}`，`save_image_models(revision,models)` 中 `apiKey:null` 按 ID 保留原值，冲突拒绝；锁内仅替换原始 JSON 的 imageModels，保留其他及未知字段喵~
 - MCP `image_gen` 省略 model/profile_id 使用首项，显式 profile_id 区分同名模型，未配置时沿旧 Helper/gpt-image-2 回退；兼容 Images API 生成 JSON/编辑 multipart，首启需增强总开关，独立生图无需对话供应商开关喵~
 - 原生回放使用 reasoning.encrypted_content 中版本化 `alunixa-x-replay-v1:` Base64 JSON，携带 wire/native/items 并核对所覆盖历史；不等同于加密，不作为对话正文或诊断日志输出喵~
@@ -139,6 +142,7 @@
 
 ## 19. Current Task
 ### 进行中：动态壁纸与 guardianv2
+- 最新前端 107/107、TS、i18n 918/918 + 80/80、品牌和 Vite 均退出 0；新增行凭据模式扫描为 0，完整基线 diff 检查发现文档末尾多余空行已清除；Rust 完整回归仍在执行，不并发重编译喵~
 - 2026-09-16 隔离生产 UI 全流程已退出 0：本机解析器 3 组失败→成功、WebM/GIF 真播放、预览/暂停/保存/取消/失败保留/场景目录/重置，Web 本地脚本/JSON/父页隔离/Helper fetch 与图片拦截全部 PASS 喵~
 - 收尾审阅发现 Scene 12 秒等待超过通用 CDP 5 秒上限，已新增仅单次调用的 30 秒 deadline，不改变其他 CDP 默认，并将前端等待上限对应为 40 秒；新增真实 WebSocket 5.2 秒成功与短 deadline 失败回归喵~
 - 截图目视发现两处开关缺少现有 CSS 要求的视觉指示，已补 ToggleVisual 同款结构；浅色测试改为实际点击主题按钮，避免只改根 class 与内部深色状态不一致；最新无窗口 VM 测试是跨 realm 数组断言差异，已复制为本 realm 数组，不弱化精确窗口断言喵~

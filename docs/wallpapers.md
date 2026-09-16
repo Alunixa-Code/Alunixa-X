@@ -65,4 +65,3 @@ cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1
 ```
 
 浏览器验证使用真实 Chromium 和 Rust 临时媒体服务，管理器 Tauri 命令由内存 fixture 提供；可选 `--codex` 使用已安装 CLI 在临时 home 验证修复前失败、修复后解析成功，不登录账户或发送模型请求喵~
-
