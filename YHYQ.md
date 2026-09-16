@@ -1900,3 +1900,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 第二次 Electron 已完成静态 PNG 解码，但所有窗口关闭触发 Electron 默认退出，使后续用例未执行；添加 window-all-closed 保活，继续完整验证而不把首项成功写成全部通过喵~
 - 完整严格 CSP 测试实际发现新同源实现大图挂起：CDP select! 的250ms generation tick会取消next_message中的长资源读写，丢失已消费的Fetch事件；已改为只排队事件，在select分支外flush完整传输，安装等待也处理资源；不删大图用例，准备重编译验证喵~
 - 修复取消后大图从挂起变为明确加载错误，仍未通过；增加自有 Electron 页面 Network 及 fixture 子进程诊断，继续定位实际响应，不增加 CSP 例外或跳过用例喵~
+- 前端全量107/107、TypeScript、i18n918/918+80/80、品牌检查PASS；补真实WebSocket安装fetch/650ms背压/9MiB完整响应/后续bridge调用回归，防止资源服务与原bridge互相破坏喵~

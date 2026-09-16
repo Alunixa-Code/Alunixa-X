@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 前端全量107/107、TypeScript/i18n/品牌检查通过；追加真实 WebSocket 的安装阶段 fetch 与650ms背压+9MiB响应+后续bridge调用回归，防止再次因连接探测取消资源传输喵~
 - 大图取消修复后请求不再永久挂起，但实际 PNG 仍触发加载失败；新增隔离页面 Network/fixture 诊断定位真实响应，不将当前状态写成通过，后续用例仍未执行喵~
 - 严格 Electron 复现新实现的大图挂起：把 Fetch 读取/大包发送放进 select! 的 next_message 后，会被 250ms generation tick 取消并丢失已消费事件；已改为事件入队、在 select 分支外完整处理，安装命令等待期间亦 flush，待重新编译实播喵~
 - Electron 首项静态 PNG 真解码已通过，但默认所有窗口关闭时退出导致 harness 在第一项后终止；已增加多用例窗口生命周期保活，非产品壁纸失败，仍需完整运行喵~
