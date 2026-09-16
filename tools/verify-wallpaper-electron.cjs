@@ -88,12 +88,8 @@ async function open(source, extra = {}) {
     webPreferences: { nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } });
   windows.add(w);
   const network = [];
-  w.webContents.debugger.attach("1.3");
-  await w.webContents.debugger.sendCommand("Network.enable");
-  w.webContents.debugger.on("message", (_event, method, params) => {
-    if (method === "Network.loadingFailed") network.push({ method, ...params });
-    if (method === "Network.responseReceived" && params.response.url.includes("_alunixa-x-wallpaper"))
-      network.push({ method, status: params.response.status, mime: params.response.mimeType, url: params.response.url });
+  w.webContents.on("console-message", (_event, details, oldMessage) => {
+    network.push(details?.message || oldMessage || String(details));
   });
   await w.loadURL("app://-/index.html");
   await w.webContents.executeJavaScript(`
@@ -155,6 +151,11 @@ async function verifyImage(name, animated = false) {
     }
     console.log("PASS", name, animated ? "decoded + real pixel animation" : "decoded under host CSP");
   } catch (error) {
+    const transport = await Promise.race([
+      ctx.evaluate(`fetch(window.__ALUNIXA_X_IMAGE_OVERLAY__.sourceUrl).then(async r=>({status:r.status,length:(await r.arrayBuffer()).byteLength})).catch(e=>String(e))`),
+      delay(3000).then(() => "fetch timed out"),
+    ]);
+    console.error("RESOURCE_DIAGNOSTICS", JSON.stringify(transport));
     console.error("IMAGE_DIAGNOSTICS", JSON.stringify(ctx.diagnostics()));
     throw error;
   } finally { await ctx.done(); }

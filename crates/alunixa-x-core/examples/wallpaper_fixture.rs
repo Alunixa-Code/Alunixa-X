@@ -72,7 +72,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
         println!("READY");
-        let _ = disconnected.await;
+        if let Ok(reason) = disconnected.await {
+            println!("DISCONNECTED: {reason}");
+        }
         return Ok(());
     }
     anyhow::ensure!(args[0] == "serve", "unknown mode");

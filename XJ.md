@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- Electron WebContents.debugger 的额外 Network 诊断与远程调试同时启用时验证停滞，改用页面 console/同源 fetch 与 fixture 连接断开原因，不改变产品路由；仍以真解码和实际画面为门禁喵~
 - 前端全量107/107、TypeScript/i18n/品牌检查通过；追加真实 WebSocket 的安装阶段 fetch 与650ms背压+9MiB响应+后续bridge调用回归，防止再次因连接探测取消资源传输喵~
 - 大图取消修复后请求不再永久挂起，但实际 PNG 仍触发加载失败；新增隔离页面 Network/fixture 诊断定位真实响应，不将当前状态写成通过，后续用例仍未执行喵~
 - 严格 Electron 复现新实现的大图挂起：把 Fetch 读取/大包发送放进 select! 的 next_message 后，会被 250ms generation tick 取消并丢失已消费事件；已改为事件入队、在 select 分支外完整处理，安装命令等待期间亦 flush，待重新编译实播喵~
