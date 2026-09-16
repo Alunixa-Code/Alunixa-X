@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- 接续检查点 1d6865d 保存上一轮尚未接通的 wallpaper.rs 同源响应初稿；当前仅完成根因复现，CDP 路由、Scene 参数修复及真实播放回归仍待完成，不能将初稿或旧 CI 当作修复成功喵~
 - 2026-09-16 用户实测反馈 v1.0.21 静态壁纸回退、视频与 WE Scene 均不能用；正式发布/CI 成功不能代表真实 Codex 显示链路已通过，当前已重开运行链路修复任务，检查点 fb02cfc 喵~
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
 - v1.0.21 已原子推送 main/标签，产品提交 9c7f71259784bf0e60dc1137dd80644b0e0d1016，annotated tag 对象 8d1bfbfa67709a68c8bec7301e63a9bca37c2707；唯一正式 Actions 35055944380 已启动并等待验收喵~
@@ -163,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 接续已完整读取本文件与最新操作记录，保留并提交 wallpaper.rs 初稿为 1d6865d；下一步接通 renderer CDP Fetch 专用路由、修正 Scene RAW 参数、添加严格 CSP Electron 实播验证，再完成全量回归与新补丁版本发行喵~
 - 已实证根因：Codex app:// CSP 拒绝 HTTP 媒体/iframe/fetch；静态图新 16 MiB 阈值导致大图从 data URI 回退到被拦 HTTP；旧测试去掉真实 CSP 因而漏验喵~
 - Scene 独立 Electron + 实际 WE 项目复现 openWallpaper=0 但 applyProperties=4，原因 Windows spawn 转义 RAW JSON；仅对此命令使用正确 verbatim argv 后 applyProperties=0 并获得精确自有 sourceId，窗口已定向关闭、不动桌面喵~
 - 方案：复用 renderer CDP 连接对专属 app://-/_alunixa-x-wallpaper/* 路径接入当前选中资源，保留 CSP 和 Web 沙箱，用有限 Range 分块不内嵌大视频；隔离 Electron 已证明 CSP self+Fetch.fulfillRequest 实际可用，不全局绕过 CSP 喵~
