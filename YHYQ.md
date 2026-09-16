@@ -1915,3 +1915,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 更改fixture清单大小写后仍黑屏，已通过单一变量诊断确认真正根因：Rust canonicalize带Win32扩展路径前缀，WE内置Web宿主转换成无效file地址；仅在自有Electron诊断进程把引擎参数转为普通盘符/UNC路径后，Web及用户选中Scene均通过非黑画面和多帧变化，窗口边框也已去除喵~
 - 已把上述规范化加入产品引擎调用并增加本地盘符/中文空格/UNC/POSIX回归，更新发行说明；诊断shim不属于产品、不作为最终验收，须重建产品fixture后不用shim复验；当前在途workspace明确为路径补丁前基线，正式CI负责最终源码全量喵~
 - 首轮workspace退出101，41套件1125 passed/1 failed/1 ignored，唯一失败为cdp_bridge静态源码断言仍使用旧source变量，而实现已用解析后的url；已同步该断言并额外断言媒体bridge调用，不删测试/跳过断言，准备最终94项CDP与新路径专项以及无shim实际播放喵~
+- 最终本地门禁：b07179e产品fixture不带任何诊断shim，Electron40.1.0完整退出0；普通/大PNG、导航恢复、GIF/APNG像素动画、大MP4跳转循环暂停恢复、WebM、WE Video、实际WE Web和用户选中Scene均通过，Native两类额外验证非黑内容及多帧变化，最新无标题栏截图已目视喵~
+- 最新CDP94/94、路径专项1/1、壁纸6/6、前端107/107、管理器UI/TS/i18n918+80/Vite/品牌/第三方锁等价/fmt/全差异检查通过；all-targets check退出0（1m03s），四包/前端/Tauri均1.0.22；首轮workspace过时断言失败已如实记录，最终三平台全量由正式CI再次验证喵~
+- 远端main仍9c7f71259784bf0e60dc1137dd80644b0e0d1016且v1.0.22未占用；本次推送明确包含：磁盘后备File/Blob媒体、场景bridge状态、RAW参数及Win32扩展路径修复、自有窗口去装饰/任务栏、Native Web控件/平台说明、导航恢复和资源回收、实播/契约回归及详细发行说明，不升级第三方依赖喵~
+- 准备以[skip ci]最终提交原子推送main/新annotated v1.0.22，再显式派发唯一release-assets.yml，不复用旧二进制、不移动旧标签，正式构建失败则不把发布描述为成功喵~

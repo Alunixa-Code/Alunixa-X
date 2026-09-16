@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **v1.0.22 发布门禁就绪**：无诊断shim的完整Electron实播PASS（含用户选中Scene及Native Web非黑/变化帧），最新94项CDP与路径测试PASS，前端107/107/生产UI/TS/i18n/Vite/依赖等价/全目标check/fmt/diff均PASS；远端main仍9c7f712且新标签空闲，准备唯一正式CI，最终源码全量Rust由CI验收喵~
 - 已准备自身版本1.0.22及详细发行/使用说明，远端新标签未占用，依赖版本未升级；仍需完成去边框后原生非黑帧/动画复验和最终全量门禁，尚未推送喵~
 - 当前采用原生磁盘后备 File/Blob + bridge 场景状态，不再使用已撤回 Fetch 同源草案；严格 Electron 已通过静态/大PNG/导航恢复/GIF/APNG/MP4跨段Seek循环/WebM/WE Video/真实Native Web，原生Scene正在本轮同一测试中验证喵~
 - 接续检查点 1d6865d 保存上一轮尚未接通的 wallpaper.rs 同源响应初稿；当前仅完成根因复现，CDP 路由、Scene 参数修复及真实播放回归仍待完成，不能将初稿或旧 CI 当作修复成功喵~
@@ -35,7 +36,7 @@
 - `assets/inject` 原生界面注入；`tools` 验证脚本；`docs/releases` 发行说明；`.github/workflows` CI 喵~
 
 ## 5. Architecture
-- 普通壁纸沿用 `codexAppImageOverlay*`，新增 muted/paused/enginePath；媒体导入状态目录，Helper 仅暴露当前选中的本地媒体和项目资源；图片/视频/隔离 Web 由 renderer 渲染，Windows Scene 由 WE 独立窗口经 Electron 精确捕获，不与 DreamSkin 混合实现喵~
+- 普通壁纸沿用 `codexAppImageOverlay*`/muted/paused/enginePath；v1.0.22大图/视频经既有bridge调用受限CDP File→磁盘后备Blob URL，renderer按需播放/撤销；Scene/Web均由Windows WE自有无装饰窗口精确捕获，状态走bridge，不依赖HTTP媒体或Fetch拦截，不与DreamSkin混合喵~
 - 生图配置已存入既有 SettingsStore 的 imageModels 有序数组，独立 Tauri 命令做脱敏读取、带版本校验的定向保存；复用全量备份，不让普通设置的旧快照覆盖新生图配置喵~
 - MCP 每次调用重新读取 imageModels，默认首项，显式 model/profile_id 可选其他已配置项；没有配置时保留原 Helper 图片端点回退，不把 Key 写入 MCP schema/env 或下载图片请求喵~
 - `protocol_proxy.rs` 处理协议路由、转换和 SSE 状态机，新增子模块 `protocol_proxy/fidelity.rs` 处理能力校验及自包含原生回放，`launcher.rs` 负责 HTTP 错误/SSE 交付与超时喵~
@@ -51,6 +52,7 @@
 - 密码、API key、token、auth.json 正文均不保存到项目记忆或公开日志喵~
 
 ## 8. Development Commands
+- 实际宿主门禁：独立Electron运行 `tools/verify-wallpaper-electron.cjs --fixture <wallpaper_fixture副本绝对路径> --output <本项目.tmp绝对路径> --scene <显式project.json> --engine <显式wallpaper64.exe>`；需要Python/Pillow及ffmpeg，生成临时媒体/profile，绝不使用当前Codex进程，完整通过标志ELECTRON_WALLPAPER_PASS喵~
 - 壁纸 UI/媒体：先 `cargo build -p alunixa-x-core --example wallpaper_fixture --locked -j 2` 与前端生产构建，再 `python tools/verify-wallpaper-ui.py --codex <CLI绝对路径>`；仅临时 home/内存 Tauri/自有随机端口，截图位于 `.tmp/wallpaper-ui-{dark,light}.png` 喵~
 - 生图 UI：`python tools/verify-image-models-ui.py`，需要 Python Playwright/Chromium 与已构建前端；脚本自管随机端口/浏览器、仅内存 Tauri fixture，截图在 `.tmp/image-models-ui-{dark,light}.png` 喵~
 - 根目录：`cargo test --workspace --locked --no-fail-fast -- --test-threads=1`，`cargo check --workspace --all-targets --locked`，`cargo fmt --all -- --check` 喵~
@@ -58,6 +60,8 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- v1.0.22最新源码 b07179e：CDP94/94、路径专项1/1、管理器UI真实浏览器PASS、前端107/107、TS/i18n918+80/品牌/Vite/依赖等价/fmt/diff/四包版本一致；全目标check退出0（1m03s），独立Electron40.1.0无shim验证全部媒体及Native Web/Scene的非黑和多帧变化，最终无标题栏截图已目视喵~
+- 首轮本地workspace 41套件1125/1/1的唯一过时静态断言已修正且CDP全量复验94/94，不能把这一首轮说成全绿；发布工作流将对最终提交执行三平台完整workspace喵~
 - v1.0.21 正式 CI 日志独立核验：Windows 41 套件 1124 passed/0 failed/1 ignored，macOS x64/arm64 各 41 套件 1102/0/1；三平台前端 107/107，Windows accepted socket fixture 回归已 PASS 喵~
 - 2026-09-16 当前源码：完整 workspace 退出 0，41 套件 1124 passed/0 failed/1 ignored；唯一 ignored 为既有父测试使用的 JSON-RPC 子进程入口，Guardian 结构/备份/防回灌、scene.pkg、CDP 独立 deadline 均通过；随后严格串行 all-targets check 退出 0（1m52s）喵~
 - 前端 107/107、TS、i18n 918/918 + 80/80、品牌、Vite、fmt、完整 diff 检查通过；新增行凭据模式 0，锁文件无依赖变化；生产 UI/真实 WebM/GIF/Web 资源隔离/深浅主题截图目视和 3 组临时 CODEX_HOME 的本机解析器验证全部 PASS 喵~
@@ -98,6 +102,7 @@
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
 
 ## 12. APIs, Interfaces, and Data Formats
+- v1.0.22运行显示：`/wallpaper/media` bridge（不是页面HTTP请求）无payload路径参数，仅返回选中媒体的`{status:"ok",sourceUrl:"blob:..."}`；`/wallpaper/scene` bridge返回自有Scene/Web状态；临时input成功/失败均移除，Blob由renderer撤销，Page agent启用后支持导航恢复喵~
 - 壁纸 Tauri：`import_wallpaper_media(path)` 无损复制，`inspect_wallpaper(path)` 只读解析，均返回 `{kind,title,path,entry,root}`；`repair_codex_feature_config()` 返回是否修复，真实文件先备份再原子写入喵~
 - Helper：`/wallpaper/media` 支持 GET/HEAD/单 Range/416，`/wallpaper/web/<relative>` 只读当前项目且 CSP 网络来源限定该前缀，`/wallpaper/scene` 返回 waiting/ok+sourceId/failed；关闭壁纸时资源路由返回 404，不接受任意本地文件 query 喵~
 - 生图 `imageModels: [{ id, name, baseUrl, apiKey, model }]` 有序数组首项为默认；UI `load_image_models` 返回 `{models:[{id,name,baseUrl,model,hasApiKey}],revision}`，`save_image_models(revision,models)` 中 `apiKey:null` 按 ID 保留原值，冲突拒绝；锁内仅替换原始 JSON 的 imageModels，保留其他及未知字段喵~
@@ -126,6 +131,7 @@
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
 ## 15. Known Bugs and Limitations
+- v1.0.22已在独立Electron+实际WE验证Scene/Web捕获，取代下面v1.0.21“未实机验收”的历史状态；原生项目仅Windows并依赖WE，Web网络/宿主能力由WE管理而非Codex iframe沙箱，用户当前Codex仍为已安装旧程序，未自动替换/重启喵~
 - 2026-09-16 正式 Windows CI 暴露既有 imagegen_mcp::tests::image_fixture_server 非阻塞 listener 接受后直接 read 的 10035/WouldBlock 竞态；本次先保留原测试做一次失败作业复跑，不将它描述为产品生图 API 已知失败或忽略测试，后续测试维护可显式设置 stream blocking 并增加延迟分片 fixture 喵~
 - 动态壁纸：选择单个含 project.json 的项目目录，不扫描整个 Workshop 库；Scene 仅 Windows/需要 Wallpaper Engine，1280×720/24 FPS 捕获及引擎实际运行未实机验收，暂停只暂停 Codex 显示；Web 不保证兼容专有宿主 API/外部网络，静态 PNG 不会自动变成动画，具体见 docs/wallpapers.md 喵~
 - Guardian 定向修复只覆盖所用 Codex home 和写入的供应商片段，不修改当前任务运行配置，也不宣称修复所有项目级配置/其他 TOML 语法错误喵~
@@ -147,6 +153,8 @@
 - 新旧仓库不可混用，旧路径无效时使用已确认的当前项目根目录喵~
 
 ## 17. Failed Approaches
+- v1.0.22：app同源Fetch初稿对已经加载的自定义协议页面/新iframe不生效，只有重新导航才接管；已撤回而使用原生File/Blob与bridge，保留CSP且不刷新宿主；大包被select取消的问题只属于撤回草案喵~
+- v1.0.22：仅sourceId/MediaStream计时通过仍可能是黑帧，最终门禁必须非黑且实际帧不同；WE Web黑帧最终确认为Win32扩展路径前缀，改fixture大小写不能修复，产品在引擎边界规范化普通盘符/UNC并已有实际验证喵~
 - 2026-09-16：已限制到本项目 .tmp、明确列出九个平面日志文件、未使用递归删除的 PowerShell 清理仍被执行环境预先拒绝；后续只读确认 9 文件/222311 字节保持原样，未重复清理或改用其他工具绕过喵~
 - 2026-09-14 v1.0.19 收尾：包含本地审计提交和 PowerShell 精确日志清理的命令在执行前整体被策略拒绝，因此该次提交/删除均未发生；随后只读确认 13 日志仍在，共 1,674,478 字节，旧 v1.0.18 六日志也保持不变，不改用其他工具或命令绕过删除限制喵~
 - 2026-09-14 发行收尾：使用已核验工作区范围的 PowerShell Remove-Item 清理本轮六份日志被执行环境拒绝，命令整体未运行；只读复查确认六文件仍在，不重试或换工具绕过喵~
@@ -156,6 +164,7 @@
 - gh run view --log 在整轮运行未完成时可能拒绝，等待同一运行完成后取日志，不重复派发喵~
 
 ## 18. Rollback and Recovery
+- v1.0.22任务起点fb02cfc，最终功能提交0e85df1/断言修正b07179e；需要回退时定向revert，不移动已有版本标签、不删除用户媒体/任务，不把撤回的Fetch草案恢复为生产实现喵~
 - 壁纸任务修改前 e8d24b7；主要实现 1514bf4/161dd5f，打包场景/CSP/预览修复 1522c17，最终产品冻结 2553916，验证脚本 910c3d5；需要回退时使用定向 revert，不移动 v1.0.19 或丢弃其他工作喵~
 - v1.0.19 产品 4c5b6a8、最终代码验收 2334162、未知字段保留 28e5dee；上一稳定发行 v1.0.18，必要时针对性 revert 后发布新版本，不移动既有标签或覆盖安装中的程序喵~
 - 生图模型/AX 功能修改前检查点 `b448544`，功能基线 v1.0.18；不动真实配置、正在运行的 Codex 或系统安装入口，使用隔离 fixture 验证喵~
@@ -166,6 +175,8 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- **当前结论：本地功能验收完成，开始正式发行**；b07179e的新产品fixture不带诊断shim完整退出0，PNG/大图/导航恢复/GIF/APNG/MP4 seek-loop-pause/WebM/WE Video/Native Web/真实Scene全部通过，原生非黑+多帧及无边框截图目视PASS，用户运行实例未动喵~
+- 下一步同一新标签v1.0.22推送、唯一release-assets.yml三平台完整回归/构建、六资产Release及正文/来源/哈希核验；本次推送明细见docs/releases/v1.0.22.md，不重复发布或移动历史标签喵~
 - 首轮完整workspace已退出101：41套件1125/1/1，唯一失败是静态源码断言仍要求旧backgroundImage的source变量，实际已改为解析后的url；已同步断言并新增媒体bridge契约，不忽略失败；接下来全量CDP专项/路径测试/无shim实播通过后由正式CI对最终源码完整构建验收喵~
 - **Native Web黑帧根因已证实**：Rust canonicalize 的Win32扩展前缀使WE内置Web浏览器产生无效file地址，单独诊断shim只移除该前缀后Web与真实Scene均通过非黑帧/多帧变化且截图无边框；大小写fixture改动不是修复根因喵~
 - 产品已加入仅跨引擎调用时的普通盘符/UNC路径规范化及三类路径回归，未动用户项目；接下来须以新产品fixture、不带诊断shim完成最终Electron复验；正在运行的workspace是该路径补丁前基线，最终新源码全量以正式CI为准，不混称验证范围喵~
@@ -308,6 +319,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
+- 当前执行v1.0.22正式推送/唯一Actions/六资产发布验收；以下v1.0.21发布完成描述均为历史，不能代替本次最终源码CI；成功后更新此文件与YHYQ.md，再交付新安装包喵~
 - 当前首先修复用户反馈的 v1.0.21 静态/视频/场景显示失败，完成失败→成功的实际显示证据后再发布补丁；以下已完成发行说明为历史，不等同于用户端效果通过喵~
 - v1.0.21 发布和验收已完成，交付正式 Release；不重复构建/发布或移动标签，不自动安装/重启；原生 Scene 实机捕获仍须另行验证，历史拒绝清理日志不再重试喵~
 - v1.0.19 已验收完成，不再构建或重复发布；本轮日志清理被环境拒绝，不重复尝试，保留记录/有用截图/复用缓存，向用户交付；后续如用户自行清理，仅处理已列出的已完成验证日志喵~
