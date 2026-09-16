@@ -1794,3 +1794,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已读取完整 `XJ.md` 与近期 `YHYQ.md`，确认项目根目录为 `D:\Cursor\AlunixaX`；工作树仅有既有 `.tmp/` 未追踪产物，产品基线为 v1.0.19。
 - 修改前建立可回滚空提交 `e8d24b7`：`chore: checkpoint before dynamic wallpapers and config repair`。
 - 后续动作将记录在本节，并在每个有意义阶段同步 `XJ.md` 与 Git 提交。
+- 已检查现有壁纸 data URI/Helper/React 设置链路和 guardianv2 修复；现有修复漏验结构化字段，官方 config.schema.json 证实 Guardian 及嵌套对象禁止未知字段；本机默认 config 不含 guardianv2，未更改真实文件喵~
+- 已读取前端设计、React、WebUI 测试、OpenAI Docs 技能；通用记忆仅用于沿用先查本机布局及隔离验证习惯，不引用旧仓库实现喵~
+- 官方 web 工具未返回正文，使用 HTTPS 实际读取 openai/codex config.schema.json 与 Wallpaper Engine 官方 CLI 文档；尝试两个 features.rs 路径为 404，已停止猜测路径喵~

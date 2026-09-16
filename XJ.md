@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- 2026-09-16 新任务进行中：动态壁纸与 Wallpaper Engine 项目目录支持、guardianv2 配置兼容修复；修改前检查点 e8d24b7，尚未修改产品代码或真实配置，未发布喵~
 - v1.0.19 已正式发布并验收完成：产品提交 4c5b6a82e58175d743c9a7b72a4b490ee7ea8dc6，唯一 Actions 34833120719 completed/success，Release 388319972 的六资产/说明/哈希/公开 latest 全通过，未改真实配置或运行实例喵~
 - 2026-09-14 v1.0.18 已正式发布并完成验收，产品提交 `44c41ea99125d4f1064ee7e636755f8ff0141fad`，annotated tag 对象 `dc9758baf645be15f62874ce502732b3e882db36`；唯一 Actions `34814836183` completed/success，六安装资产及哈希/匿名 latest 全通过，未替换已运行实例喵~
 - 上一正式发行 v1.0.17 的产品提交为 `7478e7f08f5bb13bf4ed860448e710354678aa83`，tag 对象 `264fb290f27282d028f68635c6d69f05c09bfd4b`；历史标签和资产保持不变喵~
@@ -134,6 +135,15 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+### 进行中：动态壁纸与 guardianv2
+- 用户要求视频/GIF/PNG 动态壁纸、Wallpaper Engine 目录/场景，以及新任务发送和旧任务恢复的 FeatureToml 错误修复喵~
+- 现有普通壁纸为 `codexAppImageOverlay*`、`assets::image_overlay_config`、`renderer-inject.js::installAlunixaXImageOverlay` 和 `/overlay/image`，仅图片 data URI；DreamSkin 是另一条独立皮肤链路，不应混改喵~
+- guardianv2 当前仅移除错误标量，错误地保留所有表结构；官方 openai/codex 的 config.schema.json 已实际获取，GuardianV2/嵌套对象 additionalProperties=false，字段有明确类型和数值边界喵~
+- 本机默认 CODEX_HOME config 中没有 guardianv2，不改写真实配置；须在隔离配置覆盖错误表、inline table、profiles 和供应商重新写入，保留有效参数并先备份喵~
+- Wallpaper Engine 官方 CLI 已实际获取：`-control openWallpaper -file project.json -playInWindow <unique-name> -width/-height`，仅定向 closeWallpaper -location 关闭自有窗口，不调用全局 stop/pause 或修改桌面壁纸喵~
+- 实现优先复用现有背景设置，媒体流式读取而不内嵌大视频；原生 Scene 使用独立原生渲染/捕获路径，不把 preview.jpg 当场景成功；当前尚未实现和验证喵~
+- 只做本地实现与验证，本次用户未要求推送/发行，不自动安装或重启运行中的 Codex 喵~
+
 ### 已完成：生图模型配置与 AX 搜索 v1.0.19
 - **最新发布状态**：Actions 34833120719 completed/success，Release 388319972 六安装资产、说明正文/哈希/来源与匿名 latest 已验收；正式三平台 Rust Windows 1112/0/1、macOS 各 1090/0/1，前端各 103/103，全通过喵~
 - **当前结论**：用户要求的实现、push、构建、发布全部完成；下列实现/首轮失败/等待发布措辞为历史，审计记录已补齐，13 本轮日志因执行策略拒绝而保留，不修改产品/已发布标签，不触碰用户运行实例喵~
@@ -194,6 +204,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
+- 当前新任务：实现 guardianv2 定向迁移与回归，再实现媒体/项目目录解析、UI 和渲染生命周期，串行 Rust 与前端/隔离浏览器验证；同步 XJ/YHYQ 并提交喵~
 - v1.0.19 已验收完成，不再构建或重复发布；本轮日志清理被环境拒绝，不重复尝试，保留记录/有用截图/复用缓存，向用户交付；后续如用户自行清理，仅处理已列出的已完成验证日志喵~
 - 不再构建或重复发布 v1.0.18；用户可从正式 Release 下载并在合适时机重新经 Alunixa X 启动，以加载本地协议修复，当前任务不自动安装/重启喵~
 - 如后续遇到特定供应商兼容错误，依据协议错误及不含密钥/真实对话的最小 fixture 补充回归，不能为通过请求而恢复静默丢弃或不确定重放喵~
@@ -202,6 +213,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-16：读取项目记忆/日志/Git 与通用记忆；检查点 e8d24b7、需求记录 18eba02；完成图片链路和 guardianv2 初步追踪，官方 web 工具无正文，直接获取官方 schema/WE CLI 正文，真实配置未改喵~
 - 2026-09-14 收尾：完整发行验证证据和六项哈希已写入；13 本轮日志（1,674,478 字节）删除被环境拒绝而保留，旧六日志未动；Release 预览 queued，产品文件与 tag 一致，后续差异仅本地记忆/审计喵~
 - 2026-09-14 18:43:54 正式发行 v1.0.19：Actions 34833120719 全成功，Release 388319972；Windows 1112/0/1、两种 macOS 各 1090/0/1、前端各 103/103，六资产/正文/哈希/来源/匿名 latest 验收 PASS，未安装或重启喵~
 - 2026-09-14 18:25 推送：4c5b6a8 main 与 annotated v1.0.19 原子推送成功，唯一正式 Actions 34833120719 已派发且来源核对一致；等待最终构建/Release，Dependabot 仍报告既有 12 项，本轮无依赖升级喵~
