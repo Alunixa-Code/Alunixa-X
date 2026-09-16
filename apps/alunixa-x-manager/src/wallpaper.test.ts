@@ -87,4 +87,8 @@ test("wallpaper runtime uses sandboxed web frames and releases streams on teardo
   assert.ok(runtime.includes('video.removeAttribute("src")'));
   assert.ok(runtime.includes('removeEventListener("visibilitychange", syncPlayback)'));
   assert.ok(runtime.includes('if (old?.signature === signature && old.element?.isConnected) return'));
+  assert.ok(runtime.includes('window.__codexSessionDeleteBridge("/wallpaper/media", {})'));
+  assert.ok(runtime.includes('window.__codexSessionDeleteBridge("/wallpaper/scene", {})'));
+  assert.ok(runtime.includes('URL.revokeObjectURL(blobUrl)'));
+  assert.ok(runtime.includes('if (stopped) { URL.revokeObjectURL(result.sourceUrl); return ""; }'));
 });

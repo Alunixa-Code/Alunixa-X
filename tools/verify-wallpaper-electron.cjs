@@ -82,8 +82,8 @@ async function open(source, extra = {}) {
     webPreferences: { nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } });
   windows.add(w);
   const network = [];
-  w.webContents.on("console-message", (_event, details, oldMessage) => {
-    network.push(details?.message || oldMessage || String(details));
+  w.webContents.on("console-message", event => {
+    network.push(event.message);
   });
   await w.loadURL("app://-/index.html");
   await w.webContents.executeJavaScript(`
@@ -106,7 +106,10 @@ async function open(source, extra = {}) {
     assert(child.exitCode === null, `bridge exited: ${stderr}`);
     return stdout.includes("READY");
   }, "product bridge ready");
-  const evaluate = js => w.webContents.executeJavaScript(js);
+  const evaluate = async js => {
+    try { return await w.webContents.executeJavaScript(js); }
+    catch (error) { throw new Error(`${js.slice(0,160)}: ${error.message}; console: ${JSON.stringify(network)}`); }
+  };
   const done = async () => {
     if (!w.isDestroyed()) w.destroy();
     windows.delete(w);
@@ -134,8 +137,9 @@ async function verifyImage(name, animated = false) {
       assert(hashes.size > 1, name + " must animate, not merely load a still");
     }
     if (name === "large.png") {
+      console.log("PASS large PNG initial disk-backed Blob decode");
       assert(await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.dataUrl===""`));
-      await ctx.w.webContents.executeJavaScript(`fetch("http://127.0.0.1:1/not-allowed").catch(()=>{})`);
+      await ctx.evaluate(`fetch("http://127.0.0.1:1/not-allowed").catch(()=>{})`);
       assert((await ctx.evaluate(`window.fixtureCsp`)).includes("connect-src"), "host CSP must remain active");
       fs.writeFileSync(path.join(output, "wallpaper-electron-large.png"), (await ctx.w.webContents.capturePage()).toPNG());
       const reloaded = once(ctx.w.webContents, "did-finish-load");
@@ -146,7 +150,7 @@ async function verifyImage(name, animated = false) {
     console.log("PASS", name, animated ? "decoded + real pixel animation" : "decoded under host CSP");
   } catch (error) {
     const transport = await Promise.race([
-      ctx.evaluate(`fetch(window.__ALUNIXA_X_IMAGE_OVERLAY__.sourceUrl).then(async r=>({status:r.status,length:(await r.arrayBuffer()).byteLength})).catch(e=>String(e))`),
+      ctx.evaluate(`fetch(window.__ALUNIXA_X_IMAGE_OVERLAY__?.sourceUrl).then(async r=>({status:r.status,length:(await r.arrayBuffer()).byteLength})).catch(e=>String(e))`).catch(e => String(e)),
       delay(3000).then(() => "fetch timed out"),
     ]);
     console.error("RESOURCE_DIAGNOSTICS", JSON.stringify(transport));

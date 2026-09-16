@@ -83,6 +83,40 @@ async fn media_is_streamed_with_ranges_head_and_disabled_access() {
 }
 
 #[tokio::test]
+async fn media_bridge_rejects_disabled_or_wrong_kind_without_connecting_to_cdp() {
+    let tmp = tempfile::tempdir().unwrap();
+    let media = tmp.path().join("selected.mp4");
+    std::fs::write(&media, b"fixture").unwrap();
+    let mut settings = BackendSettings {
+        codex_app_image_overlay_path: media.to_string_lossy().into(),
+        codex_app_image_overlay_enabled: false,
+        ..Default::default()
+    };
+    let invalid_target = "not-a-cdp-target";
+    assert!(
+        wallpaper::handle_bridge_request("/wallpaper/media", invalid_target, &settings)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("disabled")
+    );
+    settings.codex_app_image_overlay_enabled = true;
+    for route in [
+        "/wallpaper/scene",
+        "/wallpaper/media?path=secret",
+        "/wallpaper/other",
+    ] {
+        assert!(
+            wallpaper::handle_bridge_request(route, invalid_target, &settings)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported wallpaper resource")
+        );
+    }
+}
+
+#[tokio::test]
 async fn web_projects_are_sandboxed_and_cannot_read_outside_resources() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("web");

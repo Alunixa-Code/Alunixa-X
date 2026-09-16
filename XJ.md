@@ -164,6 +164,8 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- Blob 首轮 Electron 已过静态 PNG，后续出现脚本异常但旧诊断自身也会抛异常掩盖位置，已将执行表达式/页面console附加至错误并保证诊断自身不遮蔽原错误；仍未宣称媒体全部通过喵~
+- 已补 File/Blob WebSocket 契约测试（仅选择的文件、成功/失败均清理 input/objectId）、禁用和错误资源类型拒绝、renderer Blob 回收断言；真实Electron脚本已改验证Native Web，等待最新结果喵~
 - **方案更正（优先于上面同源初稿记录）**：独立 Electron probe 已证明晚启用 Fetch 对既有 app:// 页面及新 iframe 均不接管，只有整页导航后才有效；返回的404来自原 app handler，不是媒体解码错误，不能靠重启/刷新用户窗口解决喵~
 - 已撤回未发行 Fetch/CDP大包初稿，改为 CDP DOM.setFileInputFiles 将仅用户选中的媒体交给 Chromium 的磁盘后备 File→Blob URL，桥接只返回 blob URL，支持原生流式/Seek且无需全视频复制；Scene 状态改走既有桥接，WE Web 同样交由原生自有窗口提供完整宿主API，Windows外明确不支持原生项目喵~
 - 下一步以最新 Blob 链路重新跑严格 CSP Electron 全媒体和实际 WE Scene/Web 验证，补原生File/禁用访问测试后冻结并发布；之前CDP分块/背压测试仅证明旧草案，不再作为产品实现证据喵~

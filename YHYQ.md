@@ -1904,3 +1904,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 为避免额外 WebContents debugger 与远程调试对验证的干扰，诊断改为页面 console、同源 fetch 和 fixture 断开原因，不影响产品实现或 CSP；继续定位大图实际响应喵~
 - 独立最小 Electron probe 精确确认：Fetch 在页面已加载后启用时，当前 app:// 资源和新 iframe 均继续由原 handler 返回；重新导航后才产生 requestPaused，所以先前同源方案无法满足不刷新宿主的要求，已撤回未发行初稿与其专属测试喵~
 - 改用用户已选媒体的原生 File→磁盘后备 Blob URL，由 DOM.setFileInputFiles 挂载且立即移除临时 input；renderer 通过既有 bridge 请求，无任意路径参数、无整视频Base64、无CSP放开，生命周期结束撤销Blob；Scene 状态也走bridge，WE Web改为原生自有窗口，等待真实验证喵~
+- 补齐原生File/Blob真实WebSocket契约（成功和失败清理临时input/objectId）、禁用/错误路由先拒绝和renderer Blob回收断言；Electron验证改为实际WE Web窗口而非宣称app CSP下不可靠的HTTP iframe可用喵~
+- Blob首轮静态PNG通过，后续脚本异常定位不够且诊断异常覆盖原错误；补充表达式级错误与新版Electron console事件记录，诊断catch自身不再抛错，继续实际验证喵~

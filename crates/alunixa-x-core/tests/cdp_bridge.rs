@@ -2389,6 +2389,71 @@ async fn install_bridge_reports_cdp_disconnect_without_health_polling() {
 }
 
 #[tokio::test]
+async fn local_media_uses_native_file_object_and_always_removes_temporary_input() {
+    for fails in [false, true] {
+        let (url, done) = spawn_cdp_server(move |mut socket| async move {
+            let create = recv_json(&mut socket).await;
+            assert_eq!(create["method"], "Runtime.evaluate");
+            assert_eq!(create["params"]["returnByValue"], false);
+            assert!(
+                create["params"]["expression"]
+                    .as_str()
+                    .unwrap()
+                    .contains("input.hidden=true")
+            );
+            send_json(
+                &mut socket,
+                json!({"id":create["id"],"result":{"result":{"objectId":"owned-input"}}}),
+            )
+            .await;
+            let assign = recv_json(&mut socket).await;
+            assert_eq!(assign["method"], "DOM.setFileInputFiles");
+            assert_eq!(assign["params"]["objectId"], "owned-input");
+            assert_eq!(assign["params"]["files"], json!(["selected-clip.mp4"]));
+            if fails {
+                send_json(
+                    &mut socket,
+                    json!({"id":assign["id"],"error":{"code":-32000,"message":"file unavailable"}}),
+                )
+                .await;
+            } else {
+                send_json(&mut socket, json!({"id":assign["id"],"result":{}})).await;
+                let blob = recv_json(&mut socket).await;
+                assert_eq!(blob["method"], "Runtime.callFunctionOn");
+                let script = blob["params"]["functionDeclaration"].as_str().unwrap();
+                assert!(script.contains("URL.createObjectURL(this.files[0])"));
+                assert!(!script.contains("FileReader"));
+                send_json(
+                    &mut socket,
+                    json!({"id":blob["id"],"result":{"result":{"value":"blob:app://-/fixture"}}}),
+                )
+                .await;
+            }
+            let cleanup = recv_json(&mut socket).await;
+            assert_eq!(cleanup["method"], "Runtime.callFunctionOn");
+            assert_eq!(cleanup["params"]["objectId"], "owned-input");
+            assert_eq!(
+                cleanup["params"]["functionDeclaration"],
+                "function(){this.remove()}"
+            );
+            send_json(&mut socket, json!({"id":cleanup["id"],"result":{}})).await;
+            let release = recv_json(&mut socket).await;
+            assert_eq!(release["method"], "Runtime.releaseObject");
+            send_json(&mut socket, json!({"id":release["id"],"result":{}})).await;
+        })
+        .await;
+        let result =
+            bridge::local_file_blob_url(&url, std::path::Path::new("selected-clip.mp4")).await;
+        if fails {
+            assert!(result.is_err());
+        } else {
+            assert_eq!(result.unwrap(), "blob:app://-/fixture");
+        }
+        done.await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn install_bridge_command_error_mentions_method_and_id() {
     let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
         let command = recv_json(&mut socket).await;
