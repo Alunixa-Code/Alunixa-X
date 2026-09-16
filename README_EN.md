@@ -50,11 +50,13 @@ Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop 
 | Extensions | MCP, Skills, Plugins, script marketplace, and DreamSkin themes |
 | Operations | Startup injection, fail-closed validation, Watcher, diagnostics, updates, and installers |
 
-### Live wallpapers (use v1.0.22 or later)
+### Live wallpapers (use v1.0.24 or later)
 
-**Themes → Live Wallpaper** accepts videos, GIF/APNG animations, and still images with preview, opacity, fit, mute, and pause controls. Version 1.0.22 fixes host-CSP playback failures using disk-backed File/Blob media without relaxing CSP or reloading Codex. Wallpaper Engine Video projects use the video player; Scene and Web projects use an owned native engine window on Windows. See [wallpaper documentation and compatibility limits](docs/wallpapers.md).
+**Themes → Live Wallpaper** accepts videos, GIF/APNG animations, and still images with preview, opacity, fit, mute, and pause controls. Version 1.0.24 fixes the missing production-launcher routes that returned `Unknown bridge path` in v1.0.22/v1.0.23; the real launchers and playback fixture now share one renderer bridge entry point. Large images and videos use disk-backed File/Blob media without relaxing CSP. Native Scene/Web render outside all monitors on Windows, without an extra visible window, taskbar entry, or focus activation. See [wallpaper documentation and compatibility limits](docs/wallpapers.md).
 
-The panel also provides a narrow, backed-up repair for malformed `features.guardianv2` configuration. Saved wallpapers apply on the next launch through Alunixa X v1.0.22 or later; the current Codex process is not restarted or patched.
+The panel also provides a narrow, backed-up repair for malformed `features.guardianv2` configuration. Saved wallpapers apply on the next launch through Alunixa X v1.0.24 or later; the current Codex process is not restarted or patched.
+
+For the original image-only background, simply import a PNG/JPEG or another still image. This does not need or launch Wallpaper Engine; videos and scenes are optional.
 
 ## Install
 
