@@ -14,6 +14,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **v1.0.24已原子推送，等待唯一正式CI**：产品1e724029b68b746c46545c33fd456e3c4a2973c7，tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9；唯一workflow_dispatch Actions35109688388/ref=v1.0.24已queued，来源一致，不重复派发、不移动标签，尚未宣称Release完成喵~
 - **v1.0.24本地发布门禁全部通过，待正式CI/Release**：回退图片/动图/视频及明确旧项目预览，彻底移除原生WE；完整workspace41套件1128/0/1、前端118/118、真实Electron全部媒体与用户已选项目预览/失败退出1、生产管理器/俄语UI及版本/依赖/格式/文档检查PASS，未修改或重启真实实例喵~
 - **最新决定：撤下Wallpaper Engine原生Scene/Web**；一轮实播中图片/大PNG/GIF/APNG/MP4/WebM/WE Video均通过，但离屏Native Web真实画面为黑，严格门禁失败；按用户允许回退，不继续其他隐藏方案，不发布当前离屏草案，保留图片/动图/视频并兼容旧项目静态预览喵~
 - **当前重开壁纸修复**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；生产路由未接通是已证实故障，额外WE窗口处理正在调查，尚未修复喵~
@@ -101,6 +102,7 @@
 - `tools/verify-native-queued-followup.mjs <app.asar>` 在隔离内存 fixture 验证原生队列编辑错误，不操作真实运行实例喵~
 
 ## 10. Deployment and Operations
+- v1.0.24唯一Actions35109688388，产品1e724029b68b746c46545c33fd456e3c4a2973c7、tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9，原子main/tag已push；等待三平台完整CI与六资产/正文/来源/哈希/匿名latest验收，后续本地审计不再推送成另一发行喵~
 - v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS喵~
 - v1.0.23 Windows job104793526799、macOS x64 104793526749、arm64 104793526701、publish104799853418全成功；tag对象254dd140107e49239d42f017814d8b4dd1ad249c，六资产完整哈希见YHYQ.md和.tmp/v1.0.23-verified.json；没有后续产品推送喵~
 - v1.0.22 唯一正式运行35090929257，产品/main/tag解引用均9641a4118ff2f3162a40c2fd598757b04fb35328；等待同一运行，未发布完成前不能声称已交付，历史标签不动喵~
@@ -210,6 +212,7 @@
 
 ## 19. Current Task
 ### 待正式发布：v1.0.24可靠媒体背景与移除原生WE
+- 已推送，唯一正式35109688388等待中；只等待该运行，不再修改冻结源码或重复派发；成功后使用.tmp/verify-current-release.py验收六资产及三平台日志，并清理本轮自有临时媒体/profile/副本，保留证据及安装交付物喵~
 - 最终共享生产入口实播/完整测试/管理器及俄语UI全部通过，用户现选黑洞项目真实静态预览截图已目视；没有保留失败的离屏方案，不再启动Wallpaper Engine；具体通过项目见第9节喵~
 - 正式推送范围：统一媒体分发、移除Native Scene/Web及相关UI/API、旧配置安全且明确预览兼容、保留普通图片/动图/视频及俄语/guardian、失败测试退出码、新版本/完整中英俄说明；第三方依赖不变，现有标签不动喵~
 - 回退界面前端118/118、TS、Vite、i18n916+80/93/79、生产Chromium俄语10页/三语切换持久化/存储失败/深浅色/900-1440px已PASS；首次diff检查暴露CHANGELOG历史混合换行被Python归一化，已逐字恢复历史尾部、只保留本版条目，当前diff检查PASS喵~
