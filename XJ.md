@@ -4,6 +4,7 @@
 - Alunixa X 为 Windows/macOS Codex 桌面增强管理器与启动器，当前实际根目录 `D:\Cursor\AlunixaX` 喵~
 
 ## 2. Goals and Requirements
+- 用户补充：若动态/WE功能仍不可行，允许移除并回退最初图片背景；稳定性优先，不继续无限试错，完成当前一轮实际验证后按结果决定保留或退回喵~
 - 2026-09-16 新反馈：v1.0.23 壁纸仍然无效，启动后额外弹出 Wallpaper Engine 窗口；修复实际生产路径并验证窗口行为，不能以旧隔离测试/CI成功覆盖用户故障喵~
 - 2026-09-16 新需求：增加完整俄语管理器界面、详细 README_RU.md 和更彻底的主 README，完成新版本 GitHub Actions 构建与正式 Release；保留 v1.0.22 既有构建和标签喵~
 - 2026-09-14 新需求：左侧“生图模型”栏目，配置多组 API/Key/Model、拖拽上下排列，首项为 MCP 默认模型并标记“默认”；Windows 开始菜单与 macOS 应用搜索须可输入 AX 找到喵~
@@ -202,6 +203,8 @@
 
 ## 19. Current Task
 ### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- 用户允许不稳定则回退图片背景；采用有界的一轮共享生产入口实播/窗口验证，失败则撤掉不稳定部分，不发布未经验证的场景方案喵~
+- 前端完整118/118已退出成功；用户新消息后原Rust exec会话不可恢复，已只读确认无cargo/rustc进程且fixture exe仅2MiB疑似链接中断，不能当作构建成功，须重新构建到明确退出0再测试喵~
 - 首阶段产品提交29b1197；新增真实WebSocket生产入口路由/禁用/错误资源/普通路由共存回归及三入口防绕过断言；Electron实播补Win32实际离屏坐标、任务栏、激活/最小化检查，Node Scene4/4通过，fixture编译进行中喵~
 - 已确认第二个生产启动器`apps/alunixa-x-launcher/src/main.rs::try_inject_with_context`绕过仅core/fixure接入的壁纸分发；新增统一renderer bridge入口并接入两个启动器/fixture，准备真实回归喵~
 - WE官方CLI正文确认支持-x/-y/-borderless且activate可选；原先仅置底不能隐藏，现以全部显示器左侧离屏坐标启动，并定向去任务栏/不激活，捕获失败不向用户弹独立窗口；离屏实际动画尚待验证喵~
