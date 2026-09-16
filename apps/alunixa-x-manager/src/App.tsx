@@ -1744,7 +1744,7 @@ export function App() {
       });
     });
     if (confirmed && !setLanguage(next)) {
-      showNotice(t("切换界面语言"), t("无法保存语言设置，请检查本地存储后重试。"));
+      showNotice(t("切换界面语言"), t("无法保存语言设置，请检查本地存储后重试。"), "failed");
     }
   };
 

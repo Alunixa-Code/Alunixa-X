@@ -43,6 +43,7 @@ INIT = r"""
       if(cmd==="load_pending_dream_skin_community")return ok({versionId:""});
       if(cmd==="remote_plugin_marketplace_status")return ok({codexHome:"fixture",configRegistered:true,needsRepair:false,pluginCount:0,skillCount:0});
       if(cmd==="plugin:event|listen")return 1;
+      if(cmd==="update_tray_labels")return;
       if(cmd==="write_diagnostic_event"||cmd==="plugin:event|unlisten")return ok();
       window.__unsupportedCommands.push(cmd);
       throw new Error("Isolated fixture: unsupported "+cmd);

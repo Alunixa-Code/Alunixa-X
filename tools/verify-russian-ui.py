@@ -62,6 +62,9 @@ def main():
             page.wait_for_function("window.__tray?.showLabel === 'Показать окно'")
             assert page.evaluate("window.__tray.quitLabel") == "Выход"
             no_chinese_page_copy(page)
+            assert page.locator(".nav-label").evaluate_all(
+                "nodes => nodes.every(n => n.scrollWidth <= n.clientWidth + 1)"
+            ), "Russian navigation labels must wrap instead of clipping"
             screenshots = ROOT / ".tmp"
             screenshots.mkdir(exist_ok=True)
             page.screenshot(path=str(screenshots / "russian-overview-dark.png"), full_page=True)
@@ -108,11 +111,27 @@ def main():
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
                 assert page.locator(".language-picker").bounding_box()["x"] >= 0
                 page.screenshot(path=str(screenshots / f"russian-width-{width}.png"), full_page=True)
+            page.evaluate("""() => {
+              const original=Storage.prototype.setItem;
+              Storage.prototype.setItem=function(key,value){
+                if(key==='alunixa-x-lang')throw new Error('fixture storage blocked');
+                return original.call(this,key,value);
+              };
+            }""")
+            page.get_by_role("combobox", name="Язык интерфейса").select_option("en")
+            page.get_by_role("button", name="Сменить язык", exact=True).click()
+            expect(page.get_by_text(
+                "Не удалось сохранить язык. Проверьте локальное хранилище и повторите попытку.",
+                exact=True,
+            )).to_be_visible()
+            expect(page.get_by_role("combobox", name="Язык интерфейса")).to_have_value("ru")
+            expect(page.locator("html")).to_have_attribute("lang", "ru-RU")
             assert not errors, errors
             unsupported = page.evaluate("window.__unsupportedCommands")
             assert unsupported == [], unsupported
             print("RUSSIAN_UI_PASS: 10 routes, zero Chinese fallback, dark/light, 900/1100/1440px,")
-            print("cancel + ru/en/zh/ru persisted reloads, translated tray payloads, no page errors")
+            print("cancel + ru/en/zh/ru persisted reloads, storage-failure protection,")
+            print("translated tray payloads, no clipped navigation and no page errors")
         finally:
             browser.close()
 
