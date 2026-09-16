@@ -4,6 +4,7 @@
 - Alunixa X 为 Windows/macOS Codex 桌面增强管理器与启动器，当前实际根目录 `D:\Cursor\AlunixaX` 喵~
 
 ## 2. Goals and Requirements
+- 2026-09-16 新反馈：v1.0.23 壁纸仍然无效，启动后额外弹出 Wallpaper Engine 窗口；修复实际生产路径并验证窗口行为，不能以旧隔离测试/CI成功覆盖用户故障喵~
 - 2026-09-16 新需求：增加完整俄语管理器界面、详细 README_RU.md 和更彻底的主 README，完成新版本 GitHub Actions 构建与正式 Release；保留 v1.0.22 既有构建和标签喵~
 - 2026-09-14 新需求：左侧“生图模型”栏目，配置多组 API/Key/Model、拖拽上下排列，首项为 MCP 默认模型并标记“默认”；Windows 开始菜单与 macOS 应用搜索须可输入 AX 找到喵~
 - 中文回复，不用 WSL；保护运行中 Codex/Helper/CDP，不自动重启或热注入；用隔离 fixture 验证喵~
@@ -12,6 +13,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **当前重开壁纸修复**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；生产路由未接通是已证实故障，额外WE窗口处理正在调查，尚未修复喵~
 - **v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS** 喵~
 - 当前功能/文档/测试/推送/三平台构建/正式发布均完成；以下排队、待验证等条目为保留的历史阶段，不是当前待办，权威最终状态以本条和YHYQ.md最新验收段为准喵~
 - **v1.0.23已原子推送main/新annotated标签：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，tag对象254dd140107e49239d42f017814d8b4dd1ad249c；唯一正式workflow_dispatch Actions35096019206已启动，远端main/tag解引用/Actions head一致，等待同一运行不重复派发** 喵~
@@ -152,6 +154,7 @@
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
 ## 15. Known Bugs and Limitations
+- v1.0.23真实生产壁纸bridge返回Unknown bridge path，而独立fixture直接调用壁纸处理器漏过生产分发；Scene启动先创建WE pop-out，置底不等于隐藏，用户报告额外窗口喵~
 - 俄语覆盖Alunixa X管理器及已知消息，不是Codex官方俄语包；用户模型名/第三方内容/未知上游错误保留原文；语言只存WebView，不改真实Codex配置；切换需确认并重载管理器，存储失败保持原页喵~
 - v1.0.22已在独立Electron+实际WE验证Scene/Web捕获，取代下面v1.0.21“未实机验收”的历史状态；原生项目仅Windows并依赖WE，Web网络/宿主能力由WE管理而非Codex iframe沙箱，用户当前Codex仍为已安装旧程序，未自动替换/重启喵~
 - 2026-09-16 正式 Windows CI 暴露既有 imagegen_mcp::tests::image_fixture_server 非阻塞 listener 接受后直接 read 的 10035/WouldBlock 竞态；本次先保留原测试做一次失败作业复跑，不将它描述为产品生图 API 已知失败或忽略测试，后续测试维护可显式设置 stream blocking 并增加延迟分片 fixture 喵~
@@ -186,6 +189,7 @@
 - gh run view --log 在整轮运行未完成时可能拒绝，等待同一运行完成后取日志，不重复派发喵~
 
 ## 18. Rollback and Recovery
+- 本轮生产壁纸修复前检查点509e610，原有未跟踪.tmp保留；不重启/注入当前Codex，不更改用户真实设置或WE桌面配置喵~
 - 俄语任务起点cf94c3c，界面提交3b7c937，三语文档a7ce5e4，正式产品1429be0/tag v1.0.23；回退按需定向revert并发布新版本，禁止移动已发布标签、覆盖他人改动或删除任务数据喵~
 - v1.0.22任务起点fb02cfc，最终功能提交0e85df1/断言修正b07179e；需要回退时定向revert，不移动已有版本标签、不删除用户媒体/任务，不把撤回的Fetch草案恢复为生产实现喵~
 - 壁纸任务修改前 e8d24b7；主要实现 1514bf4/161dd5f，打包场景/CSP/预览修复 1522c17，最终产品冻结 2553916，验证脚本 910c3d5；需要回退时使用定向 revert，不移动 v1.0.19 或丢弃其他工作喵~
@@ -197,6 +201,12 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- 已读取完整XJ.md、YHYQ.md近期记录及历史维修经验；前轮摘要无代码修改，当前检查点509e610喵~
+- 已证实用户实际1.0.23日志中场景路由未接通；检查routes/CDP分发与fixture差异，修复生产链并补穿过真实分发入口的回归喵~
+- 调查只属于本程序UUID命名的WE窗口生命周期及隐藏渲染，不关闭用户桌面WE/其他窗口，不把缩到后台当作消除可见窗口喵~
+- 完成后使用新补丁版本唯一GitHub Actions三平台构建与六资产Release，保留旧标签，最终记录实际验证范围喵~
+
 ### 已完成：v1.0.23俄语界面、完整产品介绍与正式发布
 - 用户要求“加俄语、README更彻底详细、构建并发布”已全部完成；三语指南和俄语截图已随正式产品推送喵~
 - 产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 success，Release389916454为公开latest，2026-09-16 20:48:18新加坡时间发布喵~
@@ -351,6 +361,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
+- 当前优先：修复生产wallpaper bridge并重做真实分发实播；解决自有WE窗口可见/失败残留，验证后发布新补丁，不重复旧俄语工作喵~
 - **v1.0.23交付完成**：向用户提供正式发布结果与俄语入口，无须再次构建或发布；后续仅按新需求继续，不自动安装/重启当前程序喵~
 - 本节以下为前轮历史计划，已由最终发布验收覆盖，不要重复执行旧版本推送/构建/发布喵~
 - 冻结v1.0.23并以[skip ci]最终提交原子推送main/新annotated标签，再仅派发一次release-assets.yml；等待同一运行并验收六资产/三语说明/来源/哈希和公开latest，保留v1.0.22喵~
@@ -366,6 +377,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-16：用户再次反馈壁纸失败及WE弹窗；读取记录、检查真实版本及脱敏壁纸事件，发现Unknown bridge path；建立509e610检查点，未动运行实例和真实配置喵~
 - v1.0.23收尾：正式发布页在Codex右侧面板请求queued，发布核验以GitHub API/CLI、匿名latest和完成CI日志为准；本地审计记录已提交，产品源码未变，未再次push/构建喵~
 - 2026-09-16 20:48:18（新加坡）：v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS喵~
 - 2026-09-16 俄语任务接续：已读取项目记忆/近期日志、React/测试技能和旧仓库发行习惯，确认实际仓库/工作流状态，建立 cf94c3c 检查点；开始俄语与详细文档实现喵~
