@@ -18,6 +18,7 @@ const output = path.resolve(option("--output"));
 assert(fixture && argv.includes("--output"), "explicit --fixture and --output required");
 fs.mkdirSync(output, { recursive: true });
 const work = fs.mkdtempSync(path.join(output, "electron-run-"));
+fs.mkdirSync(path.join(work, "profile"));
 app.setPath("userData", path.join(work, "profile"));
 app.commandLine.appendSwitch("remote-debugging-address", "127.0.0.1");
 app.commandLine.appendSwitch("remote-debugging-port", "0");
@@ -134,7 +135,9 @@ async function verifyImage(name, animated = false) {
       await ctx.w.webContents.executeJavaScript(`fetch("http://127.0.0.1:1/not-allowed").catch(()=>{})`);
       assert((await ctx.evaluate(`window.fixtureCsp`)).includes("connect-src"), "host CSP must remain active");
       fs.writeFileSync(path.join(output, "wallpaper-electron-large.png"), (await ctx.w.webContents.capturePage()).toPNG());
-      await ctx.w.webContents.reload();
+      const reloaded = once(ctx.w.webContents, "did-finish-load");
+      ctx.w.webContents.reload();
+      await reloaded;
       await until(() => ctx.evaluate(`window.fixtureEvents?.some(e=>e.event==="wallpaper_ready")`), "reload keeps transport");
     }
     console.log("PASS", name, animated ? "decoded + real pixel animation" : "decoded under host CSP");
