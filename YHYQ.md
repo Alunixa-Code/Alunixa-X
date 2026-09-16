@@ -1849,3 +1849,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 版本准备提交 e365249 后，cargo metadata --locked 确认四包 1.0.20；前端 107/107、TypeScript、i18n 918/918 + 80/80、Vite、fmt、品牌、完整差异检查全部 PASS；新增行凭据模式 0，Cargo/npm 锁只改变自身版本喵~
 - 本次推送明确包含：动态媒体无损上传/流式播放/预览控制、Wallpaper Engine Video/Web/Windows Scene 目录链路及 scene.pkg 兼容、路径级资源隔离、guardianv2 备份修复与供应商防回灌、全部对应回归/使用说明/详细发行说明；不改真实配置、不安装、不重启，准备原子推送 main 与新 v1.0.20 标签喵~
 - 采用最终提交 [skip ci] 跳过重复 push 构建，再对 v1.0.20 显式派发一次正式 release-assets.yml；不复用旧二进制、不移动任何已有标签喵~
+- main 与 annotated v1.0.20 已原子推送成功，产品 5c3b07dcbe3c936a391f3d801cb7a5950601d646、tag 对象 40d36a71ee044fc9e8fbc3c6b7e359d748d1ec1f，远端 main/tag 解引用核验一致；原 v1.0.19 保持不变喵~
+- 唯一正式 release-assets.yml 已派发，Actions 35053573074，workflow_dispatch ref=v1.0.20；紧随派发的列表因传播延迟为空，但命令已返回明确运行 ID，不重复派发，直接按该 ID 等待和验收喵~
+- GitHub push 仍提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮未升级或宣称完成依赖专项修复；本轮不修改真实 config/auth、运行实例或安装内容喵~
