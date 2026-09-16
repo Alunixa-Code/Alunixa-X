@@ -1,5 +1,5 @@
 //! Native Scene projects stay in Wallpaper Engine; Electron captures only our
-//! uniquely named pop-out window, never the desktop or an arbitrary app.
+//! uniquely named off-screen render window, never the desktop or an arbitrary app.
 use crate::settings::BackendSettings;
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
@@ -69,15 +69,16 @@ pub fn start(inspector_port: u16, settings: &BackendSettings) {
         return;
     }
     let settings = settings.clone();
+    let Ok(source) =
+        crate::wallpaper::resolve(Path::new(settings.codex_app_image_overlay_path.trim()))
+    else {
+        return;
+    };
+    // Publish waiting synchronously, before a renderer can request the scene.
+    if let Ok(mut state) = snapshot().lock() {
+        *state = (source.path.clone(), json!({"status":"waiting"}));
+    }
     tokio::spawn(async move {
-        let Ok(source) =
-            crate::wallpaper::resolve(Path::new(settings.codex_app_image_overlay_path.trim()))
-        else {
-            return;
-        };
-        if let Ok(mut state) = snapshot().lock() {
-            *state = (source.path.clone(), json!({"status":"waiting"}));
-        }
         let result = prepare(inspector_port, &source.path, &settings).await;
         let value = match result {
             Ok(value) => value,
@@ -119,8 +120,20 @@ async fn prepare(port: u16, project: &Path, settings: &BackendSettings) -> anyho
         .and_then(Value::as_str)
         .context("原生场景返回了无效捕获结果")?;
     let value: Value = serde_json::from_str(text)?;
-    if value["status"] == "ok" {
-        send_window_behind(&title);
+    if value["status"] == "ok"
+        && let Err(error) = park_owned_window(&title)
+    {
+        let _ = crate::bridge::evaluate_script_with_timeout(
+            target.web_socket_debugger_url.as_deref().unwrap(),
+            &format!(
+                "(async()=>{{const owned=globalThis.__alunixaXWallpaperScene;if(owned?.title==={})await owned.close();}})()",
+                serde_json::to_string(&title)?
+            ),
+            true,
+            std::time::Duration::from_secs(5),
+        )
+        .await;
+        return Err(error);
     }
     Ok(value)
 }
@@ -151,11 +164,19 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
       const previous = globalThis.__alunixaXWallpaperScene;
       if (previous?.project === options.project && previous?.sourceId) return JSON.stringify({status:"ok",sourceId:previous.sourceId});
       if (previous) await previous.close();
-      const owned = {project:options.project,sourceId:"",close:() => run(["-control","closeWallpaper","-location",options.title]).catch(()=>{})};
+      const owned = {project:options.project,title:options.title,sourceId:"",close:() => run(["-control","closeWallpaper","-location",options.title]).catch(()=>{})};
       globalThis.__alunixaXWallpaperScene = owned;
       electron.app.once("will-quit",()=>{ void owned.close(); });
       try {
-        await run(["-control","openWallpaper","-file",options.project,"-playInWindow",options.title,"-width","1280","-height","720"]);
+        // Start outside *all* monitors, not at (0,0) followed by a late hide.
+        // WE's supported coordinates avoid a visible pop-out while retaining
+        // a live compositor surface for capture. Never minimize the renderer.
+        const displays = electron.screen.getAllDisplays();
+        if (!displays.length) throw new Error("display bounds unavailable");
+        const x = Math.min(...displays.map(display=>display.bounds.x))-1408;
+        const y = Math.min(...displays.map(display=>display.bounds.y));
+        await run(["-control","openWallpaper","-file",options.project,"-playInWindow",options.title,
+          "-width","1280","-height","720","-x",String(x),"-y",String(y),"-borderless"]);
         if (options.muted) await run(["-control","applyProperties","-location",options.title,"-properties",'RAW~({"volume":0})~END'],true);
         for (let attempt=0;attempt<24;attempt++) {
           const sources = await electron.desktopCapturer.getSources({types:["window"],thumbnailSize:{width:0,height:0},fetchWindowIcons:false});
@@ -191,17 +212,20 @@ fn engine_command_path(path: &Path) -> String {
 }
 
 #[cfg(windows)]
-fn send_window_behind(title: &str) {
+fn park_owned_window(title: &str) -> anyhow::Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_BOTTOM, SWP_FRAMECHANGED,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WS_CAPTION,
+        FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetSystemMetrics, GetWindowLongPtrW, HWND_BOTTOM,
+        SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE,
+        SetWindowLongPtrW, SetWindowPos, WS_CAPTION,
         WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
         WS_SYSMENU, WS_THICKFRAME,
     };
     use windows::core::PCWSTR;
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     unsafe {
-        if let Ok(window) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+        {
+            let window = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()))
+                .context("owned wallpaper window disappeared before capture")?;
             // This exact UUID-named window belongs to our wallpaper session.
             // Do not capture the WE title bar/borders or show another taskbar
             // entry. Keep the window rendered (never minimize it).
@@ -216,20 +240,24 @@ fn send_window_behind(title: &str) {
                 ((extended & !WS_EX_APPWINDOW.0) | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0)
                     as isize,
             );
-            let _ = SetWindowPos(
+            SetWindowPos(
                 window,
                 HWND_BOTTOM,
+                GetSystemMetrics(SM_XVIRTUALSCREEN).saturating_sub(1408),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
                 0,
                 0,
-                0,
-                0,
-                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
-            );
+                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOSIZE,
+            )
+            .context("failed to park owned wallpaper outside the visible desktop")?;
         }
     }
+    Ok(())
 }
 #[cfg(not(windows))]
-fn send_window_behind(_title: &str) {}
+fn park_owned_window(_title: &str) -> anyhow::Result<()> {
+    bail!("native wallpaper capture requires Windows")
+}
 
 #[cfg(test)]
 mod tests {

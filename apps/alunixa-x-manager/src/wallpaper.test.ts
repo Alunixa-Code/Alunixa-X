@@ -13,6 +13,7 @@ test("scene captures only the exact owned window and closes only that location",
   let quit: (() => void) | undefined;
   const electron = {
     app: { once(_event: string, callback: () => void) { quit = callback; } },
+    screen: { getAllDisplays: () => [{ bounds: { x: 0, y: 0 } }, { bounds: { x: -1920, y: -200 } }] },
     desktopCapturer: { async getSources(args: unknown) {
       assert.deepEqual(JSON.parse(JSON.stringify(args)), { types: ["window"], thumbnailSize: { width: 0, height: 0 }, fetchWindowIcons: false });
       return [{ name: "private window", id: "window:100:0" }, { name: options.title, id: "window:200:0" }];
@@ -40,6 +41,10 @@ test("scene captures only the exact owned window and closes only that location",
   assert.deepEqual(result, { status: "ok", sourceId: "window:200:0" });
   assert.equal(calls[0][2], "openWallpaper");
   assert.ok(calls[0].includes("-playInWindow"));
+  assert.equal(calls[0][calls[0].indexOf("-x") + 1], "-3328");
+  assert.equal(calls[0][calls[0].indexOf("-y") + 1], "-200");
+  assert.ok(calls[0].includes("-borderless"));
+  assert.ok(!calls[0].includes("-activate"));
   assert.ok(!calls.flat().includes("-monitor"));
   quit?.();
   assert.deepEqual(calls.at(-1), ["wallpaper64.exe", "-control", "closeWallpaper", "-location", options.title]);
@@ -57,6 +62,7 @@ test("scene never falls back to an unrelated window when its exact title is abse
     process: { mainModule: { require(name: string) {
       if (name === "electron") return {
         app: { once() {} },
+        screen: { getAllDisplays: () => [{ bounds: { x: 0, y: 0 } }] },
         desktopCapturer: { async getSources() {
           return [{ name: "Other wallpaper", id: "window:100:0" }];
         } },

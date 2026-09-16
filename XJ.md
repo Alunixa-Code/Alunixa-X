@@ -202,6 +202,8 @@
 
 ## 19. Current Task
 ### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- 已确认第二个生产启动器`apps/alunixa-x-launcher/src/main.rs::try_inject_with_context`绕过仅core/fixure接入的壁纸分发；新增统一renderer bridge入口并接入两个启动器/fixture，准备真实回归喵~
+- WE官方CLI正文确认支持-x/-y/-borderless且activate可选；原先仅置底不能隐藏，现以全部显示器左侧离屏坐标启动，并定向去任务栏/不激活，捕获失败不向用户弹独立窗口；离屏实际动画尚待验证喵~
 - 已读取完整XJ.md、YHYQ.md近期记录及历史维修经验；前轮摘要无代码修改，当前检查点509e610喵~
 - 已证实用户实际1.0.23日志中场景路由未接通；检查routes/CDP分发与fixture差异，修复生产链并补穿过真实分发入口的回归喵~
 - 调查只属于本程序UUID命名的WE窗口生命周期及隐藏渲染，不关闭用户桌面WE/其他窗口，不把缩到后台当作消除可见窗口喵~

@@ -64,22 +64,13 @@ async fn main() -> anyhow::Result<()> {
             &source[start..end],
         );
         let websocket = input["websocketUrl"].as_str().unwrap().to_owned();
-        let media_websocket = websocket.clone();
-        let disconnected = bridge::install_bridge_with_disconnect(
+        // This must be the same entry point used by the real data-aware
+        // launcher, not a fixture-only wallpaper dispatcher.
+        let disconnected = bridge::install_renderer_bridge_with_disconnect(
             &websocket,
-            bridge::BRIDGE_BINDING_NAME,
-            Arc::new(move |route, _| {
-                let settings = settings.clone();
-                let websocket = media_websocket.clone();
-                Box::pin(async move {
-                    if route.starts_with("/wallpaper/") {
-                        wallpaper::handle_bridge_request(&route, &websocket, &settings).await
-                    } else {
-                        Ok(json!({"status":"ok"}))
-                    }
-                })
-            }),
+            Arc::new(move |_, _| Box::pin(async { Ok(json!({"status":"ok"})) })),
             &[script],
+            &settings,
         )
         .await?;
         println!("READY");

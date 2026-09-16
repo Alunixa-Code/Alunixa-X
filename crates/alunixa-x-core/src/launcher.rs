@@ -3776,23 +3776,16 @@ async fn try_inject(
         debug_port,
         StatusStore::default(),
     )));
-    let wallpaper_websocket = websocket_url.to_owned();
-    crate::bridge::install_bridge_with_disconnect(
+    crate::bridge::install_renderer_bridge_with_disconnect(
         websocket_url,
-        crate::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
-            let settings = settings.clone();
-            let websocket = wallpaper_websocket.clone();
             Box::pin(async move {
-                if path.starts_with("/wallpaper/") {
-                    return crate::wallpaper::handle_bridge_request(&path, &websocket, &settings)
-                        .await;
-                }
                 Ok(crate::routes::handle_bridge_request(ctx, &path, payload).await)
             })
         }),
         &[script],
+        &settings,
     )
     .await
 }

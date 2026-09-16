@@ -254,6 +254,38 @@ pub async fn install_bridge(
     Ok(())
 }
 
+/// The production renderer entry point, shared by both launchers and the
+/// Electron integration fixture. Media needs the requesting renderer's CDP
+/// target, so it must not fall through to the target-independent HTTP routes.
+pub async fn install_renderer_bridge_with_disconnect(
+    websocket_url: &str,
+    handler: BridgeHandler,
+    new_document_scripts: &[String],
+    settings: &crate::settings::BackendSettings,
+) -> anyhow::Result<BridgeDisconnect> {
+    let wallpaper_target = websocket_url.to_owned();
+    let settings = settings.clone();
+    let handler: BridgeHandler = Arc::new(move |path, payload| {
+        let fallback = handler.clone();
+        let settings = settings.clone();
+        let target = wallpaper_target.clone();
+        Box::pin(async move {
+            if path.starts_with("/wallpaper/") {
+                crate::wallpaper::handle_bridge_request(&path, &target, &settings).await
+            } else {
+                fallback(path, payload).await
+            }
+        })
+    });
+    install_bridge_with_disconnect(
+        websocket_url,
+        BRIDGE_BINDING_NAME,
+        handler,
+        new_document_scripts,
+    )
+    .await
+}
+
 pub async fn install_bridge_with_disconnect(
     websocket_url: &str,
     binding_name: &str,

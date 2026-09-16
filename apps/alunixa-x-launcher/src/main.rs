@@ -1242,9 +1242,8 @@ async fn try_inject_with_context(
     } else {
         vec![script, user_bundle]
     };
-    alunixa_x_core::bridge::install_bridge_with_disconnect(
+    alunixa_x_core::bridge::install_renderer_bridge_with_disconnect(
         websocket_url,
-        alunixa_x_core::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
             Box::pin(async move {
@@ -1252,6 +1251,7 @@ async fn try_inject_with_context(
             })
         }),
         &new_document_scripts,
+        &settings,
     )
     .await
 }
