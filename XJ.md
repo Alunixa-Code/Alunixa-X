@@ -202,6 +202,7 @@
 
 ## 19. Current Task
 ### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- 首阶段产品提交29b1197；新增真实WebSocket生产入口路由/禁用/错误资源/普通路由共存回归及三入口防绕过断言；Electron实播补Win32实际离屏坐标、任务栏、激活/最小化检查，Node Scene4/4通过，fixture编译进行中喵~
 - 已确认第二个生产启动器`apps/alunixa-x-launcher/src/main.rs::try_inject_with_context`绕过仅core/fixure接入的壁纸分发；新增统一renderer bridge入口并接入两个启动器/fixture，准备真实回归喵~
 - WE官方CLI正文确认支持-x/-y/-borderless且activate可选；原先仅置底不能隐藏，现以全部显示器左侧离屏坐标启动，并定向去任务栏/不激活，捕获失败不向用户弹独立窗口；离屏实际动画尚待验证喵~
 - 已读取完整XJ.md、YHYQ.md近期记录及历史维修经验；前轮摘要无代码修改，当前检查点509e610喵~

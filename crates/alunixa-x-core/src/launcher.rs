@@ -3780,9 +3780,9 @@ async fn try_inject(
         websocket_url,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
-            Box::pin(async move {
-                Ok(crate::routes::handle_bridge_request(ctx, &path, payload).await)
-            })
+            Box::pin(
+                async move { Ok(crate::routes::handle_bridge_request(ctx, &path, payload).await) },
+            )
         }),
         &[script],
         &settings,

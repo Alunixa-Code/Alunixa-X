@@ -12,8 +12,12 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     anyhow::ensure!(
         args.len() == 2,
-        "wallpaper_fixture <serve|repair|attach|scene-script> <explicit fixture path>"
+        "wallpaper_fixture <serve|repair|attach|scene-script|inspect-window> <explicit fixture path/title>"
     );
+    if args[0] == "inspect-window" {
+        println!("{}", inspect_window(&args[1])?);
+        return Ok(());
+    }
     if args[0] == "repair" {
         println!(
             "REPAIRED={}",
@@ -118,4 +122,35 @@ async fn main() -> anyhow::Result<()> {
             Ok::<(), anyhow::Error>(())
         });
     }
+}
+
+#[cfg(windows)]
+fn inspect_window(title: &str) -> anyhow::Result<Value> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, GWL_EXSTYLE, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW,
+        GetWindowRect, IsIconic, SM_XVIRTUALSCREEN, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW,
+    };
+    use windows::core::PCWSTR;
+    let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()))?;
+        let mut rect = RECT::default();
+        GetWindowRect(hwnd, &mut rect)?;
+        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        Ok(json!({
+            "left":rect.left,"top":rect.top,"right":rect.right,"bottom":rect.bottom,
+            "offscreen":rect.right <= GetSystemMetrics(SM_XVIRTUALSCREEN),
+            "noTaskbar":ex_style & WS_EX_APPWINDOW.0 == 0 && ex_style & WS_EX_TOOLWINDOW.0 != 0,
+            "noActivate":ex_style & WS_EX_NOACTIVATE.0 != 0,
+            "foreground":GetForegroundWindow() == hwnd,
+            "minimized":IsIconic(hwnd).as_bool()
+        }))
+    }
+}
+
+#[cfg(not(windows))]
+fn inspect_window(_title: &str) -> anyhow::Result<Value> {
+    anyhow::bail!("window inspection requires Windows")
 }

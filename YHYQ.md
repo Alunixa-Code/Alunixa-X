@@ -1997,3 +1997,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 将修复生产路由与fixture绕过真实分发的验证缺口，并处理自有UUID场景窗口的可见性与失败回收；不重启或注入当前Codex/Helper，不改真实设置，不关闭用户WE桌面实例喵~
 - 定位：core默认注入分发已接wallpaper，但真正产品的data-aware启动器仍直接进通用routes；新增共享renderer安装入口，正式两条启动器及fixture统一使用，不能再由fixture手工特判掩盖缺路由喵~
 - 官方WE CLI直接获取确认-x/-y/-borderless/activate选项；改成全部屏幕左侧离屏启动且不激活，保留渲染后定向移除任务栏/边框，失败定向关闭；同步waiting状态避免启动竞态，尚未验证离屏画面喵~
+- 产品首阶段29b1197；Scene Node4/4通过，补生产安装入口的真实WebSocket回归及两种launcher/fixture统一入口防退化；扩展实播门禁实际检查离屏窗口坐标/无任务栏/不抢焦点/不最小化，不能只凭视频时间推进判定成功，Rust构建进行中喵~

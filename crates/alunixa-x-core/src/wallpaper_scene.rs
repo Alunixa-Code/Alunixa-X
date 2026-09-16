@@ -216,9 +216,8 @@ fn park_owned_window(title: &str) -> anyhow::Result<()> {
     use windows::Win32::UI::WindowsAndMessaging::{
         FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetSystemMetrics, GetWindowLongPtrW, HWND_BOTTOM,
         SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOSIZE,
-        SetWindowLongPtrW, SetWindowPos, WS_CAPTION,
-        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
-        WS_SYSMENU, WS_THICKFRAME,
+        SetWindowLongPtrW, SetWindowPos, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
+        WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
     };
     use windows::core::PCWSTR;
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();

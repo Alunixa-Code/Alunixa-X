@@ -173,6 +173,14 @@ async function verifyVideo(name, source, extra = {}) {
     assert.equal(await ctx.evaluate(`document.querySelectorAll("[data-alunixa-x-media-transfer]").length`), 0);
     if (!name.startsWith("native")) assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
     if (name.startsWith("native")) {
+      const owned = globalThis.__alunixaXWallpaperScene;
+      assert(owned?.title, "production scene must own a uniquely named window");
+      const nativeWindow = JSON.parse(run(fixture, ["inspect-window", owned.title]));
+      assert(nativeWindow.offscreen, "native renderer must stay outside every monitor");
+      assert(nativeWindow.noTaskbar, "native renderer must not add a taskbar entry");
+      assert(nativeWindow.noActivate && !nativeWindow.foreground, "native renderer must not steal focus");
+      assert(!nativeWindow.minimized, "native renderer must remain live, not minimized");
+      console.log("PASS native window isolation", JSON.stringify(nativeWindow));
       // A running MediaStream can still be a black/loading window. Verify real
       // rendered content, then animation, not just a readyState or source ID.
       await until(() => ctx.evaluate(`(()=>{

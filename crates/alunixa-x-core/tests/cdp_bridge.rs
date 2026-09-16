@@ -2363,6 +2363,114 @@ async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() 
 }
 
 #[tokio::test]
+async fn production_renderer_entry_point_routes_wallpapers_before_generic_routes() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        temp.path().join("project.json"),
+        r#"{"type":"scene","file":"scene.pkg"}"#,
+    )
+    .unwrap();
+    std::fs::write(temp.path().join("scene.pkg"), b"fixture").unwrap();
+    for enabled in [false, true] {
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: enabled,
+            codex_app_image_overlay_path: temp.path().to_string_lossy().into(),
+            ..Default::default()
+        };
+        let (url, finished) = spawn_cdp_server(move |mut socket| async move {
+            for expected_id in 1..=5 {
+                let command = recv_json(&mut socket).await;
+                assert_eq!(command["id"], expected_id);
+                send_json(&mut socket, json!({"id":expected_id,"result":{}})).await;
+            }
+            for route in ["/wallpaper/scene", "/wallpaper/media", "/normal-route"] {
+                send_json(
+                    &mut socket,
+                    json!({
+                        "method":"Runtime.bindingCalled",
+                        "params":{"payload":json!({
+                            "id":"production-wallpaper",
+                            "path":route,
+                            "payload":{"path":"must-not-be-used.mp4"}
+                        }).to_string()}
+                    }),
+                )
+                .await;
+                let response = recv_json(&mut socket).await;
+                let expression = response["params"]["expression"].as_str().unwrap();
+                assert!(!expression.contains("Unknown bridge path"), "{expression}");
+                if route == "/normal-route" {
+                    assert!(expression.contains("generic-route-ok"), "{expression}");
+                } else if !enabled {
+                    assert!(expression.contains("wallpaper disabled"), "{expression}");
+                } else if route == "/wallpaper/scene" {
+                    // The fixture never launches a real engine. Reaching its
+                    // scene-state response proves production dispatch ran.
+                    assert!(expression.contains("场景尚未启动"), "{expression}");
+                } else {
+                    assert!(
+                        expression.contains("unsupported wallpaper resource"),
+                        "{expression}"
+                    );
+                }
+                send_json(&mut socket, json!({"id":response["id"],"result":{}})).await;
+            }
+            close_socket(&mut socket).await;
+        })
+        .await;
+        let handler: bridge::BridgeHandler = Arc::new(|path, payload| {
+            Box::pin(async move {
+                assert_eq!(
+                    path, "/normal-route",
+                    "wallpaper must not reach generic routes"
+                );
+                assert_eq!(payload["path"], "must-not-be-used.mp4");
+                Ok(json!({"status":"generic-route-ok"}))
+            })
+        });
+        let disconnect =
+            bridge::install_renderer_bridge_with_disconnect(&url, handler, &[], &settings)
+                .await
+                .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), finished)
+            .await
+            .unwrap()
+            .unwrap();
+        let _ = disconnect.await;
+    }
+}
+
+#[test]
+fn both_real_launchers_and_electron_fixture_use_the_production_renderer_entry_point() {
+    for (source, function) in [
+        (include_str!("../src/launcher.rs"), "async fn try_inject("),
+        (
+            include_str!("../../../apps/alunixa-x-launcher/src/main.rs"),
+            "async fn try_inject_with_context(",
+        ),
+        (
+            include_str!("../examples/wallpaper_fixture.rs"),
+            "async fn main(",
+        ),
+    ] {
+        let entry = source.split(function).nth(1).unwrap();
+        let entry = entry.split("\nasync fn ").next().unwrap();
+        assert!(
+            entry.contains("install_renderer_bridge_with_disconnect("),
+            "{function}"
+        );
+        assert!(
+            !entry.contains("wallpaper::handle_bridge_request("),
+            "{function}"
+        );
+        assert!(
+            !entry.contains("bridge::install_bridge_with_disconnect("),
+            "{function}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn install_bridge_reports_cdp_disconnect_without_health_polling() {
     let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
         for expected_id in 1..=5 {
