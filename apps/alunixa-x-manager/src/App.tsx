@@ -76,6 +76,7 @@ import {
 } from "lucide-react";
 import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
 import { ImageModelsScreen } from "@/components/ImageModelsScreen";
+import { WallpaperSettings } from "@/components/WallpaperSettings";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
@@ -227,6 +228,9 @@ type BackendSettings = {
   codexAppInstructions: string;
   codexAppImageOverlayEnabled: boolean;
   codexAppImageOverlayPath: string;
+  codexAppWallpaperMuted: boolean;
+  codexAppWallpaperPaused: boolean;
+  codexAppWallpaperEnginePath: string;
   codexAppImageOverlayOpacity: number;
   codexAppImageOverlayFitMode: ImageOverlayFitMode;
   codexAppDreamSkinEnabled: boolean;
@@ -991,6 +995,9 @@ const defaultSettings: BackendSettings = {
   codexAppInstructions: "",
   codexAppImageOverlayEnabled: false,
   codexAppImageOverlayPath: "",
+  codexAppWallpaperMuted: true,
+  codexAppWallpaperPaused: false,
+  codexAppWallpaperEnginePath: "",
   codexAppImageOverlayOpacity: 35,
   codexAppImageOverlayFitMode: "fit",
   codexAppDreamSkinEnabled: false,
@@ -3249,6 +3256,12 @@ export function App() {
             />
           ) : null}
           {route === "dreamSkin" ? (
+            <>
+            <Panel><CardContent>
+              <WallpaperSettings value={settingsForm}
+                onChange={patch => setSettingsForm(current => ({ ...current, ...patch }))}
+                onSave={saveSettings} onReset={resetImageOverlaySettings} />
+            </CardContent></Panel>
             <DreamSkinScreen
               library={dreamSkinLibrary}
               community={dreamSkinCommunity}
@@ -3263,6 +3276,7 @@ export function App() {
               onDismissPending={() => void dismissPendingDreamSkin()}
               onOpenPreview={(url) => void openExternalUrl(url)}
             />
+            </>
           ) : null}
           {route === "sessions" ? (
             <SessionsScreen
@@ -5992,71 +6006,8 @@ function SettingsScreen({
               <Button onClick={() => void actions.saveSettings()}>{t("保存设置")}</Button>
             </div>
           </div>
-          <div className="settings-block">
-            <label className="inline-toggle">
-              <input
-                checked={form.codexAppImageOverlayEnabled}
-                onChange={(event) =>
-                  onFormChange({ ...form, codexAppImageOverlayEnabled: event.currentTarget.checked })
-                }
-                type="checkbox"
-              />
-              <span>{t("启用 Codex 图片覆盖层")}</span>
-              <ToggleVisual />
-            </label>
-            <div className="form-row">
-              <Field label={t("覆盖图片")}>
-                <Input
-                  value={form.codexAppImageOverlayPath}
-                  onChange={(event) => onFormChange({ ...form, codexAppImageOverlayPath: event.currentTarget.value })}
-                  placeholder={t("选择 png / jpg / webp / gif / bmp")}
-                />
-              </Field>
-              <Toolbar>
-                <Button variant="secondary" onClick={() => void actions.chooseImageOverlayPath()}>
-                  {t("选择图片")}
-                </Button>
-              </Toolbar>
-            </div>
-            <Field label={tf("透明度 {0}%", [form.codexAppImageOverlayOpacity])}>
-              <Input
-                min={1}
-                max={100}
-                type="range"
-                value={form.codexAppImageOverlayOpacity}
-                onChange={(event) =>
-                  onFormChange({
-                    ...form,
-                    codexAppImageOverlayOpacity: clampNumber(Number(event.currentTarget.value), 1, 100),
-                  })
-                }
-              />
-            </Field>
-            <Field label={t("背景适配方式")}>
-              <select
-                className="select-input"
-                value={form.codexAppImageOverlayFitMode}
-                onChange={(event) =>
-                  onFormChange({
-                    ...form,
-                    codexAppImageOverlayFitMode: event.currentTarget.value as ImageOverlayFitMode,
-                  })
-                }
-              >
-                <option value="fill">{t("填充")}</option>
-                <option value="fit">{t("适应")}</option>
-                <option value="stretch">{t("拉伸")}</option>
-                <option value="tile">{t("平铺")}</option>
-                <option value="center">{t("居中")}</option>
-              </select>
-            </Field>
-          </div>
-          <Toolbar>
-            <Button onClick={() => void actions.saveSettings()}>{t("保存设置")}</Button>
-            <Button variant="secondary" onClick={() => void actions.resetImageOverlaySettings()}>
-              {t("重置背景")}
-            </Button>
-          </Toolbar>
+          <WallpaperSettings value={form} onChange={patch => onFormChange({ ...form, ...patch })}
+            onSave={actions.saveSettings} onReset={actions.resetImageOverlaySettings} />
         </CardContent>
       </Panel>
       <Panel>

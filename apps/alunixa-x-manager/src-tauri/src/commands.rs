@@ -1246,24 +1246,35 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
-pub async fn import_wallpaper_media(app: tauri::AppHandle, path: String)
--> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
-    let source = tauri::async_runtime::spawn_blocking(move ||
+pub async fn import_wallpaper_media(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+    let source = tauri::async_runtime::spawn_blocking(move || {
         alunixa_x_core::wallpaper::import_media(
-            Path::new(&path), &alunixa_x_core::paths::default_app_state_dir(),
+            Path::new(&path),
+            &alunixa_x_core::paths::default_app_state_dir(),
         )
-    ).await.map_err(|_| "导入壁纸任务失败".to_string())?
+    })
+    .await
+    .map_err(|_| "导入壁纸任务失败".to_string())?
+    .map_err(|e| e.to_string())?;
+    app.asset_protocol_scope()
+        .allow_file(&source.entry)
         .map_err(|e| e.to_string())?;
-    app.asset_protocol_scope().allow_file(&source.entry).map_err(|e| e.to_string())?;
     Ok(source)
 }
 
 #[tauri::command]
-pub fn inspect_wallpaper(app: tauri::AppHandle, path: String)
--> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+pub fn inspect_wallpaper(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
     let source = alunixa_x_core::wallpaper::resolve(Path::new(&path)).map_err(|e| e.to_string())?;
     if matches!(source.kind.as_str(), "image" | "video") {
-        app.asset_protocol_scope().allow_file(&source.entry).map_err(|e| e.to_string())?;
+        app.asset_protocol_scope()
+            .allow_file(&source.entry)
+            .map_err(|e| e.to_string())?;
     }
     Ok(source)
 }
@@ -1272,7 +1283,8 @@ pub fn inspect_wallpaper(app: tauri::AppHandle, path: String)
 pub fn repair_codex_feature_config() -> Result<bool, String> {
     alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
         &alunixa_x_core::relay_config::default_codex_home_dir(),
-    ).map_err(|_| "配置修复失败，未替换为默认配置；请检查 TOML 语法和文件权限".into())
+    )
+    .map_err(|_| "配置修复失败，未替换为默认配置；请检查 TOML 语法和文件权限".into())
 }
 
 #[tauri::command]
@@ -1295,6 +1307,30 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             );
         }
     };
+    let wallpaper_changed = settings.codex_app_image_overlay_enabled
+        != previous.codex_app_image_overlay_enabled
+        || settings.codex_app_image_overlay_path != previous.codex_app_image_overlay_path
+        || settings.codex_app_wallpaper_engine_path != previous.codex_app_wallpaper_engine_path;
+    if wallpaper_changed && settings.codex_app_image_overlay_enabled {
+        let validation = alunixa_x_core::wallpaper::resolve(Path::new(
+            settings.codex_app_image_overlay_path.trim(),
+        ))
+        .and_then(|source| {
+            if source.kind == "scene" {
+                alunixa_x_core::wallpaper_scene::engine_path(
+                    &source.path,
+                    &settings.codex_app_wallpaper_engine_path,
+                )?;
+            }
+            Ok(())
+        });
+        if let Err(error) = validation {
+            return failed(
+                &format!("壁纸配置无效，未保存：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    }
     let save_result = SettingsStore::default()
         .save_preserving_runtime_model_selection(&settings)
         .and_then(|_| {
@@ -1315,7 +1351,8 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
         .and_then(|_| {
             alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
                 &alunixa_x_core::relay_config::default_codex_home_dir(),
-            ).map(|_| ())
+            )
+            .map(|_| ())
         })
         .and_then(|_| {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(

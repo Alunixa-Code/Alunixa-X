@@ -687,7 +687,7 @@
     window.addEventListener("pagehide", cleanup, { once: true });
     if (config.kind === "video" || config.kind === "scene") {
       video = document.createElement("video");
-      video.autoplay = true;
+      video.autoplay = !config.paused && !document.hidden;
       video.loop = true;
       video.muted = config.kind === "scene" || config.muted !== false;
       video.playsInline = true;
@@ -697,6 +697,7 @@
       Object.assign(video.style, { width:"100%", height:"100%", pointerEvents:"none",
         objectFit: ({ fill:"cover", stretch:"fill", center:"none", tile:"contain" })[fitMode] || "contain" });
       video.onerror = () => reportFailure("视频无法解码，请使用 MP4（H.264）或 WebM");
+      video.onloadedmetadata = syncPlayback;
       overlay.appendChild(video);
       document.addEventListener("visibilitychange", syncPlayback);
       if (config.kind === "video") {
@@ -712,9 +713,15 @@
               state = await response.json();
               if (state.status !== "waiting") break;
               await new Promise(resolve => {
-                const timer = setTimeout(() => { timers.delete(timer); resolve(); }, 500);
+                const done = () => {
+                  timers.delete(timer);
+                  clearTimeout(timer);
+                  abort.signal.removeEventListener("abort", done);
+                  resolve();
+                };
+                const timer = setTimeout(done, 500);
                 timers.add(timer);
-                abort.signal.addEventListener("abort", resolve, { once:true });
+                abort.signal.addEventListener("abort", done, { once:true });
               });
             }
             if (stopped) return;

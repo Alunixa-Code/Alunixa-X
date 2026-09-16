@@ -1858,8 +1858,14 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     merge_bool_setting(target, source, "codexAppImageOverlayEnabled");
     merge_bool_setting(target, source, "codexAppWallpaperMuted");
     merge_bool_setting(target, source, "codexAppWallpaperPaused");
-    if let Some(value) = source.get("codexAppWallpaperEnginePath").and_then(Value::as_str) {
-        target.insert("codexAppWallpaperEnginePath".into(), Value::String(value.into()));
+    if let Some(value) = source
+        .get("codexAppWallpaperEnginePath")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppWallpaperEnginePath".into(),
+            Value::String(value.into()),
+        );
     }
     if let Some(value) = source
         .get("codexAppImageOverlayPath")

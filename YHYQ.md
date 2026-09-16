@@ -1798,3 +1798,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已读取前端设计、React、WebUI 测试、OpenAI Docs 技能；通用记忆仅用于沿用先查本机布局及隔离验证习惯，不引用旧仓库实现喵~
 - 官方 web 工具未返回正文，使用 HTTPS 实际读取 openai/codex config.schema.json 与 Wallpaper Engine 官方 CLI 文档；尝试两个 features.rs 路径为 404，已停止猜测路径喵~
 - 实现第一阶段初稿：新增 guardian_config.rs、wallpaper.rs、wallpaper_scene.rs；接入结构化字段修复、备份/供应商写入防回灌、无损媒体导入、项目目录识别、视频 Range 流与场景精确窗口捕获；已修改注入生命周期和 Tauri 命令，尚未编译验收喵~
+- 第一阶段提交 1514bf4；`cargo check --workspace --all-targets --locked -j 2` 首轮退出 0（1m58s），无依赖升级；新增独立 WallpaperSettings 组件并复用现有主题/皮肤管理入口，补齐导入、预览、设置与定向修复按钮喵~
+- 补齐原设置页共用动态壁纸组件、i18n、StrictMode/视频可见性暂停/流释放；新增真实 loopback HTTP Range/HEAD/416 和 Web 隔离边界测试，新增 guardian 备份/供应商防回灌测试，准备完整回归；场景首启等待有界且不杀掉 WE 主进程喵~

@@ -23,6 +23,7 @@ const SRC_FILES = [
   "src/App.tsx",
   "src/components/ProviderPresetSelector.tsx",
   "src/components/ImageModelsScreen.tsx",
+  "src/components/WallpaperSettings.tsx",
 ];
 
 // ── Collect the keys referenced by t()/tf() across the source. ──────────────

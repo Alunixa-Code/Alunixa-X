@@ -143,6 +143,8 @@
 - Wallpaper Engine 官方 CLI 已实际获取：`-control openWallpaper -file project.json -playInWindow <unique-name> -width/-height`，仅定向 closeWallpaper -location 关闭自有窗口，不调用全局 stop/pause 或修改桌面壁纸喵~
 - 实现优先复用现有背景设置，媒体流式读取而不内嵌大视频；原生 Scene 使用独立原生渲染/捕获路径，不把 preview.jpg 当场景成功；当前尚未实现和验证喵~
 - 已实现初稿（尚未编译）：guardian_config 定向字段修复/嵌套与 profiles/备份、供应商最终写入门禁；wallpaper 媒体无损导入/项目解析/路径边界/Range 流式服务，renderer 视频/隔离 Web/原生 Scene 生命周期喵~
+- 1514bf4 阶段提交后，首轮 `cargo check --workspace --all-targets --locked -j 2` 退出 0（1m58s）；已新增皮肤管理 WallpaperSettings 预览/导入/目录/暂停/静音/配置修复组件，正在补充回归和 i18n 验证喵~
+- UI 同时接入“皮肤管理”和原设置壁纸位置；新增 HTTP Range/HEAD/416、Web 隔离/路径逃逸、选项存储、Guardian 备份/防回灌集成测试与显式临时路径 fixture example，准备完整串行回归喵~
 - Scene 设计为 Windows 官方 WE 独立命名 pop-out + Electron desktopCapturer 只枚举窗口并精确匹配自有标题 + getUserMedia 视频流，关闭时只 closeWallpaper -location 自有窗口；尚未用实际 Wallpaper Engine 验收，不能声称已验证喵~
 - 只做本地实现与验证，本次用户未要求推送/发行，不自动安装或重启运行中的 Codex 喵~
 
