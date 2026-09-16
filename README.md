@@ -79,7 +79,7 @@ Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点
 
 Windows 使用安装向导；macOS 打开 DMG，将两个应用拖入“应用程序”。ZIP 用于手动部署，解压后保留 launcher、manager、imagegen MCP 三个二进制之间的同级关系，不能只复制其中一个。当前正式发布不提供 Linux 安装包。
 
-Alunixa X 不包含 Codex 本体或 Wallpaper Engine。使用前先安装可运行的 Codex 桌面应用；原生 Scene/Web 壁纸另需 Windows 版 Wallpaper Engine。Windows 管理器基于 WebView2，开发构建还需要 Rust/MSVC 和前端工具链。
+Alunixa X 不包含 Codex 本体，使用前先安装可运行的 Codex 桌面应用；v1.0.24 已移除原生 Scene/Web，图片、动图和视频均不依赖 Wallpaper Engine。Windows 管理器基于 WebView2，开发构建还需要 Rust/MSVC 和前端工具链。
 
 安装后会出现两个入口：
 
@@ -150,24 +150,26 @@ v1.0.23 增加俄语。右上角的语言下拉框可以直接选择 **简体中
 - 首次使用保持增强功能开启，并通过 Alunixa X 启动 Codex 加载 MCP；已经加载的新版 MCP 每次调用重新读取配置，后续保存或排序无需重启喵~
 - MCP 不显式传 `model` / `profile_id` 时使用首项；清空全部生图配置后恢复原对话供应商及原默认生图模型，不自动重试或轮换到其他生图配置喵~
 
-### 动态壁纸（请使用 v1.0.24 或更新版本）
+### 图片、动图和视频背景（请使用 v1.0.24 或更新版本）
 
-**皮肤管理 → 动态壁纸** 支持上传视频、GIF、APNG 和图片，提供预览、透明度、适配、静音与暂停；v1.0.24 修复正式启动器遗漏壁纸接口导致的 `Unknown bridge path`，不再由测试程序单独接线；大图/视频使用磁盘后备 File/Blob，Scene / Web 在 Windows 上使用 Wallpaper Engine 离屏渲染，不应弹出额外可见窗口或抢焦点喵~
+**皮肤管理 → 动态壁纸** 支持上传图片、GIF/APNG 和视频，提供预览、透明度、适配、静音与暂停；v1.0.24 修复正式启动器遗漏媒体接口导致的 `Unknown bridge path`，正式启动器与实播测试不再使用不同的分发逻辑喵~
 
-面板的 **修复对话配置** 可定向备份并修复 `features.guardianv2` 类型错误；保存后下次通过 v1.0.24 或更新版本的 Alunixa X 启动时应用壁纸，不打断当前 Codex，完整使用说明与兼容边界见 [动态壁纸说明](docs/wallpapers.md) 喵~
+**Wallpaper Engine 原生 Scene/Web 支持已移除**，不再启动额外窗口、捕获桌面或执行项目脚本；离屏实验出现黑屏后已按“稳定优先”的反馈撤下，不继续用可见弹窗换取场景播放喵~
 
-只想用原来的图片背景，直接上传 PNG/JPEG 等图片即可，不依赖也不会启动 Wallpaper Engine；不必启用视频或场景喵~
+只想用最初的图片背景，直接上传 PNG/JPEG 等图片即可；已实播通过的 GIF/APNG、MP4/WebM 仍可选择使用，俄语界面及其他功能保留喵~
 
 | 壁纸类型 | Windows | macOS | 条件与边界 |
 | --- | --- | --- | --- |
-| PNG/JPEG/BMP/静态 WebP | 支持 | 支持 | 保持原图，不把普通 PNG 自动变成动画 |
-| GIF/APNG/动画 WebP | 支持 | 支持 | 文件本身包含动画帧 |
-| MP4/M4V/WebM/MOV/OGV | 支持 | 支持 | 最大 2 GiB，实际取决于视频编码，优先 H.264 MP4 或 WebM |
-| Wallpaper Engine Video | 支持 | 支持 | 读取单项目 `project.json` 所指视频 |
-| Wallpaper Engine Scene / Web | 支持 | 不支持 | 需安装 WE，原生独立窗口渲染和捕获 |
-| Wallpaper Engine Application | 不执行 | 不执行 | 不是任意可执行壁纸启动器 |
+| PNG/JPEG/BMP/静态 WebP | 支持 | 支持 | 保持原图与原有适配方式 |
+| GIF/APNG/动画 WebP | 支持 | 支持 | 文件本身含动画帧 |
+| MP4/M4V/WebM/MOV/OGV | 支持 | 支持 | 最大 2 GiB，实际取决于编码 |
+| 旧 Wallpaper Engine Video 设置 | 视频路径兼容 | 视频路径兼容 | 不启动引擎，新设置直接上传视频 |
+| 旧 Wallpaper Engine Scene/Web 设置 | 仅预览图片 | 仅预览图片 | 明确标注静态预览，无可用图片时提示重选 |
+| Wallpaper Engine Application | 不执行 | 不执行 | 无程序型壁纸支持 |
 
-选择 **单个含 `project.json` 的壁纸目录**，不是整个 Steam Workshop 库。Scene 支持资源打包在 `scene.pkg` 的项目，原生捕获上限为 1280×720、24 FPS；暂停只暂停 Codex 画面，不保证引擎停止渲染。上传文件保留原始字节，WE 项目按路径引用，移动或删除原项目后需重新选择。
+不再提供项目目录或引擎选择按钮；旧项目只读兼容，不修改原文件，预览路径必须在项目目录内；上传新图片即可替换旧场景喵~
+
+**修复对话配置** 仍可备份并定向修复 `features.guardianv2` 类型错误；保存后在方便时通过完整新版 Alunixa X 重新启动 Codex，不删除任务或重置供应商，完整方法见 [壁纸说明](docs/wallpapers.md) 喵~
 
 ## 功能分区详解
 
@@ -211,7 +213,7 @@ v1.0.23 增加俄语。右上角的语言下拉框可以直接选择 **简体中
 
 **Wallpaper Engine 目录选了却没有场景？**
 
-选单个含 `project.json` 的目录；Scene/Web 只支持 Windows，确认 WE 程序路径。Video 与原生 Scene/Web 路径不同，`preview.jpg` 不算场景播放成功。
+v1.0.24 已移除原生 Scene/Web。旧配置有预览图时只显示并明确标记为静态预览，没有可用预览图时请上传图片或视频；不再启动 Wallpaper Engine。
 
 **新任务发送报 `FeatureToml`，旧任务不能恢复？**
 

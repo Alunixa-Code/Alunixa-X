@@ -50,13 +50,15 @@ Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop 
 | Extensions | MCP, Skills, Plugins, script marketplace, and DreamSkin themes |
 | Operations | Startup injection, fail-closed validation, Watcher, diagnostics, updates, and installers |
 
-### Live wallpapers (use v1.0.24 or later)
+### Image, animation, and video backgrounds (v1.0.24 or later)
 
-**Themes → Live Wallpaper** accepts videos, GIF/APNG animations, and still images with preview, opacity, fit, mute, and pause controls. Version 1.0.24 fixes the missing production-launcher routes that returned `Unknown bridge path` in v1.0.22/v1.0.23; the real launchers and playback fixture now share one renderer bridge entry point. Large images and videos use disk-backed File/Blob media without relaxing CSP. Native Scene/Web render outside all monitors on Windows, without an extra visible window, taskbar entry, or focus activation. See [wallpaper documentation and compatibility limits](docs/wallpapers.md).
+**Themes → Live Wallpaper** accepts images, GIF/APNG, and local videos with preview, opacity, fit, mute, and pause controls. Version 1.0.24 fixes the production launcher's missing media routes (`Unknown bridge path`) by sharing the same renderer bridge entry point with the real playback fixture.
 
-The panel also provides a narrow, backed-up repair for malformed `features.guardianv2` configuration. Saved wallpapers apply on the next launch through Alunixa X v1.0.24 or later; the current Codex process is not restarted or patched.
+**Native Wallpaper Engine Scene/Web support has been removed.** Off-screen native Web capture produced black frames, so that experiment is not shipped. No engine window is launched, no desktop capture is performed, and no project script is executed. Russian localization and the other enhancements are retained.
 
-For the original image-only background, simply import a PNG/JPEG or another still image. This does not need or launch Wallpaper Engine; videos and scenes are optional.
+For the original image-only background, import a PNG/JPEG or another still image. GIF/APNG and MP4/WebM remain optional. The panel also retains the backed-up guardianv2 repair. Apply saved settings on the next launch through the complete updated Alunixa X package; your running Codex is not patched or restarted automatically.
+
+See [wallpaper setup and fallback behavior](docs/wallpapers.md).
 
 ## Install
 
@@ -68,7 +70,7 @@ Download a platform build from [GitHub Releases](https://github.com/Alunixa-Code
 
 ZIP packages are also published for each architecture. Keep the launcher, manager, and image-generation MCP companion together when deploying them manually. The DMG contains both applications; drag them into Applications. No Linux installer is currently published.
 
-Install a working Codex desktop application separately; Alunixa X does not bundle it. Windows uses WebView2. Wallpaper Engine is optional and must be installed separately for native Scene/Web projects on Windows.
+Install a working Codex desktop application separately; Alunixa X does not bundle it. Windows uses WebView2. Wallpaper Engine is not required: native Scene/Web support was removed in v1.0.24.
 
 The installer creates two entries:
 
@@ -133,20 +135,20 @@ Open **Image models** in the sidebar, add an OpenAI Images-compatible **API URL,
 
 ## Wallpaper compatibility and practical setup
 
-| Media/project | Windows | macOS | Requirements |
+| Media/project | Windows | macOS | Behavior |
 | --- | --- | --- | --- |
-| PNG/JPEG/BMP/static WebP | Yes | Yes | Kept as still images |
-| GIF/APNG/animated WebP | Yes | Yes | The source must contain animation frames |
-| MP4/M4V/WebM/MOV/OGV | Yes | Yes | Up to 2 GiB; decoding depends on codec; prefer H.264 MP4 or WebM |
-| Wallpaper Engine Video | Yes | Yes | Video referenced by one project's `project.json` |
-| Wallpaper Engine Scene/Web | Yes | No | Installed Wallpaper Engine and native window capture |
-| Wallpaper Engine Application | Not executed | Not executed | Arbitrary wallpaper executables are not launched |
+| PNG/JPEG/BMP/static WebP | Yes | Yes | Original image overlay and fit modes |
+| GIF/APNG/animated WebP | Yes | Yes | Retains the source animation |
+| MP4/M4V/WebM/MOV/OGV | Yes | Yes | Up to 2 GiB; codec-dependent, prefer H.264 MP4 or WebM |
+| Existing Wallpaper Engine Video settings | Video only | Video only | Reads the referenced video without starting the engine |
+| Existing Scene/Web settings | Preview image only | Preview image only | Explicitly labelled static preview, never native scene playback |
+| Wallpaper Engine Application | Not executed | Not executed | No arbitrary executable launch |
 
-Open **Skin manager → Live wallpapers**, import a file or choose **one folder containing `project.json`**, set opacity/fit/mute/pause, save, and launch Codex through the updated launcher. Do not select the entire Steam Workshop library. Static PNG does not become animated automatically.
+Open **Skin manager → Live wallpapers**, import a media file, set opacity/fit/mute/pause, save, and launch Codex through the updated launcher when convenient. The project-folder and engine-executable pickers have been removed. Static PNG does not become animated automatically.
 
-Uploaded files are copied without conversion to the application state's `wallpapers/` directory. Engine projects stay referenced by path: moving or deleting the original project requires selecting it again. Native Scene/Web capture is limited to 1280×720 at 24 FPS. Pausing the Codex display does not guarantee the engine has stopped rendering.
+Uploaded files are copied without conversion into the application state's `wallpapers/` directory. Existing Scene/Web paths remain read-only: an in-project preview image is used with an explicit label; missing, escaping, or non-image previews produce an error instead of launching Wallpaper Engine. Import a new image to replace an old scene. Legacy engine-path settings are retained only for lossless configuration round-tripping and are never used to start a process.
 
-Version 1.0.22's disk-backed File/Blob and engine-path fixes are retained. The manager does not change the desktop wallpaper, relax Codex CSP, or treat `preview.jpg` as successful scene playback.
+Large images and videos keep the restricted File/Blob transport. Codex CSP, original media, desktop wallpaper, conversations, and unrelated settings are not changed.
 
 ## Feature guide
 
@@ -177,8 +179,8 @@ Official releases are built from one immutable tag in GitHub Actions for Windows
 
 - **Russian does not change Codex itself:** the selector only changes the manager; the native Codex language option remains independent.
 - **Saved provider changes do not apply:** check the provider master switch, active provider, saved state, launcher entrypoint, and environment overrides.
-- **Video previews but the background is blank:** use v1.0.22 or later, enable wallpaper, set nonzero opacity, save, and relaunch through Alunixa X. A manager preview is not proof of host playback.
-- **Wallpaper Engine scene is missing:** select a single project, check Windows/engine requirements and executable path; a thumbnail is not a running scene.
+- **Video previews but the background is blank:** use v1.0.24 or later, enable wallpaper, set nonzero opacity, save, and relaunch through Alunixa X. A manager preview is not proof of host playback.
+- **Old Wallpaper Engine scene is missing:** native Scene/Web support was removed in v1.0.24. Existing settings display only an explicitly labelled in-project preview; if no preview is available, import an image or video.
 - **`FeatureToml` / `features.guardianv2` prevents new or old tasks:** use **Repair task configuration**, then reopen the affected task. The targeted repair backs up the original TOML and is not a general parser or project-config repair.
 - **Wrong image model:** the first profile is the default unless `model` or `profile_id` is explicitly supplied. Load the MCP through the launcher initially.
 - **Reporting a bug:** include versions, OS/architecture, exact steps, expected/actual behavior, and redacted diagnostics. For wallpapers include type/codec/project kind, not credentials or private conversation content.
@@ -228,7 +230,7 @@ Core code lives in `crates/alunixa-x-core`, session storage in `crates/alunixa-x
 
 Translation keys use Chinese source strings in `src/i18n-en.ts` and `src/i18n-ru.ts`. Every new `t()/tf()` call must be represented in both catalogs. The verifier scans all production TS/TSX and checks exact key coverage, placeholders, and backend regex parity.
 
-With Python Playwright/Chromium installed and the frontend built, `python tools/verify-russian-ui.py` checks production pages, cancel/confirm language switching, persistence, tray command payloads, dark/light themes, and narrow layouts using an in-memory Tauri fixture. It never operates a real Codex process or account. Actual wallpaper playback has separate Electron/Wallpaper Engine tests documented in the wallpaper guide.
+With Python Playwright/Chromium installed and the frontend built, `python tools/verify-russian-ui.py` checks production pages, cancel/confirm language switching, persistence, tray command payloads, dark/light themes, and narrow layouts using an in-memory Tauri fixture. It never operates a real Codex process or account. Actual media playback and legacy preview fallback have separate Electron tests documented in the wallpaper guide; no Wallpaper Engine is launched.
 
 ## Project
 

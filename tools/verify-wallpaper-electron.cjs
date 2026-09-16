@@ -119,8 +119,8 @@ async function open(source, extra = {}) {
   };
   return { w, evaluate, done, diagnostics: () => ({ stdout, stderr, network }) };
 }
-async function verifyImage(name, animated = false) {
-  const ctx = await open(path.join(work, name));
+async function verifyImage(name, animated = false, explicitSource = null) {
+  const ctx = await open(explicitSource || path.join(work, name));
   try {
     await until(async () => {
       const events = await ctx.evaluate(`window.fixtureEvents || []`);
@@ -131,6 +131,7 @@ async function verifyImage(name, animated = false) {
     if (name.startsWith("legacy-")) {
       assert(await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.staticPreview===true`));
       assert.equal(await ctx.evaluate(`document.querySelectorAll("video,iframe").length`), 0);
+      fs.writeFileSync(path.join(output, "wallpaper-electron-static-preview.png"), (await ctx.w.webContents.capturePage()).toPNG());
     }
     if (animated) {
       const hashes = new Set();
@@ -208,6 +209,8 @@ app.whenReady().then(async () => {
     await verifyVideo("Wallpaper Engine video project", path.join(work, "project.json"));
     await verifyImage("legacy-scene/project.json");
     await verifyImage("legacy-web/project.json");
+    if (argv.includes("--legacy-project"))
+      await verifyImage("legacy-user-project", false, option("--legacy-project"));
     console.log("ELECTRON_WALLPAPER_PASS", app.getVersion(), "work:", work);
   } catch (error) {
     console.error(error.stack || error);
