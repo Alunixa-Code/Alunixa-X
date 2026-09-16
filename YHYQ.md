@@ -1895,3 +1895,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 2026-09-16 接续：完整读取 XJ.md、当前任务日志、现有 wallpaper.rs 差异和隔离 Electron probe，保留初稿并建立 1d6865d 检查点；该初稿尚未接入 CDP，不宣称修复完成，继续同源路由、实际解码/播放/Scene 捕获验证与补丁发行喵~
 - 已实现专用 app 同源资源路由与原 bridge 同连接生命周期，保留页面 CSP、不代理任意文件；修正 Scene RAW JSON Windows 转义；补充图片/视频实际解码就绪诊断和主动销毁的 AbortError 过滤，尚待当前源码验证喵~
 - 增加同源 Rust 资源回归、大图完整性和 Web 路径隔离断言，以及 Node Windows RAW 转义断言；扩展显式隔离 fixture，供后续真实 Electron 页面通过产品 bridge 安装同源路由和 renderer，不读取默认 home 喵~
+- 新增真实 Electron 验证脚本，保留安全策略、真实 Rust CDP 分块读取及 renderer、图片像素动画/MP4 跨块 seek loop/导航恢复/bridge 共存/Web 隔离与可选实际 Scene 捕获，fixture 只采用显式独立配置；准备执行，不把脚本存在当成测试通过喵~

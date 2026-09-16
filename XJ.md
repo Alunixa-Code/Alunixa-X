@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 新增 tools/verify-wallpaper-electron.cjs，独立 Electron/临时 profile/严格 app CSP，产品 Rust bridge 接入真实 PNG/大 PNG/GIF/APNG/跨块 MP4/WebM/WE Video/Web/可选自有 Scene 捕获测试；不对用户运行中的 Codex 注入，脚本待首次执行喵~
 - 已补充 Rust 同源分块/Seek/HEAD/禁用/大图完整性/Web 隔离测试、Windows RAW 参数回归与显式 fixture attach/scene-script 模式；测试只读显式输入，不访问默认设置或自动启动真实 WE，尚待执行喵~
 - 已接入同一受监控 bridge CDP 连接的专用 Fetch 路由（先注册后注入，安装等待期间也服务资源）；Scene RAW 仅固定 JSON 使用 Windows verbatim、其他参数保持独立引用；renderer 新增真正解码就绪诊断与取消播放竞态过滤，等待编译和严格 CSP 实播验收喵~
 - 接续已完整读取本文件与最新操作记录，保留并提交 wallpaper.rs 初稿为 1d6865d；下一步接通 renderer CDP Fetch 专用路由、修正 Scene RAW 参数、添加严格 CSP Electron 实播验证，再完成全量回归与新补丁版本发行喵~

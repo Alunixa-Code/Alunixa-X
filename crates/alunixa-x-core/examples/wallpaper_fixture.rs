@@ -42,8 +42,12 @@ async fn main() -> anyhow::Result<()> {
             codex_app_image_overlay_enabled: true,
             codex_app_image_overlay_path: input["path"].as_str().unwrap().into(),
             codex_app_image_overlay_opacity: 100,
+            codex_app_wallpaper_engine_path: input["engine"].as_str().unwrap_or("").into(),
             ..Default::default()
         };
+        if let Some(port) = input["inspectorPort"].as_u64() {
+            wallpaper_scene::start(u16::try_from(port)?, &settings);
+        }
         let source = assets::renderer_script();
         let start = source
             .find("  function installAlunixaXImageOverlay()")
