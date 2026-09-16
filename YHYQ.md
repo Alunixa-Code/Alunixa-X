@@ -1823,3 +1823,15 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 产品冻结检查点 2553916；最新前端 107/107、TS、i18n 918/918 + 80/80、品牌、Vite 均退出 0；新增行凭据模式扫描 0，基线 diff 检查发现 docs/wallpapers.md 末尾额外空行，已仅修正文档格式喵~
 - 原生主模块兼容性搜索首次给 rg 传入 PowerShell 不展开的通配符导致 os error 123，未操作文件；后续不重复该错误，Scene 未做真实捕获的边界保持不变喵~
 - 核对 Scene 的 process.mainModule.require 与现有原生菜单实现一致；Rust 链接阶段正常推进，无残留旧构建或进程抢占；浏览器 fixture 改为从临时目录运行独立 exe 副本，结束后自动清理，避免 Windows 构建产物占用喵~
+
+## 2026-09-16 · 动态壁纸与 guardianv2 本地最终验收
+
+- 最终产品源码 2553916，隔离验证脚本 910c3d5；完整 `cargo test --workspace --locked --no-fail-fast -j 2 -- --test-threads=1` 退出 0，编译/链接耗时 11m49s，41 套件 1124 passed/0 failed/1 ignored 喵~
+- 唯一 ignored 为既有 `connect::app_server::tests::fake_codex_app_server_process`，由父测试显式使用，未新增跳过；Guardian 合法值保留/嵌套修复/原始备份/供应商防回灌、Workshop scene.pkg、超过普通5秒的独立CDP deadline与显式短超时均通过喵~
+- 在上述 Cargo 完全退出后才执行 `cargo check --workspace --all-targets --locked -j 2`，退出 0（1m52s），无并发重编译或 Windows 测试程序占用喵~
+- 前端最终 107/107、TypeScript、i18n 918/918 + 80/80、品牌、Vite、cargo fmt、完整基线 git diff 检查均通过；新增行凭据模式扫描 0，Cargo/npm 锁文件和第三方依赖无变化喵~
+- 最新生产 UI 脚本整体退出 0：真实 WebM 时间推进/循环/暂停/输入不受遮挡/GIF 像素变化/销毁，管理器导入/预览/保存/取消/失败保留/配置修复按钮/Scene目录/重置/窄窗口全部 PASS 喵~
+- 真正点击主题按钮后的深浅截图已重新生成并目视检查，壁纸与静音开关有可见状态、文字对比和布局正常；Web 在真实 Chromium 验证本地 JS/JSON 加载、父页DOM隔离、Helper fetch及图片请求拦截成功喵~
+- 本机已安装 Codex CLI 在三个临时 CODEX_HOME 先复现 FeatureToml，再执行备份修复后 features list 全部退出0；临时配置原始备份逐字一致，真实 config/auth 没有修改；所有自有测试服务/进程已退出，临时媒体与运行副本自动清理喵~
+- 当前只交付本地源码/验证，不推送、发布、升级安装或重启当前 Codex/Helper/CDP；原生 Wallpaper Engine Scene 真实捕获链路没有实机验收，不把目录/VM/超时测试写成实际场景播放成功喵~
+- 准备清理本轮九份已结束验证日志，总计 222311 字节：wallpaper-check-final.log、wallpaper-check.log、wallpaper-frontend-final.log、wallpaper-frontend.log、wallpaper-ui-final.log、wallpaper-vite-final.log、wallpaper-vite.log、wallpaper-workspace-final.log、wallpaper-workspace.log；均限项目 .tmp 下，保留两张截图与复用缓存，历史已拒绝删除的发行日志不再尝试喵~
