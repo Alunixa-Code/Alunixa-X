@@ -152,6 +152,7 @@
 
 ## 19. Current Task
 ### 当前进行：v1.0.20 正式发行
+- 版本准备 e365249 后复验：四个 Rust 包/前端/Tauri 1.0.20 一致，前端 107/107、TS、i18n 918/918 + 80/80、Vite、fmt、品牌、基线 diff、新增行凭据模式和第三方依赖锁一致性全部 PASS；产品源码未变，完整 Rust 由正式 CI 对新版本再次全量验证喵~
 - 已将 workspace/Cargo.lock 四个本地包、manager package/package-lock 与 Tauri 统一到 1.0.20；CHANGELOG 和中英 README/壁纸文档同步发行入口，docs/releases/v1.0.20.md 已包含新增、修复、使用方法、实机验证边界与构建方式喵~
 - 从已验收的壁纸产品源码继续，不重复实现；仅升级自身版本、同步 README/壁纸文档/CHANGELOG 并新增详细发行说明，不更新第三方依赖喵~
 - 发布六资产前由同一标签执行 Windows x64、macOS x64/arm64 的完整前端与 Rust 回归；核验正文、产品 SHA、Actions 来源、六资产名称/大小/SHA-256 与匿名 latest 后才报告发布完成喵~

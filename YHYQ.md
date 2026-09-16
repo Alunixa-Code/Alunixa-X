@@ -1846,3 +1846,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本次准备自身版本 1.0.20 与详细发行说明，包含动态媒体/WE项目/定向配置修复及已有测试，不升级第三方依赖；Scene 实机捕获未验收、真实 config/auth 和当前 Codex/Helper/CDP 不变喵~
 - 仓库工作流文件实际名为 pr-build.yml，首次按运行标题猜测 pr-build-artifacts.yml 未找到后已核对真实路径，无文件修改喵~
 - 已升级自身版本至 1.0.20，更新 CHANGELOG、中英 README、壁纸说明并新增详细发行说明；只改本地包版本，不升级第三方依赖，接下来执行版本/前端/格式门禁后推送喵~
+- 版本准备提交 e365249 后，cargo metadata --locked 确认四包 1.0.20；前端 107/107、TypeScript、i18n 918/918 + 80/80、Vite、fmt、品牌、完整差异检查全部 PASS；新增行凭据模式 0，Cargo/npm 锁只改变自身版本喵~
+- 本次推送明确包含：动态媒体无损上传/流式播放/预览控制、Wallpaper Engine Video/Web/Windows Scene 目录链路及 scene.pkg 兼容、路径级资源隔离、guardianv2 备份修复与供应商防回灌、全部对应回归/使用说明/详细发行说明；不改真实配置、不安装、不重启，准备原子推送 main 与新 v1.0.20 标签喵~
+- 采用最终提交 [skip ci] 跳过重复 push 构建，再对 v1.0.20 显式派发一次正式 release-assets.yml；不复用旧二进制、不移动任何已有标签喵~
