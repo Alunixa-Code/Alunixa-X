@@ -1,4 +1,4 @@
-## 1.0.20 - 2026-09-16
+## 1.0.21 - 2026-09-16
 
 - 普通 Codex 背景增加视频、GIF、APNG 和动画 WebP 上传、原始字节保留、预览、循环播放、静音与暂停；视频通过 Range 流式读取，不内嵌大文件喵~
 - 皮肤管理与原设置页共用动态壁纸面板，支持选择单个 Wallpaper Engine Video/Web/Scene 项目目录，兼容 Workshop `scene.pkg` 打包布局喵~

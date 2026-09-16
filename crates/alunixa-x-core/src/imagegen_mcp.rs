@@ -657,6 +657,10 @@ mod tests {
                         Err(error) => panic!("fixture accept: {error}"),
                     }
                 };
+                // The listener is non-blocking only so the accept loop can enforce
+                // its deadline; accepted sockets must be blocking for fragmented
+                // HTTP request reads on Windows.
+                stream.set_nonblocking(false).unwrap();
                 stream
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                     .unwrap();

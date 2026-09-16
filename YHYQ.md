@@ -1857,3 +1857,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 不改已发布标签或降低断言，等同一运行结束后仅重跑失败 Windows 作业一次并重新执行完整回归/构建；若仍失败需修复 fixture 后用新版本，不进行无界重试；日志未下载落地，不产生待清理临时文件喵~
 - 首轮正式运行已结束 failure（不是产品发行成功）：macOS arm64 7m04s、x64 15m38s 均完成全部回归/构建/资产上传，Windows fixture 失败令发布 job skipped；对同一 Actions 35053573074 执行唯一一次 gh run rerun --failed，attempt 2 保持产品/标签不变，等待完整 Windows 门禁和依赖发布 job 喵~
 - 已独立从完成的原始 macOS job 日志内存解析核验：macOS arm64 job 104658943704：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；macOS x64 job 104658943782：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；两架构全部编译/打包及 bundle 门禁已成功，attempt 2 只重跑 Windows 和发布依赖，不复用其他产品版本喵~
+- v1.0.20 attempt 2 已完成但仍 failure：Windows 104662109611 在相同测试夹具竞态失败，发布 104664446881 skipped；macOS x64/arm64 构建和资产上传成功，未生成 v1.0.20 Release，不能将其称为已发布喵~
+- 已按 Windows 日志修复 `crates/alunixa-x-core/src/imagegen_mcp.rs`：listener 保持 nonblocking 仅用于 accept deadline，accepted stream 读请求前显式 `set_nonblocking(false)`；这是测试夹具稳定性修复，不改变产品运行逻辑喵~
+- 由于 v1.0.20 标签不可变且无 Release，本次自身版本升级为 1.0.21，发行说明从 v1.0.20 复制并修正版本/上一版引用；不移动或覆盖 v1.0.20，不升级第三方依赖喵~
+- v1.0.21 首轮 targeted test 被错误锁文件替换拦截：通用 1.0.20→1.0.21 替换把第三方 dyn-clone 1.0.20 改成不存在的 1.0.21；已从 HEAD 的 v1.0.20 锁文件恢复，并只更新四个本地 Rust 包及 package-lock 根版本，未产生依赖升级喵~
