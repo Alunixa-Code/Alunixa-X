@@ -163,6 +163,9 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 已实证根因：Codex app:// CSP 拒绝 HTTP 媒体/iframe/fetch；静态图新 16 MiB 阈值导致大图从 data URI 回退到被拦 HTTP；旧测试去掉真实 CSP 因而漏验喵~
+- Scene 独立 Electron + 实际 WE 项目复现 openWallpaper=0 但 applyProperties=4，原因 Windows spawn 转义 RAW JSON；仅对此命令使用正确 verbatim argv 后 applyProperties=0 并获得精确自有 sourceId，窗口已定向关闭、不动桌面喵~
+- 方案：复用 renderer CDP 连接对专属 app://-/_alunixa-x-wallpaper/* 路径接入当前选中资源，保留 CSP 和 Web 沙箱，用有限 Range 分块不内嵌大视频；隔离 Electron 已证明 CSP self+Fetch.fulfillRequest 实际可用，不全局绕过 CSP 喵~
 - 用户反馈三类背景均失败；只读确认 D:\AlunixaX 的 launcher/manager 确为 1.0.21，不把问题归因于未升级；当前选中 WE project.json，日志 renderer.wallpaper_failed=Failed to fetch 喵~
 - 优先检查实际 app:// 页 CSP/资源请求、静态图与视频生命周期和原生 Scene 捕获接口；现有 image_overlay_installed 在加载成功前记录，不能作为显示成功依据，需增强真正渲染与错误验证喵~
 - 不重启/热注入当前 Codex、Helper 或 Wallpaper Engine 主进程，不改真实 config/auth/壁纸设置；用隔离环境复现和验证，再通过新版本 Actions/Release 交付，现有标签不动喵~

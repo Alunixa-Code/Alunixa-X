@@ -1888,3 +1888,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 用户原话：不行啊，你这做的不光静态壁纸不好用了，视频也不行，wallpaper 场景也不行；本轮修复真实显示链路并补真实端到端验收，不以 CI/附件通过代替功能成功喵~
 - 已读取 XJ.md 和近期日志、通用记忆相关定位/隔离习惯、React/测试技能；建立 fb02cfc 修改前检查点，保留 .tmp 和之前审计提交喵~
 - 只读确认实际 D:\AlunixaX launcher/manager 版本为 1.0.21，当前 Scene 配置开启；真实 launcher 日志显示 renderer.wallpaper_failed: Failed to fetch，image_overlay_installed 仅为创建节点而非成功加载，需要检查 app:// CSP/跨源/渲染链路喵~
+- 只读 CDP 核对实际 Codex app:// CSP：img/media/frame/connect 均未允许 localhost HTTP；当前场景视频 readyState=0，Helper 从主机访问返回引擎初始化失败，renderer 独立显示 Failed to fetch，为两个问题叠加喵~
+- 对照旧版本静态图无阈值，新版本大于16MiB改走HTTP，造成大图回归；上一轮浏览器测试用无 CSP 页面且仅测试小GIF，未覆盖真实宿主限制喵~
+- 使用既有缓存 Electron 40.1.0 在项目 .tmp 创建自有隔离测试运行时，独立 profile/隐藏窗口实证 app:// 同源资源可通过 Fetch.fulfillRequest 加载且保持 CSP，不改当前运行 Codex；未新下载安装包喵~
+- 官方 Electron protocol 与 WE CLI 正文经 HTTPS读取；实际 WE 单独命名验证窗口：原生 openWallpaper 成功，applyProperties因 Windows转义 RAW JSON退出4；在隔离 Electron修正 RAW参数后返回0且捕获到精确自有窗口，测试结束逐一 closeWallpaper -location 回收，不发送全局stop/pause喵~
