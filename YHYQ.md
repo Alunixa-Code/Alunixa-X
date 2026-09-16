@@ -1984,5 +1984,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 | `Alunixa-X-1.0.23-windows-x64-setup.exe` | 21691843 | `91ccd83d586d52fdf2af85dd1a03a8b1f209407f06c478f7b5d463ed22ff886c` |
 | `Alunixa-X-1.0.23-windows-x64.zip` | 27412191 | `ad2f55f99cd967d2b9cd7f217bade4d1445bb47ebda7932ce9cbe71a1b797c98` |
 
-- Web公开发布页再次确认Latest/v1.0.23与完整中俄英说明；未移动旧标签、未复用旧二进制、未自动安装或重启当前Codex/Helper，正式README三语已经随产品推送喵~
+- GitHub匿名公开API再次确认latest/v1.0.23与六资产，Release正文核对完整中俄英说明；未移动旧标签、未复用旧二进制、未自动安装或重启当前Codex/Helper，正式README三语已经随产品推送喵~
 - 本轮10个临时翻译文件清理仍为执行环境拒绝状态，不重复或绕过；保留最终证据/截图/可复用缓存，日志通过API内存读取，没有下载新增安装包或原始CI日志喵~
+
+- 正式v1.0.23发布页已通过Codex右侧浏览器面板请求展示，工具返回queued（切回当前任务后显示），不把queued说成已在当前前台打开；web工具未返回可引用正文，发布验收依据为GitHub CLI/API、匿名latest和完成的Actions原始日志喵~
