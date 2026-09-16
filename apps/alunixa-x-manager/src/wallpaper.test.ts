@@ -18,11 +18,20 @@ test("scene captures only the exact owned window and closes only that location",
       return [{ name: "private window", id: "window:100:0" }, { name: options.title, id: "window:200:0" }];
     } },
   };
-  const sandbox = { process: { mainModule: { require(name: string) {
+  const sandbox = { process: { platform: "win32", mainModule: { require(name: string) {
     if (name === "electron") return electron;
     if (name === "node:child_process") return { spawn(exe: string, args: unknown[], config: unknown) {
       calls.push([exe, ...args]);
       assert.equal((config as { shell: boolean }).shell, false);
+      const raw = (config as { windowsVerbatimArguments: boolean }).windowsVerbatimArguments;
+      if (raw) {
+        assert.equal(args[1], '"applyProperties"');
+        assert.equal(args[3], `"${options.title}"`);
+        assert.equal(args.at(-1), 'RAW~({"volume":0})~END');
+        assert.ok(!String(args.at(-1)).includes('\\"'));
+      } else {
+        assert.notEqual(args[1], "applyProperties");
+      }
       return { once(event: string, callback: (code: number) => void) { if (event === "exit") queueMicrotask(() => callback(0)); } };
     } };
     throw new Error("unexpected require");

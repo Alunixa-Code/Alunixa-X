@@ -209,8 +209,13 @@ pub async fn install_bridge_with_disconnect(
     new_document_scripts: &[String],
 ) -> anyhow::Result<BridgeDisconnect> {
     install_bridge_with_wallpaper(
-        websocket_url, binding_name, handler, new_document_scripts, None,
-    ).await
+        websocket_url,
+        binding_name,
+        handler,
+        new_document_scripts,
+        None,
+    )
+    .await
 }
 
 /// Keep the private media transport on the bridge's supervised CDP connection.
@@ -231,12 +236,18 @@ pub async fn install_bridge_with_wallpaper(
     session.wallpaper = wallpaper;
 
     if session.wallpaper.is_some() {
-        session.send_command(next_message_id(), "Fetch.enable", json!({
-            "patterns": [{
-                "urlPattern": format!("{}*", crate::wallpaper::APP_RESOURCE_BASE),
-                "requestStage": "Request"
-            }]
-        })).await?;
+        session
+            .send_command(
+                next_message_id(),
+                "Fetch.enable",
+                json!({
+                    "patterns": [{
+                        "urlPattern": format!("{}*", crate::wallpaper::APP_RESOURCE_BASE),
+                        "requestStage": "Request"
+                    }]
+                }),
+            )
+            .await?;
     }
 
     session.send_command(1, "Runtime.enable", json!({})).await?;
@@ -528,9 +539,8 @@ where
             && let Some(settings) = &self.wallpaper
         {
             let response = crate::wallpaper::cdp_response(&value["params"], settings).await;
-            self.send_command_without_wait(
-                next_message_id(), "Fetch.fulfillRequest", response,
-            ).await?;
+            self.send_command_without_wait(next_message_id(), "Fetch.fulfillRequest", response)
+                .await?;
         }
 
         Ok(Some(value))

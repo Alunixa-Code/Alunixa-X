@@ -3,6 +3,7 @@ use alunixa_x_core::{
     settings::{BackendSettings, SettingsStore},
     wallpaper,
 };
+use base64::Engine;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -117,6 +118,134 @@ async fn web_projects_are_sandboxed_and_cannot_read_outside_resources() {
         let response = request(settings.clone(), "GET", path, None).await;
         assert!(response.starts_with(b"HTTP/1.1 404"));
         assert!(!String::from_utf8_lossy(&response).contains("DO-NOT-SERVE"));
+    }
+}
+
+fn header<'a>(response: &'a serde_json::Value, name: &str) -> Option<&'a str> {
+    response["responseHeaders"]
+        .as_array()?
+        .iter()
+        .find(|h| h["name"] == name)?["value"]
+        .as_str()
+}
+
+async fn cdp_resource(
+    settings: &BackendSettings,
+    method: &str,
+    url: &str,
+    range: &str,
+) -> serde_json::Value {
+    wallpaper::cdp_response(
+        &json!({
+            "requestId":"fixture",
+            "request":{"method":method,"url":url,"headers":{"rAnGe":range}},
+        }),
+        settings,
+    )
+    .await
+}
+
+#[tokio::test]
+async fn same_origin_transport_bounds_media_and_preserves_seek_head_and_disabled_access() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("clip.webm");
+    let bytes = vec![42; wallpaper::CDP_MEDIA_CHUNK as usize + 23];
+    std::fs::write(&file, &bytes).unwrap();
+    let mut settings = BackendSettings {
+        codex_app_image_overlay_enabled: true,
+        codex_app_image_overlay_path: file.to_string_lossy().into(),
+        ..Default::default()
+    };
+    let config = assets::image_overlay_config(1234, &settings);
+    let url = config["sourceUrl"].as_str().unwrap();
+    assert!(url.starts_with(wallpaper::APP_RESOURCE_BASE));
+    assert!(!url.contains("http:"));
+    assert_eq!(config["dataUrl"], "");
+    let first = cdp_resource(&settings, "GET", url, "bytes=0-").await;
+    assert_eq!(first["responseCode"], 206);
+    assert_eq!(header(&first, "Content-Length"), Some("4194304"));
+    let body = base64::engine::general_purpose::STANDARD
+        .decode(first["body"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(body, bytes[..wallpaper::CDP_MEDIA_CHUNK as usize]);
+    let tail = cdp_resource(&settings, "GET", url, "bytes=4194304-").await;
+    assert_eq!(
+        header(&tail, "Content-Range"),
+        Some("bytes 4194304-4194326/4194327")
+    );
+    let head = cdp_resource(&settings, "HEAD", url, "bytes=0-").await;
+    assert_eq!(header(&head, "Content-Length"), Some("4194327"));
+    assert_eq!(head["body"], "");
+    assert_eq!(
+        cdp_resource(&settings, "GET", url, "bytes=99999999-").await["responseCode"],
+        416
+    );
+    assert_eq!(
+        cdp_resource(&settings, "POST", url, "").await["responseCode"],
+        405
+    );
+    assert_ne!(
+        cdp_resource(&settings, "GET", "file:///secrets", "").await["responseCode"],
+        200
+    );
+    settings.codex_app_image_overlay_enabled = false;
+    assert_eq!(
+        cdp_resource(&settings, "GET", url, "bytes=0-").await["responseCode"],
+        404
+    );
+}
+
+#[tokio::test]
+async fn large_images_use_host_origin_without_truncation_and_web_keeps_path_sandbox() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("large.png");
+    let bytes = vec![123; 17 * 1024 * 1024];
+    std::fs::write(&path, &bytes).unwrap();
+    let mut settings = BackendSettings {
+        codex_app_image_overlay_enabled: true,
+        codex_app_image_overlay_path: path.to_string_lossy().into(),
+        ..Default::default()
+    };
+    let config = assets::image_overlay_config(1, &settings);
+    assert_eq!(config["dataUrl"], "");
+    let response = wallpaper::cdp_response(
+        &json!({
+            "requestId":"large","request":{"method":"GET","url":config["sourceUrl"],"headers":{}}
+        }),
+        &settings,
+    )
+    .await;
+    assert_eq!(response["responseCode"], 200);
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(response["body"].as_str().unwrap())
+            .unwrap(),
+        bytes
+    );
+    std::fs::write(tmp.path().join("index.html"), "<html>isolated</html>").unwrap();
+    std::fs::write(
+        tmp.path().join("project.json"),
+        r#"{"type":"web","file":"index.html"}"#,
+    )
+    .unwrap();
+    settings.codex_app_image_overlay_path = tmp.path().to_string_lossy().into();
+    let url = format!("{}web/index.html", wallpaper::APP_RESOURCE_BASE);
+    let response = cdp_resource(&settings, "GET", &url, "bytes=0-").await;
+    let csp = header(&response, "Content-Security-Policy").unwrap();
+    assert!(csp.contains("connect-src app://-/_alunixa-x-wallpaper/web/;"));
+    assert!(csp.contains("sandbox allow-scripts"));
+    assert!(!csp.contains("allow-same-origin"));
+    for path in [
+        "../secret.json",
+        "%2e%2e/secret.json",
+        "%2e%2e%5csecret.json",
+        "file:///secret.json",
+    ] {
+        let url = format!("{}web/{path}", wallpaper::APP_RESOURCE_BASE);
+        assert_eq!(
+            cdp_resource(&settings, "GET", &url, "bytes=0-").await["responseCode"],
+            404
+        );
     }
 }
 

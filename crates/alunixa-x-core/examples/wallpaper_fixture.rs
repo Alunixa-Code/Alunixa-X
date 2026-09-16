@@ -1,6 +1,10 @@
 //! Isolated development fixture: never reads default settings or starts Codex/WE.
-use alunixa_x_core::{relay_config, settings::BackendSettings, wallpaper};
+use alunixa_x_core::{
+    assets, bridge, relay_config, settings::BackendSettings, wallpaper, wallpaper_scene,
+};
+use serde_json::{Value, json};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
@@ -8,13 +12,63 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     anyhow::ensure!(
         args.len() == 2,
-        "wallpaper_fixture <serve|repair> <explicit fixture path>"
+        "wallpaper_fixture <serve|repair|attach|scene-script> <explicit fixture path>"
     );
     if args[0] == "repair" {
         println!(
             "REPAIRED={}",
             relay_config::repair_stale_feature_entries_in_home(Path::new(&args[1]))?
         );
+        return Ok(());
+    }
+    if args[0] == "scene-script" {
+        let input: Value = serde_json::from_slice(&std::fs::read(&args[1])?)?;
+        println!(
+            "{}",
+            wallpaper_scene::capture_script(
+                Path::new(input["engine"].as_str().unwrap()),
+                Path::new(input["project"].as_str().unwrap()),
+                input["title"].as_str().unwrap(),
+                true,
+            )
+        );
+        return Ok(());
+    }
+    if args[0] == "attach" {
+        // Explicit fixture settings only: no default home/config, no launcher,
+        // no real WE control. The Electron harness owns any native scene window.
+        let input: Value = serde_json::from_slice(&std::fs::read(&args[1])?)?;
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: true,
+            codex_app_image_overlay_path: input["path"].as_str().unwrap().into(),
+            codex_app_image_overlay_opacity: 100,
+            ..Default::default()
+        };
+        let source = assets::renderer_script();
+        let start = source
+            .find("  function installAlunixaXImageOverlay()")
+            .unwrap();
+        let end = source
+            .find("  function scheduleAlunixaXImageOverlay()")
+            .unwrap();
+        let script = format!(
+            "window.__ALUNIXA_X_IMAGE_OVERLAY__={};\n\
+             (()=>{{ const alunixaXImageOverlayId='alunixa-x-image-overlay';\n\
+             const sendAlunixaXDiagnostic=(event,payload)=>{{window.fixtureEvents??=[];window.fixtureEvents.push({{event,payload}})}};\n\
+             {}\nwindow.installWallpaper=installAlunixaXImageOverlay;installAlunixaXImageOverlay();}})();",
+            assets::image_overlay_config(1, &settings),
+            &source[start..end],
+        );
+        let disconnected = bridge::install_bridge_with_wallpaper(
+            input["websocketUrl"].as_str().unwrap(),
+            bridge::BRIDGE_BINDING_NAME,
+            Arc::new(|_, _| Box::pin(async { Ok(json!({"status":"ok"})) })),
+            &[script],
+            Some(settings),
+        )
+        .await?;
+        println!("READY");
+        let _ = disconnected.await;
         return Ok(());
     }
     anyhow::ensure!(args[0] == "serve", "unknown mode");

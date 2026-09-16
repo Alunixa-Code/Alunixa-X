@@ -256,15 +256,28 @@ pub async fn cdp_response(request: &Value, settings: &crate::settings::BackendSe
     let request_id = request["requestId"].as_str().unwrap_or_default();
     let response = async {
         let url = request["request"]["url"].as_str().unwrap_or_default();
-        let relative = url.strip_prefix(APP_RESOURCE_BASE).context("invalid wallpaper URL")?;
+        let relative = url
+            .strip_prefix(APP_RESOURCE_BASE)
+            .context("invalid wallpaper URL")?;
         let method = request["request"]["method"].as_str().unwrap_or("GET");
-        let range = request["request"]["headers"].as_object().and_then(|headers| {
-            headers.iter().find(|(key, _)| key.eq_ignore_ascii_case("range"))
-                .and_then(|(_, value)| value.as_str())
-        });
+        let range = request["request"]["headers"]
+            .as_object()
+            .and_then(|headers| {
+                headers
+                    .iter()
+                    .find(|(key, _)| key.eq_ignore_ascii_case("range"))
+                    .and_then(|(_, value)| value.as_str())
+            });
         let path = format!("/wallpaper/{relative}");
-        let mut response = prepare_response(method, &path, range, settings,
-            &format!("{APP_RESOURCE_BASE}web/"), true).await?;
+        let mut response = prepare_response(
+            method,
+            &path,
+            range,
+            settings,
+            &format!("{APP_RESOURCE_BASE}web/"),
+            true,
+        )
+        .await?;
         let bytes = match &mut response.body {
             Body::Empty => Vec::new(),
             Body::Bytes(bytes) => std::mem::take(bytes),
@@ -272,7 +285,10 @@ pub async fn cdp_response(request: &Value, settings: &crate::settings::BackendSe
                 file.seek(std::io::SeekFrom::Start(*start)).await?;
                 let mut bytes = Vec::with_capacity(*count as usize);
                 file.take(*count).read_to_end(&mut bytes).await?;
-                anyhow::ensure!(bytes.len() as u64 == *count, "wallpaper file changed during read");
+                anyhow::ensure!(
+                    bytes.len() as u64 == *count,
+                    "wallpaper file changed during read"
+                );
                 bytes
             }
         };
@@ -282,17 +298,24 @@ pub async fn cdp_response(request: &Value, settings: &crate::settings::BackendSe
                 json!({"name":name,"value":value})).collect::<Vec<_>>(),
             "body": base64::engine::general_purpose::STANDARD.encode(bytes),
         }))
-    }.await;
-    response.unwrap_or_else(|_| json!({
-        "requestId":request_id,"responseCode":500,
-        "responseHeaders":[{"name":"Content-Length","value":"0"}],"body":""
-    }))
+    }
+    .await;
+    response.unwrap_or_else(|_| {
+        json!({
+            "requestId":request_id,"responseCode":500,
+            "responseHeaders":[{"name":"Content-Length","value":"0"}],"body":""
+        })
+    })
 }
 
 enum Body {
     Empty,
     Bytes(Vec<u8>),
-    File { file: tokio::fs::File, start: u64, count: u64 },
+    File {
+        file: tokio::fs::File,
+        start: u64,
+        count: u64,
+    },
 }
 struct ResourceResponse {
     status: u16,
@@ -301,13 +324,20 @@ struct ResourceResponse {
 }
 impl ResourceResponse {
     fn empty(status: u16) -> Self {
-        Self { status, headers: vec![
-            ("Content-Length".into(), "0".into()),
-            ("Access-Control-Allow-Origin".into(), "*".into()),
-            ("Access-Control-Allow-Methods".into(), "GET, HEAD, OPTIONS".into()),
-            ("Access-Control-Allow-Headers".into(), "Range".into()),
-            ("Cache-Control".into(), "no-store".into()),
-        ], body: Body::Empty }
+        Self {
+            status,
+            headers: vec![
+                ("Content-Length".into(), "0".into()),
+                ("Access-Control-Allow-Origin".into(), "*".into()),
+                (
+                    "Access-Control-Allow-Methods".into(),
+                    "GET, HEAD, OPTIONS".into(),
+                ),
+                ("Access-Control-Allow-Headers".into(), "Range".into()),
+                ("Cache-Control".into(), "no-store".into()),
+            ],
+            body: Body::Empty,
+        }
     }
     fn header(&mut self, name: &str, value: impl ToString) {
         self.headers.retain(|(key, _)| key != name);
@@ -316,24 +346,36 @@ impl ResourceResponse {
 }
 
 async fn prepare_response(
-    method: &str, raw_path: &str, range: Option<&str>,
-    settings: &crate::settings::BackendSettings, web_resources: &str, bounded: bool,
+    method: &str,
+    raw_path: &str,
+    range: Option<&str>,
+    settings: &crate::settings::BackendSettings,
+    web_resources: &str,
+    bounded: bool,
 ) -> anyhow::Result<ResourceResponse> {
     if !matches!(method, "GET" | "HEAD" | "OPTIONS") {
         return Ok(ResourceResponse::empty(405));
     }
-    if method == "OPTIONS" { return Ok(ResourceResponse::empty(204)); }
+    if method == "OPTIONS" {
+        return Ok(ResourceResponse::empty(204));
+    }
     let path = raw_path.split('?').next().unwrap_or(raw_path);
     let result = if settings.enhancements_enabled && settings.codex_app_image_overlay_enabled {
         resolve(Path::new(settings.codex_app_image_overlay_path.trim()))
-    } else { Err(anyhow::anyhow!("disabled")) };
-    let Ok(source) = result else { return Ok(ResourceResponse::empty(404)); };
+    } else {
+        Err(anyhow::anyhow!("disabled"))
+    };
+    let Ok(source) = result else {
+        return Ok(ResourceResponse::empty(404));
+    };
     let mut response = ResourceResponse::empty(200);
     if path == "/wallpaper/scene" && source.kind == "scene" {
         let bytes = serde_json::to_vec(&crate::wallpaper_scene::state(&source.path))?;
         response.header("Content-Type", "application/json");
         response.header("Content-Length", bytes.len());
-        if method != "HEAD" { response.body = Body::Bytes(bytes); }
+        if method != "HEAD" {
+            response.body = Body::Bytes(bytes);
+        }
         return Ok(response);
     }
     let file = if path == "/wallpaper/media" && matches!(source.kind.as_str(), "image" | "video") {
@@ -342,7 +384,9 @@ async fn prepare_response(
         let encoded = path.trim_start_matches("/wallpaper/web/");
         let relative = match url::form_urlencoded::parse(
             format!("p={}", encoded.replace('+', "%2B").replace('&', "%26")).as_bytes(),
-        ).next() {
+        )
+        .next()
+        {
             Some((_, value)) => value.into_owned(),
             None => return Ok(ResourceResponse::empty(404)),
         };
@@ -350,20 +394,28 @@ async fn prepare_response(
             Ok(file) => file,
             Err(_) => return Ok(ResourceResponse::empty(404)),
         }
-    } else { return Ok(ResourceResponse::empty(404)); };
+    } else {
+        return Ok(ResourceResponse::empty(404));
+    };
     let mime = media_type(&file).map(|(_, mime)| mime).or_else(|| {
         match file.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "html" | "htm" => Some("text/html; charset=utf-8"),
             "js" | "mjs" => Some("text/javascript; charset=utf-8"),
             "css" => Some("text/css; charset=utf-8"),
             "json" => Some("application/json"),
-            "woff2" => Some("font/woff2"), "woff" => Some("font/woff"), "ttf" => Some("font/ttf"),
-            "svg" => Some("image/svg+xml"), "mp3" => Some("audio/mpeg"),
-            "ogg" => Some("audio/ogg"), "wav" => Some("audio/wav"),
+            "woff2" => Some("font/woff2"),
+            "woff" => Some("font/woff"),
+            "ttf" => Some("font/ttf"),
+            "svg" => Some("image/svg+xml"),
+            "mp3" => Some("audio/mpeg"),
+            "ogg" => Some("audio/ogg"),
+            "wav" => Some("audio/wav"),
             _ => None,
         }
     });
-    let Some(mime) = mime else { return Ok(ResourceResponse::empty(404)); };
+    let Some(mime) = mime else {
+        return Ok(ResourceResponse::empty(404));
+    };
     let file = tokio::fs::File::open(file).await?;
     let length = file.metadata().await?.len();
     let (start, mut end, mut partial) = match byte_range(range, length) {
@@ -383,40 +435,65 @@ async fn prepare_response(
     if bounded && end - start + 1 > CDP_DOCUMENT_LIMIT && method != "HEAD" {
         return Ok(ResourceResponse::empty(413));
     }
-    response.status = if partial {206} else {200};
+    response.status = if partial { 206 } else { 200 };
     response.header("Content-Type", mime);
     response.header("Content-Length", end - start + 1);
     response.header("Accept-Ranges", "bytes");
     response.header("X-Content-Type-Options", "nosniff");
-    if partial { response.header("Content-Range", format!("bytes {start}-{end}/{length}")); }
+    if partial {
+        response.header("Content-Range", format!("bytes {start}-{end}/{length}"));
+    }
     if source.kind == "web" {
         response.header("Content-Security-Policy", format!(
             "default-src 'none'; script-src {web_resources} 'unsafe-inline'; style-src {web_resources} 'unsafe-inline'; img-src {web_resources} data: blob:; media-src {web_resources} data: blob:; font-src {web_resources} data:; connect-src {web_resources}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts"
         ));
     }
-    if method != "HEAD" { response.body = Body::File { file, start, count:end - start + 1 }; }
+    if method != "HEAD" {
+        response.body = Body::File {
+            file,
+            start,
+            count: end - start + 1,
+        };
+    }
     Ok(response)
 }
 
 pub async fn serve(
-    stream: &mut tokio::net::TcpStream, method: &str, raw_path: &str,
-    range: Option<&str>, settings: &crate::settings::BackendSettings,
+    stream: &mut tokio::net::TcpStream,
+    method: &str,
+    raw_path: &str,
+    range: Option<&str>,
+    settings: &crate::settings::BackendSettings,
 ) -> anyhow::Result<()> {
-    let resources = format!("http://127.0.0.1:{}/wallpaper/web/", stream.local_addr()?.port());
+    let resources = format!(
+        "http://127.0.0.1:{}/wallpaper/web/",
+        stream.local_addr()?.port()
+    );
     let response = prepare_response(method, raw_path, range, settings, &resources, false).await?;
     let reason = match response.status {
-        200 => "OK", 204 => "No Content", 206 => "Partial Content", 404 => "Not Found",
-        405 => "Method Not Allowed", 413 => "Content Too Large", 416 => "Range Not Satisfiable",
+        200 => "OK",
+        204 => "No Content",
+        206 => "Partial Content",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        413 => "Content Too Large",
+        416 => "Range Not Satisfiable",
         _ => "Internal Server Error",
     };
     let mut head = format!("HTTP/1.1 {} {reason}\r\n", response.status);
-    for (name, value) in response.headers { head.push_str(&format!("{name}: {value}\r\n")); }
+    for (name, value) in response.headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
     head.push_str("Connection: close\r\n\r\n");
     stream.write_all(head.as_bytes()).await?;
     match response.body {
-        Body::Empty => {},
+        Body::Empty => {}
         Body::Bytes(bytes) => stream.write_all(&bytes).await?,
-        Body::File { mut file, start, count } => {
+        Body::File {
+            mut file,
+            start,
+            count,
+        } => {
             file.seek(std::io::SeekFrom::Start(start)).await?;
             tokio::io::copy(&mut file.take(count), stream).await?;
         }
