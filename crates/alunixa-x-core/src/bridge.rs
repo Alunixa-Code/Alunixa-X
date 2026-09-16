@@ -267,6 +267,11 @@ pub async fn install_bridge_with_disconnect(
         .with_generation(generation.clone());
 
     session.send_command(1, "Runtime.enable", json!({})).await?;
+    // Electron only runs registered new-document scripts after navigation when
+    // the Page agent is enabled on the owning session.
+    session
+        .send_command(next_message_id(), "Page.enable", json!({}))
+        .await?;
     session
         .send_command(2, "Runtime.removeBinding", json!({ "name": binding_name }))
         .await?;

@@ -1906,3 +1906,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 改用用户已选媒体的原生 File→磁盘后备 Blob URL，由 DOM.setFileInputFiles 挂载且立即移除临时 input；renderer 通过既有 bridge 请求，无任意路径参数、无整视频Base64、无CSP放开，生命周期结束撤销Blob；Scene 状态也走bridge，WE Web改为原生自有窗口，等待真实验证喵~
 - 补齐原生File/Blob真实WebSocket契约（成功和失败清理临时input/objectId）、禁用/错误路由先拒绝和renderer Blob回收断言；Electron验证改为实际WE Web窗口而非宣称app CSP下不可靠的HTTP iframe可用喵~
 - Blob首轮静态PNG通过，后续脚本异常定位不够且诊断异常覆盖原错误；补充表达式级错误与新版Electron console事件记录，诊断catch自身不再抛错，继续实际验证喵~
+- 原生File/Blob WebSocket专项PASS、壁纸集成6/6 PASS；严格Electron确认大PNG已从磁盘后备Blob真正解码，原CSP仍拦localhost；导航恢复发现bridge未启用Page agent，补Page.enable保证注册的新文档脚本在导航后执行，不刷新用户真实窗口喵~

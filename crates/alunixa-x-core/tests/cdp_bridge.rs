@@ -2867,15 +2867,22 @@ fn websocket_url(address: SocketAddr) -> String {
 }
 
 async fn recv_json(socket: &mut TestSocket) -> serde_json::Value {
-    let message = socket
-        .next()
-        .await
-        .expect("client should send message")
-        .expect("message should be readable");
-    let Message::Text(text) = message else {
-        panic!("expected text websocket message");
-    };
-    serde_json::from_str(&text).expect("message should be JSON")
+    loop {
+        let message = socket
+            .next()
+            .await
+            .expect("client should send message")
+            .expect("message should be readable");
+        let Message::Text(text) = message else {
+            panic!("expected text websocket message");
+        };
+        let value: serde_json::Value = serde_json::from_str(&text).expect("message should be JSON");
+        if value["method"] == "Page.enable" {
+            send_json(socket, json!({"id":value["id"],"result":{}})).await;
+            continue;
+        }
+        return value;
+    }
 }
 
 async fn send_json(socket: &mut TestSocket, value: serde_json::Value) {

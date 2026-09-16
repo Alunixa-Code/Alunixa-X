@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 原生 File/Blob 专项和壁纸集成6/6通过；Electron的大PNG已真正解码且CSP仍阻止localhost，导航恢复暴露旧bridge未启用Page agent，现补Page.enable以让新文档脚本在导航后真正执行，继续整套实播喵~
 - Blob 首轮 Electron 已过静态 PNG，后续出现脚本异常但旧诊断自身也会抛异常掩盖位置，已将执行表达式/页面console附加至错误并保证诊断自身不遮蔽原错误；仍未宣称媒体全部通过喵~
 - 已补 File/Blob WebSocket 契约测试（仅选择的文件、成功/失败均清理 input/objectId）、禁用和错误资源类型拒绝、renderer Blob 回收断言；真实Electron脚本已改验证Native Web，等待最新结果喵~
 - **方案更正（优先于上面同源初稿记录）**：独立 Electron probe 已证明晚启用 Fetch 对既有 app:// 页面及新 iframe 均不接管，只有整页导航后才有效；返回的404来自原 app handler，不是媒体解码错误，不能靠重启/刷新用户窗口解决喵~
