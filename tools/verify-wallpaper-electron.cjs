@@ -1,13 +1,11 @@
 // Actual Electron + product Rust File/Blob bridge, with host-equivalent strict CSP.
 // Run with a standalone Electron binary, never the user's running Codex:
 // electron tools/verify-wallpaper-electron.cjs --fixture <exe> --output <dir>
-// Optional --scene <project.json> --engine <wallpaper64.exe> uses one owned
-// uniquely named native window and closes only that location in finally.
+// Native Wallpaper Engine launch/capture is intentionally retired.
 const { app, BrowserWindow, protocol } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
-const inspector = require("node:inspector");
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { once } = require("node:events");
@@ -31,6 +29,7 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const html = `<html><head><meta http-equiv="Content-Security-Policy" content="${CSP}"></head><body style="margin:0;background:#14243c"><main><input aria-label="underlying input"></main></body></html>`;
 const windows = new Set();
 const children = new Set();
+let failed = false;
 app.on("window-all-closed", () => {}); // Each case owns a fresh isolated window.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(test, label, timeout = 18000) {
@@ -66,17 +65,15 @@ a.save(p/"animated.apng",save_all=True,append_images=[b],duration=180,loop=0)
   run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
     "testsrc2=size=320x180:rate=12", "-t", "1.5", "-c:v", "libvpx-vp9",
     "-deadline", "realtime", "-cpu-used", "8", "-an", path.join(work, "loop.webm")]);
-  const web = path.join(work, "web");
-  fs.mkdirSync(web);
-  // Use the same manifest format as a native WE-exported Web project.
-  fs.writeFileSync(path.join(web, "project.json"), JSON.stringify({
-    type: "Web", file: "index.html", title: "Alunixa X isolated validation", version: 5, general: { properties: {} },
-  }));
-  fs.writeFileSync(path.join(web, "data.json"), '{"local":true}');
-  fs.writeFileSync(path.join(web, "script.js"), `
-    let f=0;setInterval(()=>{document.body.style.background=f++%2?'#216e85':'#dc714c'},180);
-  `);
-  fs.writeFileSync(path.join(web, "index.html"), '<body style="background:#216e85"><script src="./script.js"></script></body>');
+  for (const kind of ["scene", "web"]) {
+    const legacy = path.join(work, "legacy-" + kind);
+    fs.mkdirSync(legacy);
+    fs.copyFileSync(path.join(work, "still.png"), path.join(legacy, "preview.png"));
+    fs.writeFileSync(path.join(legacy, "project.json"), JSON.stringify({
+      type: kind, file: kind === "scene" ? "scene.pkg" : "index.html", preview: "preview.png",
+    }));
+    fs.writeFileSync(path.join(legacy, "index.html"), "<script>throw new Error('must never execute')</script>");
+  }
   const weVideo = path.join(work, "project.json");
   fs.writeFileSync(weVideo, JSON.stringify({ type: "video", file: "loop.webm" }));
 }
@@ -131,6 +128,10 @@ async function verifyImage(name, animated = false) {
       return events.some(e => e.event === "wallpaper_ready");
     }, name + " decoded", 30000);
     assert(!await ctx.evaluate(`window.fixtureEvents.some(e=>e.event==="wallpaper_failed")`));
+    if (name.startsWith("legacy-")) {
+      assert(await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.staticPreview===true`));
+      assert.equal(await ctx.evaluate(`document.querySelectorAll("video,iframe").length`), 0);
+    }
     if (animated) {
       const hashes = new Set();
       for (let i = 0; i < 5; i++) {
@@ -171,35 +172,7 @@ async function verifyVideo(name, source, extra = {}) {
     }, name + " playback", 45000);
     assert.deepEqual(await ctx.evaluate(`window.__codexSessionDeleteBridge("fixture",{})`), { status: "ok" });
     assert.equal(await ctx.evaluate(`document.querySelectorAll("[data-alunixa-x-media-transfer]").length`), 0);
-    if (!name.startsWith("native")) assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
-    if (name.startsWith("native")) {
-      const owned = globalThis.__alunixaXWallpaperScene;
-      assert(owned?.title, "production scene must own a uniquely named window");
-      const nativeWindow = JSON.parse(run(fixture, ["inspect-window", owned.title]));
-      assert(nativeWindow.offscreen, "native renderer must stay outside every monitor");
-      assert(nativeWindow.noTaskbar, "native renderer must not add a taskbar entry");
-      assert(nativeWindow.noActivate && !nativeWindow.foreground, "native renderer must not steal focus");
-      assert(!nativeWindow.minimized, "native renderer must remain live, not minimized");
-      console.log("PASS native window isolation", JSON.stringify(nativeWindow));
-      // A running MediaStream can still be a black/loading window. Verify real
-      // rendered content, then animation, not just a readyState or source ID.
-      await until(() => ctx.evaluate(`(()=>{
-        const c=document.createElement('canvas');c.width=64;c.height=36;
-        const x=c.getContext('2d');x.drawImage(document.querySelector('video'),0,0,64,36);
-        const d=x.getImageData(0,0,64,36).data;let lit=0;
-        for(let i=0;i<d.length;i+=4)if(d[i]+d[i+1]+d[i+2]>90)lit++;
-        return lit>64*36*.2;
-      })()`), name + " nonblack content", 30000);
-      const frames = new Set();
-      for (let i=0;i<5;i++) {
-        await delay(230);
-        frames.add(await ctx.evaluate(`(()=>{
-          const c=document.createElement('canvas');c.width=160;c.height=90;
-          c.getContext('2d').drawImage(document.querySelector('video'),0,0,160,90);return c.toDataURL();
-        })()`));
-      }
-      assert(frames.size > 1, name + " must deliver changing native frames");
-    }
+    assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
     if (name === "large MP4") {
       await ctx.evaluate(`document.querySelector("video").currentTime=2.5`);
       await until(() => ctx.evaluate(`document.querySelector("video").currentTime>2.6`), "seek across chunks");
@@ -212,8 +185,7 @@ async function verifyVideo(name, source, extra = {}) {
     }
     await ctx.evaluate(`document.querySelector("input").value="still usable"`);
     assert.equal(await ctx.evaluate(`document.elementFromPoint(20,10).tagName`), "INPUT");
-    fs.writeFileSync(path.join(output, name === "native scene" ? "wallpaper-electron-scene.png" : name.startsWith("native") ? "wallpaper-electron-web.png" : "wallpaper-electron-video.png"),
-      (await ctx.w.webContents.capturePage()).toPNG());
+    fs.writeFileSync(path.join(output, "wallpaper-electron-video.png"), (await ctx.w.webContents.capturePage()).toPNG());
     await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.enabled=false;window.installWallpaper()`);
     assert(await ctx.evaluate(`!document.querySelector("video") && !window.__alunixaXWallpaperRuntime`));
     console.log("PASS", name, "real frames + bridge + input + cleanup");
@@ -225,6 +197,7 @@ app.whenReady().then(async () => {
     { status: new URL(request.url).pathname === "/index.html" ? 200 : 404, headers: { "Content-Type": "text/html" } },
   ));
   try {
+    if (argv.includes("--self-test-failure")) throw new Error("intentional failure exit-code check");
     makeMedia();
     await verifyImage("still.png");
     await verifyImage("large.png");
@@ -233,24 +206,16 @@ app.whenReady().then(async () => {
     await verifyVideo("large MP4", path.join(work, "seek.mp4"));
     await verifyVideo("WebM", path.join(work, "loop.webm"));
     await verifyVideo("Wallpaper Engine video project", path.join(work, "project.json"));
-    if (argv.includes("--scene")) {
-      assert.equal(process.platform, "win32");
-      assert(argv.includes("--engine"));
-      inspector.open(0, "127.0.0.1");
-      const native = { engine: option("--engine"), inspectorPort: Number(new URL(inspector.url()).port) };
-      await verifyVideo("native Web project", path.join(work, "web"), native);
-      await verifyVideo("native scene", option("--scene"), native);
-    } else console.log("SKIP native scene: no explicit project/engine");
+    await verifyImage("legacy-scene/project.json");
+    await verifyImage("legacy-web/project.json");
     console.log("ELECTRON_WALLPAPER_PASS", app.getVersion(), "work:", work);
   } catch (error) {
     console.error(error.stack || error);
-    process.exitCode = 1;
+    failed = true;
   } finally {
-    // Never stop/pause the global engine or close somebody else's window.
-    await globalThis.__alunixaXWallpaperScene?.close();
-    if (inspector.url()) inspector.close();
+    // Only isolated test processes/windows are cleaned up; no engine is launched.
     for (const w of windows) if (!w.isDestroyed()) w.destroy();
     for (const child of children) if (child.exitCode === null) child.kill();
-    app.quit();
+    app.exit(failed ? 1 : 0);
   }
 });

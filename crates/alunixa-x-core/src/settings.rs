@@ -593,6 +593,7 @@ pub struct BackendSettings {
     #[serde(rename = "codexAppWallpaperPaused", default)]
     pub codex_app_wallpaper_paused: bool,
     #[serde(rename = "codexAppWallpaperEnginePath", default)]
+    // Legacy field retained for lossless settings round-trips; never launched.
     pub codex_app_wallpaper_engine_path: String,
     #[serde(
         rename = "codexAppImageOverlayOpacity",

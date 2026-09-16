@@ -644,13 +644,10 @@
     root.appendChild(overlay);
     let stopped = false;
     let video = null;
-    let stream = null;
     let notice = null;
     let image = null;
     let ready = false;
     let blobUrl = null;
-    const abort = new AbortController();
-    const timers = new Set();
     const reportReady = () => {
       if (stopped || ready) return;
       ready = true;
@@ -688,8 +685,6 @@
     };
     const cleanup = () => {
       stopped = true;
-      abort.abort();
-      timers.forEach(clearTimeout);
       document.removeEventListener("visibilitychange", syncPlayback);
       window.removeEventListener("pagehide", cleanup);
       if (image) { image.onload = image.onerror = null; image.src = ""; }
@@ -700,18 +695,17 @@
         video.removeAttribute("src");
         video.load();
       }
-      stream?.getTracks().forEach(track => track.stop());
       overlay.remove();
       notice?.remove();
       if (window.__alunixaXWallpaperRuntime?.element === overlay) delete window.__alunixaXWallpaperRuntime;
     };
     window.__alunixaXWallpaperRuntime = { signature, element: overlay, cleanup };
     window.addEventListener("pagehide", cleanup, { once: true });
-    if (config.kind === "video" || config.kind === "scene") {
+    if (config.kind === "video") {
       video = document.createElement("video");
       video.autoplay = !config.paused && !document.hidden;
       video.loop = true;
-      video.muted = config.kind === "scene" || config.muted !== false;
+      video.muted = config.muted !== false;
       video.playsInline = true;
       video.preload = "metadata";
       video.disablePictureInPicture = true;
@@ -724,67 +718,11 @@
       video.onplaying = reportReady;
       overlay.appendChild(video);
       document.addEventListener("visibilitychange", syncPlayback);
-      if (config.kind === "video") {
-        void loadMediaSource().then(url => {
-          if (stopped) return;
-          video.src = url;
-          syncPlayback();
-        }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
-      } else {
-        const connectScene = async () => {
-          try {
-            let state;
-            for (let attempt = 0; attempt < 80 && !stopped; attempt++) {
-              if (typeof window.__codexSessionDeleteBridge === "function") {
-                state = await window.__codexSessionDeleteBridge("/wallpaper/scene", {});
-              } else {
-                const response = await fetch(config.sceneUrl, { signal: abort.signal });
-                if (!response.ok) throw new Error("场景接口未就绪");
-                state = await response.json();
-              }
-              if (state.status !== "waiting") break;
-              await new Promise(resolve => {
-                const done = () => {
-                  timers.delete(timer);
-                  clearTimeout(timer);
-                  abort.signal.removeEventListener("abort", done);
-                  resolve();
-                };
-                const timer = setTimeout(done, 500);
-                timers.add(timer);
-                abort.signal.addEventListener("abort", done, { once:true });
-              });
-            }
-            if (stopped) return;
-            if (state?.status !== "ok" || !/^window:[0-9]+:[0-9]+$/.test(state.sourceId || "")) {
-              throw new Error(state?.message || "Wallpaper Engine 场景启动超时");
-            }
-            const captured = await navigator.mediaDevices.getUserMedia({
-              audio:false, video:{ mandatory:{ chromeMediaSource:"desktop", chromeMediaSourceId:state.sourceId,
-                maxWidth:1280, maxHeight:720, maxFrameRate:24 } },
-            });
-            if (stopped) { captured.getTracks().forEach(track => track.stop()); return; }
-            stream = captured;
-            stream.getVideoTracks().forEach(track => {
-              track.onended = () => reportFailure("场景渲染窗口已关闭，请重新通过 Alunixa X 启动");
-            });
-            video.srcObject = stream;
-            syncPlayback();
-          } catch (error) {
-            if (!stopped) reportFailure(error?.message || "原生场景捕获不可用");
-          }
-        };
-        void connectScene();
-      }
-    } else if (config.kind === "web") {
-      const frame = document.createElement("iframe");
-      frame.title = "Wallpaper";
-      frame.tabIndex = -1;
-      frame.setAttribute("sandbox", "allow-scripts");
-      frame.referrerPolicy = "no-referrer";
-      frame.src = source;
-      Object.assign(frame.style, { width:"100%", height:"100%", border:"0", pointerEvents:"none" });
-      overlay.appendChild(frame);
+      void loadMediaSource().then(url => {
+        if (stopped) return;
+        video.src = url;
+        syncPlayback();
+      }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
     } else {
       image = new Image();
       image.onload = reportReady;

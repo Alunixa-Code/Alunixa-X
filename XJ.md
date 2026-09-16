@@ -51,6 +51,7 @@
 - `assets/inject` 原生界面注入；`tools` 验证脚本；`docs/releases` 发行说明；`.github/workflows` CI 喵~
 
 ## 5. Architecture
+- v1.0.24当前方案覆盖旧原生描述：所有壁纸只有image/video；共享renderer bridge服务选中媒体，已删除wallpaper_scene模块/引擎启动/窗口捕获/项目脚本服务；旧Scene/Web只解析受目录约束的预览图片，staticPreview=true明确标记喵~
 - 普通壁纸沿用 `codexAppImageOverlay*`/muted/paused/enginePath；v1.0.22大图/视频经既有bridge调用受限CDP File→磁盘后备Blob URL，renderer按需播放/撤销；Scene/Web均由Windows WE自有无装饰窗口精确捕获，状态走bridge，不依赖HTTP媒体或Fetch拦截，不与DreamSkin混合喵~
 - 生图配置已存入既有 SettingsStore 的 imageModels 有序数组，独立 Tauri 命令做脱敏读取、带版本校验的定向保存；复用全量备份，不让普通设置的旧快照覆盖新生图配置喵~
 - MCP 每次调用重新读取 imageModels，默认首项，显式 model/profile_id 可选其他已配置项；没有配置时保留原 Helper 图片端点回退，不把 Key 写入 MCP schema/env 或下载图片请求喵~
@@ -205,6 +206,8 @@
 
 ## 19. Current Task
 ### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- 已实际撤下wallpaper_scene.rs、三处启动调用、主进程捕获/renderer getUserMedia/iframe/HTTP项目脚本服务及管理器目录/引擎选择UI；仅保留旧EnginePath序列化字段避免无关设置丢失，不再校验/使用该路径喵~
+- 旧Scene/Web安全预览兼容返回image+staticPreview，项目文件不修改、无预览/越界/非图片明确失败；英俄同步新提示（916+80词条、93后端），前端118/118已通过；追加回退/路径边界/错误码回归，准备最终Rust/生产UI/无WE实播喵~
 - **当前执行回退**：撤下原生Scene/Web与全部WE自动启动/窗口捕获，不再尝试不同隐藏方案；保留刚通过实播的图片/动图/视频，旧Scene/Web项目只按明确标记的静态预览兼容，无预览则要求重新选图片，原项目文件不改喵~
 - Electron日志.tmp/wallpaper-production-electron.log：普通/大PNG、GIF/APNG、MP4跳转循环、WebM、WE Video已过；Native Web离屏矩形left=-2848/right=-1552、无任务栏/无激活/非最小化，但非黑画面超时，Scene尚未执行，整套失败；无ELECTRON_WALLPAPER_PASS，错误退出码问题一并修正喵~
 - 先前1.0.24离屏发行草案尚未推送，必须重写为移除不可靠WE场景与恢复稳定媒体路径；原生方案历史提交保留便于追踪，不作为最终功能喵~

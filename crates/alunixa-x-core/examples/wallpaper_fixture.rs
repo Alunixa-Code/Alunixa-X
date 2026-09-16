@@ -1,7 +1,5 @@
 //! Isolated development fixture: never reads default settings or starts Codex/WE.
-use alunixa_x_core::{
-    assets, bridge, relay_config, settings::BackendSettings, wallpaper, wallpaper_scene,
-};
+use alunixa_x_core::{assets, bridge, relay_config, settings::BackendSettings, wallpaper};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
@@ -12,12 +10,8 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     anyhow::ensure!(
         args.len() == 2,
-        "wallpaper_fixture <serve|repair|attach|scene-script|inspect-window> <explicit fixture path/title>"
+        "wallpaper_fixture <serve|repair|attach> <explicit fixture path>"
     );
-    if args[0] == "inspect-window" {
-        println!("{}", inspect_window(&args[1])?);
-        return Ok(());
-    }
     if args[0] == "repair" {
         println!(
             "REPAIRED={}",
@@ -25,33 +19,16 @@ async fn main() -> anyhow::Result<()> {
         );
         return Ok(());
     }
-    if args[0] == "scene-script" {
-        let input: Value = serde_json::from_slice(&std::fs::read(&args[1])?)?;
-        println!(
-            "{}",
-            wallpaper_scene::capture_script(
-                Path::new(input["engine"].as_str().unwrap()),
-                Path::new(input["project"].as_str().unwrap()),
-                input["title"].as_str().unwrap(),
-                true,
-            )
-        );
-        return Ok(());
-    }
     if args[0] == "attach" {
         // Explicit fixture settings only: no default home/config, no launcher,
-        // no real WE control. The Electron harness owns any native scene window.
+        // no Wallpaper Engine process, inspector or native capture.
         let input: Value = serde_json::from_slice(&std::fs::read(&args[1])?)?;
         let settings = BackendSettings {
             codex_app_image_overlay_enabled: true,
             codex_app_image_overlay_path: input["path"].as_str().unwrap().into(),
             codex_app_image_overlay_opacity: 100,
-            codex_app_wallpaper_engine_path: input["engine"].as_str().unwrap_or("").into(),
             ..Default::default()
         };
-        if let Some(port) = input["inspectorPort"].as_u64() {
-            wallpaper_scene::start(u16::try_from(port)?, &settings);
-        }
         let source = assets::renderer_script();
         let start = source
             .find("  function installAlunixaXImageOverlay()")
@@ -122,35 +99,4 @@ async fn main() -> anyhow::Result<()> {
             Ok::<(), anyhow::Error>(())
         });
     }
-}
-
-#[cfg(windows)]
-fn inspect_window(title: &str) -> anyhow::Result<Value> {
-    use windows::Win32::Foundation::RECT;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, GWL_EXSTYLE, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW,
-        GetWindowRect, IsIconic, SM_XVIRTUALSCREEN, WS_EX_APPWINDOW, WS_EX_NOACTIVATE,
-        WS_EX_TOOLWINDOW,
-    };
-    use windows::core::PCWSTR;
-    let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
-    unsafe {
-        let hwnd = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr()))?;
-        let mut rect = RECT::default();
-        GetWindowRect(hwnd, &mut rect)?;
-        let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
-        Ok(json!({
-            "left":rect.left,"top":rect.top,"right":rect.right,"bottom":rect.bottom,
-            "offscreen":rect.right <= GetSystemMetrics(SM_XVIRTUALSCREEN),
-            "noTaskbar":ex_style & WS_EX_APPWINDOW.0 == 0 && ex_style & WS_EX_TOOLWINDOW.0 != 0,
-            "noActivate":ex_style & WS_EX_NOACTIVATE.0 != 0,
-            "foreground":GetForegroundWindow() == hwnd,
-            "minimized":IsIconic(hwnd).as_bool()
-        }))
-    }
-}
-
-#[cfg(not(windows))]
-fn inspect_window(_title: &str) -> anyhow::Result<Value> {
-    anyhow::bail!("window inspection requires Windows")
 }

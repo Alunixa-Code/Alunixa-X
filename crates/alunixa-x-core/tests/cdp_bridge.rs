@@ -2365,16 +2365,11 @@ async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() 
 #[tokio::test]
 async fn production_renderer_entry_point_routes_wallpapers_before_generic_routes() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(
-        temp.path().join("project.json"),
-        r#"{"type":"scene","file":"scene.pkg"}"#,
-    )
-    .unwrap();
-    std::fs::write(temp.path().join("scene.pkg"), b"fixture").unwrap();
+    std::fs::write(temp.path().join("selected.mp4"), b"fixture").unwrap();
     for enabled in [false, true] {
         let settings = BackendSettings {
             codex_app_image_overlay_enabled: enabled,
-            codex_app_image_overlay_path: temp.path().to_string_lossy().into(),
+            codex_app_image_overlay_path: temp.path().join("selected.mp4").to_string_lossy().into(),
             ..Default::default()
         };
         let (url, finished) = spawn_cdp_server(move |mut socket| async move {
@@ -2383,7 +2378,15 @@ async fn production_renderer_entry_point_routes_wallpapers_before_generic_routes
                 assert_eq!(command["id"], expected_id);
                 send_json(&mut socket, json!({"id":expected_id,"result":{}})).await;
             }
-            for route in ["/wallpaper/scene", "/wallpaper/media", "/normal-route"] {
+            for route in [
+                "/wallpaper/scene",
+                if enabled {
+                    "/wallpaper/media?path=secret"
+                } else {
+                    "/wallpaper/media"
+                },
+                "/normal-route",
+            ] {
                 send_json(
                     &mut socket,
                     json!({
@@ -2403,10 +2406,6 @@ async fn production_renderer_entry_point_routes_wallpapers_before_generic_routes
                     assert!(expression.contains("generic-route-ok"), "{expression}");
                 } else if !enabled {
                     assert!(expression.contains("wallpaper disabled"), "{expression}");
-                } else if route == "/wallpaper/scene" {
-                    // The fixture never launches a real engine. Reaching its
-                    // scene-state response proves production dispatch ran.
-                    assert!(expression.contains("场景尚未启动"), "{expression}");
                 } else {
                     assert!(
                         expression.contains("unsupported wallpaper resource"),

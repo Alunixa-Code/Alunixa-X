@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, Upload, Film, Image, Layers, Pause, Play, Wrench } from "lucide-react";
+import { Upload, Film, Image, Pause, Play, Wrench } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { t } from "../i18n";
@@ -16,7 +16,7 @@ export type WallpaperValues = {
   codexAppWallpaperEnginePath: string;
 };
 
-type Source = { kind: "image" | "video" | "web" | "scene"; title: string; path: string; entry: string; root: string };
+type Source = { kind: "image" | "video"; title: string; path: string; entry: string; root: string; staticPreview?: boolean };
 
 export function WallpaperSettings({ value, onChange, onSave, onReset }: {
   value: WallpaperValues;
@@ -47,7 +47,7 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
           if (mounted.current && selection.current === revision) { setSource(result); setMessage(""); }
         })
         .catch(error => {
-          if (mounted.current && selection.current === revision) setMessage(String(error));
+          if (mounted.current && selection.current === revision) setMessage(t(String(error)));
         });
     }, 250);
     return () => clearTimeout(timer);
@@ -70,49 +70,39 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
     return () => { active = false; document.removeEventListener("visibilitychange", sync); element.pause(); };
   }, [source?.entry, value.codexAppWallpaperPaused]);
 
-  const choose = async (directory: boolean) => {
+  const choose = async () => {
     setBusy(true);
     setMessage("");
     const revision = ++selection.current;
     try {
       const path = await open({
-        directory, multiple: false,
-        title: directory ? t("选择 Wallpaper Engine 壁纸目录") : t("上传壁纸媒体"),
-        ...(directory ? {} : { filters: [{ name: t("图片与视频"), extensions: ["mp4", "webm", "m4v", "mov", "ogv", "gif", "png", "apng", "webp", "jpg", "jpeg", "bmp"] }] }),
+        directory: false, multiple: false,
+        title: t("上传壁纸媒体"),
+        filters: [{ name: t("图片与视频"), extensions: ["mp4", "webm", "m4v", "mov", "ogv", "gif", "png", "apng", "webp", "jpg", "jpeg", "bmp"] }],
       });
       if (typeof path !== "string") return;
-      const result = await invoke<Source>(directory ? "inspect_wallpaper" : "import_wallpaper_media", { path });
+      const result = await invoke<Source>("import_wallpaper_media", { path });
       if (!mounted.current || selection.current !== revision) return;
       setSource(result);
       onChange({ codexAppImageOverlayPath: result.path, codexAppImageOverlayEnabled: true, codexAppWallpaperPaused: false });
     } catch (error) {
-      if (mounted.current && selection.current === revision) setMessage(String(error));
+      if (mounted.current && selection.current === revision) setMessage(t(String(error)));
     } finally {
       if (mounted.current) setBusy(false);
     }
   };
 
-  const chooseEngine = async () => {
-    setBusy(true);
-    try {
-      const path = await open({ directory: false, multiple: false, title: t("选择 Wallpaper Engine 程序"),
-        filters: [{ name: "Wallpaper Engine", extensions: ["exe"] }] });
-      if (typeof path === "string" && mounted.current) onChange({ codexAppWallpaperEnginePath: path });
-    } catch (error) { if (mounted.current) setMessage(String(error)); }
-    finally { if (mounted.current) setBusy(false); }
-  };
   const action = async (run: () => Promise<unknown>) => {
     setBusy(true);
-    try { await run(); } catch (error) { if (mounted.current) setMessage(String(error)); }
+    try { await run(); } catch (error) { if (mounted.current) setMessage(t(String(error))); }
     finally { if (mounted.current) setBusy(false); }
   };
   const preview = source && (source.kind === "image" || source.kind === "video") ? convertFileSrc(source.entry) : "";
-  const nativeProject = source?.kind === "scene" || source?.kind === "web";
   const objectFit = ({ fill: "cover", fit: "contain", stretch: "fill", tile: "contain", center: "none" } as const)[value.codexAppImageOverlayFitMode];
 
   return <section className="wallpaper-settings" aria-label={t("动态壁纸")}>
     <div className="wallpaper-heading">
-      <div><h3>{t("动态壁纸")}</h3><p>{t("上传视频或动图，也可以选择 Wallpaper Engine 的单个项目目录。")}</p></div>
+      <div><h3>{t("动态壁纸")}</h3><p>{t("上传图片、动图或视频；不启动 Wallpaper Engine。")}</p></div>
       <label className="inline-toggle">
         <input type="checkbox" checked={value.codexAppImageOverlayEnabled} disabled={busy}
           onChange={e => onChange({ codexAppImageOverlayEnabled: e.currentTarget.checked })} />
@@ -127,22 +117,19 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
             onError={() => setPreviewFailed(true)} /> :
           <img src={preview} alt={source?.title || ""} style={{ objectFit }} onError={() => setPreviewFailed(true)} /> :
           <div className="wallpaper-placeholder">
-            {nativeProject ? <Layers /> : source?.kind === "video" ? <Film /> : <Image />}
+            {source?.kind === "video" ? <Film /> : <Image />}
             <strong>{source?.title || t("尚未选择壁纸")}</strong>
-            <span>{previewFailed ? t("预览失败，请检查文件或视频编码。") :
-              source?.kind === "scene" ? t("原生场景 · 由 Wallpaper Engine 渲染") :
-              source?.kind === "web" ? t("Web 场景 · 由 Wallpaper Engine 渲染") : "MP4 · WebM · GIF · PNG / APNG"}</span>
+            <span>{previewFailed ? t("预览失败，请检查文件或视频编码。") : "MP4 · WebM · GIF · PNG / APNG"}</span>
           </div>}
-        {source ? <span className="wallpaper-kind">{source.kind.toUpperCase()}</span> : null}
+        {source ? <span className="wallpaper-kind">{source.staticPreview ? t("静态预览") : source.kind.toUpperCase()}</span> : null}
       </div>
       <div className="wallpaper-controls">
         <div className="toolbar">
-          <Button disabled={busy} onClick={() => void choose(false)}><Upload className="h-4 w-4" />{t("上传壁纸媒体")}</Button>
-          <Button disabled={busy} variant="secondary" onClick={() => void choose(true)}><FolderOpen className="h-4 w-4" />{t("选择项目目录")}</Button>
+          <Button disabled={busy} onClick={() => void choose()}><Upload className="h-4 w-4" />{t("上传壁纸媒体")}</Button>
         </div>
-        <label className="wallpaper-field"><span>{t("壁纸文件或项目路径")}</span>
+        <label className="wallpaper-field"><span>{t("壁纸文件路径")}</span>
           <Input value={value.codexAppImageOverlayPath} disabled={busy}
-            onChange={e => onChange({ codexAppImageOverlayPath: e.currentTarget.value })} placeholder="MP4 / WebM / GIF / PNG / project.json" />
+            onChange={e => onChange({ codexAppImageOverlayPath: e.currentTarget.value })} placeholder="PNG / JPG / GIF / APNG / MP4 / WebM" />
         </label>
         <div className="wallpaper-options">
           <label className="wallpaper-field"><span>{t("透明度")} {value.codexAppImageOverlayOpacity}%</span>
@@ -162,7 +149,7 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
           <label className="inline-toggle"><input type="checkbox" checked={value.codexAppWallpaperMuted}
             onChange={e => onChange({ codexAppWallpaperMuted: e.currentTarget.checked })} /><span>{t("静音播放")}</span>
             <span aria-hidden="true" className="toggle-switch-visual"><span className="toggle-switch-thumb" /></span></label>
-          <Button variant="secondary" disabled={!source || !["video", "scene", "web"].includes(source.kind)}
+          <Button variant="secondary" disabled={source?.kind !== "video"}
             onClick={() => onChange({ codexAppWallpaperPaused: !value.codexAppWallpaperPaused })}>
             {value.codexAppWallpaperPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
             {value.codexAppWallpaperPaused ? t("继续播放") : t("暂停视频")}
@@ -170,15 +157,8 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         </div>
       </div>
     </div>
-    {nativeProject ? <div className="wallpaper-engine">
-      <p>{t("Scene / Web 项目需要 Windows 和已安装的 Wallpaper Engine；仅捕获独立渲染窗口，不修改桌面壁纸。")}</p>
-      <div className="toolbar">
-        <Input aria-label={t("Wallpaper Engine 程序路径")} placeholder={t("自动从 Steam 壁纸目录查找，也可手动选择")}
-          value={value.codexAppWallpaperEnginePath} onChange={e => onChange({ codexAppWallpaperEnginePath: e.currentTarget.value })} />
-        <Button variant="secondary" disabled={busy} onClick={() => void chooseEngine()}>{t("选择程序")}</Button>
-      </div>
-    </div> : null}
-    {source?.kind === "web" ? <p className="wallpaper-note">{t("Web 项目在 Wallpaper Engine 中运行，Codex 只接收窗口画面；网络和宿主功能由 Wallpaper Engine 管理。")}</p> : null}
+    <p className="wallpaper-note">{t("Wallpaper Engine 场景支持已移除，不会再启动引擎窗口。")}</p>
+    {source?.staticPreview ? <p className="wallpaper-note" role="status">{t("旧场景只显示预览图片，不运行场景；可上传新图片替换。")}</p> : null}
     <p className="wallpaper-note">{t("视频不超过 2 GiB；优先使用 MP4（H.264）或 WebM。PNG 保持原图，APNG、GIF、动画 WebP 保留动画。")}</p>
     <p className="wallpaper-note">{t("保存后，下次通过 Alunixa X 启动 Codex 时生效；预览始终静音。")}</p>
     {message ? <p className="wallpaper-message" role="status">{message}</p> : null}

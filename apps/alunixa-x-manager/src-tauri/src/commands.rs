@@ -1309,21 +1309,11 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
     };
     let wallpaper_changed = settings.codex_app_image_overlay_enabled
         != previous.codex_app_image_overlay_enabled
-        || settings.codex_app_image_overlay_path != previous.codex_app_image_overlay_path
-        || settings.codex_app_wallpaper_engine_path != previous.codex_app_wallpaper_engine_path;
+        || settings.codex_app_image_overlay_path != previous.codex_app_image_overlay_path;
     if wallpaper_changed && settings.codex_app_image_overlay_enabled {
         let validation = alunixa_x_core::wallpaper::resolve(Path::new(
             settings.codex_app_image_overlay_path.trim(),
-        ))
-        .and_then(|source| {
-            if source.kind == "scene" {
-                alunixa_x_core::wallpaper_scene::engine_path(
-                    &source.path,
-                    &settings.codex_app_wallpaper_engine_path,
-                )?;
-            }
-            Ok(())
-        });
+        ));
         if let Err(error) = validation {
             return failed(
                 &format!("壁纸配置无效，未保存：{error}"),

@@ -123,40 +123,20 @@ def verify_runtime(browser, url, video_url, gif):
     print("RENDERER: real WebM decode/time advance/pause/reuse/input/GIF motion/cleanup PASS")
 
 
-def verify_web(browser, url, root):
-    project = root / "web"
+def verify_legacy_preview(browser, root):
+    project = root / "legacy-web"
     project.mkdir()
-    (project / "project.json").write_text('{"type":"web","file":"index.html"}', encoding="utf-8")
-    (project / "index.html").write_text(
-        '<body><div id="motion"></div><script src="main.js"></script></body>', encoding="utf-8")
-    (project / "data.json").write_text('{"local":true}', encoding="utf-8")
-    (project / "main.js").write_text("""
-      (async()=>{
-        const result={violations:[]};
-        addEventListener('securitypolicyviolation',e=>result.violations.push(e.blockedURI));
-        result.local=(await (await fetch('./data.json')).json()).local;
-        try{ void parent.document; result.parentBlocked=false; }catch{result.parentBlocked=true;}
-        try{await fetch('/backend/status');result.apiBlocked=false;}catch{result.apiBlocked=true;}
-        const img=new Image();img.src='/backend/status?image-probe=1';document.body.append(img);
-        await new Promise(r=>setTimeout(r,100));
-        document.body.dataset.result=JSON.stringify(result);
-      })();
-    """, encoding="utf-8")
+    (project / "project.json").write_text('{"type":"web","file":"index.html","preview":"preview.png"}', encoding="utf-8")
+    (project / "index.html").write_text("<script>throw new Error('must not execute')</script>", encoding="utf-8")
+    Image.new("RGB", (64, 64), "#4269b5").save(project / "preview.png")
     with media_server(project) as media:
         page = browser.new_page()
-        page.goto(url, wait_until="networkidle")
-        page.set_content('<main><iframe sandbox="allow-scripts" title="test wallpaper"></iframe></main>')
-        finished = []
-        page.on("requestfinished", lambda request: finished.append(request.url))
-        page.locator("iframe").evaluate("(f,url)=>f.src=url", media + "/wallpaper/web/index.html")
-        frame = page.frame_locator("iframe")
-        expect(frame.locator("body")).to_have_attribute("data-result", re.compile(".+"))
-        result = json.loads(frame.locator("body").get_attribute("data-result"))
-        assert result["local"] and result["parentBlocked"] and result["apiBlocked"], result
-        assert any("/backend/status" in value for value in result["violations"]), result
-        assert not any("/backend/status" in value for value in finished), finished
+        response = page.request.get(media + "/wallpaper/media")
+        assert response.ok and response.body() == (project / "preview.png").read_bytes()
+        for route in ["/wallpaper/scene", "/wallpaper/web/index.html", "/wallpaper/web/../project.json"]:
+            assert page.request.get(media + route).status == 404
         page.close()
-    print("WEB: actual Chromium local script/JSON loading, parent isolation, fetch/image Helper blocking PASS")
+    print("LEGACY: preview bytes only; retired scene and script routes return 404 PASS")
 
 
 def verify_manager(browser, url, video_url, output):
@@ -187,7 +167,7 @@ def verify_manager(browser, url, video_url, output):
                 raise RuntimeError("fixture import failed; previous wallpaper retained")
             path = args["path"]
             if "scene" in path:
-                return dict(kind="scene", title="Native scene fixture", path="/fixture/scene/project.json", entry="/fixture/scene/scene.pkg", root="/fixture/scene")
+                return dict(kind="image", title="Legacy scene preview", path="/fixture/scene/project.json", entry="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", root="/fixture/scene", staticPreview=True)
             return dict(kind="video", title="Live wallpaper demo", path="/fixture/clip.webm", entry=video_url, root="/fixture")
         raise AssertionError(command)
 
@@ -241,11 +221,12 @@ def verify_manager(browser, url, video_url, output):
     expect(page.locator("html")).to_have_class(re.compile(r"\blight\b"))
     page.wait_for_timeout(250)
     page.screenshot(path=str(output / "wallpaper-ui-light.png"), full_page=True)
-    selected.append("/fixture/scene")
-    region.get_by_role("button", name="选择项目目录").click()
-    expect(region.get_by_label("Wallpaper Engine 程序路径")).to_be_visible()
-    expect(region.get_by_text("原生场景 · 由 Wallpaper Engine 渲染", exact=True)).to_be_visible()
-    assert region.locator("img").count() == 0, "native scene must not masquerade as a preview image"
+    assert region.get_by_role("button", name="选择项目目录").count() == 0
+    assert region.get_by_label("Wallpaper Engine 程序路径").count() == 0
+    region.get_by_label("壁纸文件路径", exact=True).fill("/fixture/scene/project.json")
+    expect(region.get_by_text("静态预览", exact=True)).to_be_visible()
+    expect(region.get_by_text("旧场景只显示预览图片，不运行场景；可上传新图片替换。", exact=True)).to_be_visible()
+    assert region.locator("video,iframe").count() == 0
     page.set_viewport_size({"width": 1000, "height": 900})
     assert region.evaluate("(e)=>e.scrollWidth<=e.clientWidth+1")
     region.get_by_role("button", name="重置背景").click()
@@ -254,7 +235,7 @@ def verify_manager(browser, url, video_url, output):
     assert not errors, errors
     assert not page.evaluate("window.__unsupportedCommands"), page.evaluate("window.__unsupportedCommands")
     page.close()
-    print("MANAGER: import/preview/pause/save/cancel/failure/scene directory/reset/themes/layout PASS")
+    print("MANAGER: import/preview/pause/save/cancel/failure/explicit legacy preview/no engine UI/reset/themes/layout PASS")
 
 
 def main():
@@ -286,10 +267,10 @@ def main():
                 with media_server(clip) as media:
                     verify_runtime(browser, url, media + "/wallpaper/media", gif)
                     verify_manager(browser, url, media + "/wallpaper/media", output)
-                verify_web(browser, url, root)
+                verify_legacy_preview(browser, root)
             finally:
                 browser.close()
-    print("WALLPAPER_VERIFICATION=PASS (native Wallpaper Engine rendering not exercised)")
+    print("WALLPAPER_VERIFICATION=PASS (media and legacy previews; native engine removed)")
 
 
 if __name__ == "__main__":

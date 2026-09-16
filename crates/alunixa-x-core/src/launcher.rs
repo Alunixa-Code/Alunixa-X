@@ -1038,9 +1038,8 @@ impl LaunchHooks for DefaultLaunchHooks {
             );
         }
         let native_menu_localization_enabled = settings.codex_app_native_menu_localization;
-        let native_menu_inspector_port = (native_menu_localization_enabled
-            || crate::wallpaper_scene::enabled(settings))
-        .then(|| select_native_menu_inspector_port(debug_port));
+        let native_menu_inspector_port =
+            native_menu_localization_enabled.then(|| select_native_menu_inspector_port(debug_port));
         let launch_extra_args = codex_extra_args_for_launch(settings, extra_args);
         if cfg!(windows) {
             let activation = if let Some(inspector_port) = native_menu_inspector_port {
@@ -1068,7 +1067,6 @@ impl LaunchHooks for DefaultLaunchHooks {
                     if native_menu_localization_enabled {
                         start_native_menu_localizer(inspector_port);
                     }
-                    crate::wallpaper_scene::start(inspector_port, settings);
                 }
                 return Ok(match activation {
                     CodexLaunch::PackagedActivation {
@@ -1120,7 +1118,6 @@ impl LaunchHooks for DefaultLaunchHooks {
                 if native_menu_localization_enabled {
                     start_native_menu_localizer(inspector_port);
                 }
-                crate::wallpaper_scene::start(inspector_port, settings);
             }
             return Ok(CodexLaunch::Process {
                 command,
@@ -1161,7 +1158,6 @@ impl LaunchHooks for DefaultLaunchHooks {
             if native_menu_localization_enabled {
                 start_native_menu_localizer(inspector_port);
             }
-            crate::wallpaper_scene::start(inspector_port, settings);
         }
         Ok(CodexLaunch::Process {
             command,

@@ -58,7 +58,6 @@ pub mod user_scripts;
 pub mod version;
 pub mod vision;
 pub mod wallpaper;
-pub mod wallpaper_scene;
 pub mod watcher;
 #[cfg(windows)]
 mod windows_integration;

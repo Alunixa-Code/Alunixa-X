@@ -1,4 +1,4 @@
-//! User-selected local media and Wallpaper Engine projects. No arbitrary file route.
+//! Local media and read-only compatibility for legacy wallpaper project settings.
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -17,6 +17,7 @@ pub struct WallpaperSource {
     pub path: PathBuf,
     pub entry: PathBuf,
     pub root: PathBuf,
+    pub static_preview: bool,
 }
 
 pub fn media_type(path: &Path) -> Option<(&'static str, &'static str)> {
@@ -64,6 +65,7 @@ pub fn resolve(path: &Path) -> anyhow::Result<WallpaperSource> {
             path: entry.clone(),
             root: entry.parent().context("壁纸路径无效")?.into(),
             entry,
+            static_preview: false,
         });
     }
     if selected.file_name().and_then(|v| v.to_str()) != Some("project.json") {
@@ -75,27 +77,40 @@ pub fn resolve(path: &Path) -> anyhow::Result<WallpaperSource> {
     let value: Value =
         serde_json::from_slice(&std::fs::read(&project)?).context("project.json 格式无效")?;
     let kind = value["type"].as_str().unwrap_or("").to_ascii_lowercase();
+    if matches!(kind.as_str(), "scene" | "web") {
+        // Retired native projects are images only. Never launch an engine,
+        // execute their scripts, or use a preview as proof of scene playback.
+        let preview = value["preview"].as_str().map(str::to_owned).or_else(|| {
+            ["preview.jpg", "preview.png", "preview.jpeg", "preview.webp"]
+                .into_iter()
+                .find(|name| root.join(name).is_file())
+                .map(str::to_owned)
+        });
+        let missing = "Wallpaper Engine 场景支持已移除且没有可用预览图，请上传图片或视频";
+        let preview = preview.context(missing)?;
+        let entry = contained_file(&root, &preview).context(missing)?;
+        anyhow::ensure!(
+            media_type(&entry).is_some_and(|(kind, _)| kind == "image"),
+            "{missing}"
+        );
+        return Ok(WallpaperSource {
+            kind: "image".into(),
+            title: value["title"]
+                .as_str()
+                .unwrap_or("Wallpaper preview")
+                .chars()
+                .take(160)
+                .collect(),
+            path: project,
+            root,
+            entry,
+            static_preview: true,
+        });
+    }
     let file = value["file"].as_str().context("project.json 缺少 file")?;
-    // Workshop scenes keep "file": "scene.json" in project.json even when the
-    // entry is inside scene.pkg. Let the native engine read its own archive.
-    let entry = if kind == "scene"
-        && file.eq_ignore_ascii_case("scene.json")
-        && !root.join(file).exists()
-    {
-        contained_file(&root, "scene.pkg")?
-    } else {
-        contained_file(&root, file)?
-    };
+    let entry = contained_file(&root, file)?;
     let actual_kind = match kind.as_str() {
         "video" if media_type(&entry).is_some_and(|(kind, _)| kind == "video") => "video",
-        "web"
-            if entry.extension().and_then(|s| s.to_str()).is_some_and(|s| {
-                s.eq_ignore_ascii_case("html") || s.eq_ignore_ascii_case("htm")
-            }) =>
-        {
-            "web"
-        }
-        "scene" => "scene",
         _ => bail!("不支持此 Wallpaper Engine 项目类型或入口文件；不执行 Application 类型壁纸"),
     };
     Ok(WallpaperSource {
@@ -109,6 +124,7 @@ pub fn resolve(path: &Path) -> anyhow::Result<WallpaperSource> {
         path: project,
         entry,
         root,
+        static_preview: false,
     })
 }
 
@@ -178,37 +194,12 @@ pub fn runtime_config(helper_port: u16, settings: &crate::settings::BackendSetti
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|t| t.as_nanos())
                     .unwrap_or(0);
-                let relative = source
-                    .entry
-                    .strip_prefix(&source.root)
-                    .unwrap_or(Path::new(""));
-                let web_path = relative
-                    .components()
-                    .map(|s| {
-                        url::form_urlencoded::byte_serialize(
-                            s.as_os_str().to_string_lossy().as_bytes(),
-                        )
-                        .collect::<String>()
-                        .replace('+', "%20")
-                    })
-                    .collect::<Vec<_>>()
-                    .join("/");
                 config["enabled"] = json!(true);
-                // Web projects also need the native host: custom-scheme CSP
-                // cannot reliably serve their scripts after the page has loaded.
-                // WE itself provides its complete Web APIs in an owned window.
-                config["kind"] = json!(if source.kind == "web" {
-                    "scene"
-                } else {
-                    &source.kind
-                });
-                config["sourceUrl"] = json!(if source.kind == "web" {
-                    format!("http://127.0.0.1:{helper_port}/wallpaper/web/{web_path}?v={version}")
-                } else {
-                    format!("http://127.0.0.1:{helper_port}/wallpaper/media?v={version}")
-                });
-                config["sceneUrl"] =
-                    json!(format!("http://127.0.0.1:{helper_port}/wallpaper/scene"));
+                config["kind"] = json!(source.kind);
+                config["staticPreview"] = json!(source.static_preview);
+                config["sourceUrl"] = json!(format!(
+                    "http://127.0.0.1:{helper_port}/wallpaper/media?v={version}"
+                ));
             }
             Err(_) => {
                 config["error"] = json!("壁纸文件或项目入口不可用，请在 Alunixa X 中重新选择")
@@ -219,7 +210,7 @@ pub fn runtime_config(helper_port: u16, settings: &crate::settings::BackendSetti
 }
 
 /// Routes have no renderer-supplied file/path/URL parameters. Only the selected
-/// media or the exact owned native scene may be requested.
+/// media may be requested. Retired native/window/script routes stay unavailable.
 pub async fn handle_bridge_request(
     route: &str,
     websocket_url: &str,
@@ -234,9 +225,6 @@ pub async fn handle_bridge_request(
         "/wallpaper/media" if matches!(source.kind.as_str(), "image" | "video") => {
             let url = crate::bridge::local_file_blob_url(websocket_url, &source.entry).await?;
             Ok(json!({"status":"ok","sourceUrl":url}))
-        }
-        "/wallpaper/scene" if matches!(source.kind.as_str(), "scene" | "web") => {
-            Ok(crate::wallpaper_scene::state(&source.path))
         }
         _ => bail!("unsupported wallpaper resource"),
     }
@@ -300,54 +288,12 @@ pub async fn serve(
     let Ok(source) = result else {
         return error_response(stream, "404 Not Found", "").await;
     };
-    if path == "/wallpaper/scene" {
-        let state = crate::wallpaper_scene::state(&source.path);
-        let bytes = serde_json::to_vec(&state)?;
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
-            bytes.len()
-        );
-        stream.write_all(head.as_bytes()).await?;
-        if method != "HEAD" {
-            stream.write_all(&bytes).await?;
-        }
-        return Ok(());
-    }
     let file = if path == "/wallpaper/media" && matches!(source.kind.as_str(), "image" | "video") {
         source.entry.clone()
-    } else if source.kind == "web" && path.starts_with("/wallpaper/web/") {
-        let encoded = path.trim_start_matches("/wallpaper/web/");
-        let relative = match url::form_urlencoded::parse(
-            format!("p={}", encoded.replace('+', "%2B").replace('&', "%26")).as_bytes(),
-        )
-        .next()
-        {
-            Some((_, value)) => value.into_owned(),
-            None => return error_response(stream, "404 Not Found", "").await,
-        };
-        match contained_file(&source.root, &relative) {
-            Ok(file) => file,
-            Err(_) => return error_response(stream, "404 Not Found", "").await,
-        }
     } else {
         return error_response(stream, "404 Not Found", "").await;
     };
-    let mime = media_type(&file).map(|(_, mime)| mime).or_else(|| {
-        match file.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-            "html" | "htm" => Some("text/html; charset=utf-8"),
-            "js" | "mjs" => Some("text/javascript; charset=utf-8"),
-            "css" => Some("text/css; charset=utf-8"),
-            "json" => Some("application/json"),
-            "woff2" => Some("font/woff2"),
-            "woff" => Some("font/woff"),
-            "ttf" => Some("font/ttf"),
-            "svg" => Some("image/svg+xml"),
-            "mp3" => Some("audio/mpeg"),
-            "ogg" => Some("audio/ogg"),
-            "wav" => Some("audio/wav"),
-            _ => None,
-        }
-    });
+    let mime = media_type(&file).map(|(_, mime)| mime);
     let Some(mime) = mime else {
         return error_response(stream, "404 Not Found", "").await;
     };
@@ -364,16 +310,7 @@ pub async fn serve(
             .await;
         }
     };
-    // An opaque-origin sandbox alone is not enough: 'self' also allows resource
-    // GETs against unrelated Helper routes. Limit all network sources to the
-    // selected project's read-only route, including local JSON/shader fetches.
-    let resources = format!(
-        "http://127.0.0.1:{}/wallpaper/web/",
-        stream.local_addr()?.port()
-    );
-    let security = format!(
-        "Content-Security-Policy: default-src 'none'; script-src {resources} 'unsafe-inline'; style-src {resources} 'unsafe-inline'; img-src {resources} data: blob:; media-src {resources} data: blob:; font-src {resources} data:; connect-src {resources}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts\r\n"
-    );
+    let security = "Content-Security-Policy: default-src 'none'\r\n";
     let head = format!(
         "HTTP/1.1 {}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{security}Connection: close\r\n\r\n",
         if partial {
@@ -435,7 +372,7 @@ mod tests {
             ("video", "video.mp4", true),
             ("video", "../secret.mp4", false),
             ("application", "video.mp4", false),
-            ("scene", "video.mp4", true),
+            ("scene", "video.mp4", false),
         ] {
             std::fs::write(
                 root.join("project.json"),

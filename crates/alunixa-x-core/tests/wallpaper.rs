@@ -117,66 +117,102 @@ async fn media_bridge_rejects_disabled_or_wrong_kind_without_connecting_to_cdp()
 }
 
 #[tokio::test]
-async fn web_projects_are_sandboxed_and_cannot_read_outside_resources() {
+async fn retired_projects_only_serve_preview_images_never_scripts_or_window_ids() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path().join("web");
+    let root = tmp.path().join("legacy");
     std::fs::create_dir(&root).unwrap();
-    std::fs::write(root.join("index.html"), b"<html>fixture</html>").unwrap();
-    std::fs::write(
-        root.join("project.json"),
-        br#"{"type":"web","file":"index.html"}"#,
-    )
-    .unwrap();
-    std::fs::write(tmp.path().join("secret.json"), b"DO-NOT-SERVE").unwrap();
-    let settings = BackendSettings {
-        codex_app_image_overlay_enabled: true,
-        codex_app_image_overlay_path: root.to_string_lossy().into(),
-        ..Default::default()
-    };
-    let html = String::from_utf8(
-        request(settings.clone(), "GET", "/wallpaper/web/index.html", None).await,
-    )
-    .unwrap();
-    assert!(html.contains("sandbox allow-scripts"));
-    assert!(html.contains("connect-src http://127.0.0.1:"));
-    assert!(html.contains("/wallpaper/web/; frame-src 'none'"));
-    assert!(!html.contains("'self'"));
-    assert!(!html.contains("allow-same-origin"));
-    for path in [
-        "/wallpaper/web/../secret.json",
-        "/wallpaper/web/%2e%2e/secret.json",
-        "/wallpaper/web/%2e%2e%5csecret.json",
-        "/wallpaper/media",
-    ] {
-        let response = request(settings.clone(), "GET", path, None).await;
-        assert!(response.starts_with(b"HTTP/1.1 404"));
-        assert!(!String::from_utf8_lossy(&response).contains("DO-NOT-SERVE"));
+    std::fs::write(root.join("preview.jpg"), b"preview image bytes").unwrap();
+    std::fs::write(root.join("index.html"), b"DO-NOT-EXECUTE").unwrap();
+    std::fs::write(tmp.path().join("secret.jpg"), b"DO-NOT-SERVE").unwrap();
+    for kind in ["Scene", "Web"] {
+        std::fs::write(
+            root.join("project.json"),
+            serde_json::to_vec(&json!({
+                "type":kind,"file":"index.html","preview":"preview.jpg"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let resolved = wallpaper::resolve(&root).unwrap();
+        assert_eq!(resolved.kind, "image");
+        assert!(resolved.static_preview);
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: true,
+            codex_app_image_overlay_path: root.to_string_lossy().into(),
+            ..Default::default()
+        };
+        let config = assets::image_overlay_config(1234, &settings);
+        assert_eq!(config["kind"], "image");
+        assert_eq!(config["staticPreview"], true);
+        assert!(config.get("sceneUrl").is_none());
+        let response = request(settings.clone(), "GET", "/wallpaper/media", None).await;
+        assert!(response.starts_with(b"HTTP/1.1 200"));
+        assert!(response.ends_with(b"preview image bytes"));
+        for path in [
+            "/wallpaper/scene",
+            "/wallpaper/web/index.html",
+            "/wallpaper/web/../secret.jpg",
+            "/wallpaper/web/%2e%2e/secret.jpg",
+        ] {
+            let response = request(settings.clone(), "GET", path, None).await;
+            assert!(response.starts_with(b"HTTP/1.1 404"));
+            assert!(!String::from_utf8_lossy(&response).contains("DO-NOT-"));
+        }
     }
 }
 
 #[test]
-fn workshop_packaged_scenes_do_not_require_an_unpacked_scene_json() {
+fn legacy_scene_preview_is_read_only_and_rejects_escape_or_non_images() {
     let tmp = tempfile::tempdir().unwrap();
-    let root = tmp.path();
-    std::fs::write(root.join("scene.pkg"), b"opaque native engine archive").unwrap();
-    std::fs::write(
-        root.join("project.json"),
-        br#"{"type":"scene","file":"scene.json","title":"Packaged scene"}"#,
-    )
-    .unwrap();
-    let source = wallpaper::resolve(root).unwrap();
-    assert_eq!(source.kind, "scene");
-    assert_eq!(source.entry.file_name().unwrap(), "scene.pkg");
-    assert_eq!(source.path.file_name().unwrap(), "project.json");
-    // A package must never hide an unsafe or arbitrary project entry.
-    for entry in ["../scene.json", r"..\scene.json", "absent.json"] {
+    let root = tmp.path().join("scene");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("preview.png"), b"preview").unwrap();
+    std::fs::write(root.join("index.html"), b"script").unwrap();
+    std::fs::write(tmp.path().join("secret.png"), b"outside").unwrap();
+    let project = root.join("project.json");
+    let bytes = br#"{"type":"scene","file":"scene.json"}"#;
+    std::fs::write(&project, bytes).unwrap();
+    let source = wallpaper::resolve(&root).unwrap();
+    assert!(source.static_preview);
+    assert_eq!(source.entry.file_name().unwrap(), "preview.png");
+    assert_eq!(std::fs::read(&project).unwrap(), bytes);
+    // No scene.pkg/scene.json is opened or needed for the static fallback.
+    for preview in [
+        "../secret.png",
+        r"..\secret.png",
+        "index.html",
+        "missing.png",
+    ] {
         std::fs::write(
-            root.join("project.json"),
-            serde_json::to_vec(&json!({"type":"scene","file":entry})).unwrap(),
+            &project,
+            serde_json::to_vec(&json!({"type":"scene","preview":preview})).unwrap(),
         )
         .unwrap();
-        assert!(wallpaper::resolve(root).is_err());
+        assert!(wallpaper::resolve(&root).is_err(), "{preview}");
     }
+}
+
+#[test]
+fn legacy_scene_without_preview_is_disabled_with_actionable_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("project.json"),
+        br#"{"type":"scene","file":"scene.pkg"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("scene.pkg"),
+        b"native archive must not be opened",
+    )
+    .unwrap();
+    let error = wallpaper::resolve(tmp.path()).unwrap_err().to_string();
+    assert!(error.contains("上传图片或视频"));
+    let settings = BackendSettings {
+        codex_app_image_overlay_enabled: true,
+        codex_app_image_overlay_path: tmp.path().to_string_lossy().into(),
+        ..Default::default()
+    };
+    assert_eq!(assets::image_overlay_config(1, &settings)["enabled"], false);
 }
 
 #[test]
