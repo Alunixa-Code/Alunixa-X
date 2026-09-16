@@ -164,6 +164,9 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- **方案更正（优先于上面同源初稿记录）**：独立 Electron probe 已证明晚启用 Fetch 对既有 app:// 页面及新 iframe 均不接管，只有整页导航后才有效；返回的404来自原 app handler，不是媒体解码错误，不能靠重启/刷新用户窗口解决喵~
+- 已撤回未发行 Fetch/CDP大包初稿，改为 CDP DOM.setFileInputFiles 将仅用户选中的媒体交给 Chromium 的磁盘后备 File→Blob URL，桥接只返回 blob URL，支持原生流式/Seek且无需全视频复制；Scene 状态改走既有桥接，WE Web 同样交由原生自有窗口提供完整宿主API，Windows外明确不支持原生项目喵~
+- 下一步以最新 Blob 链路重新跑严格 CSP Electron 全媒体和实际 WE Scene/Web 验证，补原生File/禁用访问测试后冻结并发布；之前CDP分块/背压测试仅证明旧草案，不再作为产品实现证据喵~
 - Electron WebContents.debugger 的额外 Network 诊断与远程调试同时启用时验证停滞，改用页面 console/同源 fetch 与 fixture 连接断开原因，不改变产品路由；仍以真解码和实际画面为门禁喵~
 - 前端全量107/107、TypeScript/i18n/品牌检查通过；追加真实 WebSocket 的安装阶段 fetch 与650ms背压+9MiB响应+后续bridge调用回归，防止再次因连接探测取消资源传输喵~
 - 大图取消修复后请求不再永久挂起，但实际 PNG 仍触发加载失败；新增隔离页面 Network/fixture 诊断定位真实响应，不将当前状态写成通过，后续用例仍未执行喵~

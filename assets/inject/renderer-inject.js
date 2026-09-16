@@ -648,6 +648,7 @@
     let notice = null;
     let image = null;
     let ready = false;
+    let blobUrl = null;
     const abort = new AbortController();
     const timers = new Set();
     const reportReady = () => {
@@ -668,6 +669,15 @@
       notice.onclick = () => notice.remove();
       root.appendChild(notice);
     };
+    const loadMediaSource = async () => {
+      if (config.dataUrl || typeof window.__codexSessionDeleteBridge !== "function") return source;
+      const result = await window.__codexSessionDeleteBridge("/wallpaper/media", {});
+      if (result?.status !== "ok" || !String(result.sourceUrl || "").startsWith("blob:"))
+        throw new Error(result?.message || "壁纸文件无法读取，请重新选择");
+      if (stopped) { URL.revokeObjectURL(result.sourceUrl); return ""; }
+      blobUrl = result.sourceUrl;
+      return blobUrl;
+    };
     const syncPlayback = () => {
       if (!video || stopped) return;
       if (document.hidden || config.paused) video.pause();
@@ -683,6 +693,7 @@
       document.removeEventListener("visibilitychange", syncPlayback);
       window.removeEventListener("pagehide", cleanup);
       if (image) { image.onload = image.onerror = null; image.src = ""; }
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
       if (video) {
         video.pause();
         video.srcObject = null;
@@ -714,16 +725,23 @@
       overlay.appendChild(video);
       document.addEventListener("visibilitychange", syncPlayback);
       if (config.kind === "video") {
-        video.src = source;
-        syncPlayback();
+        void loadMediaSource().then(url => {
+          if (stopped) return;
+          video.src = url;
+          syncPlayback();
+        }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
       } else {
         const connectScene = async () => {
           try {
             let state;
             for (let attempt = 0; attempt < 80 && !stopped; attempt++) {
-              const response = await fetch(config.sceneUrl, { signal: abort.signal });
-              if (!response.ok) throw new Error("场景接口未就绪");
-              state = await response.json();
+              if (typeof window.__codexSessionDeleteBridge === "function") {
+                state = await window.__codexSessionDeleteBridge("/wallpaper/scene", {});
+              } else {
+                const response = await fetch(config.sceneUrl, { signal: abort.signal });
+                if (!response.ok) throw new Error("场景接口未就绪");
+                state = await response.json();
+              }
               if (state.status !== "waiting") break;
               await new Promise(resolve => {
                 const done = () => {
@@ -768,14 +786,17 @@
       Object.assign(frame.style, { width:"100%", height:"100%", border:"0", pointerEvents:"none" });
       overlay.appendChild(frame);
     } else {
-      Object.assign(overlay.style, {
-        backgroundImage: `url("${source.replace(/"/g, "%22")}")`,
-        backgroundSize: fitStyles.size, backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
-      });
       image = new Image();
       image.onload = reportReady;
       image.onerror = () => reportFailure("壁纸图片无法加载，请重新选择有效的图片");
-      image.src = source;
+      void loadMediaSource().then(url => {
+        if (stopped) return;
+        Object.assign(overlay.style, {
+          backgroundImage: `url("${url.replace(/"/g, "%22")}")`,
+          backgroundSize: fitStyles.size, backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
+        });
+        image.src = url;
+      }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
     }
     sendAlunixaXDiagnostic("image_overlay_installed", { opacity, fitMode, kind:config.kind || "image" });
   }

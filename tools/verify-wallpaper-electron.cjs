@@ -1,4 +1,4 @@
-// Actual Electron + product Rust CDP bridge, with host-equivalent strict CSP.
+// Actual Electron + product Rust File/Blob bridge, with host-equivalent strict CSP.
 // Run with a standalone Electron binary, never the user's running Codex:
 // electron tools/verify-wallpaper-electron.cjs --fixture <exe> --output <dir>
 // Optional --scene <project.json> --engine <wallpaper64.exe> uses one owned
@@ -71,13 +71,7 @@ a.save(p/"animated.apng",save_all=True,append_images=[b],duration=180,loop=0)
   fs.writeFileSync(path.join(web, "project.json"), JSON.stringify({ type: "web", file: "index.html" }));
   fs.writeFileSync(path.join(web, "data.json"), '{"local":true}');
   fs.writeFileSync(path.join(web, "script.js"), `
-    (async()=>{
-      let parentBlocked=false, helperBlocked=false;
-      try { parent.document.body; } catch { parentBlocked=true; }
-      try { await fetch("app://-/_alunixa-x-wallpaper/scene"); } catch { helperBlocked=true; }
-      const data=await fetch("./data.json").then(r=>r.json());
-      parent.postMessage({fixtureWeb:true,parentBlocked,helperBlocked,local:data.local},"*");
-    })();
+    let f=0;setInterval(()=>{document.body.style.background=f++%2?'#216e85':'#dc714c'},180);
   `);
   fs.writeFileSync(path.join(web, "index.html"), '<body style="background:#216e85"><script src="./script.js"></script></body>');
   const weVideo = path.join(work, "project.json");
@@ -169,6 +163,8 @@ async function verifyVideo(name, source, extra = {}) {
       return ctx.evaluate(`document.querySelector("video")?.currentTime>.25 && document.querySelector("video")?.videoWidth>0`);
     }, name + " playback", 45000);
     assert.deepEqual(await ctx.evaluate(`window.__codexSessionDeleteBridge("fixture",{})`), { status: "ok" });
+    assert.equal(await ctx.evaluate(`document.querySelectorAll("[data-alunixa-x-media-transfer]").length`), 0);
+    if (!name.startsWith("native")) assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
     if (name === "large MP4") {
       await ctx.evaluate(`document.querySelector("video").currentTime=2.5`);
       await until(() => ctx.evaluate(`document.querySelector("video").currentTime>2.6`), "seek across chunks");
@@ -202,17 +198,13 @@ app.whenReady().then(async () => {
     await verifyVideo("large MP4", path.join(work, "seek.mp4"));
     await verifyVideo("WebM", path.join(work, "loop.webm"));
     await verifyVideo("Wallpaper Engine video project", path.join(work, "project.json"));
-    const web = await open(path.join(work, "web"));
-    try {
-      await until(() => web.evaluate(`window.webResult?.local`), "sandboxed Web local scripts and JSON");
-      assert.deepEqual(await web.evaluate(`window.webResult`), { fixtureWeb: true, parentBlocked: true, helperBlocked: true, local: true });
-      console.log("PASS Web project actual local script/JSON and parent/helper isolation");
-    } finally { await web.done(); }
     if (argv.includes("--scene")) {
       assert.equal(process.platform, "win32");
       assert(argv.includes("--engine"));
       inspector.open(0, "127.0.0.1");
-      await verifyVideo("native scene", option("--scene"), { engine: option("--engine"), inspectorPort: Number(new URL(inspector.url()).port) });
+      const native = { engine: option("--engine"), inspectorPort: Number(new URL(inspector.url()).port) };
+      await verifyVideo("native Web project", path.join(work, "web"), native);
+      await verifyVideo("native scene", option("--scene"), native);
     } else console.log("SKIP native scene: no explicit project/engine");
     console.log("ELECTRON_WALLPAPER_PASS", app.getVersion(), "work:", work);
   } catch (error) {

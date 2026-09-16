@@ -116,6 +116,58 @@ pub async fn evaluate_script(websocket_url: &str, script: &str) -> anyhow::Resul
     evaluate_script_with_await_promise(websocket_url, script, false).await
 }
 
+/// Transfer only an already-authorized local media file into the main world's
+/// File API. Chromium owns the disk-backed Blob and can stream/seek it directly;
+/// no whole-video base64, HTTP origin exception, navigation, or CSP bypass.
+pub async fn local_file_blob_url(
+    websocket_url: &str,
+    path: &std::path::Path,
+) -> anyhow::Result<String> {
+    let socket = connect_cdp_websocket(websocket_url).await?;
+    let mut session = CdpSession::new(socket);
+    let created = session.send_command(next_message_id(), "Runtime.evaluate", json!({
+        "expression":"(()=>{const input=document.createElement('input');input.type='file';input.hidden=true;input.setAttribute('data-alunixa-x-media-transfer','');document.documentElement.appendChild(input);return input})()",
+        "returnByValue":false,
+    })).await?;
+    let object_id = created
+        .pointer("/result/result/objectId")
+        .and_then(Value::as_str)
+        .context("wallpaper file input could not be created")?
+        .to_owned();
+    let result = async {
+        session.send_command(next_message_id(), "DOM.setFileInputFiles", json!({
+            "objectId":object_id,"files":[path],
+        })).await?;
+        let result = session.send_command(next_message_id(), "Runtime.callFunctionOn", json!({
+            "objectId":object_id,
+            "functionDeclaration":"function(){if(this.files.length!==1)throw new Error('missing wallpaper file');return URL.createObjectURL(this.files[0])}",
+            "returnByValue":true,
+        })).await?;
+        let url = result.pointer("/result/result/value").and_then(Value::as_str)
+            .filter(|url| url.starts_with("blob:")).context("wallpaper file could not be loaded")?;
+        Ok::<_, anyhow::Error>(url.to_owned())
+    }.await;
+    // Remove the temporary input even on failure; Blob lifetime belongs to the
+    // renderer, which revokes it when the overlay changes or is destroyed.
+    let _ = session
+        .send_command(
+            next_message_id(),
+            "Runtime.callFunctionOn",
+            json!({
+                "objectId":object_id,"functionDeclaration":"function(){this.remove()}",
+            }),
+        )
+        .await;
+    let _ = session
+        .send_command(
+            next_message_id(),
+            "Runtime.releaseObject",
+            json!({"objectId":object_id}),
+        )
+        .await;
+    result
+}
+
 pub async fn evaluate_script_with_await_promise(
     websocket_url: &str,
     script: &str,
@@ -208,47 +260,11 @@ pub async fn install_bridge_with_disconnect(
     handler: BridgeHandler,
     new_document_scripts: &[String],
 ) -> anyhow::Result<BridgeDisconnect> {
-    install_bridge_with_wallpaper(
-        websocket_url,
-        binding_name,
-        handler,
-        new_document_scripts,
-        None,
-    )
-    .await
-}
-
-/// Keep the private media transport on the bridge's supervised CDP connection.
-/// It is installed before any renderer script, survives navigation, and is
-/// recreated with the bridge on disconnect. The host CSP is never disabled.
-pub async fn install_bridge_with_wallpaper(
-    websocket_url: &str,
-    binding_name: &str,
-    handler: BridgeHandler,
-    new_document_scripts: &[String],
-    wallpaper: Option<crate::settings::BackendSettings>,
-) -> anyhow::Result<BridgeDisconnect> {
     let socket = connect_cdp_websocket(websocket_url).await?;
     let generation = next_bridge_generation(websocket_url);
     let mut session = CdpSession::new(socket)
         .with_handler(handler)
         .with_generation(generation.clone());
-    session.wallpaper = wallpaper;
-
-    if session.wallpaper.is_some() {
-        session
-            .send_command(
-                next_message_id(),
-                "Fetch.enable",
-                json!({
-                    "patterns": [{
-                        "urlPattern": format!("{}*", crate::wallpaper::APP_RESOURCE_BASE),
-                        "requestStage": "Request"
-                    }]
-                }),
-            )
-            .await?;
-    }
 
     session.send_command(1, "Runtime.enable", json!({})).await?;
     session
@@ -323,14 +339,7 @@ pub async fn install_bridge_with_wallpaper(
                 }
                 message = session.next_message() => {
                     match message {
-                        Ok(Some(_)) => {
-                            // Do not put file I/O or a large WebSocket send inside
-                            // the select's cancellable next_message future.
-                            if let Err(error) = session.flush_wallpaper_requests().await {
-                                break format!("failed to serve wallpaper resource: {error:#}");
-                            }
-                            session.enqueue_binding_calls(&mut pending_calls);
-                        },
+                        Ok(Some(_)) => session.enqueue_binding_calls(&mut pending_calls),
                         Ok(None) => break "CDP websocket closed".to_string(),
                         Err(error) => break format!("CDP websocket read failed: {error:#}"),
                     }
@@ -396,8 +405,6 @@ struct CdpSession<S> {
     binding_calls: VecDeque<Value>,
     handler: Option<BridgeHandler>,
     generation: Option<BridgeGeneration>,
-    wallpaper: Option<crate::settings::BackendSettings>,
-    wallpaper_requests: VecDeque<Value>,
 }
 
 impl<S> CdpSession<S>
@@ -415,8 +422,6 @@ where
             binding_calls: VecDeque::new(),
             handler: None,
             generation: None,
-            wallpaper: None,
-            wallpaper_requests: VecDeque::new(),
         }
     }
 
@@ -509,7 +514,6 @@ where
             let Some(message) = self.next_message().await? else {
                 bail!("CDP websocket closed before response for {method} id {message_id}");
             };
-            self.flush_wallpaper_requests().await?;
 
             if let Some(response_id) = message.get("id").and_then(Value::as_u64) {
                 if response_id == message_id {
@@ -542,27 +546,8 @@ where
         if value.get("method").and_then(Value::as_str) == Some("Runtime.bindingCalled") {
             self.binding_calls.push_back(value.clone());
         }
-        if value.get("method").and_then(Value::as_str) == Some("Fetch.requestPaused")
-            && self.wallpaper.is_some()
-        {
-            self.wallpaper_requests.push_back(value["params"].clone());
-        }
 
         Ok(Some(value))
-    }
-
-    async fn flush_wallpaper_requests(&mut self) -> anyhow::Result<()> {
-        // Called outside the read select, including during command installation,
-        // so neither a generation tick nor a ready bridge call can discard a
-        // consumed Fetch event or partially write a multi-megabyte response.
-        while let Some(request) = self.wallpaper_requests.pop_front() {
-            if let Some(settings) = &self.wallpaper {
-                let response = crate::wallpaper::cdp_response(&request, settings).await;
-                self.send_command_without_wait(next_message_id(), "Fetch.fulfillRequest", response)
-                    .await?;
-            }
-        }
-        Ok(())
     }
 
     fn enqueue_binding_calls(&mut self, pending_calls: &mut FuturesUnordered<PendingBridgeCall>) {

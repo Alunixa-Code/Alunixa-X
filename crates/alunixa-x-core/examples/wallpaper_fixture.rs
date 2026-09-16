@@ -59,16 +59,27 @@ async fn main() -> anyhow::Result<()> {
             "window.__ALUNIXA_X_IMAGE_OVERLAY__={};\n\
              (()=>{{ const alunixaXImageOverlayId='alunixa-x-image-overlay';\n\
              const sendAlunixaXDiagnostic=(event,payload)=>{{window.fixtureEvents??=[];window.fixtureEvents.push({{event,payload}})}};\n\
-             {}\nwindow.installWallpaper=installAlunixaXImageOverlay;installAlunixaXImageOverlay();}})();",
+             {}\nwindow.installWallpaper=installAlunixaXImageOverlay;if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installAlunixaXImageOverlay,{{once:true}});else installAlunixaXImageOverlay();}})();",
             assets::image_overlay_config(1, &settings),
             &source[start..end],
         );
-        let disconnected = bridge::install_bridge_with_wallpaper(
-            input["websocketUrl"].as_str().unwrap(),
+        let websocket = input["websocketUrl"].as_str().unwrap().to_owned();
+        let media_websocket = websocket.clone();
+        let disconnected = bridge::install_bridge_with_disconnect(
+            &websocket,
             bridge::BRIDGE_BINDING_NAME,
-            Arc::new(|_, _| Box::pin(async { Ok(json!({"status":"ok"})) })),
+            Arc::new(move |route, _| {
+                let settings = settings.clone();
+                let websocket = media_websocket.clone();
+                Box::pin(async move {
+                    if route.starts_with("/wallpaper/") {
+                        wallpaper::handle_bridge_request(&route, &websocket, &settings).await
+                    } else {
+                        Ok(json!({"status":"ok"}))
+                    }
+                })
+            }),
             &[script],
-            Some(settings),
         )
         .await?;
         println!("READY");

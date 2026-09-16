@@ -24,7 +24,7 @@ pub fn enabled(settings: &BackendSettings) -> bool {
     settings.enhancements_enabled
         && settings.codex_app_image_overlay_enabled
         && crate::wallpaper::resolve(Path::new(settings.codex_app_image_overlay_path.trim()))
-            .is_ok_and(|source| source.kind == "scene")
+            .is_ok_and(|source| matches!(source.kind.as_str(), "scene" | "web"))
 }
 
 pub fn engine_path(project: &Path, configured: &str) -> anyhow::Result<PathBuf> {

@@ -1902,3 +1902,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 修复取消后大图从挂起变为明确加载错误，仍未通过；增加自有 Electron 页面 Network 及 fixture 子进程诊断，继续定位实际响应，不增加 CSP 例外或跳过用例喵~
 - 前端全量107/107、TypeScript、i18n918/918+80/80、品牌检查PASS；补真实WebSocket安装fetch/650ms背压/9MiB完整响应/后续bridge调用回归，防止资源服务与原bridge互相破坏喵~
 - 为避免额外 WebContents debugger 与远程调试对验证的干扰，诊断改为页面 console、同源 fetch 和 fixture 断开原因，不影响产品实现或 CSP；继续定位大图实际响应喵~
+- 独立最小 Electron probe 精确确认：Fetch 在页面已加载后启用时，当前 app:// 资源和新 iframe 均继续由原 handler 返回；重新导航后才产生 requestPaused，所以先前同源方案无法满足不刷新宿主的要求，已撤回未发行初稿与其专属测试喵~
+- 改用用户已选媒体的原生 File→磁盘后备 Blob URL，由 DOM.setFileInputFiles 挂载且立即移除临时 input；renderer 通过既有 bridge 请求，无任意路径参数、无整视频Base64、无CSP放开，生命周期结束撤销Blob；Scene 状态也走bridge，WE Web改为原生自有窗口，等待真实验证喵~
