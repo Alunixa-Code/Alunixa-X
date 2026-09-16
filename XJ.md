@@ -14,6 +14,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **v1.0.24本地发布门禁全部通过，待正式CI/Release**：回退图片/动图/视频及明确旧项目预览，彻底移除原生WE；完整workspace41套件1128/0/1、前端118/118、真实Electron全部媒体与用户已选项目预览/失败退出1、生产管理器/俄语UI及版本/依赖/格式/文档检查PASS，未修改或重启真实实例喵~
 - **最新决定：撤下Wallpaper Engine原生Scene/Web**；一轮实播中图片/大PNG/GIF/APNG/MP4/WebM/WE Video均通过，但离屏Native Web真实画面为黑，严格门禁失败；按用户允许回退，不继续其他隐藏方案，不发布当前离屏草案，保留图片/动图/视频并兼容旧项目静态预览喵~
 - **当前重开壁纸修复**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；生产路由未接通是已证实故障，额外WE窗口处理正在调查，尚未修复喵~
 - **v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS** 喵~
@@ -76,6 +77,8 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- v1.0.24当前源码：workspace退出0，41套件1128 passed/0 failed/1 ignored；随后fixture构建退出0（1m27s），前端118/118、TS/Vite/i18n916+80/93/79、品牌/格式/版本/依赖等价/14本地文档链接/凭据新增行/diff全PASS喵~
+- 独立Electron40.1.0最终退出0且ELECTRON_WALLPAPER_PASS：小/大PNG、GIF/APNG像素变化、MP4跳转循环暂停恢复、WebM、旧Video项目、旧Scene/Web预览与用户当前所选项目预览均真解码；负对照故意失败明确退出1，不运行WE；UI上传/播放/保存/取消/失败保留/重置/明确预览/移除引擎控件/原生和脚本路由404均PASS喵~
 - v1.0.23正式CI独立日志：Windows41套件1127/0/1，macOS x64/arm64各41套件1105/0/1，三平台前端均118/118；三语字典923+80/92/79、10页面及取消/确认/持久化/存储失败/托盘载荷/深浅主题/长导航/900-1440px通过喵~
 - v1.0.23本地完整workspace退出0：41套件，1127 passed/0 failed/1 ignored；随后严格串行all-targets check退出0（1m26s），fmt通过；当前产品1429be0未再修改，仍等待同一正式Actions35096019206喵~
 - v1.0.22最新源码 b07179e：CDP94/94、路径专项1/1、管理器UI真实浏览器PASS、前端107/107、TS/i18n918+80/品牌/Vite/依赖等价/fmt/diff/四包版本一致；全目标check退出0（1m03s），独立Electron40.1.0无shim验证全部媒体及Native Web/Scene的非黑和多帧变化，最终无标题栏截图已目视喵~
@@ -146,6 +149,7 @@
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
+- 当前仅待v1.0.24原子推送/唯一正式Actions/三平台六资产及来源正文哈希验收，旧俄语发行已完成不重做；当前用户实例保持不变喵~
 - v1.0.23用户要求的开发/构建/发布无剩余工作；不重复派发或重发，未自动安装到用户正在使用的程序，临时文件清理仅剩已记录的环境拒绝项喵~
 - v1.0.23本轮10个翻译中间TSV/源JSON/重复日志清理命令被执行环境预先拒绝，未执行删除；停止尝试且不换工具绕过，保留最终截图/日志/发行证据及可复用缓存喵~
 - v1.0.22正式CI运行中，准备清理本轮自有15个electron-run/late-profile临时目录（1207582829字节）及临时fixture副本/诊断shim；已确认自有测试进程为0，保留最终截图、实播证据及可复用缓存，不触碰历史拒绝删除的日志喵~
@@ -205,7 +209,9 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
-### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+### 待正式发布：v1.0.24可靠媒体背景与移除原生WE
+- 最终共享生产入口实播/完整测试/管理器及俄语UI全部通过，用户现选黑洞项目真实静态预览截图已目视；没有保留失败的离屏方案，不再启动Wallpaper Engine；具体通过项目见第9节喵~
+- 正式推送范围：统一媒体分发、移除Native Scene/Web及相关UI/API、旧配置安全且明确预览兼容、保留普通图片/动图/视频及俄语/guardian、失败测试退出码、新版本/完整中英俄说明；第三方依赖不变，现有标签不动喵~
 - 回退界面前端118/118、TS、Vite、i18n916+80/93/79、生产Chromium俄语10页/三语切换持久化/存储失败/深浅色/900-1440px已PASS；首次diff检查暴露CHANGELOG历史混合换行被Python归一化，已逐字恢复历史尾部、只保留本版条目，当前diff检查PASS喵~
 - 回退产品提交b89a85c；已将自身四个Rust包/前端/Tauri定向升级1.0.24，第三方锁逐项等价，远端main仍1429be0且新标签空闲；完整workspace与fixture串行构建正在执行，尚未宣称通过喵~
 - 已把未推送的三语发行草案/CHANGELOG/三语README/壁纸指南全部改为“移除原生Scene/Web、保留图片/动图/视频、明确静态预览”，不再宣传离屏实验；实际用户已选项目将作为只读预览额外验收，不启动引擎喵~
