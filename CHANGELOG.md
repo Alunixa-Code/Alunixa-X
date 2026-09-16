@@ -1,10 +1,10 @@
-## Unreleased
+## 1.0.20 - 2026-09-16
 
 - 普通 Codex 背景增加视频、GIF、APNG 和动画 WebP 上传、原始字节保留、预览、循环播放、静音与暂停；视频通过 Range 流式读取，不内嵌大文件喵~
 - 皮肤管理与原设置页共用动态壁纸面板，支持选择单个 Wallpaper Engine Video/Web/Scene 项目目录，兼容 Workshop `scene.pkg` 打包布局喵~
 - Web 壁纸使用 iframe 沙箱及项目路径级 CSP，Scene 使用 Windows 原生独立命名窗口渲染和精确窗口捕获，不切换桌面壁纸、不以预览图冒充场景喵~
 - 修复 `features.guardianv2` 无效结构化字段引起的新对话发送和旧对话恢复配置错误，覆盖嵌套表、inline table、profiles、原始备份和供应商防回灌，保留有效设置喵~
-- 新增媒体流、真实 Chromium 播放/动画/隔离、管理器交互、原生场景捕获脚本与本机 CLI 临时配置解析回归；使用说明与原生场景验收边界见 `docs/wallpapers.md`，当前未发布或替换运行实例喵~
+- 新增媒体流、真实 Chromium 播放/动画/隔离、管理器交互、原生场景捕获脚本与本机 CLI 临时配置解析回归；使用说明与原生场景验收边界见 `docs/wallpapers.md`，由 GitHub Actions 三平台构建发布，不替换正在运行的实例喵~
 
 ## 1.0.19 - 2026-09-14
 

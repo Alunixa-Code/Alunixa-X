@@ -1837,3 +1837,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 准备清理本轮九份已结束验证日志，总计 222311 字节：wallpaper-check-final.log、wallpaper-check.log、wallpaper-frontend-final.log、wallpaper-frontend.log、wallpaper-ui-final.log、wallpaper-vite-final.log、wallpaper-vite.log、wallpaper-workspace-final.log、wallpaper-workspace.log；均限项目 .tmp 下，保留两张截图与复用缓存，历史已拒绝删除的发行日志不再尝试喵~
 - 验收记录已先单独提交 5dd53cb；随后明确列名、限制本项目 .tmp、无递归的 PowerShell 清理仍被执行环境在执行前拒绝，未发生删除；只读确认九日志全部仍在、共 222311 字节，不换工具/重复命令绕过喵~
 - 深浅主题截图分别为 .tmp/wallpaper-ui-dark.png（256418 字节）、wallpaper-ui-light.png（236162 字节）；最终产品文件无未提交改动，.tmp 仍为未追踪本地验证与历史产物，未声称工作树完全没有未追踪文件喵~
+
+## 2026-09-16 · 用户要求完成构建和正式发布 v1.0.20
+
+- 用户原话：发布啊，构建以后你不发布；明确接续已完成的动态壁纸和 guardianv2 修复，要求可下载的正式发行而非只交付本地源码喵~
+- 已读取完整 XJ.md、近期 YHYQ.md、当前 Git/版本/工作流和最终验证日志；通用记忆只用于保护现有改动、隔离验证和六资产发行验收流程，当前仓库实查为 D:\Cursor\AlunixaX，旧 CodexPP 目录不存在喵~
+- GitHub 实查 latest 为 v1.0.19、main 为 4c5b6a82e58175d743c9a7b72a4b490ee7ea8dc6，v1.0.20 标签不存在，最近正式运行均已完成；沿用修改前检查点 b999966，不重复功能实现或提交 .tmp 喵~
+- 本次准备自身版本 1.0.20 与详细发行说明，包含动态媒体/WE项目/定向配置修复及已有测试，不升级第三方依赖；Scene 实机捕获未验收、真实 config/auth 和当前 Codex/Helper/CDP 不变喵~
+- 仓库工作流文件实际名为 pr-build.yml，首次按运行标题猜测 pr-build-artifacts.yml 未找到后已核对真实路径，无文件修改喵~
+- 已升级自身版本至 1.0.20，更新 CHANGELOG、中英 README、壁纸说明并新增详细发行说明；只改本地包版本，不升级第三方依赖，接下来执行版本/前端/格式门禁后推送喵~
