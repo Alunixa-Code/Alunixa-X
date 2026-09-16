@@ -1910,3 +1910,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - Page agent修复后的同一严格Electron运行已通过静态/大PNG/导航恢复/GIF/APNG动画/大MP4跨段跳转循环暂停恢复/WebM/WE Video以及实际WE Web窗口捕获，原生Scene正在继续验证；UI同步Web引擎选择/静音/暂停和中英文平台说明，不再声称iframe隔离链路有效喵~
 - 首轮完整Electron已退出0，真实Scene截图确认黑洞场景已显示；目视也发现WE标题边框被捕入且Web第一帧仍黑，故追加“非黑内容+多个不同实际帧”门禁；仅对自身UUID命名窗口移除装饰/任务栏项并置底，不最小化/停止引擎，继续复验而不将Stream时间推进视为最终画面验收喵~
 - 远端v1.0.22标签空闲，已定向升级四个自身Rust包、前端与Tauri版本，未改第三方依赖；更新中英README、使用说明、CHANGELOG并新增详细1.0.22发行说明，记录File/Blob、RAW转义、Native Web平台变化、生命周期与严格实播门禁，尚未推送喵~
+- v1.0.22 前端107/107、TypeScript、i18n918/918+80/80、品牌、Vite和第三方依赖锁等价PASS；完整workspace及其后串行all-targets正在运行，管理器UI复验另用自有副本并行喵~
+- 原生Web非黑帧门禁拒绝当前fixture；只读对照真实Workshop项目显示引擎导出的type为大写Web而测试清单使用了小写web，已将fixture改为真实导出结构并复验，未修改任何用户WE项目或桌面配置喵~

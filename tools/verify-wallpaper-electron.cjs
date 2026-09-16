@@ -68,7 +68,10 @@ a.save(p/"animated.apng",save_all=True,append_images=[b],duration=180,loop=0)
     "-deadline", "realtime", "-cpu-used", "8", "-an", path.join(work, "loop.webm")]);
   const web = path.join(work, "web");
   fs.mkdirSync(web);
-  fs.writeFileSync(path.join(web, "project.json"), JSON.stringify({ type: "web", file: "index.html" }));
+  // Native WE uses its exported project's case-sensitive Web enum.
+  fs.writeFileSync(path.join(web, "project.json"), JSON.stringify({
+    type: "Web", file: "index.html", title: "Alunixa X isolated validation", version: 5, general: { properties: {} },
+  }));
   fs.writeFileSync(path.join(web, "data.json"), '{"local":true}');
   fs.writeFileSync(path.join(web, "script.js"), `
     let f=0;setInterval(()=>{document.body.style.background=f++%2?'#216e85':'#dc714c'},180);
