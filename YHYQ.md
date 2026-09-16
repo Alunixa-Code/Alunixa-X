@@ -1787,3 +1787,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本轮精确清理日志命令被执行环境在执行前整体拒绝，连同前置审计提交也未执行；随后只读核对 13 本轮日志仍在，共 1,674,478 字节，旧 v1.0.18 六日志未变，不换工具或重复尝试删除喵~
 - 保留的本轮日志：image-models-frontend.log、image-models-mcp.log、image-models-rust.log、image-models-vite.log、v1.0.19-workspace.log、v1.0.19-workspace-final.log、v1.0.19-frontend.log、v1.0.19-vite.log、v1.0.19-check.log、v1.0.19-actions-watch.log、v1.0.19-ci-windows.log、v1.0.19-ci-macos-x64.log、v1.0.19-ci-macos-arm64.log，均在 .tmp 内；两张 UI 截图和复用缓存作为有用输出保留喵~
 - Release 页面已请求在 Codex 右侧浏览器预览，返回 queued，不能说已经显示；只读 Git diff 确认正式标签后差异仅 XJ.md/YHYQ.md，产品源码、版本、回归和发行说明均已推送并完成构建/发布喵~
+
+## 2026-09-16 · 动态壁纸、Wallpaper Engine 场景与 guardianv2 配置兼容
+
+- 用户请求：为 Codex 增加视频/GIF/PNG 等动态壁纸上传与播放；支持选择 Wallpaper Engine 壁纸目录并将场景显示为 Codex 背景；修复新建对话发送和旧对话恢复时 `features.guardianv2` 导致 `FeatureToml` 反序列化失败的问题。
+- 已读取完整 `XJ.md` 与近期 `YHYQ.md`，确认项目根目录为 `D:\Cursor\AlunixaX`；工作树仅有既有 `.tmp/` 未追踪产物，产品基线为 v1.0.19。
+- 修改前建立可回滚空提交 `e8d24b7`：`chore: checkpoint before dynamic wallpapers and config repair`。
+- 后续动作将记录在本节，并在每个有意义阶段同步 `XJ.md` 与 Git 提交。
