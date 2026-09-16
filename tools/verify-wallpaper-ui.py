@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import re
 import runpy
+import shutil
 import subprocess
 from contextlib import contextmanager
 import tempfile
@@ -257,13 +258,19 @@ def verify_manager(browser, url, video_url, output):
 
 
 def main():
+    global FIXTURE
     parser = argparse.ArgumentParser()
     parser.add_argument("--codex")
     args = parser.parse_args()
     assert FIXTURE.exists(), "Build the wallpaper_fixture example first"
+    built_fixture = FIXTURE
     output = ROOT / ".tmp"
     with tempfile.TemporaryDirectory(prefix="ax-wallpaper-") as directory:
         root = Path(directory)
+        # Do not hold the workspace build artifact open on Windows while this
+        # isolated HTTP fixture is running. The owned copy is removed on exit.
+        FIXTURE = root / built_fixture.name
+        shutil.copy2(built_fixture, FIXTURE)
         if args.codex:
             verify_parser(args.codex, root)
         gif = root / "animation.gif"
