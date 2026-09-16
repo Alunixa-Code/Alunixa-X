@@ -100,6 +100,7 @@
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
 ## 11. Important Files
+- README.md / README_EN.md / README_RU.md 为完整中英俄指南；src/i18n-ru.ts 为独立俄语词典；tools/verify-russian-ui.py 为内存Tauri+生产Chromium语言验收脚本喵~
 - `wallpaper.rs` 媒体导入/目录解析/路径约束/Range/CSP；`wallpaper_scene.rs` 自有 WE 窗口与精确捕获；`guardian_config.rs` TOML 定向校验；`WallpaperSettings.tsx` 共用控制面板；`docs/wallpapers.md` 使用方法与兼容边界喵~
 - `image_models.rs` 有序配置/校验/脱敏/并发修订；`imagegen_mcp.rs` 每次调用读取默认/显式选择及生成编辑/凭据隔离；`ImageModelsScreen.tsx` 独立页面；`tests/image_models.rs` 配置/备份/原始字段保留回归喵~
 - `docs/protocol-fidelity.md` 记录保真边界和协议契约；`tests/protocol_fidelity.rs` 为新增独立回归，不依赖真实模型账户喵~
@@ -182,7 +183,7 @@
 
 ## 19. Current Task
 ### 当前进行：俄语界面、完整产品介绍与新版本发布
-- 已完成全量 RU 词典/三语选择器/持久化确认与失败保护/托盘/日期/HTML lang/NSIS Russian 标准页；前端118/118和第一轮真实UI通过，正在补详细文档和最终长文案布局验证，尚未发行新版喵~
+- 已完成全量 RU 词典/三语选择器/持久化确认与失败保护/托盘/日期/HTML lang/NSIS Russian 标准页；前端118/118和第一轮真实UI通过，详细中英俄文档已扩展，待最终长文案布局/版本/全量回归与v1.0.23发行喵~
 - 基线为 v1.0.22 壁纸修复产品 9641a41，修改前保存两份遗留日志到 cf94c3c；不改真实配置、运行中 Codex/Helper 或已冻结标签喵~
 - 当前三语源文键923 plain + 80 template、92 backend/79 patterns；工具自动扫描全部生产TS/TSX并验证占位符和RU中文回退，运行时不调用在线翻译喵~
 - 计划新版本 v1.0.23，先核对标签空闲；完成本地验证后原子推送 main/新标签并仅派发一次 release-assets.yml，最终核对三平台及六资产/正文/哈希喵~
