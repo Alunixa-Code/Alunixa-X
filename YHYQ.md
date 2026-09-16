@@ -1919,3 +1919,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 最新CDP94/94、路径专项1/1、壁纸6/6、前端107/107、管理器UI/TS/i18n918+80/Vite/品牌/第三方锁等价/fmt/全差异检查通过；all-targets check退出0（1m03s），四包/前端/Tauri均1.0.22；首轮workspace过时断言失败已如实记录，最终三平台全量由正式CI再次验证喵~
 - 远端main仍9c7f71259784bf0e60dc1137dd80644b0e0d1016且v1.0.22未占用；本次推送明确包含：磁盘后备File/Blob媒体、场景bridge状态、RAW参数及Win32扩展路径修复、自有窗口去装饰/任务栏、Native Web控件/平台说明、导航恢复和资源回收、实播/契约回归及详细发行说明，不升级第三方依赖喵~
 - 准备以[skip ci]最终提交原子推送main/新annotated v1.0.22，再显式派发唯一release-assets.yml，不复用旧二进制、不移动旧标签，正式构建失败则不把发布描述为成功喵~
+- v1.0.22 main/新annotated标签已原子推送成功：产品9641a4118ff2f3162a40c2fd598757b04fb35328、tag对象431116b097f19b5db4ce61f1fadf87cd8b0269e0，远端main和tag解引用一致；唯一workflow_dispatch Actions35090929257/ref=v1.0.22已派发，列表确认只有这一轮新正式运行，不重复派发喵~
+- push仍提示既有Dependabot12项（6 high/5 moderate/1 low），没有宣称本轮做依赖专项修复；真实config/auth、正在运行的用户Codex/Helper与安装程序不变，后续仅本地记录验收，不另推产品更新喵~

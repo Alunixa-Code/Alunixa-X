@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **v1.0.22 已原子推送并启动唯一正式CI**：产品9641a4118ff2f3162a40c2fd598757b04fb35328，annotated tag对象431116b097f19b5db4ce61f1fadf87cd8b0269e0；Actions35090929257（workflow_dispatch，ref=v1.0.22）已排队，仍需三平台全量/Release六资产验收，不重复派发喵~
 - **v1.0.22 发布门禁就绪**：无诊断shim的完整Electron实播PASS（含用户选中Scene及Native Web非黑/变化帧），最新94项CDP与路径测试PASS，前端107/107/生产UI/TS/i18n/Vite/依赖等价/全目标check/fmt/diff均PASS；远端main仍9c7f712且新标签空闲，准备唯一正式CI，最终源码全量Rust由CI验收喵~
 - 已准备自身版本1.0.22及详细发行/使用说明，远端新标签未占用，依赖版本未升级；仍需完成去边框后原生非黑帧/动画复验和最终全量门禁，尚未推送喵~
 - 当前采用原生磁盘后备 File/Blob + bridge 场景状态，不再使用已撤回 Fetch 同源草案；严格 Electron 已通过静态/大PNG/导航恢复/GIF/APNG/MP4跨段Seek循环/WebM/WE Video/真实Native Web，原生Scene正在本轮同一测试中验证喵~
@@ -80,6 +81,7 @@
 - `tools/verify-native-queued-followup.mjs <app.asar>` 在隔离内存 fixture 验证原生队列编辑错误，不操作真实运行实例喵~
 
 ## 10. Deployment and Operations
+- v1.0.22 唯一正式运行35090929257，产品/main/tag解引用均9641a4118ff2f3162a40c2fd598757b04fb35328；等待同一运行，未发布完成前不能声称已交付，历史标签不动喵~
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
 - v1.0.21 Windows job 104666090050、macOS x64 104666090154、arm64 104666090199、publish 104669774096 全成功；Windows 41 套件 1124/0/1，macOS 各 41 套件 1102/0/1，前端均 107/107，已独立核对完成日志喵~
 - v1.0.19 唯一正式 Actions 34833120719 全部 success，Windows job 103940848589、macOS x64 103940848578、arm64 103940848581、发布 103945473751；workflow_dispatch ref=v1.0.19，没有复用旧二进制或重复派发喵~
@@ -175,6 +177,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 当前已进入正式发行等待阶段：35090929257唯一运行、产品9641a4118ff2f3162a40c2fd598757b04fb35328；不再修改冻结产品或重复派发，接下来核验完成日志、六资产、正文/来源/哈希和匿名latest；后续本地审计提交不推送为另一次产品发行喵~
 - **当前结论：本地功能验收完成，开始正式发行**；b07179e的新产品fixture不带诊断shim完整退出0，PNG/大图/导航恢复/GIF/APNG/MP4 seek-loop-pause/WebM/WE Video/Native Web/真实Scene全部通过，原生非黑+多帧及无边框截图目视PASS，用户运行实例未动喵~
 - 下一步同一新标签v1.0.22推送、唯一release-assets.yml三平台完整回归/构建、六资产Release及正文/来源/哈希核验；本次推送明细见docs/releases/v1.0.22.md，不重复发布或移动历史标签喵~
 - 首轮完整workspace已退出101：41套件1125/1/1，唯一失败是静态源码断言仍要求旧backgroundImage的source变量，实际已改为解析后的url；已同步断言并新增媒体bridge契约，不忽略失败；接下来全量CDP专项/路径测试/无shim实播通过后由正式CI对最终源码完整构建验收喵~
@@ -330,6 +333,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-16 v1.0.22原子push成功，产品9641a4118ff2f3162a40c2fd598757b04fb35328/tag对象431116b097f19b5db4ce61f1fadf87cd8b0269e0，唯一Actions35090929257已派发；等待正式全量构建/Release验收喵~
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
 - 2026-09-16 v1.0.21 已原子推送：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，tag 对象 8d1bfbfa67709a68c8bec7301e63a9bca37c2707，唯一正式 Actions 35055944380 已派发，等待构建/发布验收喵~
 - 2026-09-16 v1.0.21 发布准备完成：accepted socket blocking 修复 targeted test PASS，锁文件依赖等价/凭据扫描/fmt/diff PASS，版本与详细说明一致；准备新标签原子推送，不重用 v1.0.20 失败构建资产喵~
