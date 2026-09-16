@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- v1.0.21 产品提交已准备为 ff12e34（完整 SHA 见发布后记录），targeted Windows socket fixture test 通过；v1.0.20 保留为失败构建标签，未生成 Release，准备推送新标签 v1.0.21 喵~
 - v1.0.20 Actions 35053573074 最终 failure，未生成 Release；macOS 两架构构建成功，Windows 因 imagegen_mcp 测试夹具在 accepted socket 上未恢复 blocking 而触发 10035/WouldBlock；已在测试夹具加入显式 blocking 修复，保留 v1.0.20 标签不动，准备 v1.0.21 喵~
 - v1.0.20 已原子推送 main/新标签，产品 SHA 5c3b07dcbe3c936a391f3d801cb7a5950601d646，annotated tag 40d36a71ee044fc9e8fbc3c6b7e359d748d1ec1f；唯一正式 Actions 35053573074 已派发，仍待构建与发行验收喵~
 - 2026-09-16 用户明确要求构建后发布，接续 v1.0.20 发行；已核对远端 latest/main 为 v1.0.19/4c5b6a8、v1.0.20 标签未占用、没有进行中的正式发行；修改前检查点 b999966，以下本地阶段“未要求发布”记录仅为历史喵~
@@ -155,6 +156,7 @@
 
 ## 19. Current Task
 ### 当前进行：v1.0.21 正式发行
+- v1.0.21 版本门禁通过，已修复测试夹具并从 v1.0.20 锁文件精确保留第三方依赖；待原子推送 main/tag 与唯一正式 Actions，远端 v1.0.20 不动喵~
 - 版本准备首轮发现通用替换误改 Cargo.lock 第三方 dyn-clone 版本，已从 HEAD v1.0.20 锁文件恢复并只更新四个本地包；package-lock 同样恢复后只更新根版本字段，未升级或变更依赖喵~
 - v1.0.20 的一次失败重跑已确认不是产品功能失败而是 Windows 测试夹具竞态；本次修复 `imagegen_mcp.rs` accepted socket blocking 状态并将自身版本/发行说明升至 1.0.21，不升级依赖、不修改壁纸/guardian 产品逻辑喵~
 - 已独立从完成的原始 macOS job 日志内存解析核验：macOS arm64 job 104658943704：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；macOS x64 job 104658943782：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；两架构全部编译/打包及 bundle 门禁已成功，attempt 2 只重跑 Windows 和发布依赖，不复用其他产品版本喵~
@@ -262,7 +264,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 当前下一步：运行 Windows 竞态回归及版本门禁，提交并推送 v1.0.21，唯一派发正式 Actions；核验三平台全量回归、六资产、正文/来源/哈希/匿名 latest 后交付，不修改或移动 v1.0.20 喵~
+- 当前下一步：推送 ff12e34 对应的 v1.0.21，唯一派发正式 release-assets.yml；核验三平台全量回归、六资产、正文/来源/哈希/匿名 latest 后更新发布证据并交付，不修改或移动 v1.0.20 喵~
 - v1.0.19 已验收完成，不再构建或重复发布；本轮日志清理被环境拒绝，不重复尝试，保留记录/有用截图/复用缓存，向用户交付；后续如用户自行清理，仅处理已列出的已完成验证日志喵~
 - 不再构建或重复发布 v1.0.18；用户可从正式 Release 下载并在合适时机重新经 Alunixa X 启动，以加载本地协议修复，当前任务不自动安装/重启喵~
 - 如后续遇到特定供应商兼容错误，依据协议错误及不含密钥/真实对话的最小 fixture 补充回归，不能为通过请求而恢复静默丢弃或不确定重放喵~
@@ -271,7 +273,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
-- 2026-09-16 v1.0.20 发布失败收尾：Actions 35053573074 attempt 2 仍在 Windows job 104662109611 同一 imagegen_mcp.rs:666 10035/WouldBlock 失败，macOS 两架构成功、Release job skipped；已按日志修复 accepted socket blocking，升级至 v1.0.21 重新发布喵~
+- 2026-09-16 v1.0.21 发布准备完成：accepted socket blocking 修复 targeted test PASS，锁文件依赖等价/凭据扫描/fmt/diff PASS，版本与详细说明一致；准备新标签原子推送，不重用 v1.0.20 失败构建资产喵~- 2026-09-16 v1.0.20 发布失败收尾：Actions 35053573074 attempt 2 仍在 Windows job 104662109611 同一 imagegen_mcp.rs:666 10035/WouldBlock 失败，macOS 两架构成功、Release job skipped；已按日志修复 accepted socket blocking，升级至 v1.0.21 重新发布喵~
 - 2026-09-16 已推送 v1.0.20：产品 5c3b07d、tag 对象 40d36a7，远端 main/tag 解引用完全一致；唯一正式 Actions 35053573074 派发成功，等待同一运行产出六安装资产喵~
 - 2026-09-16 发布接续：已完整读取 XJ.md、近期 YHYQ.md、本地最终验证日志和正式工作流，实查远端 v1.0.19/4c5b6a8 且 v1.0.20 空闲；开始版本与发行说明准备，检查点 b999966，未改真实配置或重启喵~
 - 2026-09-16 收尾：验收记录提交 5dd53cb；九份本轮日志清理被环境预先拒绝，只读确认保留 222311 字节，不绕过；两张真实深浅主题截图保留，产品文件无未提交改动，未发布/安装喵~
