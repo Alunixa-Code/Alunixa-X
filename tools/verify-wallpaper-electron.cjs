@@ -68,7 +68,7 @@ a.save(p/"animated.apng",save_all=True,append_images=[b],duration=180,loop=0)
     "-deadline", "realtime", "-cpu-used", "8", "-an", path.join(work, "loop.webm")]);
   const web = path.join(work, "web");
   fs.mkdirSync(web);
-  // Native WE uses its exported project's case-sensitive Web enum.
+  // Use the same manifest format as a native WE-exported Web project.
   fs.writeFileSync(path.join(web, "project.json"), JSON.stringify({
     type: "Web", file: "index.html", title: "Alunixa X isolated validation", version: 5, general: { properties: {} },
   }));

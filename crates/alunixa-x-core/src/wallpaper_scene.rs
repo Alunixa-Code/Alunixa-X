@@ -126,7 +126,7 @@ async fn prepare(port: u16, project: &Path, settings: &BackendSettings) -> anyho
 }
 
 pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -> String {
-    let options = json!({"engine":engine,"project":project,"title":title,"muted":muted});
+    let options = json!({"engine":engine_command_path(engine),"project":engine_command_path(project),"title":title,"muted":muted});
     r#"(async () => {
       const options = __OPTIONS__;
       const require = process.mainModule?.require?.bind(process.mainModule);
@@ -175,6 +175,21 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
     })()"#.replace("__OPTIONS__", &options.to_string())
 }
 
+fn engine_command_path(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    // Rust canonicalize returns Win32 extended paths. WE's Scene reader accepts
+    // them, but its Web host turns them into invalid file URLs and renders black.
+    // Preserve ordinary drive and UNC paths when crossing this external API.
+    if let Some(unc) = path
+        .strip_prefix(r"\\?\UNC\")
+        .or_else(|| path.strip_prefix(r"\\?\unc\"))
+    {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+    }
+}
+
 #[cfg(windows)]
 fn send_window_behind(title: &str) {
     use windows::Win32::UI::WindowsAndMessaging::{
@@ -219,6 +234,21 @@ fn send_window_behind(_title: &str) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_engine_receives_browser_compatible_drive_and_unc_paths() {
+        assert_eq!(
+            engine_command_path(Path::new(r"\\?\D:\壁纸 folder\project.json")),
+            r"D:\壁纸 folder\project.json"
+        );
+        assert_eq!(
+            engine_command_path(Path::new(r"\\?\UNC\server\share\project.json")),
+            r"\\server\share\project.json"
+        );
+        assert_eq!(
+            engine_command_path(Path::new("/fixture/project.json")),
+            "/fixture/project.json"
+        );
+    }
     #[test]
     fn scene_never_controls_desktop_or_launches_project_programs() {
         let script = capture_script(

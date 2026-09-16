@@ -1912,3 +1912,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 远端v1.0.22标签空闲，已定向升级四个自身Rust包、前端与Tauri版本，未改第三方依赖；更新中英README、使用说明、CHANGELOG并新增详细1.0.22发行说明，记录File/Blob、RAW转义、Native Web平台变化、生命周期与严格实播门禁，尚未推送喵~
 - v1.0.22 前端107/107、TypeScript、i18n918/918+80/80、品牌、Vite和第三方依赖锁等价PASS；完整workspace及其后串行all-targets正在运行，管理器UI复验另用自有副本并行喵~
 - 原生Web非黑帧门禁拒绝当前fixture；只读对照真实Workshop项目显示引擎导出的type为大写Web而测试清单使用了小写web，已将fixture改为真实导出结构并复验，未修改任何用户WE项目或桌面配置喵~
+- 更改fixture清单大小写后仍黑屏，已通过单一变量诊断确认真正根因：Rust canonicalize带Win32扩展路径前缀，WE内置Web宿主转换成无效file地址；仅在自有Electron诊断进程把引擎参数转为普通盘符/UNC路径后，Web及用户选中Scene均通过非黑画面和多帧变化，窗口边框也已去除喵~
+- 已把上述规范化加入产品引擎调用并增加本地盘符/中文空格/UNC/POSIX回归，更新发行说明；诊断shim不属于产品、不作为最终验收，须重建产品fixture后不用shim复验；当前在途workspace明确为路径补丁前基线，正式CI负责最终源码全量喵~

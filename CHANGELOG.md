@@ -2,6 +2,7 @@
 
 - 修复 v1.0.21 大图、视频和场景在真实 Codex 页面被 CSP 阻止：媒体使用仅选中文件的磁盘后备 File/Blob，场景状态使用原生桥接，不刷新宿主或放开 CSP 喵~
 - 修复 Windows Wallpaper Engine RAW JSON 参数转义，Scene / Web 使用自有原生窗口，仅捕获画面，移除窗口装饰与额外任务栏项，不切换桌面壁纸喵~
+- 修复规范化路径携带 Windows `\\?\` 前缀导致原生 Web 宿主黑屏，保留盘符/UNC 语义，不更改原项目喵~
 - 启用 Page agent 以保证正常导航后恢复背景，正确释放 Blob/轨道/临时 input，过滤主动取消播放的误报，新增真正解码就绪诊断喵~
 - 补充严格 app CSP 的 Electron 大图/GIF/APNG/MP4/WebM/WE 项目实播门禁和原生 File 成功/失败清理契约；保留 guardianv2 定向修复，第三方依赖不升级喵~
 
