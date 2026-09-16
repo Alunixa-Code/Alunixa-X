@@ -1921,3 +1921,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 准备以[skip ci]最终提交原子推送main/新annotated v1.0.22，再显式派发唯一release-assets.yml，不复用旧二进制、不移动旧标签，正式构建失败则不把发布描述为成功喵~
 - v1.0.22 main/新annotated标签已原子推送成功：产品9641a4118ff2f3162a40c2fd598757b04fb35328、tag对象431116b097f19b5db4ce61f1fadf87cd8b0269e0，远端main和tag解引用一致；唯一workflow_dispatch Actions35090929257/ref=v1.0.22已派发，列表确认只有这一轮新正式运行，不重复派发喵~
 - push仍提示既有Dependabot12项（6 high/5 moderate/1 low），没有宣称本轮做依赖专项修复；真实config/auth、正在运行的用户Codex/Helper与安装程序不变，后续仅本地记录验收，不另推产品更新喵~
+- CI等待期间只读清理审计：本轮15个electron-run/late-profile临时目录共1207582829字节，自有Electron/fixture进程数量为0；准备在完整路径验证后以原生PowerShell删除这些生成媒体/profile、fixture副本及诊断shim，保留最终截图/实播日志/可复用缓存，历史已拒绝删除的日志不动喵~
