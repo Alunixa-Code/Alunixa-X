@@ -164,6 +164,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- Electron 首项静态 PNG 真解码已通过，但默认所有窗口关闭时退出导致 harness 在第一项后终止；已增加多用例窗口生命周期保活，非产品壁纸失败，仍需完整运行喵~
 - 首批 Rust 壁纸集成 7/7、Scene Node 4/4 通过；首次 Electron harness 未创建 userData 目录导致 DevToolsActivePort 写入失败（尚未进入产品播放），已补目录创建和精确 reload 完成等待，准备复验喵~
 - 新增 tools/verify-wallpaper-electron.cjs，独立 Electron/临时 profile/严格 app CSP，产品 Rust bridge 接入真实 PNG/大 PNG/GIF/APNG/跨块 MP4/WebM/WE Video/Web/可选自有 Scene 捕获测试；不对用户运行中的 Codex 注入，脚本待首次执行喵~
 - 已补充 Rust 同源分块/Seek/HEAD/禁用/大图完整性/Web 隔离测试、Windows RAW 参数回归与显式 fixture attach/scene-script 模式；测试只读显式输入，不访问默认设置或自动启动真实 WE，尚待执行喵~

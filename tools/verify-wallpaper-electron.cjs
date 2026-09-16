@@ -31,6 +31,7 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inl
 const html = `<html><head><meta http-equiv="Content-Security-Policy" content="${CSP}"></head><body style="margin:0;background:#14243c"><main><input aria-label="underlying input"></main></body></html>`;
 const windows = new Set();
 const children = new Set();
+app.on("window-all-closed", () => {}); // Each case owns a fresh isolated window.
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(test, label, timeout = 18000) {
   const end = Date.now() + timeout;

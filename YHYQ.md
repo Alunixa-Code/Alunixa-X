@@ -1897,3 +1897,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 增加同源 Rust 资源回归、大图完整性和 Web 路径隔离断言，以及 Node Windows RAW 转义断言；扩展显式隔离 fixture，供后续真实 Electron 页面通过产品 bridge 安装同源路由和 renderer，不读取默认 home 喵~
 - 新增真实 Electron 验证脚本，保留安全策略、真实 Rust CDP 分块读取及 renderer、图片像素动画/MP4 跨块 seek loop/导航恢复/bridge 共存/Web 隔离与可选实际 Scene 捕获，fixture 只采用显式独立配置；准备执行，不把脚本存在当成测试通过喵~
 - 首批 Rust 壁纸 7/7、Scene Node 4/4 PASS；首次 Electron fixture 因缺 userData 目录而不能写入随机调试端口文件，尚未进入产品媒体链路；已补目录创建和 reload 完成等待，不弱化媒体断言，GitHub 实查 latest 仍 v1.0.21 且无在途正式构建喵~
+- 第二次 Electron 已完成静态 PNG 解码，但所有窗口关闭触发 Electron 默认退出，使后续用例未执行；添加 window-all-closed 保活，继续完整验证而不把首项成功写成全部通过喵~
