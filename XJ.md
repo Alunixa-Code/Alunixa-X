@@ -114,6 +114,7 @@
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
 ## 15. Known Bugs and Limitations
+- 2026-09-16 正式 Windows CI 暴露既有 imagegen_mcp::tests::image_fixture_server 非阻塞 listener 接受后直接 read 的 10035/WouldBlock 竞态；本次先保留原测试做一次失败作业复跑，不将它描述为产品生图 API 已知失败或忽略测试，后续测试维护可显式设置 stream blocking 并增加延迟分片 fixture 喵~
 - 动态壁纸：选择单个含 project.json 的项目目录，不扫描整个 Workshop 库；Scene 仅 Windows/需要 Wallpaper Engine，1280×720/24 FPS 捕获及引擎实际运行未实机验收，暂停只暂停 Codex 显示；Web 不保证兼容专有宿主 API/外部网络，静态 PNG 不会自动变成动画，具体见 docs/wallpapers.md 喵~
 - Guardian 定向修复只覆盖所用 Codex home 和写入的供应商片段，不修改当前任务运行配置，也不宣称修复所有项目级配置/其他 TOML 语法错误喵~
 - 正式 CI 的 Actions v4 出现 Node 20 弃用/自动使用 Node 24 注释，属于 action runtime 提示；本轮所有 job 成功，项目构建 Node 22 设置未改，后续可独立升级 workflow actions，不混入本次已冻结产品喵~
@@ -153,6 +154,8 @@
 
 ## 19. Current Task
 ### 当前进行：v1.0.20 正式发行
+- Actions 首次 Windows job 104658943768 在既有 imagegen_mcp 测试夹具读取 socket 时返回 Windows 10035/WouldBlock，330 core 测试中一项失败；失败处 imagegen_mcp.rs:666 的 accept 后流未显式恢复 blocking，属已定位的跨平台测试竞态，不能将首轮称为全绿喵~
+- macOS arm64 已全成功、x64 Rust 回归已成功并继续构建；待整轮结束后只重跑一次失败的 Windows job，保留完整测试与所有断言，不改产品/版本/标签；如仍失败再按新的补丁版本处理，不盲目循环重跑喵~
 - 已完成原子推送；唯一 workflow_dispatch ref=v1.0.20，Actions 35053573074，产品 SHA 5c3b07dcbe3c936a391f3d801cb7a5950601d646 与远端 main/tag 解引用一致；后续只等待该运行，不重复派发或移动标签喵~
 - 版本准备 e365249 后复验：四个 Rust 包/前端/Tauri 1.0.20 一致，前端 107/107、TS、i18n 918/918 + 80/80、Vite、fmt、品牌、基线 diff、新增行凭据模式和第三方依赖锁一致性全部 PASS；产品源码未变，完整 Rust 由正式 CI 对新版本再次全量验证喵~
 - 已将 workspace/Cargo.lock 四个本地包、manager package/package-lock 与 Tauri 统一到 1.0.20；CHANGELOG 和中英 README/壁纸文档同步发行入口，docs/releases/v1.0.20.md 已包含新增、修复、使用方法、实机验证边界与构建方式喵~

@@ -1852,3 +1852,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - main 与 annotated v1.0.20 已原子推送成功，产品 5c3b07dcbe3c936a391f3d801cb7a5950601d646、tag 对象 40d36a71ee044fc9e8fbc3c6b7e359d748d1ec1f，远端 main/tag 解引用核验一致；原 v1.0.19 保持不变喵~
 - 唯一正式 release-assets.yml 已派发，Actions 35053573074，workflow_dispatch ref=v1.0.20；紧随派发的列表因传播延迟为空，但命令已返回明确运行 ID，不重复派发，直接按该 ID 等待和验收喵~
 - GitHub push 仍提示既有 Dependabot 12 项（6 high/5 moderate/1 low），本轮未升级或宣称完成依赖专项修复；本轮不修改真实 config/auth、运行实例或安装内容喵~
+- 正式 Actions 首轮 Windows job 104658943768 全量回归失败：imagegen_mcp::tests::configured_models_route_generation_and_edits_and_reload_default_without_restart，fixture socket read 在 imagegen_mcp.rs:666 返回 Windows 10035/WouldBlock，随后调用因测试服务关闭失败；core 汇总 329 passed/1 failed/1 ignored，未跳过门禁喵~
+- 通过已完成 job 的 logs API 在内存读取日志定位：既有 listener nonblocking，accept 后只设置 read timeout，未显式恢复 accepted stream blocking，Windows 请求分片时存在竞态；本轮壁纸/guardian 不是失败点，macOS 两架构 Rust 回归已通过喵~
+- 不改已发布标签或降低断言，等同一运行结束后仅重跑失败 Windows 作业一次并重新执行完整回归/构建；若仍失败需修复 fixture 后用新版本，不进行无界重试；日志未下载落地，不产生待清理临时文件喵~
