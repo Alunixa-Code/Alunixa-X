@@ -53,7 +53,7 @@ test("scene never falls back to an unrelated window when its exact title is abse
         } },
       };
       if (name === "node:child_process") return { spawn(_exe: string, args: unknown[]) {
-        calls.push(args);
+        calls.push([...args]);
         return { once(event: string, callback: (code: number) => void) {
           if (event === "exit") queueMicrotask(() => callback(0));
         } };

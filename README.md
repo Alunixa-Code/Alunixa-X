@@ -78,6 +78,12 @@ Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点
 - 首次使用保持增强功能开启，并通过 Alunixa X 启动 Codex 加载 MCP；已经加载的新版 MCP 每次调用重新读取配置，后续保存或排序无需重启喵~
 - MCP 不显式传 `model` / `profile_id` 时使用首项；清空全部生图配置后恢复原对话供应商及原默认生图模型，不自动重试或轮换到其他生图配置喵~
 
+### 动态壁纸（开发版本）
+
+**皮肤管理 → 动态壁纸** 支持上传视频、GIF、APNG 和图片，提供预览、透明度、适配、静音与暂停；也可选择含 `project.json` 的单个 Wallpaper Engine 目录，支持 Video、隔离 Web 和 Windows 原生 Scene（需要 Wallpaper Engine）喵~
+
+面板的 **修复对话配置** 可定向备份并修复 `features.guardianv2` 类型错误；保存后下次通过新构建的 Alunixa X 启动时应用壁纸，不打断当前 Codex，完整使用说明与兼容边界见 [动态壁纸说明](docs/wallpapers.md) 喵~
+
 ## 从 Codex+++ 迁移
 
 旧 `Alunixa-Code/CodexPlusPlusPlus` 仓库已经归档，最终桥接版本为 `v1.2.67`。现有用户可以在“Codex++ 管理工具 → 关于 → 迁移到 Alunixa X”中自主下载安装 Alunixa X，也可以从 [Codex+++ v1.2.67 最终 Release](https://github.com/Alunixa-Code/CodexPlusPlusPlus/releases/tag/v1.2.67) 直接下载 `Alunixa-X-1.0.6-*` 迁移包。

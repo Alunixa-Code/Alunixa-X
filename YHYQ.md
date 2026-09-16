@@ -1816,3 +1816,7 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 官方文档网页返回 403，直接获取官方 openai/codex schema 和 WE CLI 成功，确认 reasoning_effort 为非空字符串；一次多文件补丁因翻译原文不匹配而整体未应用，核对后按真实文本修正，未丢失现有修改喵~
 - 修复检查点 1522c17，更新后的 fixture 构建退出 0（30.10s）；增加真实 Chromium 的 Web 脚本/本地 JSON/父页隔离/Helper fetch 与图片拦截验证，增加找不到精确窗口时关闭自有窗口而不误捕获的 VM 测试喵~
 - 新增 docs/wallpapers.md 和 CHANGELOG Unreleased，记录格式/目录/使用方式/存储/修复备份/兼容边界；Native Scene 未做真实窗口渲染验收，保存后下次启动生效，不修改现有版本号或发行标签喵~
+- 隔离 UI 脚本整体退出 0，真实媒体、完整管理器流程、Web 本地脚本/JSON/父页隔离/Helper fetch 和图片请求隔离、3 组本机解析器失败→成功均通过；预览 AbortError 处理修复已获得真实 Chromium 验证喵~
+- 收尾审阅发现 Scene 冷启动等待超过普通 CDP 5 秒 deadline；改为显式单次 30 秒 deadline，其他调用保留原限时，前端等待上限对应 40 秒；加入真实 WebSocket 超过 5 秒成功与显式短限时失败测试喵~
+- 深浅截图目视验收发现开关视觉缺失与浅色 fixture 只修改 root class 的测试问题，已补同款可见开关并改用真实主题按钮；无窗口 VM 回归初次失败为跨 realm 数组原型，复制为本 realm 数组后再验，不改变产品窗口选择逻辑喵~
+- README 中英补开发版使用入口和说明链接，冻结产品源码开始最终串行全量与生产 UI 验收喵~

@@ -139,6 +139,10 @@
 
 ## 19. Current Task
 ### 进行中：动态壁纸与 guardianv2
+- 2026-09-16 隔离生产 UI 全流程已退出 0：本机解析器 3 组失败→成功、WebM/GIF 真播放、预览/暂停/保存/取消/失败保留/场景目录/重置，Web 本地脚本/JSON/父页隔离/Helper fetch 与图片拦截全部 PASS 喵~
+- 收尾审阅发现 Scene 12 秒等待超过通用 CDP 5 秒上限，已新增仅单次调用的 30 秒 deadline，不改变其他 CDP 默认，并将前端等待上限对应为 40 秒；新增真实 WebSocket 5.2 秒成功与短 deadline 失败回归喵~
+- 截图目视发现两处开关缺少现有 CSS 要求的视觉指示，已补 ToggleVisual 同款结构；浅色测试改为实际点击主题按钮，避免只改根 class 与内部深色状态不一致；最新无窗口 VM 测试是跨 realm 数组断言差异，已复制为本 realm 数组，不弱化精确窗口断言喵~
+- README 中英增加开发版入口，未发布/未安装的状态保持明确；开始冻结源码最终串行 Rust workspace 和前端/UI 验收喵~
 - 打包场景/资源隔离/预览生命周期修复已提交 1522c17，新 fixture 构建退出 0（30.10s）；新增 Web 实际脚本/JSON/父页隔离/Helper 请求拦截测试，以及无精确窗口时不误捕获的 VM 回归喵~
 - 已补 CHANGELOG Unreleased 与 docs/wallpapers.md，明确单个项目目录、PNG/APNG 区别、Scene 仅 Windows 和捕获上限/未实机验收、保存后下次启动生效；未修改发行版本喵~
 - 2026-09-16 最新验收：106/106 前端、TS、Vite、i18n 918/918 + 80/80 通过；fixture 构建退出 0；本机 Codex 解析器在三种独立临时 CODEX_HOME 先复现 FeatureToml、修复后成功解析且备份一致，未改真实配置喵~

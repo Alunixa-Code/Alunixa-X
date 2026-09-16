@@ -50,6 +50,12 @@ Provider → Model → Context → MCP / Skills / Plugins → Codex → Desktop 
 | Extensions | MCP, Skills, Plugins, script marketplace, and DreamSkin themes |
 | Operations | Startup injection, fail-closed validation, Watcher, diagnostics, updates, and installers |
 
+### Live wallpapers (development build)
+
+**Themes → Live Wallpaper** accepts videos, GIF/APNG animations, and still images with preview, opacity, fit, mute, and pause controls. You can also select one Wallpaper Engine project folder containing `project.json`: Video, isolated Web, and native Scene on Windows with Wallpaper Engine installed. See [wallpaper documentation and compatibility limits](docs/wallpapers.md).
+
+The panel also provides a narrow, backed-up repair for malformed `features.guardianv2` configuration. Saved wallpapers apply on the next launch through a newly built Alunixa X; the current Codex process is not restarted or patched.
+
 ## Install
 
 Download a platform build from [GitHub Releases](https://github.com/Alunixa-Code/Alunixa-X/releases/latest):

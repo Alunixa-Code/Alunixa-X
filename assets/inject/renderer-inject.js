@@ -707,7 +707,7 @@
         const connectScene = async () => {
           try {
             let state;
-            for (let attempt = 0; attempt < 40 && !stopped; attempt++) {
+            for (let attempt = 0; attempt < 80 && !stopped; attempt++) {
               const response = await fetch(config.sceneUrl, { signal: abort.signal });
               if (!response.ok) throw new Error("场景接口未就绪");
               state = await response.json();

@@ -106,10 +106,11 @@ async fn prepare(port: u16, project: &Path, settings: &BackendSettings) -> anyho
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
     let target = target.context("Codex 主进程未开放场景接口，请通过 Alunixa X 启动")?;
-    let result = crate::bridge::evaluate_script_with_await_promise(
+    let result = crate::bridge::evaluate_script_with_timeout(
         target.web_socket_debugger_url.as_deref().unwrap(),
         &script,
         true,
+        std::time::Duration::from_secs(30),
     )
     .await?;
     let text = result

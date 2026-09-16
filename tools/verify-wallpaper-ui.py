@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import subprocess
 from contextlib import contextmanager
@@ -148,7 +149,7 @@ def verify_web(browser, url, root):
         page.on("requestfinished", lambda request: finished.append(request.url))
         page.locator("iframe").evaluate("(f,url)=>f.src=url", media + "/wallpaper/web/index.html")
         frame = page.frame_locator("iframe")
-        expect(frame.locator("body")).to_have_attribute("data-result", __import__("re").compile(".+"))
+        expect(frame.locator("body")).to_have_attribute("data-result", re.compile(".+"))
         result = json.loads(frame.locator("body").get_attribute("data-result"))
         assert result["local"] and result["parentBlocked"] and result["apiBlocked"], result
         assert any("/backend/status" in value for value in result["violations"]), result
@@ -232,8 +233,12 @@ def verify_manager(browser, url, video_url, output):
     assert saved["codexAppImageOverlayPath"] == "/fixture/clip.webm"
     region.get_by_role("button", name="修复对话配置").click()
     expect(region.get_by_role("status")).to_contain_text("配置已备份并修复")
+    expect(region.get_by_role("checkbox", name="启用壁纸", exact=True)).to_be_checked()
+    expect(region.locator(".toggle-switch-visual")).to_have_count(2)
     page.screenshot(path=str(output / "wallpaper-ui-dark.png"), full_page=True)
-    page.evaluate("document.documentElement.classList.remove('dark');document.documentElement.classList.add('light')")
+    page.get_by_role("button", name="切换到浅色", exact=True).click()
+    expect(page.locator("html")).to_have_class(re.compile(r"\blight\b"))
+    page.wait_for_timeout(250)
     page.screenshot(path=str(output / "wallpaper-ui-light.png"), full_page=True)
     selected.append("/fixture/scene")
     region.get_by_role("button", name="选择项目目录").click()

@@ -116,6 +116,7 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         <input type="checkbox" checked={value.codexAppImageOverlayEnabled} disabled={busy}
           onChange={e => onChange({ codexAppImageOverlayEnabled: e.currentTarget.checked })} />
         <span>{t("启用壁纸")}</span>
+        <span aria-hidden="true" className="toggle-switch-visual"><span className="toggle-switch-thumb" /></span>
       </label>
     </div>
     <div className="wallpaper-layout">
@@ -158,7 +159,8 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         </div>
         <div className="toolbar">
           <label className="inline-toggle"><input type="checkbox" checked={value.codexAppWallpaperMuted}
-            disabled={source?.kind === "web"} onChange={e => onChange({ codexAppWallpaperMuted: e.currentTarget.checked })} /><span>{t("静音播放")}</span></label>
+            disabled={source?.kind === "web"} onChange={e => onChange({ codexAppWallpaperMuted: e.currentTarget.checked })} /><span>{t("静音播放")}</span>
+            <span aria-hidden="true" className="toggle-switch-visual"><span className="toggle-switch-thumb" /></span></label>
           <Button variant="secondary" disabled={!source || !["video", "scene"].includes(source.kind)}
             onClick={() => onChange({ codexAppWallpaperPaused: !value.codexAppWallpaperPaused })}>
             {value.codexAppWallpaperPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}

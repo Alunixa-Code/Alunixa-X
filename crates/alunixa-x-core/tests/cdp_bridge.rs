@@ -2729,6 +2729,51 @@ async fn install_bridge_keeps_status_responsive_while_another_call_is_pending() 
 
 type TestSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
+#[tokio::test]
+async fn native_render_evaluation_has_an_explicit_deadline_without_changing_bridge_default() {
+    let (url, finished) = spawn_cdp_server(|mut socket| async move {
+        let request = recv_json(&mut socket).await;
+        assert_eq!(request["method"], "Runtime.evaluate");
+        assert_eq!(request["params"]["awaitPromise"], true);
+        // Cross the ordinary five-second deadline, as a native engine can.
+        tokio::time::sleep(Duration::from_millis(5200)).await;
+        send_json(
+            &mut socket,
+            json!({"id":request["id"],"result":{"result":{"type":"string","value":"ready"}}}),
+        )
+        .await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+    let response = bridge::evaluate_script_with_timeout(
+        &url,
+        "Promise.resolve('ready')",
+        true,
+        Duration::from_secs(8),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response["result"]["result"]["value"], "ready");
+    finished.await.unwrap();
+
+    let (url, finished) = spawn_cdp_server(|mut socket| async move {
+        let _ = recv_json(&mut socket).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+    let error = bridge::evaluate_script_with_timeout(
+        &url,
+        "new Promise(()=>{})",
+        true,
+        Duration::from_millis(25),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.to_string().contains("timed out"));
+    finished.await.unwrap();
+}
+
 async fn spawn_cdp_server<F, Fut>(handler: F) -> (String, oneshot::Receiver<()>)
 where
     F: FnOnce(TestSocket) -> Fut + Send + 'static,
