@@ -1864,3 +1864,21 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - v1.0.21 版本门禁完成：accepted socket blocking targeted test 1/1 PASS，fmt/diff、项目版本一致、锁文件第三方依赖等价、新增行凭据扫描均 PASS；产品提交 ff12e34（完整 SHA 推送后记录），准备原子推送 main 与 v1.0.21 标签喵~
 - v1.0.21 已原子推送 main 和 annotated tag 成功：产品提交 9c7f71259784bf0e60dc1137dd80644b0e0d1016、tag 对象 8d1bfbfa67709a68c8bec7301e63a9bca37c2707，远端 main/tag 解引用一致；v1.0.20 失败标签和历史 Release 未改动喵~
 - 唯一正式 release-assets.yml 已派发，Actions 35055944380，workflow_dispatch ref=v1.0.21，head SHA 与标签一致；不重复派发，等待 Windows/macOS 全量验证和六资产发布喵~
+
+## 2026-09-16 · v1.0.21 正式发布验收完成
+
+- v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
+- 正式 Actions 三平台和发布 job 全成功：Windows 104666090050、macOS x64 104666090154、arm64 104666090199、publish 104669774096；v1.0.21 未重跑或复用旧二进制，v1.0.20 失败标签保持原样且无 Release 喵~
+- 完成日志独立核验：Windows 41 套件 1124/0/1、两种 macOS 各 41 套件 1102/0/1，前端各 107/107；此前 Windows fixture 的 accepted socket read 回归全部 PASS；首次日志统计只匹配 ℹ 而未覆盖 CI 的 # 标记，已修正统计表达式，无产品错误喵~
+- Release 389646054 于 2026-09-16T04:51:34Z（新加坡 12:51:34）发布，非草稿/非预发布；正文与 docs/releases/v1.0.21.md 规范化换行后完全匹配，源码 SHA 和 Actions 来源一致，六资产 uploaded/非零/名称唯一，正文 SHA-256 与 GitHub digest 全部匹配，匿名 latest 返回相同 Release 与六资产喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.21-macos-arm64.dmg` | 33134052 | `5298c80a06a70599604246d7a140d2625f05332d19151a1e2a737fc85d84d33c` |
+| `Alunixa-X-1.0.21-macos-arm64.zip` | 28215720 | `79b8b6841fea2467c4a9bbacd38d159cb1a3b119812e0d4710a51d27e9c815f4` |
+| `Alunixa-X-1.0.21-macos-x64.dmg` | 34515972 | `2759e540a9ecb652fadc9769f119950018918c73efce0ea01fdab1adea517d40` |
+| `Alunixa-X-1.0.21-macos-x64.zip` | 28861582 | `b43d8347e8c1f0a43163f438a597f4bd6770e7631b0568f9a46607ab8fdcb67a` |
+| `Alunixa-X-1.0.21-windows-x64-setup.exe` | 21699128 | `4287543ae062dbc8f9e4d577c2ec1c05fe467516e922cfde865df64b0d57cbfc` |
+| `Alunixa-X-1.0.21-windows-x64.zip` | 27466695 | `2fc7a4037213f6bf7ef590ccafef90c8277f3d0e8e1560ebe4d9168dcc066bca` |
+
+- 本次日志通过 API 在内存读取，未下载新增临时日志/安装包；保留既有验证截图与可复用构建缓存，历史已被拒绝删除的日志没有再次尝试清理；未修改真实 config/auth、安装内容或运行实例喵~
