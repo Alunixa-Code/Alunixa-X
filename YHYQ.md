@@ -1907,3 +1907,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 补齐原生File/Blob真实WebSocket契约（成功和失败清理临时input/objectId）、禁用/错误路由先拒绝和renderer Blob回收断言；Electron验证改为实际WE Web窗口而非宣称app CSP下不可靠的HTTP iframe可用喵~
 - Blob首轮静态PNG通过，后续脚本异常定位不够且诊断异常覆盖原错误；补充表达式级错误与新版Electron console事件记录，诊断catch自身不再抛错，继续实际验证喵~
 - 原生File/Blob WebSocket专项PASS、壁纸集成6/6 PASS；严格Electron确认大PNG已从磁盘后备Blob真正解码，原CSP仍拦localhost；导航恢复发现bridge未启用Page agent，补Page.enable保证注册的新文档脚本在导航后执行，不刷新用户真实窗口喵~
+- Page agent修复后的同一严格Electron运行已通过静态/大PNG/导航恢复/GIF/APNG动画/大MP4跨段跳转循环暂停恢复/WebM/WE Video以及实际WE Web窗口捕获，原生Scene正在继续验证；UI同步Web引擎选择/静音/暂停和中英文平台说明，不再声称iframe隔离链路有效喵~
+- 首轮完整Electron已退出0，真实Scene截图确认黑洞场景已显示；目视也发现WE标题边框被捕入且Web第一帧仍黑，故追加“非黑内容+多个不同实际帧”门禁；仅对自身UUID命名窗口移除装饰/任务栏项并置底，不最小化/停止引擎，继续复验而不将Stream时间推进视为最终画面验收喵~
+- 远端v1.0.22标签空闲，已定向升级四个自身Rust包、前端与Tauri版本，未改第三方依赖；更新中英README、使用说明、CHANGELOG并新增详细1.0.22发行说明，记录File/Blob、RAW转义、Native Web平台变化、生命周期与严格实播门禁，尚未推送喵~

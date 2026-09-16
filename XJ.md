@@ -11,6 +11,8 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- 已准备自身版本1.0.22及详细发行/使用说明，远端新标签未占用，依赖版本未升级；仍需完成去边框后原生非黑帧/动画复验和最终全量门禁，尚未推送喵~
+- 当前采用原生磁盘后备 File/Blob + bridge 场景状态，不再使用已撤回 Fetch 同源草案；严格 Electron 已通过静态/大PNG/导航恢复/GIF/APNG/MP4跨段Seek循环/WebM/WE Video/真实Native Web，原生Scene正在本轮同一测试中验证喵~
 - 接续检查点 1d6865d 保存上一轮尚未接通的 wallpaper.rs 同源响应初稿；当前仅完成根因复现，CDP 路由、Scene 参数修复及真实播放回归仍待完成，不能将初稿或旧 CI 当作修复成功喵~
 - 2026-09-16 用户实测反馈 v1.0.21 静态壁纸回退、视频与 WE Scene 均不能用；正式发布/CI 成功不能代表真实 Codex 显示链路已通过，当前已重开运行链路修复任务，检查点 fb02cfc 喵~
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
@@ -164,6 +166,8 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 首轮完整Electron退出0且真实Scene截图已见黑洞场景，但目视同时发现捕获含WE窗口边框、Web首次帧仍黑；已仅对自有UUID窗口移除标题边框/任务栏项且保持渲染，测试新增非黑内容及真实帧变化门禁，不能把先前MediaStream时间推进当最终Web播放验收喵~
+- 当前 UI 已同步 Native Web 的引擎选择、静音和暂停，不再声称 Codex iframe 沙箱运行；中英文字对应替换，macOS 明确改用视频/动图，不隐瞒原生项目平台条件喵~
 - 原生 File/Blob 专项和壁纸集成6/6通过；Electron的大PNG已真正解码且CSP仍阻止localhost，导航恢复暴露旧bridge未启用Page agent，现补Page.enable以让新文档脚本在导航后真正执行，继续整套实播喵~
 - Blob 首轮 Electron 已过静态 PNG，后续出现脚本异常但旧诊断自身也会抛异常掩盖位置，已将执行表达式/页面console附加至错误并保证诊断自身不遮蔽原错误；仍未宣称媒体全部通过喵~
 - 已补 File/Blob WebSocket 契约测试（仅选择的文件、成功/失败均清理 input/objectId）、禁用和错误资源类型拒绝、renderer Blob 回收断言；真实Electron脚本已改验证Native Web，等待最新结果喵~

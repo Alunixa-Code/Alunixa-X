@@ -169,6 +169,26 @@ async function verifyVideo(name, source, extra = {}) {
     assert.deepEqual(await ctx.evaluate(`window.__codexSessionDeleteBridge("fixture",{})`), { status: "ok" });
     assert.equal(await ctx.evaluate(`document.querySelectorAll("[data-alunixa-x-media-transfer]").length`), 0);
     if (!name.startsWith("native")) assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
+    if (name.startsWith("native")) {
+      // A running MediaStream can still be a black/loading window. Verify real
+      // rendered content, then animation, not just a readyState or source ID.
+      await until(() => ctx.evaluate(`(()=>{
+        const c=document.createElement('canvas');c.width=64;c.height=36;
+        const x=c.getContext('2d');x.drawImage(document.querySelector('video'),0,0,64,36);
+        const d=x.getImageData(0,0,64,36).data;let lit=0;
+        for(let i=0;i<d.length;i+=4)if(d[i]+d[i+1]+d[i+2]>90)lit++;
+        return lit>64*36*.2;
+      })()`), name + " nonblack content", 30000);
+      const frames = new Set();
+      for (let i=0;i<5;i++) {
+        await delay(230);
+        frames.add(await ctx.evaluate(`(()=>{
+          const c=document.createElement('canvas');c.width=160;c.height=90;
+          c.getContext('2d').drawImage(document.querySelector('video'),0,0,160,90);return c.toDataURL();
+        })()`));
+      }
+      assert(frames.size > 1, name + " must deliver changing native frames");
+    }
     if (name === "large MP4") {
       await ctx.evaluate(`document.querySelector("video").currentTime=2.5`);
       await until(() => ctx.evaluate(`document.querySelector("video").currentTime>2.6`), "seek across chunks");
@@ -181,7 +201,7 @@ async function verifyVideo(name, source, extra = {}) {
     }
     await ctx.evaluate(`document.querySelector("input").value="still usable"`);
     assert.equal(await ctx.evaluate(`document.elementFromPoint(20,10).tagName`), "INPUT");
-    fs.writeFileSync(path.join(output, name === "native scene" ? "wallpaper-electron-scene.png" : "wallpaper-electron-video.png"),
+    fs.writeFileSync(path.join(output, name === "native scene" ? "wallpaper-electron-scene.png" : name.startsWith("native") ? "wallpaper-electron-web.png" : "wallpaper-electron-video.png"),
       (await ctx.w.webContents.capturePage()).toPNG());
     await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.enabled=false;window.installWallpaper()`);
     assert(await ctx.evaluate(`!document.querySelector("video") && !window.__alunixaXWallpaperRuntime`));

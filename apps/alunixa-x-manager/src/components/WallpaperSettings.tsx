@@ -107,6 +107,7 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
     finally { if (mounted.current) setBusy(false); }
   };
   const preview = source && (source.kind === "image" || source.kind === "video") ? convertFileSrc(source.entry) : "";
+  const nativeProject = source?.kind === "scene" || source?.kind === "web";
   const objectFit = ({ fill: "cover", fit: "contain", stretch: "fill", tile: "contain", center: "none" } as const)[value.codexAppImageOverlayFitMode];
 
   return <section className="wallpaper-settings" aria-label={t("动态壁纸")}>
@@ -126,11 +127,11 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
             onError={() => setPreviewFailed(true)} /> :
           <img src={preview} alt={source?.title || ""} style={{ objectFit }} onError={() => setPreviewFailed(true)} /> :
           <div className="wallpaper-placeholder">
-            {source?.kind === "scene" ? <Layers /> : source?.kind === "video" ? <Film /> : <Image />}
+            {nativeProject ? <Layers /> : source?.kind === "video" ? <Film /> : <Image />}
             <strong>{source?.title || t("尚未选择壁纸")}</strong>
             <span>{previewFailed ? t("预览失败，请检查文件或视频编码。") :
               source?.kind === "scene" ? t("原生场景 · 由 Wallpaper Engine 渲染") :
-              source?.kind === "web" ? t("Web 场景 · 在 Codex 中隔离运行") : "MP4 · WebM · GIF · PNG / APNG"}</span>
+              source?.kind === "web" ? t("Web 场景 · 由 Wallpaper Engine 渲染") : "MP4 · WebM · GIF · PNG / APNG"}</span>
           </div>}
         {source ? <span className="wallpaper-kind">{source.kind.toUpperCase()}</span> : null}
       </div>
@@ -159,9 +160,9 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         </div>
         <div className="toolbar">
           <label className="inline-toggle"><input type="checkbox" checked={value.codexAppWallpaperMuted}
-            disabled={source?.kind === "web"} onChange={e => onChange({ codexAppWallpaperMuted: e.currentTarget.checked })} /><span>{t("静音播放")}</span>
+            onChange={e => onChange({ codexAppWallpaperMuted: e.currentTarget.checked })} /><span>{t("静音播放")}</span>
             <span aria-hidden="true" className="toggle-switch-visual"><span className="toggle-switch-thumb" /></span></label>
-          <Button variant="secondary" disabled={!source || !["video", "scene"].includes(source.kind)}
+          <Button variant="secondary" disabled={!source || !["video", "scene", "web"].includes(source.kind)}
             onClick={() => onChange({ codexAppWallpaperPaused: !value.codexAppWallpaperPaused })}>
             {value.codexAppWallpaperPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
             {value.codexAppWallpaperPaused ? t("继续播放") : t("暂停视频")}
@@ -169,15 +170,15 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         </div>
       </div>
     </div>
-    {source?.kind === "scene" ? <div className="wallpaper-engine">
-      <p>{t("原生 Scene 需要 Windows 和已安装的 Wallpaper Engine；仅捕获独立渲染窗口，不修改桌面壁纸。")}</p>
+    {nativeProject ? <div className="wallpaper-engine">
+      <p>{t("Scene / Web 项目需要 Windows 和已安装的 Wallpaper Engine；仅捕获独立渲染窗口，不修改桌面壁纸。")}</p>
       <div className="toolbar">
         <Input aria-label={t("Wallpaper Engine 程序路径")} placeholder={t("自动从 Steam 壁纸目录查找，也可手动选择")}
           value={value.codexAppWallpaperEnginePath} onChange={e => onChange({ codexAppWallpaperEnginePath: e.currentTarget.value })} />
         <Button variant="secondary" disabled={busy} onClick={() => void chooseEngine()}>{t("选择程序")}</Button>
       </div>
     </div> : null}
-    {source?.kind === "web" ? <p className="wallpaper-note">{t("Web 项目使用隔离沙箱；仅加载项目内资源，不允许外部网络、应用启动或访问 Codex，依赖这些能力的项目可能无法完整运行。")}</p> : null}
+    {source?.kind === "web" ? <p className="wallpaper-note">{t("Web 项目在 Wallpaper Engine 中运行，Codex 只接收窗口画面；网络和宿主功能由 Wallpaper Engine 管理。")}</p> : null}
     <p className="wallpaper-note">{t("视频不超过 2 GiB；优先使用 MP4（H.264）或 WebM。PNG 保持原图，APNG、GIF、动画 WebP 保留动画。")}</p>
     <p className="wallpaper-note">{t("保存后，下次通过 Alunixa X 启动 Codex 时生效；预览始终静音。")}</p>
     {message ? <p className="wallpaper-message" role="status">{message}</p> : null}

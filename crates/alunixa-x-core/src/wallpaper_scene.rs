@@ -29,7 +29,7 @@ pub fn enabled(settings: &BackendSettings) -> bool {
 
 pub fn engine_path(project: &Path, configured: &str) -> anyhow::Result<PathBuf> {
     if !cfg!(windows) {
-        bail!("Wallpaper Engine 原生 Scene 仅支持 Windows；其他平台可使用视频或 Web 壁纸");
+        bail!("Wallpaper Engine Scene / Web 项目仅支持 Windows；其他平台可使用视频或动图壁纸");
     }
     let valid = |path: &Path| {
         path.is_file()
@@ -178,12 +178,29 @@ pub fn capture_script(engine: &Path, project: &Path, title: &str, muted: bool) -
 #[cfg(windows)]
 fn send_window_behind(title: &str) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        FindWindowW, HWND_BOTTOM, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        FindWindowW, GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, HWND_BOTTOM, SWP_FRAMECHANGED,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowLongPtrW, SetWindowPos, WS_CAPTION,
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+        WS_SYSMENU, WS_THICKFRAME,
     };
     use windows::core::PCWSTR;
     let title: Vec<u16> = title.encode_utf16().chain(Some(0)).collect();
     unsafe {
         if let Ok(window) = FindWindowW(PCWSTR::null(), PCWSTR(title.as_ptr())) {
+            // This exact UUID-named window belongs to our wallpaper session.
+            // Do not capture the WE title bar/borders or show another taskbar
+            // entry. Keep the window rendered (never minimize it).
+            let style = GetWindowLongPtrW(window, GWL_STYLE) as u32;
+            let chrome =
+                WS_CAPTION.0 | WS_THICKFRAME.0 | WS_SYSMENU.0 | WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0;
+            let _ = SetWindowLongPtrW(window, GWL_STYLE, (style & !chrome) as isize);
+            let extended = GetWindowLongPtrW(window, GWL_EXSTYLE) as u32;
+            let _ = SetWindowLongPtrW(
+                window,
+                GWL_EXSTYLE,
+                ((extended & !WS_EX_APPWINDOW.0) | WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0)
+                    as isize,
+            );
             let _ = SetWindowPos(
                 window,
                 HWND_BOTTOM,
@@ -191,7 +208,7 @@ fn send_window_behind(title: &str) {
                 0,
                 0,
                 0,
-                SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                SWP_FRAMECHANGED | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
             );
         }
     }
