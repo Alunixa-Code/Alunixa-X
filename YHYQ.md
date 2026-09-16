@@ -1855,3 +1855,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 正式 Actions 首轮 Windows job 104658943768 全量回归失败：imagegen_mcp::tests::configured_models_route_generation_and_edits_and_reload_default_without_restart，fixture socket read 在 imagegen_mcp.rs:666 返回 Windows 10035/WouldBlock，随后调用因测试服务关闭失败；core 汇总 329 passed/1 failed/1 ignored，未跳过门禁喵~
 - 通过已完成 job 的 logs API 在内存读取日志定位：既有 listener nonblocking，accept 后只设置 read timeout，未显式恢复 accepted stream blocking，Windows 请求分片时存在竞态；本轮壁纸/guardian 不是失败点，macOS 两架构 Rust 回归已通过喵~
 - 不改已发布标签或降低断言，等同一运行结束后仅重跑失败 Windows 作业一次并重新执行完整回归/构建；若仍失败需修复 fixture 后用新版本，不进行无界重试；日志未下载落地，不产生待清理临时文件喵~
+- 首轮正式运行已结束 failure（不是产品发行成功）：macOS arm64 7m04s、x64 15m38s 均完成全部回归/构建/资产上传，Windows fixture 失败令发布 job skipped；对同一 Actions 35053573074 执行唯一一次 gh run rerun --failed，attempt 2 保持产品/标签不变，等待完整 Windows 门禁和依赖发布 job 喵~

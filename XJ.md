@@ -154,6 +154,7 @@
 
 ## 19. Current Task
 ### 当前进行：v1.0.20 正式发行
+- Actions attempt 1 已结束 failure：两种 macOS 成功，Windows 上述夹具失败阻止发布；已对同一 run 35053573074 仅执行一次 --failed 重跑（attempt 2），保持同一产品 SHA 和标签，等待 Windows 完整门禁与依赖发布 job 喵~
 - Actions 首次 Windows job 104658943768 在既有 imagegen_mcp 测试夹具读取 socket 时返回 Windows 10035/WouldBlock，330 core 测试中一项失败；失败处 imagegen_mcp.rs:666 的 accept 后流未显式恢复 blocking，属已定位的跨平台测试竞态，不能将首轮称为全绿喵~
 - macOS arm64 已全成功、x64 Rust 回归已成功并继续构建；待整轮结束后只重跑一次失败的 Windows job，保留完整测试与所有断言，不改产品/版本/标签；如仍失败再按新的补丁版本处理，不盲目循环重跑喵~
 - 已完成原子推送；唯一 workflow_dispatch ref=v1.0.20，Actions 35053573074，产品 SHA 5c3b07dcbe3c936a391f3d801cb7a5950601d646 与远端 main/tag 解引用一致；后续只等待该运行，不重复派发或移动标签喵~
