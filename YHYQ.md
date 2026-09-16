@@ -2027,3 +2027,25 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本轮三个electron-run目录及两个fixture副本共209503026字节、无reparse point、自有Electron/fixture进程为0；准备严格限定项目.tmp清理，保留最终截图/日志和复用缓存，历史拒绝删除项不重试；同步更正XJ.md的当前架构/API/命令和下一步，产品源码保持v1.0.24冻结喵~
 - 包含审计提交与清理的命令被执行环境在启动前整体拒绝，因此该次提交和删除均未发生；单独只读确认五个目标仍在，停止删除且不换工具绕过；随后仅提交项目记忆/日志，不触碰冻结产品喵~
 - 核对实播脚本后把XJ.md负对照参数更正为实际的`--self-test-failure`；一次记忆补丁因上下文缺少Markdown列表前缀校验失败且未写入，随后按原行补正喵~
+
+## 2026-09-16 · v1.0.24 稳定背景回退版正式发布验收完成
+
+- 复用既有gh watch等待同一Actions35109688388，三平台完整测试/编译/打包/安装包结构门禁及发布job104847404641全部success；没有重复派发、复用历史二进制或移动标签喵~
+- Release390023532于2026-09-16T14:56:15Z正式发布（新加坡2026-09-16 22:56:15），非草稿、非预发布，匿名公开latest指向同一版本并有全部六个安装资产喵~
+- 产品1e724029b68b746c46545c33fd456e3c4a2973c7，annotated tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9；再次git ls-remote确认远端main/tag解引用均为产品SHA，与Actions head一致；后续只有本地审计提交，不再推送新产品喵~
+- 已运行既有.tmp/verify-current-release.py并明确退出0：发行正文与docs/releases/v1.0.24.md规范化换行后一致，三语说明完整，六个资产名称唯一且uploaded/非零，Actions SHA-256与GitHub digest逐项匹配，来源/匿名latest/完成日志均PASS；机器可读证据.tmp/v1.0.24-verified.json喵~
+- Windows x64 job104839954425：Rust41套件1128 passed/0 failed/1 ignored，前端118/118；macOS x64 job104839954575及arm64 job104839954424各Rust41套件1106/0/1、前端118/118，唯一ignored仍为既有父测试使用的JSON-RPC子进程入口喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.24-macos-arm64.dmg` | 33155520 | `6e6724b17a742a030f69f47afe91314db2db3d20b0403298e3c7323d14de848a` |
+| `Alunixa-X-1.0.24-macos-arm64.zip` | 28243415 | `d84feea572e0864fd85ac4cd4c6044d62cf6e8c17f8b40eea7abe55f32515fab` |
+| `Alunixa-X-1.0.24-macos-x64.dmg` | 34383979 | `0d7d41a3d11bd593f0da26fff9fa349e774a385a1a71ecd41878dab860a0b440` |
+| `Alunixa-X-1.0.24-macos-x64.zip` | 28800572 | `8dd23c7c1b5bd6e6dc7c7b4ae07d46ac60261886330537daaaf20a60d287ff02` |
+| `Alunixa-X-1.0.24-windows-x64-setup.exe` | 21732664 | `8c3bc94f5b92796c0c1b94b6478442e1bdab7565762a9e48e8ee48e0f839a91e` |
+| `Alunixa-X-1.0.24-windows-x64.zip` | 27493318 | `c242ccde9aa6f5e553a1b685f52e5b715c0905186fff7c170a32d7eeea4dab3e` |
+
+- 交付为恢复普通图片、保留已验证动图/视频、彻底移除原生WE场景/引擎窗口；旧Scene/Web仅明确的静态预览，不再宣传场景播放，俄语管理器/三语README及guardianv2修复保留喵~
+- 正式发行页已请求在Codex右侧浏览器显示，返回queued，未说成已在前台打开；本次没有下载安装包、修改真实config/auth、自动安装/重启Codex/Helper或关闭用户桌面引擎喵~
+- 本轮三个electron-run目录和两个fixture副本清理仍为执行环境拒绝状态，合计209503026字节保留，停止尝试；最终截图/日志/发行证据和缓存保留，原始CI日志通过API内存核验，没有新增日志下载文件喵~
+- 最终先同步XJ.md当前状态/架构/验证/部署/完成项/待办/下一步，再定向提交本地审计；产品源码保持正式v1.0.24不变喵~
