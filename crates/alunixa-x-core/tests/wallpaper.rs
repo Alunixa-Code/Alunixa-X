@@ -104,7 +104,9 @@ async fn web_projects_are_sandboxed_and_cannot_read_outside_resources() {
     )
     .unwrap();
     assert!(html.contains("sandbox allow-scripts"));
-    assert!(html.contains("connect-src 'none'"));
+    assert!(html.contains("connect-src http://127.0.0.1:"));
+    assert!(html.contains("/wallpaper/web/; frame-src 'none'"));
+    assert!(!html.contains("'self'"));
     assert!(!html.contains("allow-same-origin"));
     for path in [
         "/wallpaper/web/../secret.json",
@@ -115,6 +117,31 @@ async fn web_projects_are_sandboxed_and_cannot_read_outside_resources() {
         let response = request(settings.clone(), "GET", path, None).await;
         assert!(response.starts_with(b"HTTP/1.1 404"));
         assert!(!String::from_utf8_lossy(&response).contains("DO-NOT-SERVE"));
+    }
+}
+
+#[test]
+fn workshop_packaged_scenes_do_not_require_an_unpacked_scene_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("scene.pkg"), b"opaque native engine archive").unwrap();
+    std::fs::write(
+        root.join("project.json"),
+        br#"{"type":"scene","file":"scene.json","title":"Packaged scene"}"#,
+    )
+    .unwrap();
+    let source = wallpaper::resolve(root).unwrap();
+    assert_eq!(source.kind, "scene");
+    assert_eq!(source.entry.file_name().unwrap(), "scene.pkg");
+    assert_eq!(source.path.file_name().unwrap(), "project.json");
+    // A package must never hide an unsafe or arbitrary project entry.
+    for entry in ["../scene.json", r"..\scene.json", "absent.json"] {
+        std::fs::write(
+            root.join("project.json"),
+            serde_json::to_vec(&json!({"type":"scene","file":entry})).unwrap(),
+        )
+        .unwrap();
+        assert!(wallpaper::resolve(root).is_err());
     }
 }
 

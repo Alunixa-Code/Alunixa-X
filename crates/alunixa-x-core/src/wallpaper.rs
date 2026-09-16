@@ -76,7 +76,16 @@ pub fn resolve(path: &Path) -> anyhow::Result<WallpaperSource> {
         serde_json::from_slice(&std::fs::read(&project)?).context("project.json 格式无效")?;
     let kind = value["type"].as_str().unwrap_or("").to_ascii_lowercase();
     let file = value["file"].as_str().context("project.json 缺少 file")?;
-    let entry = contained_file(&root, file)?;
+    // Workshop scenes keep "file": "scene.json" in project.json even when the
+    // entry is inside scene.pkg. Let the native engine read its own archive.
+    let entry = if kind == "scene"
+        && file.eq_ignore_ascii_case("scene.json")
+        && !root.join(file).exists()
+    {
+        contained_file(&root, "scene.pkg")?
+    } else {
+        contained_file(&root, file)?
+    };
     let actual_kind = match kind.as_str() {
         "video" if media_type(&entry).is_some_and(|(kind, _)| kind == "video") => "video",
         "web"
@@ -324,8 +333,16 @@ pub async fn serve(
             .await;
         }
     };
-    // Sandboxed web projects cannot navigate/pop up or call the Helper's API.
-    let security = "Content-Security-Policy: default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts\r\n";
+    // An opaque-origin sandbox alone is not enough: 'self' also allows resource
+    // GETs against unrelated Helper routes. Limit all network sources to the
+    // selected project's read-only route, including local JSON/shader fetches.
+    let resources = format!(
+        "http://127.0.0.1:{}/wallpaper/web/",
+        stream.local_addr()?.port()
+    );
+    let security = format!(
+        "Content-Security-Policy: default-src 'none'; script-src {resources} 'unsafe-inline'; style-src {resources} 'unsafe-inline'; img-src {resources} data: blob:; media-src {resources} data: blob:; font-src {resources} data:; connect-src {resources}; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; sandbox allow-scripts\r\n"
+    );
     let head = format!(
         "HTTP/1.1 {}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: Range\r\nX-Content-Type-Options: nosniff\r\nCache-Control: no-store\r\n{security}Connection: close\r\n\r\n",
         if partial {

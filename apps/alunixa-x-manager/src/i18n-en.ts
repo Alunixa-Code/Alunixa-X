@@ -26,7 +26,7 @@ export const EN_PLAIN: Record<string, string> = {
   "Wallpaper Engine 程序路径": "Wallpaper Engine executable path",
   "自动从 Steam 壁纸目录查找，也可手动选择": "Detected from the Steam project folder, or choose manually",
   "选择程序": "Choose executable",
-  "Web 项目使用隔离沙箱；不允许外部网络、应用启动或访问 Codex，依赖这些能力的项目可能无法完整运行。": "Web projects run in a sandbox without network requests, app launching, or Codex access. Projects requiring those capabilities may not work fully.",
+  "Web 项目使用隔离沙箱；仅加载项目内资源，不允许外部网络、应用启动或访问 Codex，依赖这些能力的项目可能无法完整运行。": "Web projects run in a sandbox and load only project resources, without external network requests, app launching, or Codex access. Projects requiring those capabilities may not work fully.",
   "视频不超过 2 GiB；优先使用 MP4（H.264）或 WebM。PNG 保持原图，APNG、GIF、动画 WebP 保留动画。": "Videos: up to 2 GiB; MP4 (H.264) or WebM recommended. PNG stays unchanged; APNG, GIF, and animated WebP retain animation.",
   "保存后，下次通过 Alunixa X 启动 Codex 时生效；预览始终静音。": "Save, then launch Codex through Alunixa X to apply. Previews are always muted.",
   "处理中…": "Working…",

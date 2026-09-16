@@ -56,13 +56,18 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
   useEffect(() => {
     const element = video.current;
     if (!element) return;
+    let active = true;
     const sync = () => {
       if (document.hidden || value.codexAppWallpaperPaused) element.pause();
-      else void element.play().catch(() => setPreviewFailed(true));
+      else void element.play().catch(error => {
+        // Changing selection or StrictMode cleanup aborts an in-flight play().
+        // That is not a decode error for the replacement video.
+        if (active && error?.name !== "AbortError") setPreviewFailed(true);
+      });
     };
     sync();
     document.addEventListener("visibilitychange", sync);
-    return () => { document.removeEventListener("visibilitychange", sync); element.pause(); };
+    return () => { active = false; document.removeEventListener("visibilitychange", sync); element.pause(); };
   }, [source?.entry, value.codexAppWallpaperPaused]);
 
   const choose = async (directory: boolean) => {
@@ -170,7 +175,7 @@ export function WallpaperSettings({ value, onChange, onSave, onReset }: {
         <Button variant="secondary" disabled={busy} onClick={() => void chooseEngine()}>{t("选择程序")}</Button>
       </div>
     </div> : null}
-    {source?.kind === "web" ? <p className="wallpaper-note">{t("Web 项目使用隔离沙箱；不允许外部网络、应用启动或访问 Codex，依赖这些能力的项目可能无法完整运行。")}</p> : null}
+    {source?.kind === "web" ? <p className="wallpaper-note">{t("Web 项目使用隔离沙箱；仅加载项目内资源，不允许外部网络、应用启动或访问 Codex，依赖这些能力的项目可能无法完整运行。")}</p> : null}
     <p className="wallpaper-note">{t("视频不超过 2 GiB；优先使用 MP4（H.264）或 WebM。PNG 保持原图，APNG、GIF、动画 WebP 保留动画。")}</p>
     <p className="wallpaper-note">{t("保存后，下次通过 Alunixa X 启动 Codex 时生效；预览始终静音。")}</p>
     {message ? <p className="wallpaper-message" role="status">{message}</p> : null}

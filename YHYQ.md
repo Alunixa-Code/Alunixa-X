@@ -1808,3 +1808,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 当前仅本地实现和验证，本次未要求 push/发行；不修改真实 config/auth、不注入或重启运行中的 Codex/Helper/CDP，隔离 CODEX_HOME 验证配置修复喵~
 - 通用记忆仅用于保留现有修改和隔离验证习惯，当前项目实现均已重新读取；官方 web 搜索和 schema 打开仍未返回正文，不将空结果视为官方查证成功喵~
 - 已有 workspace 日志各套件成功，缺少上轮进程退出码；前端旧结果未含新测试，接下来执行最新回归与真实媒体/生产 UI 验收喵~
+- 新前端 106/106、TS、生产构建和 i18n 918/918 + 80/80 全通过；隔离 fixture 构建退出 0（2m08s），未升级第三方依赖喵~
+- 本机 Codex 的 features list 在三个临时 CODEX_HOME 分别复现无效标量、嵌套表、inline table 的 FeatureToml 错误；修复后均退出 0，三个原始配置备份逐字一致，真实 config/auth 不变喵~
+- Chromium 中真实 WebM 解码/时间推进/暂停/重复安装复用、输入框交互、GIF 像素变化和媒体销毁均通过；管理器第一次播放等待超时，检查发现卸载时的 play AbortError 可能污染替换预览，已区分取消与真实解码失败喵~
+- 只读检查本机 Steam 库发现已安装 Wallpaper Engine，两个实际 Scene 目录均有 scene.pkg 而无松散 scene.json；已补 packaged Scene 回退和路径逃逸回归，不解析原生包或用预览图冒充场景喵~
+- 加强 Web 壁纸 CSP，网络资源仅允许当前本地服务 /wallpaper/web/ 前缀，允许项目 JSON/着色器加载但不能用同源资源请求访问其他 Helper 路由，准备真实浏览器隔离验证喵~
+- 官方文档网页返回 403，直接获取官方 openai/codex schema 和 WE CLI 成功，确认 reasoning_effort 为非空字符串；一次多文件补丁因翻译原文不匹配而整体未应用，核对后按真实文本修正，未丢失现有修改喵~
