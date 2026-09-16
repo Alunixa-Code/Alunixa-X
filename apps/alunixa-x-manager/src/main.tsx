@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { getLocale } from "./i18n";
 import "./styles.css";
 
 /* ── Bundled fonts (offline, no Google Fonts request) ──
@@ -11,6 +12,7 @@ import "@fontsource/inter/600.css";
 import "@fontsource/inter/700.css";
 
 const app = document.getElementById("app");
+document.documentElement.lang = getLocale();
 
 if (app instanceof HTMLElement) {
   createRoot(app).render(<App />);

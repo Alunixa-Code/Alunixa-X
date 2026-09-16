@@ -110,7 +110,7 @@ import {
   type DreamSkinThemeLibraryResult,
   type DreamSkinThemeSummary,
 } from "./dream-skin";
-import { getLanguage, t, tf, toggleLanguage } from "@/i18n";
+import { getLanguage, getLocale, isLanguage, LANGUAGE_OPTIONS, setLanguage, t, tf } from "@/i18n";
 
 const isWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent);
 
@@ -1732,6 +1732,22 @@ export function App() {
     }
   };
 
+  const changeLanguage = async (next: string) => {
+    if (!isLanguage(next) || next === getLanguage() || imageModelsPending.current.busy) return;
+    const confirmed = await new Promise<boolean>((resolve) => {
+      setConfirmDialog({
+        title: t("切换界面语言"),
+        message: t("切换语言会重新加载管理器，未保存的编辑将丢失。已保存的配置和 Codex 语言不受影响。"),
+        confirmText: t("切换语言"),
+        cancelText: t("取消"),
+        resolve,
+      });
+    });
+    if (confirmed && !setLanguage(next)) {
+      showNotice(t("切换界面语言"), t("无法保存语言设置，请检查本地存储后重试。"));
+    }
+  };
+
   const navigate = async (next: Route) => {
     if (route === "imageModels") {
       if (imageModelsPending.current.busy) return;
@@ -2911,13 +2927,11 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (getLanguage() === "en") {
-      void invoke("update_tray_labels", {
-        showLabel: "Show window",
-        quitLabel: "Quit",
-        windowTitle: "Alunixa X",
-      });
-    }
+    void invoke("update_tray_labels", {
+      showLabel: t("显示窗口"),
+      quitLabel: t("退出"),
+      windowTitle: "Alunixa X",
+    }).catch((error: unknown) => console.error("update_tray_labels failed", error));
   }, []);
 
   useEffect(() => {
@@ -3170,14 +3184,18 @@ export function App() {
             <p>{routeSubtitle(route)}</p>
           </div>
           <div className="topbar-actions">
-            <Button
-              onClick={() => toggleLanguage()}
-              size="icon"
-              title={getLanguage() === "en" ? t("切换到中文") : t("切换到英文")}
-              variant="outline"
-            >
-              <Languages className="h-4 w-4" />
-            </Button>
+            <label className="language-picker" title={t("界面语言")}>
+              <Languages className="h-4 w-4" aria-hidden="true" />
+              <select
+                aria-label={t("界面语言")}
+                value={getLanguage()}
+                onChange={(event) => void changeLanguage(event.target.value)}
+              >
+                {LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} lang={option.locale}>{option.label}</option>
+                ))}
+              </select>
+            </label>
             <Button
               onClick={actions.toggleTheme}
               size="icon"
@@ -3513,7 +3531,7 @@ function OverviewScreen({
     { id: "model", label: t("模型"), value: selectedModel, ready: Boolean(profile.lastUsedModel || profile.model), icon: Cpu },
     { id: "tools", label: t("工具"), value: settings.enhancementsEnabled ? t("增强已接管") : t("基础模式"), ready: settings.enhancementsEnabled, icon: Boxes },
     { id: "codex", label: "Codex", value: overview?.codex_version || t("等待检测"), ready: codexReady, icon: Workflow },
-    { id: "runtime", label: t("运行"), value: runtimeState, ready: helperReady, icon: Activity },
+    { id: "runtime", label: t("运行"), value: runtimeState === "idle" ? t("待机") : statusLabel(runtimeState), ready: helperReady, icon: Activity },
   ];
   const readyCount = railNodes.filter((node) => node.ready).length;
   return (
@@ -10428,7 +10446,7 @@ function zedRemoteSourceLabel(source: string) {
 
 function formatTime(value: number) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("zh-CN");
+  return new Date(value).toLocaleString(getLocale());
 }
 
 function normalizedRemoteTimestamp(value: number | null | undefined) {
@@ -10438,7 +10456,7 @@ function normalizedRemoteTimestamp(value: number | null | undefined) {
 
 function formatRemoteTimestamp(value: number | null | undefined) {
   const timestamp = normalizedRemoteTimestamp(value);
-  return timestamp ? new Date(timestamp).toLocaleString(getLanguage() === "en" ? "en-US" : "zh-CN") : "-";
+  return timestamp ? new Date(timestamp).toLocaleString(getLocale()) : "-";
 }
 
 function remoteControlStatusLabel(status: string) {
