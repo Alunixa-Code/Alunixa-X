@@ -323,7 +323,14 @@ pub async fn install_bridge_with_wallpaper(
                 }
                 message = session.next_message() => {
                     match message {
-                        Ok(Some(_)) => session.enqueue_binding_calls(&mut pending_calls),
+                        Ok(Some(_)) => {
+                            // Do not put file I/O or a large WebSocket send inside
+                            // the select's cancellable next_message future.
+                            if let Err(error) = session.flush_wallpaper_requests().await {
+                                break format!("failed to serve wallpaper resource: {error:#}");
+                            }
+                            session.enqueue_binding_calls(&mut pending_calls);
+                        },
                         Ok(None) => break "CDP websocket closed".to_string(),
                         Err(error) => break format!("CDP websocket read failed: {error:#}"),
                     }
@@ -390,6 +397,7 @@ struct CdpSession<S> {
     handler: Option<BridgeHandler>,
     generation: Option<BridgeGeneration>,
     wallpaper: Option<crate::settings::BackendSettings>,
+    wallpaper_requests: VecDeque<Value>,
 }
 
 impl<S> CdpSession<S>
@@ -408,6 +416,7 @@ where
             handler: None,
             generation: None,
             wallpaper: None,
+            wallpaper_requests: VecDeque::new(),
         }
     }
 
@@ -500,6 +509,7 @@ where
             let Some(message) = self.next_message().await? else {
                 bail!("CDP websocket closed before response for {method} id {message_id}");
             };
+            self.flush_wallpaper_requests().await?;
 
             if let Some(response_id) = message.get("id").and_then(Value::as_u64) {
                 if response_id == message_id {
@@ -532,18 +542,27 @@ where
         if value.get("method").and_then(Value::as_str) == Some("Runtime.bindingCalled") {
             self.binding_calls.push_back(value.clone());
         }
-        // Handle paused resources even while waiting for installation/evaluate
-        // replies; otherwise a script awaiting a same-origin fetch can deadlock
-        // bridge installation. Only the registered private prefix is served.
         if value.get("method").and_then(Value::as_str) == Some("Fetch.requestPaused")
-            && let Some(settings) = &self.wallpaper
+            && self.wallpaper.is_some()
         {
-            let response = crate::wallpaper::cdp_response(&value["params"], settings).await;
-            self.send_command_without_wait(next_message_id(), "Fetch.fulfillRequest", response)
-                .await?;
+            self.wallpaper_requests.push_back(value["params"].clone());
         }
 
         Ok(Some(value))
+    }
+
+    async fn flush_wallpaper_requests(&mut self) -> anyhow::Result<()> {
+        // Called outside the read select, including during command installation,
+        // so neither a generation tick nor a ready bridge call can discard a
+        // consumed Fetch event or partially write a multi-megabyte response.
+        while let Some(request) = self.wallpaper_requests.pop_front() {
+            if let Some(settings) = &self.wallpaper {
+                let response = crate::wallpaper::cdp_response(&request, settings).await;
+                self.send_command_without_wait(next_message_id(), "Fetch.fulfillRequest", response)
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     fn enqueue_binding_calls(&mut self, pending_calls: &mut FuturesUnordered<PendingBridgeCall>) {

@@ -36,7 +36,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(test, label, timeout = 18000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
-    if (await test()) return;
+  if (await test()) return;
     await delay(120);
   }
   throw new Error(`timed out: ${label}`);
@@ -121,7 +121,11 @@ async function open(source, extra = {}) {
 async function verifyImage(name, animated = false) {
   const ctx = await open(path.join(work, name));
   try {
-    await until(() => ctx.evaluate(`window.fixtureEvents?.some(e=>e.event==="wallpaper_ready")`), name + " decoded");
+    await until(async () => {
+      const events = await ctx.evaluate(`window.fixtureEvents || []`);
+      assert(!events.some(e => e.event === "wallpaper_failed"), JSON.stringify(events));
+      return events.some(e => e.event === "wallpaper_ready");
+    }, name + " decoded", 30000);
     assert(!await ctx.evaluate(`window.fixtureEvents.some(e=>e.event==="wallpaper_failed")`));
     if (animated) {
       const hashes = new Set();
