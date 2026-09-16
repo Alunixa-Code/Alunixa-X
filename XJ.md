@@ -154,6 +154,7 @@
 
 ## 19. Current Task
 ### 当前进行：v1.0.20 正式发行
+- 已独立从完成的原始 macOS job 日志内存解析核验：macOS arm64 job 104658943704：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；macOS x64 job 104658943782：Rust 41 套件 1102 passed/0 failed/1 ignored，前端 107/107，Guardian 与壁纸套件均通过；两架构全部编译/打包及 bundle 门禁已成功，attempt 2 只重跑 Windows 和发布依赖，不复用其他产品版本喵~
 - Actions attempt 1 已结束 failure：两种 macOS 成功，Windows 上述夹具失败阻止发布；已对同一 run 35053573074 仅执行一次 --failed 重跑（attempt 2），保持同一产品 SHA 和标签，等待 Windows 完整门禁与依赖发布 job 喵~
 - Actions 首次 Windows job 104658943768 在既有 imagegen_mcp 测试夹具读取 socket 时返回 Windows 10035/WouldBlock，330 core 测试中一项失败；失败处 imagegen_mcp.rs:666 的 accept 后流未显式恢复 blocking，属已定位的跨平台测试竞态，不能将首轮称为全绿喵~
 - macOS arm64 已全成功、x64 Rust 回归已成功并继续构建；待整轮结束后只重跑一次失败的 Windows job，保留完整测试与所有断言，不改产品/版本/标签；如仍失败再按新的补丁版本处理，不盲目循环重跑喵~
