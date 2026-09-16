@@ -121,6 +121,42 @@ def verify_runtime(browser, url, video_url, gif):
     print("RENDERER: real WebM decode/time advance/pause/reuse/input/GIF motion/cleanup PASS")
 
 
+def verify_web(browser, url, root):
+    project = root / "web"
+    project.mkdir()
+    (project / "project.json").write_text('{"type":"web","file":"index.html"}', encoding="utf-8")
+    (project / "index.html").write_text(
+        '<body><div id="motion"></div><script src="main.js"></script></body>', encoding="utf-8")
+    (project / "data.json").write_text('{"local":true}', encoding="utf-8")
+    (project / "main.js").write_text("""
+      (async()=>{
+        const result={violations:[]};
+        addEventListener('securitypolicyviolation',e=>result.violations.push(e.blockedURI));
+        result.local=(await (await fetch('./data.json')).json()).local;
+        try{ void parent.document; result.parentBlocked=false; }catch{result.parentBlocked=true;}
+        try{await fetch('/backend/status');result.apiBlocked=false;}catch{result.apiBlocked=true;}
+        const img=new Image();img.src='/backend/status?image-probe=1';document.body.append(img);
+        await new Promise(r=>setTimeout(r,100));
+        document.body.dataset.result=JSON.stringify(result);
+      })();
+    """, encoding="utf-8")
+    with media_server(project) as media:
+        page = browser.new_page()
+        page.goto(url, wait_until="networkidle")
+        page.set_content('<main><iframe sandbox="allow-scripts" title="test wallpaper"></iframe></main>')
+        finished = []
+        page.on("requestfinished", lambda request: finished.append(request.url))
+        page.locator("iframe").evaluate("(f,url)=>f.src=url", media + "/wallpaper/web/index.html")
+        frame = page.frame_locator("iframe")
+        expect(frame.locator("body")).to_have_attribute("data-result", __import__("re").compile(".+"))
+        result = json.loads(frame.locator("body").get_attribute("data-result"))
+        assert result["local"] and result["parentBlocked"] and result["apiBlocked"], result
+        assert any("/backend/status" in value for value in result["violations"]), result
+        assert not any("/backend/status" in value for value in finished), finished
+        page.close()
+    print("WEB: actual Chromium local script/JSON loading, parent isolation, fetch/image Helper blocking PASS")
+
+
 def verify_manager(browser, url, video_url, output):
     saved = dict(relayProfiles=[], enhancementsEnabled=True, codexAppImageOverlayEnabled=False,
                  codexAppImageOverlayPath="", codexAppWallpaperMuted=True, codexAppWallpaperPaused=False)
@@ -171,7 +207,14 @@ def verify_manager(browser, url, video_url, output):
     expect(region).to_be_visible()
     region.get_by_role("button", name="上传壁纸媒体", exact=True).click()
     expect(region.locator("video")).to_have_count(1)
-    page.wait_for_function("document.querySelector('.wallpaper-preview video')?.currentTime > .1")
+    try:
+        page.wait_for_function("document.querySelector('.wallpaper-preview video')?.currentTime > .1")
+    except Exception:
+        page.screenshot(path=str(output / "wallpaper-ui-failure.png"), full_page=True)
+        print("MANAGER_PREVIEW_FAILURE", region.inner_text(), errors)
+        print(page.evaluate("""()=>{const v=document.querySelector('.wallpaper-preview video');
+          return v && {src:v.src,paused:v.paused,readyState:v.readyState,error:v.error?.message};}"""))
+        raise
     region.get_by_role("button", name="暂停视频").click()
     assert region.locator("video").evaluate("(v)=>v.paused")
     region.get_by_role("button", name="继续播放").click()
@@ -231,6 +274,7 @@ def main():
                 with media_server(clip) as media:
                     verify_runtime(browser, url, media + "/wallpaper/media", gif)
                     verify_manager(browser, url, media + "/wallpaper/media", output)
+                verify_web(browser, url, root)
             finally:
                 browser.close()
     print("WALLPAPER_VERIFICATION=PASS (native Wallpaper Engine rendering not exercised)")

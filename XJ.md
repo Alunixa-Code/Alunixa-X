@@ -40,6 +40,7 @@
 - 密码、API key、token、auth.json 正文均不保存到项目记忆或公开日志喵~
 
 ## 8. Development Commands
+- 壁纸 UI/媒体：先 `cargo build -p alunixa-x-core --example wallpaper_fixture --locked -j 2` 与前端生产构建，再 `python tools/verify-wallpaper-ui.py --codex <CLI绝对路径>`；仅临时 home/内存 Tauri/自有随机端口，截图位于 `.tmp/wallpaper-ui-{dark,light}.png` 喵~
 - 生图 UI：`python tools/verify-image-models-ui.py`，需要 Python Playwright/Chromium 与已构建前端；脚本自管随机端口/浏览器、仅内存 Tauri fixture，截图在 `.tmp/image-models-ui-{dark,light}.png` 喵~
 - 根目录：`cargo test --workspace --locked --no-fail-fast -- --test-threads=1`，`cargo check --workspace --all-targets --locked`，`cargo fmt --all -- --check` 喵~
 - 前端：`npm --prefix apps/alunixa-x-manager test`、`npm --prefix apps/alunixa-x-manager run check`、`npm --prefix apps/alunixa-x-manager run vite:build` 喵~
@@ -73,6 +74,7 @@
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
 ## 11. Important Files
+- `wallpaper.rs` 媒体导入/目录解析/路径约束/Range/CSP；`wallpaper_scene.rs` 自有 WE 窗口与精确捕获；`guardian_config.rs` TOML 定向校验；`WallpaperSettings.tsx` 共用控制面板；`docs/wallpapers.md` 使用方法与兼容边界喵~
 - `image_models.rs` 有序配置/校验/脱敏/并发修订；`imagegen_mcp.rs` 每次调用读取默认/显式选择及生成编辑/凭据隔离；`ImageModelsScreen.tsx` 独立页面；`tests/image_models.rs` 配置/备份/原始字段保留回归喵~
 - `docs/protocol-fidelity.md` 记录保真边界和协议契约；`tests/protocol_fidelity.rs` 为新增独立回归，不依赖真实模型账户喵~
 - `settings.rs` 设置合并与保存；`relay_config.rs` TOML 和上下文/模型窗口；`relay_switch.rs` 供应商切换回填喵~
@@ -137,6 +139,8 @@
 
 ## 19. Current Task
 ### 进行中：动态壁纸与 guardianv2
+- 打包场景/资源隔离/预览生命周期修复已提交 1522c17，新 fixture 构建退出 0（30.10s）；新增 Web 实际脚本/JSON/父页隔离/Helper 请求拦截测试，以及无精确窗口时不误捕获的 VM 回归喵~
+- 已补 CHANGELOG Unreleased 与 docs/wallpapers.md，明确单个项目目录、PNG/APNG 区别、Scene 仅 Windows 和捕获上限/未实机验收、保存后下次启动生效；未修改发行版本喵~
 - 2026-09-16 最新验收：106/106 前端、TS、Vite、i18n 918/918 + 80/80 通过；fixture 构建退出 0；本机 Codex 解析器在三种独立临时 CODEX_HOME 先复现 FeatureToml、修复后成功解析且备份一致，未改真实配置喵~
 - Chromium 已验证 WebM 时间推进/暂停/重复安装复用/输入不受阻挡/GIF 多帧/清理通过；管理器首次预览验收发现异步 play 被卸载打断后误标为解码失败，已加生命周期与 AbortError 区分，需重新验证喵~
 - 只读检查本机 Steam 库证实原生 Scene 的 scene.json 实际在 scene.pkg 内，已补解析回退及拒绝逃逸回归；Web CSP 改为所有网络资源仅限 /wallpaper/web/ 前缀，支持本地 JSON/着色器，不将 Helper 同源等同于安全喵~

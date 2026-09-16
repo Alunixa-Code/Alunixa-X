@@ -1814,3 +1814,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 只读检查本机 Steam 库发现已安装 Wallpaper Engine，两个实际 Scene 目录均有 scene.pkg 而无松散 scene.json；已补 packaged Scene 回退和路径逃逸回归，不解析原生包或用预览图冒充场景喵~
 - 加强 Web 壁纸 CSP，网络资源仅允许当前本地服务 /wallpaper/web/ 前缀，允许项目 JSON/着色器加载但不能用同源资源请求访问其他 Helper 路由，准备真实浏览器隔离验证喵~
 - 官方文档网页返回 403，直接获取官方 openai/codex schema 和 WE CLI 成功，确认 reasoning_effort 为非空字符串；一次多文件补丁因翻译原文不匹配而整体未应用，核对后按真实文本修正，未丢失现有修改喵~
+- 修复检查点 1522c17，更新后的 fixture 构建退出 0（30.10s）；增加真实 Chromium 的 Web 脚本/本地 JSON/父页隔离/Helper fetch 与图片拦截验证，增加找不到精确窗口时关闭自有窗口而不误捕获的 VM 测试喵~
+- 新增 docs/wallpapers.md 和 CHANGELOG Unreleased，记录格式/目录/使用方式/存储/修复备份/兼容边界；Native Scene 未做真实窗口渲染验收，保存后下次启动生效，不修改现有版本号或发行标签喵~

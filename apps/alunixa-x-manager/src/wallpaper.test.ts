@@ -42,6 +42,33 @@ test("scene reports an unavailable Electron capturer instead of using a preview"
   assert.equal(result.sourceId, undefined);
 });
 
+test("scene never falls back to an unrelated window when its exact title is absent", async () => {
+  const calls: unknown[][] = [];
+  const sandbox = {
+    process: { mainModule: { require(name: string) {
+      if (name === "electron") return {
+        app: { once() {} },
+        desktopCapturer: { async getSources() {
+          return [{ name: "Other wallpaper", id: "window:100:0" }];
+        } },
+      };
+      if (name === "node:child_process") return { spawn(_exe: string, args: unknown[]) {
+        calls.push(args);
+        return { once(event: string, callback: (code: number) => void) {
+          if (event === "exit") queueMicrotask(() => callback(0));
+        } };
+      } };
+      throw new Error(name);
+    } } },
+    setTimeout(callback: () => void) { queueMicrotask(callback); return 1; },
+    clearTimeout() {},
+  };
+  const result = JSON.parse(await vm.runInNewContext(script, sandbox));
+  assert.equal(result.status, "failed");
+  assert.equal(result.sourceId, undefined);
+  assert.deepEqual(calls.at(-1), ["-control", "closeWallpaper", "-location", options.title]);
+});
+
 test("wallpaper runtime uses sandboxed web frames and releases streams on teardown", () => {
   const source = readFileSync(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
   const runtime = source.split("function installAlunixaXImageOverlay()")[1].split("function scheduleAlunixaXImageOverlay")[0];
