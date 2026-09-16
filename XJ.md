@@ -166,6 +166,7 @@
 
 ## 19. Current Task
 ### 当前进行：修复真实 Codex 壁纸链路回归
+- 首轮完整workspace已退出101：41套件1125/1/1，唯一失败是静态源码断言仍要求旧backgroundImage的source变量，实际已改为解析后的url；已同步断言并新增媒体bridge契约，不忽略失败；接下来全量CDP专项/路径测试/无shim实播通过后由正式CI对最终源码完整构建验收喵~
 - **Native Web黑帧根因已证实**：Rust canonicalize 的Win32扩展前缀使WE内置Web浏览器产生无效file地址，单独诊断shim只移除该前缀后Web与真实Scene均通过非黑帧/多帧变化且截图无边框；大小写fixture改动不是修复根因喵~
 - 产品已加入仅跨引擎调用时的普通盘符/UNC路径规范化及三类路径回归，未动用户项目；接下来须以新产品fixture、不带诊断shim完成最终Electron复验；正在运行的workspace是该路径补丁前基线，最终新源码全量以正式CI为准，不混称验证范围喵~
 - 加强门禁准确拒绝Native Web黑帧；只读核对实际Workshop Web清单发现引擎导出type为大写Web，测试用最小清单写了小写web，现改为真实导出格式并继续验收；产品不修改用户项目文件喵~

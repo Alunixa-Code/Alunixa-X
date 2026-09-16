@@ -1914,3 +1914,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 原生Web非黑帧门禁拒绝当前fixture；只读对照真实Workshop项目显示引擎导出的type为大写Web而测试清单使用了小写web，已将fixture改为真实导出结构并复验，未修改任何用户WE项目或桌面配置喵~
 - 更改fixture清单大小写后仍黑屏，已通过单一变量诊断确认真正根因：Rust canonicalize带Win32扩展路径前缀，WE内置Web宿主转换成无效file地址；仅在自有Electron诊断进程把引擎参数转为普通盘符/UNC路径后，Web及用户选中Scene均通过非黑画面和多帧变化，窗口边框也已去除喵~
 - 已把上述规范化加入产品引擎调用并增加本地盘符/中文空格/UNC/POSIX回归，更新发行说明；诊断shim不属于产品、不作为最终验收，须重建产品fixture后不用shim复验；当前在途workspace明确为路径补丁前基线，正式CI负责最终源码全量喵~
+- 首轮workspace退出101，41套件1125 passed/1 failed/1 ignored，唯一失败为cdp_bridge静态源码断言仍使用旧source变量，而实现已用解析后的url；已同步该断言并额外断言媒体bridge调用，不删测试/跳过断言，准备最终94项CDP与新路径专项以及无shim实际播放喵~

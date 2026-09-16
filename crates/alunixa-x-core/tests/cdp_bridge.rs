@@ -189,7 +189,8 @@ fn injection_script_installs_image_overlay_from_data_uri() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("const source = config.dataUrl || config.sourceUrl || \"\""));
-    assert!(script.contains("backgroundImage: `url(\"${source.replace(/\"/g, \"%22\")}\")`"));
+    assert!(script.contains("backgroundImage: `url(\"${url.replace(/\"/g, \"%22\")}\")`"));
+    assert!(script.contains("window.__codexSessionDeleteBridge(\"/wallpaper/media\", {})"));
     assert!(script.contains(
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
     ));
