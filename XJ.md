@@ -11,6 +11,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- 2026-09-16 用户实测反馈 v1.0.21 静态壁纸回退、视频与 WE Scene 均不能用；正式发布/CI 成功不能代表真实 Codex 显示链路已通过，当前已重开运行链路修复任务，检查点 fb02cfc 喵~
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
 - v1.0.21 已原子推送 main/标签，产品提交 9c7f71259784bf0e60dc1137dd80644b0e0d1016，annotated tag 对象 8d1bfbfa67709a68c8bec7301e63a9bca37c2707；唯一正式 Actions 35055944380 已启动并等待验收喵~
 - v1.0.21 产品提交已准备为 ff12e34（完整 SHA 见发布后记录），targeted Windows socket fixture test 通过；v1.0.20 保留为失败构建标签，未生成 Release，准备推送新标签 v1.0.21 喵~
@@ -161,6 +162,11 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+### 当前进行：修复真实 Codex 壁纸链路回归
+- 用户反馈三类背景均失败；只读确认 D:\AlunixaX 的 launcher/manager 确为 1.0.21，不把问题归因于未升级；当前选中 WE project.json，日志 renderer.wallpaper_failed=Failed to fetch 喵~
+- 优先检查实际 app:// 页 CSP/资源请求、静态图与视频生命周期和原生 Scene 捕获接口；现有 image_overlay_installed 在加载成功前记录，不能作为显示成功依据，需增强真正渲染与错误验证喵~
+- 不重启/热注入当前 Codex、Helper 或 Wallpaper Engine 主进程，不改真实 config/auth/壁纸设置；用隔离环境复现和验证，再通过新版本 Actions/Release 交付，现有标签不动喵~
+
 ### 已完成：v1.0.21 正式发行
 - v1.0.21 正式发布验收完成：产品 9c7f71259784bf0e60dc1137dd80644b0e0d1016，唯一 Actions 35055944380 completed/success，Release 389646054 于 2026-09-16T04:51:34Z 发布；六资产/说明/来源/哈希/匿名 latest 全部 PASS，未安装或重启用户实例喵~
 - 当前交付已完成；下列准备/等待/失败重跑描述为历史阶段，v1.0.20 无 Release，v1.0.21 已完成三平台全量构建及六安装资产验收喵~
@@ -273,6 +279,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
+- 当前首先修复用户反馈的 v1.0.21 静态/视频/场景显示失败，完成失败→成功的实际显示证据后再发布补丁；以下已完成发行说明为历史，不等同于用户端效果通过喵~
 - v1.0.21 发布和验收已完成，交付正式 Release；不重复构建/发布或移动标签，不自动安装/重启；原生 Scene 实机捕获仍须另行验证，历史拒绝清理日志不再重试喵~
 - v1.0.19 已验收完成，不再构建或重复发布；本轮日志清理被环境拒绝，不重复尝试，保留记录/有用截图/复用缓存，向用户交付；后续如用户自行清理，仅处理已列出的已完成验证日志喵~
 - 不再构建或重复发布 v1.0.18；用户可从正式 Release 下载并在合适时机重新经 Alunixa X 启动，以加载本地协议修复，当前任务不自动安装/重启喵~

@@ -1882,3 +1882,9 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 | `Alunixa-X-1.0.21-windows-x64.zip` | 27466695 | `2fc7a4037213f6bf7ef590ccafef90c8277f3d0e8e1560ebe4d9168dcc066bca` |
 
 - 本次日志通过 API 在内存读取，未下载新增临时日志/安装包；保留既有验证截图与可复用构建缓存，历史已被拒绝删除的日志没有再次尝试清理；未修改真实 config/auth、安装内容或运行实例喵~
+
+## 2026-09-16 · 用户反馈 v1.0.21 壁纸全面失效
+
+- 用户原话：不行啊，你这做的不光静态壁纸不好用了，视频也不行，wallpaper 场景也不行；本轮修复真实显示链路并补真实端到端验收，不以 CI/附件通过代替功能成功喵~
+- 已读取 XJ.md 和近期日志、通用记忆相关定位/隔离习惯、React/测试技能；建立 fb02cfc 修改前检查点，保留 .tmp 和之前审计提交喵~
+- 只读确认实际 D:\AlunixaX launcher/manager 版本为 1.0.21，当前 Scene 配置开启；真实 launcher 日志显示 renderer.wallpaper_failed: Failed to fetch，image_overlay_installed 仅为创建节点而非成功加载，需要检查 app:// CSP/跨源/渲染链路喵~
