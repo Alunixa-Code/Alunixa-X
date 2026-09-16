@@ -14,10 +14,10 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- **v1.0.24已原子推送，等待唯一正式CI**：产品1e724029b68b746c46545c33fd456e3c4a2973c7，tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9；唯一workflow_dispatch Actions35109688388/ref=v1.0.24已queued，来源一致，不重复派发、不移动标签，尚未宣称Release完成喵~
+- **v1.0.24已原子推送，等待唯一正式CI**：产品1e724029b68b746c46545c33fd456e3c4a2973c7，tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9；唯一workflow_dispatch Actions35109688388/ref=v1.0.24已in_progress，三平台前端和版本门禁成功，继续等待完整构建和发布，来源一致，不重复派发、不移动标签，尚未宣称Release完成喵~
 - **v1.0.24本地发布门禁全部通过，待正式CI/Release**：回退图片/动图/视频及明确旧项目预览，彻底移除原生WE；完整workspace41套件1128/0/1、前端118/118、真实Electron全部媒体与用户已选项目预览/失败退出1、生产管理器/俄语UI及版本/依赖/格式/文档检查PASS，未修改或重启真实实例喵~
 - **最新决定：撤下Wallpaper Engine原生Scene/Web**；一轮实播中图片/大PNG/GIF/APNG/MP4/WebM/WE Video均通过，但离屏Native Web真实画面为黑，严格门禁失败；按用户允许回退，不继续其他隐藏方案，不发布当前离屏草案，保留图片/动图/视频并兼容旧项目静态预览喵~
-- **当前重开壁纸修复**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；生产路由未接通是已证实故障，额外WE窗口处理正在调查，尚未修复喵~
+- **历史故障起点，已由v1.0.24源码修复/移除**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；当前已修复生产媒体分发并删除原生引擎启动，未自动替换用户仍运行的旧版本喵~
 - **v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS** 喵~
 - 当前功能/文档/测试/推送/三平台构建/正式发布均完成；以下排队、待验证等条目为保留的历史阶段，不是当前待办，权威最终状态以本条和YHYQ.md最新验收段为准喵~
 - **v1.0.23已原子推送main/新annotated标签：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，tag对象254dd140107e49239d42f017814d8b4dd1ad249c；唯一正式workflow_dispatch Actions35096019206已启动，远端main/tag解引用/Actions head一致，等待同一运行不重复派发** 喵~
@@ -54,7 +54,7 @@
 
 ## 5. Architecture
 - v1.0.24当前方案覆盖旧原生描述：所有壁纸只有image/video；共享renderer bridge服务选中媒体，已删除wallpaper_scene模块/引擎启动/窗口捕获/项目脚本服务；旧Scene/Web只解析受目录约束的预览图片，staticPreview=true明确标记喵~
-- 普通壁纸沿用 `codexAppImageOverlay*`/muted/paused/enginePath；v1.0.22大图/视频经既有bridge调用受限CDP File→磁盘后备Blob URL，renderer按需播放/撤销；Scene/Web均由Windows WE自有无装饰窗口精确捕获，状态走bridge，不依赖HTTP媒体或Fetch拦截，不与DreamSkin混合喵~
+- 普通壁纸沿用 `codexAppImageOverlay*`/muted/paused；大图/视频经既有bridge调用受限CDP File→磁盘后备Blob URL，renderer按需播放/撤销，不与DreamSkin混合；历史v1.0.22的Scene/Web自有窗口捕获在v1.0.24删除，enginePath仅作为旧配置兼容字段保留、不使用喵~
 - 生图配置已存入既有 SettingsStore 的 imageModels 有序数组，独立 Tauri 命令做脱敏读取、带版本校验的定向保存；复用全量备份，不让普通设置的旧快照覆盖新生图配置喵~
 - MCP 每次调用重新读取 imageModels，默认首项，显式 model/profile_id 可选其他已配置项；没有配置时保留原 Helper 图片端点回退，不把 Key 写入 MCP schema/env 或下载图片请求喵~
 - `protocol_proxy.rs` 处理协议路由、转换和 SSE 状态机，新增子模块 `protocol_proxy/fidelity.rs` 处理能力校验及自包含原生回放，`launcher.rs` 负责 HTTP 错误/SSE 交付与超时喵~
@@ -70,7 +70,7 @@
 - 密码、API key、token、auth.json 正文均不保存到项目记忆或公开日志喵~
 
 ## 8. Development Commands
-- 实际宿主门禁：独立Electron运行 `tools/verify-wallpaper-electron.cjs --fixture <wallpaper_fixture副本绝对路径> --output <本项目.tmp绝对路径> --scene <显式project.json> --engine <显式wallpaper64.exe>`；需要Python/Pillow及ffmpeg，生成临时媒体/profile，绝不使用当前Codex进程，完整通过标志ELECTRON_WALLPAPER_PASS喵~
+- 实际宿主门禁：独立Electron运行 `tools/verify-wallpaper-electron.cjs --fixture <wallpaper_fixture副本绝对路径> --output <本项目.tmp绝对路径> [--legacy-project <显式project.json>]`；需要Python/Pillow及ffmpeg，生成临时媒体/profile，绝不使用当前Codex进程或启动WE，完整通过要求退出0且有ELECTRON_WALLPAPER_PASS，`--self-test-failure`负对照必须退出1喵~
 - 壁纸 UI/媒体：先 `cargo build -p alunixa-x-core --example wallpaper_fixture --locked -j 2` 与前端生产构建，再 `python tools/verify-wallpaper-ui.py --codex <CLI绝对路径>`；仅临时 home/内存 Tauri/自有随机端口，截图位于 `.tmp/wallpaper-ui-{dark,light}.png` 喵~
 - 生图 UI：`python tools/verify-image-models-ui.py`，需要 Python Playwright/Chromium 与已构建前端；脚本自管随机端口/浏览器、仅内存 Tauri fixture，截图在 `.tmp/image-models-ui-{dark,light}.png` 喵~
 - 根目录：`cargo test --workspace --locked --no-fail-fast -- --test-threads=1`，`cargo check --workspace --all-targets --locked`，`cargo fmt --all -- --check` 喵~
@@ -121,7 +121,7 @@
 
 ## 11. Important Files
 - README.md / README_EN.md / README_RU.md 为完整中英俄指南；src/i18n-ru.ts 为独立俄语词典；tools/verify-russian-ui.py 为内存Tauri+生产Chromium语言验收脚本喵~
-- `wallpaper.rs` 媒体导入/目录解析/路径约束/Range/CSP；`wallpaper_scene.rs` 自有 WE 窗口与精确捕获；`guardian_config.rs` TOML 定向校验；`WallpaperSettings.tsx` 共用控制面板；`docs/wallpapers.md` 使用方法与兼容边界喵~
+- `wallpaper.rs` 媒体导入/旧项目预览解析/路径约束/Range；`bridge.rs::install_renderer_bridge_with_disconnect` 为两个正式启动器和实播fixture的共用入口；`wallpaper_scene.rs` 已删除；`guardian_config.rs` TOML 定向校验；`WallpaperSettings.tsx` 共用控制面板；`docs/wallpapers.md` 使用方法与兼容边界喵~
 - `image_models.rs` 有序配置/校验/脱敏/并发修订；`imagegen_mcp.rs` 每次调用读取默认/显式选择及生成编辑/凭据隔离；`ImageModelsScreen.tsx` 独立页面；`tests/image_models.rs` 配置/备份/原始字段保留回归喵~
 - `docs/protocol-fidelity.md` 记录保真边界和协议契约；`tests/protocol_fidelity.rs` 为新增独立回归，不依赖真实模型账户喵~
 - `settings.rs` 设置合并与保存；`relay_config.rs` TOML 和上下文/模型窗口；`relay_switch.rs` 供应商切换回填喵~
@@ -129,9 +129,9 @@
 - `YHYQ.md` 保留完整历史和发行证据；本文件首次创建于 2026-09-13，前序历史未删除喵~
 
 ## 12. APIs, Interfaces, and Data Formats
-- v1.0.22运行显示：`/wallpaper/media` bridge（不是页面HTTP请求）无payload路径参数，仅返回选中媒体的`{status:"ok",sourceUrl:"blob:..."}`；`/wallpaper/scene` bridge返回自有Scene/Web状态；临时input成功/失败均移除，Blob由renderer撤销，Page agent启用后支持导航恢复喵~
-- 壁纸 Tauri：`import_wallpaper_media(path)` 无损复制，`inspect_wallpaper(path)` 只读解析，均返回 `{kind,title,path,entry,root}`；`repair_codex_feature_config()` 返回是否修复，真实文件先备份再原子写入喵~
-- Helper：`/wallpaper/media` 支持 GET/HEAD/单 Range/416，`/wallpaper/web/<relative>` 只读当前项目且 CSP 网络来源限定该前缀，`/wallpaper/scene` 返回 waiting/ok+sourceId/failed；关闭壁纸时资源路由返回 404，不接受任意本地文件 query 喵~
+- v1.0.24运行显示：`/wallpaper/media` bridge（不是页面HTTP请求）无payload路径参数，仅返回选中媒体的`{status:"ok",sourceUrl:"blob:..."}`；旧`/wallpaper/scene`不再提供原生状态；临时input成功/失败均移除，Blob由renderer撤销，Page agent启用后支持导航恢复喵~
+- 壁纸 Tauri：`import_wallpaper_media(path)` 无损复制，`inspect_wallpaper(path)` 只读解析，均返回 `{kind,title,path,entry,root,staticPreview}`，kind只有image/video，旧Scene/Web明确staticPreview=true；`repair_codex_feature_config()` 返回是否修复，真实文件先备份再原子写入喵~
+- Helper：`/wallpaper/media` 支持 GET/HEAD/单 Range/416；已移除`/wallpaper/web/<relative>`与`/wallpaper/scene`原生/脚本资源服务，均返回404；关闭壁纸时媒体路由也返回404，不接受任意本地文件query喵~
 - 生图 `imageModels: [{ id, name, baseUrl, apiKey, model }]` 有序数组首项为默认；UI `load_image_models` 返回 `{models:[{id,name,baseUrl,model,hasApiKey}],revision}`，`save_image_models(revision,models)` 中 `apiKey:null` 按 ID 保留原值，冲突拒绝；锁内仅替换原始 JSON 的 imageModels，保留其他及未知字段喵~
 - MCP `image_gen` 省略 model/profile_id 使用首项，显式 profile_id 区分同名模型，未配置时沿旧 Helper/gpt-image-2 回退；兼容 Images API 生成 JSON/编辑 multipart，首启需增强总开关，独立生图无需对话供应商开关喵~
 - 原生回放使用 reasoning.encrypted_content 中版本化 `alunixa-x-replay-v1:` Base64 JSON，携带 wire/native/items 并核对所覆盖历史；不等同于加密，不作为对话正文或诊断日志输出喵~
@@ -151,7 +151,8 @@
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
-- 当前仅待v1.0.24原子推送/唯一正式Actions/三平台六资产及来源正文哈希验收，旧俄语发行已完成不重做；当前用户实例保持不变喵~
+- v1.0.24本轮三个electron-run目录及两个fixture副本清理命令被执行环境在启动前整体拒绝，共209503026字节只读确认仍保留；停止删除，不重试或换工具绕过，最终截图/日志及其他缓存保持不变喵~
+- 当前仅待已派发v1.0.24唯一正式Actions35109688388/三平台六资产及来源正文哈希验收，推送已完成，旧俄语发行已完成不重做；当前用户实例保持不变喵~
 - v1.0.23用户要求的开发/构建/发布无剩余工作；不重复派发或重发，未自动安装到用户正在使用的程序，临时文件清理仅剩已记录的环境拒绝项喵~
 - v1.0.23本轮10个翻译中间TSV/源JSON/重复日志清理命令被执行环境预先拒绝，未执行删除；停止尝试且不换工具绕过，保留最终截图/日志/发行证据及可复用缓存喵~
 - v1.0.22正式CI运行中，准备清理本轮自有15个electron-run/late-profile临时目录（1207582829字节）及临时fixture副本/诊断shim；已确认自有测试进程为0，保留最终截图、实播证据及可复用缓存，不触碰历史拒绝删除的日志喵~
@@ -163,6 +164,7 @@
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
 ## 15. Known Bugs and Limitations
+- 当前v1.0.24不支持Wallpaper Engine原生Scene/Web播放，只支持普通媒体与明确标注的旧项目静态预览；以下原生捕获能力/故障记录为历史，不是待恢复的功能承诺喵~
 - 离屏WE方案实测不可交付：Win32坐标/无任务栏/无激活均合格，但Native Web非黑门禁超时；旧harness错误路径用了process.exitCode+app.quit导致退出码0，必须改成app.exit明确失败并要求最终PASS标志，不能看退出码0就认定成功喵~
 - v1.0.23真实生产壁纸bridge返回Unknown bridge path，而独立fixture直接调用壁纸处理器漏过生产分发；Scene启动先创建WE pop-out，置底不等于隐藏，用户报告额外窗口喵~
 - 俄语覆盖Alunixa X管理器及已知消息，不是Codex官方俄语包；用户模型名/第三方内容/未知上游错误保留原文；语言只存WebView，不改真实Codex配置；切换需确认并重载管理器，存储失败保持原页喵~
@@ -180,6 +182,7 @@
 - 旧运行中队列记录没有补丁捕获的删除证据时不盲目重放喵~
 
 ## 16. Design Decisions
+- 用户允许必要时退回图片背景；一次真实离屏试验失败后删除原生引擎功能，不无限试错，保留已验证的普通图片/动图/视频及旧项目只读静态预览，不回退俄语或guardianv2修复喵~
 - 新页面沿用现有紫色主题、Inter/JetBrains Mono 与卡片样式，以真实顺序编号、拖拽手柄和首项“默认”徽标表达优先级，不另造一套界面或新增依赖喵~
 - Windows 保留原品牌快捷方式并增加 AX 开始菜单别名；macOS 实际 bundle 文件名与显示名增加 (AX)，运行路径识别同时支持旧名称，不改变 bundle ID 或盲目删除旧安装喵~
 - 协议保真优先于表面成功：保留原始参数和结构化类型，只在能力能够表达时转换；未知结果不重放，不根据普通正文启发式删除“调试内容”喵~
@@ -212,6 +215,7 @@
 
 ## 19. Current Task
 ### 待正式发布：v1.0.24可靠媒体背景与移除原生WE
+- 2026-09-16接续：完整读取XJ.md/近期YHYQ.md并独立复核冻结源码差异、实播/负对照/UI日志及用户项目预览截图；新审计检查点9c1243d，产品未改；唯一gh watch进程仍存在，复用等待，不另建watch或重复派发喵~
 - 已推送，唯一正式35109688388等待中；只等待该运行，不再修改冻结源码或重复派发；成功后使用.tmp/verify-current-release.py验收六资产及三平台日志，并清理本轮自有临时媒体/profile/副本，保留证据及安装交付物喵~
 - 最终共享生产入口实播/完整测试/管理器及俄语UI全部通过，用户现选黑洞项目真实静态预览截图已目视；没有保留失败的离屏方案，不再启动Wallpaper Engine；具体通过项目见第9节喵~
 - 正式推送范围：统一媒体分发、移除Native Scene/Web及相关UI/API、旧配置安全且明确预览兼容、保留普通图片/动图/视频及俄语/guardian、失败测试退出码、新版本/完整中英俄说明；第三方依赖不变，现有标签不动喵~
@@ -389,7 +393,8 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 当前优先：修复生产wallpaper bridge并重做真实分发实播；解决自有WE窗口可见/失败残留，验证后发布新补丁，不重复旧俄语工作喵~
+- 当前优先：等待已在执行的v1.0.24唯一Actions35109688388完成，使用既有.tmp/verify-current-release.py核验六资产/三语正文/来源/哈希/匿名latest及三平台完整日志；收尾更新XJ.md/YHYQ.md，仅本地提交审计，不再推送或重复构建喵~
+- 本轮三个electron-run目录和两个fixture副本清理已被环境在运行前拒绝；保留并停止尝试，不重复删除或改用其他工具，不影响源码/构建/发布验收喵~
 - **v1.0.23交付完成**：向用户提供正式发布结果与俄语入口，无须再次构建或发布；后续仅按新需求继续，不自动安装/重启当前程序喵~
 - 本节以下为前轮历史计划，已由最终发布验收覆盖，不要重复执行旧版本推送/构建/发布喵~
 - 冻结v1.0.23并以[skip ci]最终提交原子推送main/新annotated标签，再仅派发一次release-assets.yml；等待同一运行并验收六资产/三语说明/来源/哈希和公开latest，保留v1.0.22喵~
@@ -405,6 +410,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-16接续发行验收：确认XJ.md存在并完整读取；GitHub API实查唯一CI正在执行且Release尚未生成；本地1128/0/1与最终实播PASS、负对照失败及生产UI记录已复核；补正本文件当前架构/API/命令中的过时原生场景描述，保留历史阶段喵~
 - 2026-09-16：用户再次反馈壁纸失败及WE弹窗；读取记录、检查真实版本及脱敏壁纸事件，发现Unknown bridge path；建立509e610检查点，未动运行实例和真实配置喵~
 - v1.0.23收尾：正式发布页在Codex右侧面板请求queued，发布核验以GitHub API/CLI、匿名latest和完成CI日志为准；本地审计记录已提交，产品源码未变，未再次push/构建喵~
 - 2026-09-16 20:48:18（新加坡）：v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS喵~
