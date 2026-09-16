@@ -1862,3 +1862,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 由于 v1.0.20 标签不可变且无 Release，本次自身版本升级为 1.0.21，发行说明从 v1.0.20 复制并修正版本/上一版引用；不移动或覆盖 v1.0.20，不升级第三方依赖喵~
 - v1.0.21 首轮 targeted test 被错误锁文件替换拦截：通用 1.0.20→1.0.21 替换把第三方 dyn-clone 1.0.20 改成不存在的 1.0.21；已从 HEAD 的 v1.0.20 锁文件恢复，并只更新四个本地 Rust 包及 package-lock 根版本，未产生依赖升级喵~
 - v1.0.21 版本门禁完成：accepted socket blocking targeted test 1/1 PASS，fmt/diff、项目版本一致、锁文件第三方依赖等价、新增行凭据扫描均 PASS；产品提交 ff12e34（完整 SHA 推送后记录），准备原子推送 main 与 v1.0.21 标签喵~
+- v1.0.21 已原子推送 main 和 annotated tag 成功：产品提交 9c7f71259784bf0e60dc1137dd80644b0e0d1016、tag 对象 8d1bfbfa67709a68c8bec7301e63a9bca37c2707，远端 main/tag 解引用一致；v1.0.20 失败标签和历史 Release 未改动喵~
+- 唯一正式 release-assets.yml 已派发，Actions 35055944380，workflow_dispatch ref=v1.0.21，head SHA 与标签一致；不重复派发，等待 Windows/macOS 全量验证和六资产发布喵~
