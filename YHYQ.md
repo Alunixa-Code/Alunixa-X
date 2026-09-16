@@ -1835,3 +1835,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 本机已安装 Codex CLI 在三个临时 CODEX_HOME 先复现 FeatureToml，再执行备份修复后 features list 全部退出0；临时配置原始备份逐字一致，真实 config/auth 没有修改；所有自有测试服务/进程已退出，临时媒体与运行副本自动清理喵~
 - 当前只交付本地源码/验证，不推送、发布、升级安装或重启当前 Codex/Helper/CDP；原生 Wallpaper Engine Scene 真实捕获链路没有实机验收，不把目录/VM/超时测试写成实际场景播放成功喵~
 - 准备清理本轮九份已结束验证日志，总计 222311 字节：wallpaper-check-final.log、wallpaper-check.log、wallpaper-frontend-final.log、wallpaper-frontend.log、wallpaper-ui-final.log、wallpaper-vite-final.log、wallpaper-vite.log、wallpaper-workspace-final.log、wallpaper-workspace.log；均限项目 .tmp 下，保留两张截图与复用缓存，历史已拒绝删除的发行日志不再尝试喵~
+- 验收记录已先单独提交 5dd53cb；随后明确列名、限制本项目 .tmp、无递归的 PowerShell 清理仍被执行环境在执行前拒绝，未发生删除；只读确认九日志全部仍在、共 222311 字节，不换工具/重复命令绕过喵~
+- 深浅主题截图分别为 .tmp/wallpaper-ui-dark.png（256418 字节）、wallpaper-ui-light.png（236162 字节）；最终产品文件无未提交改动，.tmp 仍为未追踪本地验证与历史产物，未声称工作树完全没有未追踪文件喵~
