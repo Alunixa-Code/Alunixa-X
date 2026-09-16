@@ -14,6 +14,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **最新决定：撤下Wallpaper Engine原生Scene/Web**；一轮实播中图片/大PNG/GIF/APNG/MP4/WebM/WE Video均通过，但离屏Native Web真实画面为黑，严格门禁失败；按用户允许回退，不继续其他隐藏方案，不发布当前离屏草案，保留图片/动图/视频并兼容旧项目静态预览喵~
 - **当前重开壁纸修复**：只读实查 D:\AlunixaX 启动器和管理器均1.0.23；13:11:09Z真实日志为 `/wallpaper/scene` → `bridge.unknown_path` → `renderer.wallpaper_failed: Unknown bridge path`；生产路由未接通是已证实故障，额外WE窗口处理正在调查，尚未修复喵~
 - **v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS** 喵~
 - 当前功能/文档/测试/推送/三平台构建/正式发布均完成；以下排队、待验证等条目为保留的历史阶段，不是当前待办，权威最终状态以本条和YHYQ.md最新验收段为准喵~
@@ -155,6 +156,7 @@
 - 本轮六份 `.tmp/v1.0.18-*.log` 清理被环境策略拒绝，已停止删除尝试并保留原文件；不声称清理完成，不改用其他工具绕过，后续需要环境允许或用户自行处理喵~
 
 ## 15. Known Bugs and Limitations
+- 离屏WE方案实测不可交付：Win32坐标/无任务栏/无激活均合格，但Native Web非黑门禁超时；旧harness错误路径用了process.exitCode+app.quit导致退出码0，必须改成app.exit明确失败并要求最终PASS标志，不能看退出码0就认定成功喵~
 - v1.0.23真实生产壁纸bridge返回Unknown bridge path，而独立fixture直接调用壁纸处理器漏过生产分发；Scene启动先创建WE pop-out，置底不等于隐藏，用户报告额外窗口喵~
 - 俄语覆盖Alunixa X管理器及已知消息，不是Codex官方俄语包；用户模型名/第三方内容/未知上游错误保留原文；语言只存WebView，不改真实Codex配置；切换需确认并重载管理器，存储失败保持原页喵~
 - v1.0.22已在独立Electron+实际WE验证Scene/Web捕获，取代下面v1.0.21“未实机验收”的历史状态；原生项目仅Windows并依赖WE，Web网络/宿主能力由WE管理而非Codex iframe沙箱，用户当前Codex仍为已安装旧程序，未自动替换/重启喵~
@@ -203,6 +205,10 @@
 
 ## 19. Current Task
 ### 进行中：真实壁纸bridge与额外Wallpaper Engine窗口
+- **当前执行回退**：撤下原生Scene/Web与全部WE自动启动/窗口捕获，不再尝试不同隐藏方案；保留刚通过实播的图片/动图/视频，旧Scene/Web项目只按明确标记的静态预览兼容，无预览则要求重新选图片，原项目文件不改喵~
+- Electron日志.tmp/wallpaper-production-electron.log：普通/大PNG、GIF/APNG、MP4跳转循环、WebM、WE Video已过；Native Web离屏矩形left=-2848/right=-1552、无任务栏/无激活/非最小化，但非黑画面超时，Scene尚未执行，整套失败；无ELECTRON_WALLPAPER_PASS，错误退出码问题一并修正喵~
+- 先前1.0.24离屏发行草案尚未推送，必须重写为移除不可靠WE场景与恢复稳定媒体路径；原生方案历史提交保留便于追踪，不作为最终功能喵~
+- fixture重建已明确退出0（2m45s），当前以自有副本运行完整共享生产入口Electron实播及真实Scene/Web离屏检查，CDP/壁纸Rust专项并行执行；1.0.24三语发行说明草案已准备，未标记验收成功喵~
 - TS/i18n/品牌通过，保留923+80/92/79完整俄语；中英俄README及壁纸指南草拟1.0.24生产路由修复、离屏方案及只使用静态图片的入口，最终是否保留Scene取决于当前实播门禁，尚未推送发布喵~
 - 用户允许不稳定则回退图片背景；采用有界的一轮共享生产入口实播/窗口验证，失败则撤掉不稳定部分，不发布未经验证的场景方案喵~
 - 前端完整118/118已退出成功；用户新消息后原Rust exec会话不可恢复，已只读确认无cargo/rustc进程且fixture exe仅2MiB疑似链接中断，不能当作构建成功，须重新构建到明确退出0再测试喵~
