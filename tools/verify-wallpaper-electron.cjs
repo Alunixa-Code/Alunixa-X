@@ -36,7 +36,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(test, label, timeout = 18000) {
   const end = Date.now() + timeout;
   while (Date.now() < end) {
-  if (await test()) return;
+    if (await test()) return;
     await delay(120);
   }
   throw new Error(`timed out: ${label}`);
@@ -87,6 +87,14 @@ async function open(source, extra = {}) {
   const w = new BrowserWindow({ show: false, width: 960, height: 640,
     webPreferences: { nodeIntegration: false, contextIsolation: true, backgroundThrottling: false } });
   windows.add(w);
+  const network = [];
+  w.webContents.debugger.attach("1.3");
+  await w.webContents.debugger.sendCommand("Network.enable");
+  w.webContents.debugger.on("message", (_event, method, params) => {
+    if (method === "Network.loadingFailed") network.push({ method, ...params });
+    if (method === "Network.responseReceived" && params.response.url.includes("_alunixa-x-wallpaper"))
+      network.push({ method, status: params.response.status, mime: params.response.mimeType, url: params.response.url });
+  });
   await w.loadURL("app://-/index.html");
   await w.webContents.executeJavaScript(`
     window.webResult=null;window.addEventListener("message",e=>{if(e.data?.fixtureWeb)window.webResult=e.data});
@@ -116,7 +124,7 @@ async function open(source, extra = {}) {
     if (child.exitCode === null) child.kill();
     children.delete(child);
   };
-  return { w, evaluate, done };
+  return { w, evaluate, done, diagnostics: () => ({ stdout, stderr, network }) };
 }
 async function verifyImage(name, animated = false) {
   const ctx = await open(path.join(work, name));
@@ -146,6 +154,9 @@ async function verifyImage(name, animated = false) {
       await until(() => ctx.evaluate(`window.fixtureEvents?.some(e=>e.event==="wallpaper_ready")`), "reload keeps transport");
     }
     console.log("PASS", name, animated ? "decoded + real pixel animation" : "decoded under host CSP");
+  } catch (error) {
+    console.error("IMAGE_DIAGNOSTICS", JSON.stringify(ctx.diagnostics()));
+    throw error;
   } finally { await ctx.done(); }
 }
 async function verifyVideo(name, source, extra = {}) {
