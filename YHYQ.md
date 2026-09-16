@@ -1965,3 +1965,24 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 
 - v1.0.23本地完整workspace退出0：41套件，1127 passed/0 failed/1 ignored；随后严格串行all-targets check退出0（1m26s），fmt通过；当前产品1429be0未再修改，仍等待同一正式Actions35096019206喵~
 - 完整三语README含俄语生产截图已推送，右侧README_RU预览请求返回queued；截图目视确认深浅主题和俄语导航换行可用，不将UI fixture当成原生托盘截图或真实Codex运行验证喵~
+
+## 2026-09-16 · v1.0.23 俄语版正式发布验收完成
+
+- v1.0.23正式发布验收完成：产品1429be066f0a5c55abecc3b7323221ea8e34c19c，唯一Actions35096019206 completed/success，Release 389916454于2026-09-16T12:48:18Z发布（新加坡2026-09-16 20:48:18）；六资产/中俄英正文/来源/哈希/匿名latest/完成日志全部PASS喵~
+- 三平台正式前端均118/118；独立完成日志核验如下，唯一ignored为既有父测试调用的JSON-RPC子进程入口，未新增忽略项喵~
+- Windows x64 job 104793526799：Rust 41套件 1127 passed/0 failed/1 ignored，前端118/118，完整回归/编译/打包均success喵~
+- macOS x64 job 104793526749：Rust 41套件 1105 passed/0 failed/1 ignored，前端118/118，完整回归/编译/打包均success喵~
+- macOS arm64 job 104793526701：Rust 41套件 1105 passed/0 failed/1 ignored，前端118/118，完整回归/编译/打包均success喵~
+- 发布job104799853418成功，Release非草稿/非预发布；说明与docs/releases/v1.0.23.md规范化换行后一致，产品/main/tag解引用/Actions head均1429be066f0a5c55abecc3b7323221ea8e34c19c；六资产名称唯一、uploaded且非零，Actions SHA-256与GitHub digest逐项一致，匿名latest返回相同Release/六资产喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.23-macos-arm64.dmg` | 33174334 | `ea694851a31d7e36b4cb8913d1d510ccfb1b4ecae575bf118c540bc49d8edbd4` |
+| `Alunixa-X-1.0.23-macos-arm64.zip` | 28299237 | `3e70ddcf491c1105d633dbcd332c8c26347885521eba000e12eaea25a25ce5e8` |
+| `Alunixa-X-1.0.23-macos-x64.dmg` | 34423009 | `c8cfc6cbb073ef967453171726e3353a6a9be4071ba9d6990db4afaea3b609c2` |
+| `Alunixa-X-1.0.23-macos-x64.zip` | 28823499 | `d9227e99d4bcbd096a2b4061a7434f69ff66ede038d32fb00d2e628e035b8580` |
+| `Alunixa-X-1.0.23-windows-x64-setup.exe` | 21691843 | `91ccd83d586d52fdf2af85dd1a03a8b1f209407f06c478f7b5d463ed22ff886c` |
+| `Alunixa-X-1.0.23-windows-x64.zip` | 27412191 | `ad2f55f99cd967d2b9cd7f217bade4d1445bb47ebda7932ce9cbe71a1b797c98` |
+
+- Web公开发布页再次确认Latest/v1.0.23与完整中俄英说明；未移动旧标签、未复用旧二进制、未自动安装或重启当前Codex/Helper，正式README三语已经随产品推送喵~
+- 本轮10个临时翻译文件清理仍为执行环境拒绝状态，不重复或绕过；保留最终证据/截图/可复用缓存，日志通过API内存读取，没有下载新增安装包或原始CI日志喵~
