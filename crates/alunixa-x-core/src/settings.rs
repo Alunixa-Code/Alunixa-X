@@ -588,6 +588,12 @@ pub struct BackendSettings {
     pub codex_app_image_overlay_enabled: bool,
     #[serde(rename = "codexAppImageOverlayPath", default)]
     pub codex_app_image_overlay_path: String,
+    #[serde(rename = "codexAppWallpaperMuted", default = "default_true")]
+    pub codex_app_wallpaper_muted: bool,
+    #[serde(rename = "codexAppWallpaperPaused", default)]
+    pub codex_app_wallpaper_paused: bool,
+    #[serde(rename = "codexAppWallpaperEnginePath", default)]
+    pub codex_app_wallpaper_engine_path: String,
     #[serde(
         rename = "codexAppImageOverlayOpacity",
         default = "default_image_overlay_opacity",
@@ -726,6 +732,9 @@ impl Default for BackendSettings {
             codex_app_instructions: String::new(),
             codex_app_image_overlay_enabled: false,
             codex_app_image_overlay_path: String::new(),
+            codex_app_wallpaper_muted: true,
+            codex_app_wallpaper_paused: false,
+            codex_app_wallpaper_engine_path: String::new(),
             codex_app_image_overlay_opacity: default_image_overlay_opacity(),
             codex_app_image_overlay_fit_mode: default_image_overlay_fit_mode(),
             codex_app_dream_skin_enabled: false,
@@ -1847,6 +1856,11 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
         );
     }
     merge_bool_setting(target, source, "codexAppImageOverlayEnabled");
+    merge_bool_setting(target, source, "codexAppWallpaperMuted");
+    merge_bool_setting(target, source, "codexAppWallpaperPaused");
+    if let Some(value) = source.get("codexAppWallpaperEnginePath").and_then(Value::as_str) {
+        target.insert("codexAppWallpaperEnginePath".into(), Value::String(value.into()));
+    }
     if let Some(value) = source
         .get("codexAppImageOverlayPath")
         .and_then(Value::as_str)

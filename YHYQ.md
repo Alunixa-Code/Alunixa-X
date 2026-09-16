@@ -1797,3 +1797,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已检查现有壁纸 data URI/Helper/React 设置链路和 guardianv2 修复；现有修复漏验结构化字段，官方 config.schema.json 证实 Guardian 及嵌套对象禁止未知字段；本机默认 config 不含 guardianv2，未更改真实文件喵~
 - 已读取前端设计、React、WebUI 测试、OpenAI Docs 技能；通用记忆仅用于沿用先查本机布局及隔离验证习惯，不引用旧仓库实现喵~
 - 官方 web 工具未返回正文，使用 HTTPS 实际读取 openai/codex config.schema.json 与 Wallpaper Engine 官方 CLI 文档；尝试两个 features.rs 路径为 404，已停止猜测路径喵~
+- 实现第一阶段初稿：新增 guardian_config.rs、wallpaper.rs、wallpaper_scene.rs；接入结构化字段修复、备份/供应商写入防回灌、无损媒体导入、项目目录识别、视频 Range 流与场景精确窗口捕获；已修改注入生命周期和 Tauri 命令，尚未编译验收喵~

@@ -604,21 +604,18 @@
 
   function installAlunixaXImageOverlay() {
     const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
-    const canQueryById = typeof document?.getElementById === "function";
-    const existing = canQueryById ? document.getElementById(alunixaXImageOverlayId) : null;
-    const source = config.dataUrl || "";
+    const source = config.dataUrl || config.sourceUrl || "";
+    const signature = JSON.stringify(config);
+    const old = window.__alunixaXWallpaperRuntime;
+    if (old?.signature === signature && old.element?.isConnected) return;
+    old?.cleanup?.();
+    document.getElementById?.(alunixaXImageOverlayId)?.remove();
     if (!config.enabled || !source) {
-      if (window.__alunixaXImageOverlayBlobUrl) {
-        URL.revokeObjectURL(window.__alunixaXImageOverlayBlobUrl);
-        window.__alunixaXImageOverlayBlobUrl = "";
-      }
-      if (existing) existing.remove();
+      if (config.error) sendAlunixaXDiagnostic("wallpaper_failed", { message: config.error });
       return;
     }
     const root = document?.documentElement;
-    if (!root || typeof document?.createElement !== "function") {
-      return;
-    }
+    if (!root || typeof document?.createElement !== "function") return;
     const opacity = Math.min(1, Math.max(0.01, Number(config.opacity) || 0.35));
     const fitMode = ["fill", "fit", "stretch", "tile", "center"].includes(config.fitMode)
       ? config.fitMode
@@ -630,8 +627,7 @@
       tile: { size: "auto", position: "left top", repeat: "repeat" },
       center: { size: "auto", position: "center center", repeat: "no-repeat" },
     }[fitMode];
-    const overlay = existing?.tagName === "DIV" ? existing : document.createElement("div");
-    if (existing && existing !== overlay) existing.remove();
+    const overlay = document.createElement("div");
     overlay.id = alunixaXImageOverlayId;
     overlay.setAttribute("aria-hidden", "true");
     Object.assign(overlay.style, {
@@ -639,21 +635,125 @@
       inset: "0",
       width: "100vw",
       height: "100vh",
-      backgroundImage: `url("${source.replace(/"/g, "%22")}")`,
-      backgroundSize: fitStyles.size,
-      backgroundPosition: fitStyles.position,
-      backgroundRepeat: fitStyles.repeat,
       opacity: String(opacity),
       pointerEvents: "none",
       zIndex: "2147483646",
       userSelect: "none",
+      overflow: "hidden",
     });
-    if (!overlay.parentElement) root.appendChild(overlay);
-    sendAlunixaXDiagnostic("image_overlay_installed", {
-      opacity,
-      fitMode,
-      sourceKind: source.startsWith("data:") ? "data-uri" : "unknown",
-    });
+    root.appendChild(overlay);
+    let stopped = false;
+    let video = null;
+    let stream = null;
+    let notice = null;
+    const abort = new AbortController();
+    const timers = new Set();
+    const reportFailure = (message) => {
+      if (stopped || notice) return;
+      sendAlunixaXDiagnostic("wallpaper_failed", { kind: config.kind, message });
+      notice = document.createElement("button");
+      notice.type = "button";
+      notice.textContent = `${message} · ×`;
+      notice.setAttribute("role", "status");
+      Object.assign(notice.style, { position:"fixed", right:"16px", bottom:"16px", zIndex:"2147483647",
+        maxWidth:"420px", padding:"10px 14px", borderRadius:"8px", background:"#252525",
+        color:"#fff", border:"1px solid #777", cursor:"pointer", font:"13px system-ui" });
+      notice.onclick = () => notice.remove();
+      root.appendChild(notice);
+    };
+    const syncPlayback = () => {
+      if (!video || stopped) return;
+      if (document.hidden || config.paused) video.pause();
+      else video.play().catch(() => reportFailure("壁纸播放失败，请检查视频编码或静音设置"));
+    };
+    const cleanup = () => {
+      stopped = true;
+      abort.abort();
+      timers.forEach(clearTimeout);
+      document.removeEventListener("visibilitychange", syncPlayback);
+      window.removeEventListener("pagehide", cleanup);
+      if (video) {
+        video.pause();
+        video.srcObject = null;
+        video.removeAttribute("src");
+        video.load();
+      }
+      stream?.getTracks().forEach(track => track.stop());
+      overlay.remove();
+      notice?.remove();
+      if (window.__alunixaXWallpaperRuntime?.element === overlay) delete window.__alunixaXWallpaperRuntime;
+    };
+    window.__alunixaXWallpaperRuntime = { signature, element: overlay, cleanup };
+    window.addEventListener("pagehide", cleanup, { once: true });
+    if (config.kind === "video" || config.kind === "scene") {
+      video = document.createElement("video");
+      video.autoplay = true;
+      video.loop = true;
+      video.muted = config.kind === "scene" || config.muted !== false;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.disablePictureInPicture = true;
+      video.setAttribute("aria-hidden", "true");
+      Object.assign(video.style, { width:"100%", height:"100%", pointerEvents:"none",
+        objectFit: ({ fill:"cover", stretch:"fill", center:"none", tile:"contain" })[fitMode] || "contain" });
+      video.onerror = () => reportFailure("视频无法解码，请使用 MP4（H.264）或 WebM");
+      overlay.appendChild(video);
+      document.addEventListener("visibilitychange", syncPlayback);
+      if (config.kind === "video") {
+        video.src = source;
+        syncPlayback();
+      } else {
+        const connectScene = async () => {
+          try {
+            let state;
+            for (let attempt = 0; attempt < 40 && !stopped; attempt++) {
+              const response = await fetch(config.sceneUrl, { signal: abort.signal });
+              if (!response.ok) throw new Error("场景接口未就绪");
+              state = await response.json();
+              if (state.status !== "waiting") break;
+              await new Promise(resolve => {
+                const timer = setTimeout(() => { timers.delete(timer); resolve(); }, 500);
+                timers.add(timer);
+                abort.signal.addEventListener("abort", resolve, { once:true });
+              });
+            }
+            if (stopped) return;
+            if (state?.status !== "ok" || !/^window:[0-9]+:[0-9]+$/.test(state.sourceId || "")) {
+              throw new Error(state?.message || "Wallpaper Engine 场景启动超时");
+            }
+            const captured = await navigator.mediaDevices.getUserMedia({
+              audio:false, video:{ mandatory:{ chromeMediaSource:"desktop", chromeMediaSourceId:state.sourceId,
+                maxWidth:1280, maxHeight:720, maxFrameRate:24 } },
+            });
+            if (stopped) { captured.getTracks().forEach(track => track.stop()); return; }
+            stream = captured;
+            stream.getVideoTracks().forEach(track => {
+              track.onended = () => reportFailure("场景渲染窗口已关闭，请重新通过 Alunixa X 启动");
+            });
+            video.srcObject = stream;
+            syncPlayback();
+          } catch (error) {
+            if (!stopped) reportFailure(error?.message || "原生场景捕获不可用");
+          }
+        };
+        void connectScene();
+      }
+    } else if (config.kind === "web") {
+      const frame = document.createElement("iframe");
+      frame.title = "Wallpaper";
+      frame.tabIndex = -1;
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.referrerPolicy = "no-referrer";
+      frame.src = source;
+      Object.assign(frame.style, { width:"100%", height:"100%", border:"0", pointerEvents:"none" });
+      overlay.appendChild(frame);
+    } else {
+      Object.assign(overlay.style, {
+        backgroundImage: `url("${source.replace(/"/g, "%22")}")`,
+        backgroundSize: fitStyles.size, backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
+      });
+    }
+    sendAlunixaXDiagnostic("image_overlay_installed", { opacity, fitMode, kind:config.kind || "image" });
   }
 
   function scheduleAlunixaXImageOverlay() {

@@ -32,10 +32,6 @@ const RESERVED_MODEL_PROVIDER_IDS: &[&str] = &[
     "oss",
     "ollama-chat",
 ];
-/// New Codex still supports `guardianv2` as a boolean or structured table.
-/// Only a legacy scalar value that cannot match either `FeatureToml` variant
-/// may be removed automatically; structured Guardian settings are preserved.
-const STALE_FEATURE_KEYS: &[&str] = &["guardianv2"];
 /// Codex Desktop versions at or after this release no longer inherit the
 /// ChatGPT auth.json token for custom providers when the provider explicitly
 /// sets `requires_openai_auth = false`.
@@ -180,6 +176,7 @@ pub fn sync_codex_agent_capabilities_in_home(
     let mut changed =
         set_codex_sub_agent_max_threads_in_home(home, settings.codex_app_sub_agent_max_threads)?;
     changed |= set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
+    changed |= repair_stale_feature_entries_in_home(home)?;
     Ok(changed)
 }
 
@@ -217,29 +214,17 @@ pub fn repair_stale_feature_entries_in_home(home: &Path) -> anyhow::Result<bool>
             return Err(error).with_context(|| format!("读取 {} 失败", config_path.display()));
         }
     };
-    let mut document = parse_toml_document(&existing)?;
-    let Some(features) = document
-        .get_mut("features")
-        .and_then(Item::as_table_like_mut)
-    else {
-        return Ok(false);
-    };
-    let mut removed = Vec::new();
-    for key in STALE_FEATURE_KEYS {
-        let invalid_scalar = features
-            .get(*key)
-            .is_some_and(|item| item.as_bool().is_none() && item.as_table_like().is_none());
-        if invalid_scalar && features.remove(key).is_some() {
-            removed.push(*key);
-        }
-    }
+    let (updated, removed) = crate::guardian_config::repair_text(&existing)?;
     if removed.is_empty() {
         return Ok(false);
     }
-    if features.is_empty() {
-        document.as_table_mut().remove("features");
-    }
-    let updated = ensure_trailing_newline(document.to_string());
+    // Abort if the original cannot be backed up; never log field values.
+    let backup = home.join("alunixa-x-config-repair-backups");
+    std::fs::create_dir_all(&backup)?;
+    crate::settings::atomic_write(
+        &backup.join(format!("guardianv2-{}.toml", uuid::Uuid::new_v4())),
+        existing.as_bytes(),
+    )?;
     crate::settings::atomic_write(&config_path, updated.as_bytes())?;
     let _ = crate::diagnostic_log::append_diagnostic_log(
         "codex_config.stale_feature_entries_repaired",
@@ -1508,6 +1493,13 @@ fn write_codex_live_atomic(
         None => None,
     };
     let config_text = config_text.as_deref();
+
+    // A provider switch must not reintroduce the malformed value after startup repair.
+    let repaired_config = config_text
+        .map(crate::guardian_config::repair_text)
+        .transpose()?
+        .map(|(text, _)| text);
+    let config_text = repaired_config.as_deref();
 
     if let Some(config_text) = config_text {
         validate_toml_config(config_text, &config_path)?;
@@ -3552,7 +3544,6 @@ mod tests {
             "{ enabled = true }",
             "{ enabled = false, thread_context = true }",
             "{ enabled = true, transcript = { include_images = false } }",
-            "{ future_option = \"preserve unknown structured options\" }",
         ] {
             let temp = tempfile::tempdir().unwrap();
             let path = temp.path().join("config.toml");

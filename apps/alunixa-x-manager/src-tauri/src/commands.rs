@@ -16,6 +16,7 @@ use alunixa_x_core::user_scripts::UserScriptManager;
 use alunixa_x_core::zed_remote::{ZedOpenStrategy, ZedRemoteProject};
 use serde::Serialize;
 use serde_json::{Value, json};
+use tauri::Manager;
 
 use crate::install::{self, InstallActionResult, InstallOptions};
 
@@ -1245,6 +1246,36 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
+pub async fn import_wallpaper_media(app: tauri::AppHandle, path: String)
+-> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+    let source = tauri::async_runtime::spawn_blocking(move ||
+        alunixa_x_core::wallpaper::import_media(
+            Path::new(&path), &alunixa_x_core::paths::default_app_state_dir(),
+        )
+    ).await.map_err(|_| "导入壁纸任务失败".to_string())?
+        .map_err(|e| e.to_string())?;
+    app.asset_protocol_scope().allow_file(&source.entry).map_err(|e| e.to_string())?;
+    Ok(source)
+}
+
+#[tauri::command]
+pub fn inspect_wallpaper(app: tauri::AppHandle, path: String)
+-> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+    let source = alunixa_x_core::wallpaper::resolve(Path::new(&path)).map_err(|e| e.to_string())?;
+    if matches!(source.kind.as_str(), "image" | "video") {
+        app.asset_protocol_scope().allow_file(&source.entry).map_err(|e| e.to_string())?;
+    }
+    Ok(source)
+}
+
+#[tauri::command]
+pub fn repair_codex_feature_config() -> Result<bool, String> {
+    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+    ).map_err(|_| "配置修复失败，未替换为默认配置；请检查 TOML 语法和文件权限".into())
+}
+
+#[tauri::command]
 pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
     let previous = match SettingsStore::default().load() {
         Ok(settings) => settings,
@@ -1281,6 +1312,11 @@ pub async fn save_settings(settings: BackendSettings) -> CommandResult<SettingsP
             .map(|_| ())
         })
         .and_then(|_| remove_retired_context_config())
+        .and_then(|_| {
+            alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
+                &alunixa_x_core::relay_config::default_codex_home_dir(),
+            ).map(|_| ())
+        })
         .and_then(|_| {
             alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
                 settings.codex_app_disable_auto_update,
@@ -2933,6 +2969,9 @@ pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
     settings.codex_app_image_overlay_path = defaults.codex_app_image_overlay_path;
     settings.codex_app_image_overlay_opacity = defaults.codex_app_image_overlay_opacity;
     settings.codex_app_image_overlay_fit_mode = defaults.codex_app_image_overlay_fit_mode;
+    settings.codex_app_wallpaper_muted = true;
+    settings.codex_app_wallpaper_paused = false;
+    settings.codex_app_wallpaper_engine_path.clear();
     let settings = match normalize_settings_before_save(settings) {
         Ok(settings) => settings,
         Err(error) => {

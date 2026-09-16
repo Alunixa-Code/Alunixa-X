@@ -724,25 +724,15 @@ fn installed_plugins_from_config(home: &Path) -> std::collections::BTreeSet<Stri
 }
 
 pub fn image_overlay_config(helper_port: u16, settings: &BackendSettings) -> Value {
-    let has_path = !settings.codex_app_image_overlay_path.trim().is_empty();
-    let enabled = settings.codex_app_image_overlay_enabled && has_path;
-    let data_url = if enabled {
-        image_file_data_uri(Path::new(settings.codex_app_image_overlay_path.trim()))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    json!({
-        "enabled": enabled && !data_url.is_empty(),
-        "opacity": f64::from(settings.codex_app_image_overlay_opacity.clamp(1, 100)) / 100.0,
-        "fitMode": settings.codex_app_image_overlay_fit_mode.as_str(),
-        "dataUrl": data_url,
-        "imageUrl": if enabled {
-            format!("http://127.0.0.1:{helper_port}/overlay/image")
-        } else {
-            String::new()
-        },
-    })
+    let mut config = crate::wallpaper::runtime_config(helper_port, settings);
+    // Keep the image fallback, but never embed large video files in a CDP payload.
+    if config["enabled"] == true && config["kind"] == "image" {
+        let path = Path::new(settings.codex_app_image_overlay_path.trim());
+        if std::fs::metadata(path).is_ok_and(|m| m.len() <= 16 * 1024 * 1024) {
+            config["dataUrl"] = json!(image_file_data_uri(path).unwrap_or_default());
+        }
+    }
+    config
 }
 
 pub fn paste_fix_enabled_config(settings: &BackendSettings) -> Value {
@@ -781,7 +771,7 @@ fn image_content_type(path: &Path) -> Option<&'static str> {
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("png") => Some("image/png"),
+        Some("png") | Some("apng") => Some("image/png"),
         Some("jpg") | Some("jpeg") => Some("image/jpeg"),
         Some("webp") => Some("image/webp"),
         Some("gif") => Some("image/gif"),

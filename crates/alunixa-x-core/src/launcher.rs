@@ -1039,7 +1039,8 @@ impl LaunchHooks for DefaultLaunchHooks {
         }
         let native_menu_localization_enabled = settings.codex_app_native_menu_localization;
         let native_menu_inspector_port =
-            native_menu_localization_enabled.then(|| select_native_menu_inspector_port(debug_port));
+            (native_menu_localization_enabled || crate::wallpaper_scene::enabled(settings))
+                .then(|| select_native_menu_inspector_port(debug_port));
         let launch_extra_args = codex_extra_args_for_launch(settings, extra_args);
         if cfg!(windows) {
             let activation = if let Some(inspector_port) = native_menu_inspector_port {
@@ -1064,7 +1065,8 @@ impl LaunchHooks for DefaultLaunchHooks {
                 let process_id = activate_packaged_app(app_user_model_id, arguments).await?;
                 apply_codexplusplus_window_icon_after_launch(process_id);
                 if let Some(inspector_port) = native_menu_inspector_port {
-                    start_native_menu_localizer(inspector_port);
+                    if native_menu_localization_enabled { start_native_menu_localizer(inspector_port); }
+                    crate::wallpaper_scene::start(inspector_port, settings);
                 }
                 return Ok(match activation {
                     CodexLaunch::PackagedActivation {
@@ -1113,7 +1115,8 @@ impl LaunchHooks for DefaultLaunchHooks {
                 .context("failed to launch macOS Codex app")?;
             *self.child.lock().await = Some(child);
             if let Some(inspector_port) = native_menu_inspector_port {
-                start_native_menu_localizer(inspector_port);
+                if native_menu_localization_enabled { start_native_menu_localizer(inspector_port); }
+                crate::wallpaper_scene::start(inspector_port, settings);
             }
             return Ok(CodexLaunch::Process {
                 command,
@@ -1151,7 +1154,8 @@ impl LaunchHooks for DefaultLaunchHooks {
             .with_context(|| format!("failed to launch Codex executable {executable}"))?;
         *self.child.lock().await = Some(child);
         if let Some(inspector_port) = native_menu_inspector_port {
-            start_native_menu_localizer(inspector_port);
+            if native_menu_localization_enabled { start_native_menu_localizer(inspector_port); }
+            crate::wallpaper_scene::start(inspector_port, settings);
         }
         Ok(CodexLaunch::Process {
             command,
@@ -1367,6 +1371,14 @@ async fn handle_helper_connection(
     let path = raw_path.split('?').next().unwrap_or(raw_path);
     let request_user_agent = header_value_from_headers(&request_headers, "user-agent");
     let remote_addr_text = remote_addr.map(|addr| addr.to_string());
+
+    if path.starts_with("/wallpaper/") {
+        let settings = SettingsStore::default().load()?;
+        let range = header_value_from_headers(&request_headers, "range");
+        crate::wallpaper::serve(&mut stream, method, raw_path, range.as_deref(), &settings).await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
 
     let quiet_status_request = matches!(
         path,

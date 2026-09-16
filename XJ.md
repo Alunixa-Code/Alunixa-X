@@ -142,6 +142,8 @@
 - 本机默认 CODEX_HOME config 中没有 guardianv2，不改写真实配置；须在隔离配置覆盖错误表、inline table、profiles 和供应商重新写入，保留有效参数并先备份喵~
 - Wallpaper Engine 官方 CLI 已实际获取：`-control openWallpaper -file project.json -playInWindow <unique-name> -width/-height`，仅定向 closeWallpaper -location 关闭自有窗口，不调用全局 stop/pause 或修改桌面壁纸喵~
 - 实现优先复用现有背景设置，媒体流式读取而不内嵌大视频；原生 Scene 使用独立原生渲染/捕获路径，不把 preview.jpg 当场景成功；当前尚未实现和验证喵~
+- 已实现初稿（尚未编译）：guardian_config 定向字段修复/嵌套与 profiles/备份、供应商最终写入门禁；wallpaper 媒体无损导入/项目解析/路径边界/Range 流式服务，renderer 视频/隔离 Web/原生 Scene 生命周期喵~
+- Scene 设计为 Windows 官方 WE 独立命名 pop-out + Electron desktopCapturer 只枚举窗口并精确匹配自有标题 + getUserMedia 视频流，关闭时只 closeWallpaper -location 自有窗口；尚未用实际 Wallpaper Engine 验收，不能声称已验证喵~
 - 只做本地实现与验证，本次用户未要求推送/发行，不自动安装或重启运行中的 Codex 喵~
 
 ### 已完成：生图模型配置与 AX 搜索 v1.0.19
