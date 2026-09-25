@@ -2078,3 +2078,5 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 修正后的定向测试 `1/1` 通过；最终完整 Rust workspace 明确退出 `0`，共 `1128 passed / 0 failed / 1 ignored`，唯一 ignored 仍为既有父测试使用的 app-server JSON-RPC 子进程入口，未新增忽略或跳过产品回归，喵~
 - 最终源码门禁全部 PASS：`cargo fmt --check`、`cargo check --workspace --all-targets --locked`、前端 `118/118`、TypeScript、Vite、i18n 英俄普通键 `916/916`、模板键 `80/80`、俄语后端 `93/93`、后端正则 `79/79`、品牌和 `git diff --check`，喵~
 - 重新运行当前 Codex `26.917.9434.0` 的隔离 app-server 正反契约，两次 turn 都完成且本机假上游实际收到 `gpt-5.6-sol`：保留根级覆盖时 `modelContextWindow=272000`，按本次产品规则移除根级键后 `modelContextWindow=1050000`，两个 probe 均退出 `0`，喵~
+- 产品修复已定向暂存并提交为 `5316541 fix: keep custom model context windows per model`，未暂存既有 `.tmp`；实时 fetch/gh 核对显示正式 latest 仍为 `v1.0.24`、`v1.0.25` 标签未占用、最近正式发行工作流均 completed 且当前无进行中任务，喵~
+- 首次标签详情只读命令因 PowerShell 在子表达式中混用语句而解析失败，命令未执行任何部分；修正语法后确认 `v1.2.66` 等是 2026-08 的历史 Codex++ 标签且目标已在远端 main 历史中，不影响当前 Alunixa X `v1.0.x` Release 采用 `v1.0.25`，喵~
