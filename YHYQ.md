@@ -2058,3 +2058,10 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 脱敏设置显示视频开关启用、媒体路径位于自有wallpapers目录、透明度25、fill、静音且未暂停；启动日志中bridge/script/settings均成功，`renderer.wallpaper_ready kind=video`，所以当前不是文件缺失、bridge未知路径或视频解码失败，下一步只读检查DOM层级/遮挡/导航，喵~
 - 上下文窗口方面，活动管理器配置、真实`config.toml`根和当前模型目录对`gpt-5.6-terra`均为272000窗口/271000自动压缩；同次新版启动明确记录`renderer.model_app_server_request_patch_not_found`，旧dispatcher相关补丁也因新版资源模块变化失败，初步怀疑Codex内显示继续使用app-server自带元数据而未应用自定义目录，需核对实时UI与新版资源，喵~
 - 只读诊断未输出或修改API Key、token、auth.json、真实对话内容；未停止任何Codex/Helper/管理器进程，未修改真实配置、壁纸媒体或系统安装，喵~
+
+## 2026-09-25 · 上下文窗口分流修复开始
+
+- 用户新增反馈：管理器里的上下文窗口和 Codex 内显示不一致；要求继续修复当前 Codex 更新后的兼容问题，喵~
+- 已完成本轮修改前检查点 `5ffea60`；读取完整 `XJ.md`、完整 `YHYQ.md`、Git 状态与当前源码，保留未跟踪 `.tmp`，未修改真实 Codex 配置或运行实例，喵~
+- 已定位现有多模型写入逻辑：`apply_profile_context_limits_to_config` 仍把选中模型窗口写入根级 `model_context_window`/`model_auto_compact_token_limit`；前端预览与本地 profile patch 也沿用该逻辑，存在启动模型根覆盖后来模型目录元数据的风险，喵~
+- 下一步：使用当前安装 Codex 26.917.9434.0 的隔离 `CODEX_HOME` 与 app-server/model-list 契约验证根级覆盖行为；随后只做多模型模式的最小配置修复、管理器文案/预览同步和回归测试，不重写已验证的视频背景链路，喵~
