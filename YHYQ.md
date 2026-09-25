@@ -2089,3 +2089,27 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 最终冻结提交 `9e7aa4d2a5b321400da30b59ae3dcfb646ce0c4b` 已建立；annotated `v1.0.25` 标签对象 `e07a67835c33a9ee92eff8365d5ba2023e8c35f0` 与 main 原子推送成功，远端 main/tag 解引用均与产品 SHA 一致，喵~
 - 标签 push 因最终提交含 `[skip ci]` 没有自动创建新运行；核对后仅手动派发一次 `release-assets.yml`，唯一运行 `36123937473`、event=`workflow_dispatch`、ref=`v1.0.25`、head=`9e7aa4d...`，当前 `in_progress`，后续不重复派发，喵~
 - push 提示既有 Dependabot `12` 项（`6 high / 5 moderate / 1 low`）；本版本未升级第三方依赖，也不将上下文修复描述为已解决该历史依赖清单，喵~
+
+## 2026-09-25 · Codex 26.917 上下文窗口修复 v1.0.25 正式发布验收完成
+
+- 用户反馈管理器中的上下文窗口与 Codex 内实际窗口不一致，并要求修复后完成构建和正式发布；本轮从既有产品提交、标签和唯一正式 Actions 接续，不重复实现或派发，喵~
+- 接续时确认项目根 `XJ.md` 已存在并分段完整读取，同时读取 `YHYQ.md` 近期记录、Git 状态和通用发行经验；当前分支 `main` 仅有既有本地审计提交领先远端，未跟踪 `.tmp` 保持未暂存，未使用 `git add -A`，喵~
+- 复用原 `gh run watch` 会话等待唯一正式运行 `36123937473`，没有创建第二次构建；运行来源为 `workflow_dispatch`、ref=`v1.0.25`、head=`9e7aa4d2a5b321400da30b59ae3dcfb646ce0c4b`，喵~
+- Actions 最终 `completed/success`：verify-version job `108035620580`、Windows x64 job `108035669641`、macOS arm64 job `108035669681`、macOS x64 job `108035669717`、发布 job `108041575824` 全部成功；复用旧产物 job 因未请求复用而正常 skipped，喵~
+- 正式日志独立核验：Windows 为 41 套件 `1128 passed / 0 failed / 1 ignored`，macOS x64 与 arm64 各为 41 套件 `1106 passed / 0 failed / 1 ignored`，三平台前端均 `118/118`；唯一 ignored 仍为既有父测试调用的 app-server JSON-RPC 子进程入口，喵~
+- Release `396523097` 于 `2026-09-25T10:47:10Z`（新加坡 `2026-09-25 18:47:10`）正式发布，非草稿、非预发布；公开匿名 latest 已指向 `v1.0.25`，发行页为 `https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.25`，喵~
+- 已运行 `.tmp/verify-current-release.py --tag v1.0.25 --run 36123937473 --frontend 118` 并明确退出 `0`；正文以 `docs/releases/v1.0.25.md` 为规范前缀并包含产品 SHA、Actions 来源和六项哈希，六资产名称唯一、uploaded、非零，GitHub digest 与 Actions SHA-256 逐项一致，机器可读证据为 `.tmp/v1.0.25-verified.json`，喵~
+- 远端 `main`、tag `v1.0.25^{}` 和 Actions head 均为产品 `9e7aa4d2a5b321400da30b59ae3dcfb646ce0c4b`，annotated tag 对象为 `e07a67835c33a9ee92eff8365d5ba2023e8c35f0`；未移动或覆盖历史标签，喵~
+
+| 安装资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `Alunixa-X-1.0.25-macos-arm64.dmg` | 33164754 | `78e9ce70949dc415bfc07afbd04da686531a2b4e531958fe5f1b04146655ab76` |
+| `Alunixa-X-1.0.25-macos-arm64.zip` | 28246046 | `b781fc883aa28459eaeb8181e3c413745faad64d99a48c134b987ffef8760579` |
+| `Alunixa-X-1.0.25-macos-x64.dmg` | 34445895 | `3aa8940c310d604aae117bc0dca6e2090ff6e4de1db774d26c092abe5ab2e506` |
+| `Alunixa-X-1.0.25-macos-x64.zip` | 28880145 | `ca288d7b4601286a2f7b29ecfb4e7468852dda11091dec9e3d70c9c4e539ee5f` |
+| `Alunixa-X-1.0.25-windows-x64-setup.exe` | 21727286 | `463bd7d41c9be12438e68972293a5527be4752a654fddfce9268290dbe462bbf` |
+| `Alunixa-X-1.0.25-windows-x64.zip` | 27487608 | `807bdeb9656d3aa5e12023159ad22ea2d2be71757003eeeb99789d61cb5cb89c` |
+
+- 本版交付范围为修复 CustomModels 根级窗口覆盖，使模型目录中的逐模型上下文窗口与 Codex 实际 app-server 结果一致；普通单模型和 Pure API 原行为保留，当前实例的视频背景已确认真实播放，本版没有重写媒体链路或恢复已撤下的 Wallpaper Engine 原生窗口方案，喵~
+- Actions 仅有既有 Node 20 action 被强制使用 Node 24 与未来 Ubuntu 26 迁移提示，不是构建失败；本轮没有升级第三方依赖，也不将历史 Dependabot 12 项描述为已修复，喵~
+- 没有下载安装包、修改真实 `config.toml`/auth、自动安装或重启当前 Codex、Helper、管理器，也没有重试删除此前被环境拒绝的临时目录；产品标签和 Release 已冻结，后续仅保留本地审计记录，喵~
