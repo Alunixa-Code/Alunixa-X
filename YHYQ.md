@@ -2085,3 +2085,4 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 首次版本一致性脚本因 PowerShell `ConvertFrom-Json` 默认模式不接受 package-lock 的空字符串属性名而退出，未修改文件；改用 `-AsHashtable` 后验证通过：Cargo 四包、package、package-lock 根和 Tauri 全为 `1.0.25`，锁文件仅本地版本字段变化，第三方 `unicode-ident 1.0.24` 保持不变，喵~
 - 对最终 `v1.0.25` 源码重新执行完整门禁并取得明确成功退出：Rust workspace `1128 passed / 0 failed / 1 ignored`，`cargo check --workspace --all-targets --locked`、fmt、前端 `118/118`、TypeScript、Vite、i18n `916+80/93/79`、品牌和 `git diff --check` 全部 PASS；唯一 ignored 仍为既有 app-server 子进程入口，喵~
 - 最终发布静态审计通过：四包/前端/Tauri 版本一致，本地 Markdown 链接无缺失，新增行凭据模式命中 `0`，Cargo/npm lock 只改本地版本字段，`git diff --check` 通过；`.tmp` 保持未跟踪且不会进入版本提交，喵~
+- `v1.0.25` 版本、CHANGELOG、三语 README、详细三语发行说明和项目记录已定向提交为 `b2febde release: prepare v1.0.25 context window compatibility`；核心行为提交为 `5316541`，未跟踪 `.tmp` 未暂存，准备最终冻结并让远端 main、annotated tag 和 Actions head 指向同一产品提交，喵~
