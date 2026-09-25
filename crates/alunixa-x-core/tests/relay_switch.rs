@@ -547,7 +547,7 @@ experimental_bearer_token = "alunixa-x-custom"
 }
 
 #[test]
-fn saving_active_custom_window_updates_disk_and_preserves_external_instructions() {
+fn saving_active_custom_window_updates_catalog_and_preserves_external_instructions() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("codex");
     let store = SettingsStore::new(temp.path().join("settings.json"));
@@ -560,11 +560,8 @@ fn saving_active_custom_window_updates_disk_and_preserves_external_instructions(
     let config_path = home.join("config.toml");
     let original = std::fs::read_to_string(&config_path).unwrap();
     let manual = format!(
-        "model_instructions_file = 'external.md'\n{}",
-        original.replace(
-            "model_context_window = 500000",
-            "model_context_window = 777000"
-        )
+        "model_instructions_file = 'external.md'\nmodel_context_window = 777000\n{}",
+        original
     );
     std::fs::write(&config_path, manual).unwrap();
     std::fs::write(home.join("external.md"), "Keep this external prompt.").unwrap();
@@ -577,11 +574,8 @@ fn saving_active_custom_window_updates_disk_and_preserves_external_instructions(
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(live["model_context_window"].as_integer(), Some(1_050_000));
-    assert_eq!(
-        live["model_auto_compact_token_limit"].as_integer(),
-        Some(1_000_000)
-    );
+    assert!(live.get("model_context_window").is_none());
+    assert!(live.get("model_auto_compact_token_limit").is_none());
     assert_eq!(
         live["model_instructions_file"].as_str(),
         Some("external.md")
@@ -591,6 +585,18 @@ fn saving_active_custom_window_updates_disk_and_preserves_external_instructions(
         store.load().unwrap().relay_profiles[0].context_window,
         "1050000"
     );
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join(live["model_catalog_json"].as_str().unwrap())).unwrap(),
+    )
+    .unwrap();
+    let selected = catalog["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["slug"] == "grok-4.5")
+        .unwrap();
+    assert_eq!(selected["context_window"], 1_050_000);
+    assert_eq!(selected["auto_compact_token_limit"], 1_000_000);
     assert_eq!(
         std::fs::read_to_string(home.join("external.md")).unwrap(),
         "Keep this external prompt."
@@ -627,7 +633,7 @@ fn clearing_selected_custom_window_removes_stale_root_and_summary() {
 }
 
 #[test]
-fn custom_window_units_save_as_numeric_config_when_compaction_is_disabled() {
+fn custom_window_units_save_as_numeric_catalog_when_compaction_is_disabled() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path().join("codex");
     let store = SettingsStore::new(temp.path().join("settings.json"));
@@ -644,8 +650,20 @@ fn custom_window_units_save_as_numeric_config_when_compaction_is_disabled() {
         .unwrap()
         .parse()
         .unwrap();
-    assert_eq!(live["model_context_window"].as_integer(), Some(1_050_000));
+    assert!(live.get("model_context_window").is_none());
     assert!(live.get("model_auto_compact_token_limit").is_none());
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join(live["model_catalog_json"].as_str().unwrap())).unwrap(),
+    )
+    .unwrap();
+    let selected = catalog["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["slug"] == "grok-4.5")
+        .unwrap();
+    assert_eq!(selected["context_window"], 1_050_000);
+    assert!(selected["auto_compact_token_limit"].is_null());
     let saved = store.load().unwrap().active_relay_profile();
     assert_eq!(saved.context_window, "1050000");
     assert!(!saved.auto_compact_enabled);
@@ -672,7 +690,8 @@ fn editing_other_custom_model_updates_its_catalog_without_switching_startup_mode
         .parse()
         .unwrap();
     assert_eq!(live["model"].as_str(), Some("grok-4.5"));
-    assert_eq!(live["model_context_window"].as_integer(), Some(500_000));
+    assert!(live.get("model_context_window").is_none());
+    assert!(live.get("model_auto_compact_token_limit").is_none());
     let catalog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(home.join(live["model_catalog_json"].as_str().unwrap())).unwrap(),
     )

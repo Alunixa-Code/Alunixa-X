@@ -66,7 +66,7 @@ export const EN_PLAIN: Record<string, string> = {
   "删除生图模型": "Delete image model",
   "删除默认项后，下一项将成为默认；删除全部后恢复原供应商。": "Deleting the default makes the next entry the default. Deleting all entries restores the original provider.",
   "确定删除此生图模型？": "Delete this image model?",
-  "保存时 config.toml 的窗口与压缩阈值跟随启动模型；其他模型的设置写入模型目录，不会自动切换启动模型。": "On save, config.toml uses the startup model's context window and compaction threshold. Other model settings are saved to the model catalog without changing the startup model.",
+  "多模型模式不再写根级窗口覆盖；Codex 会从模型目录读取每个模型自己的上下文窗口与压缩阈值，切换模型后立即使用对应值。": "Multi-model mode no longer writes global context overrides. Codex reads each model's context window and compaction threshold from the model catalog and applies the matching values immediately after a model switch.",
   "Token 与模型使用统计": "Token and model usage",
   "累计 Token": "Total tokens",
   "Token 已用": "Tokens used",

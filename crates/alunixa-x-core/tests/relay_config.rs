@@ -1966,8 +1966,22 @@ experimental_bearer_token = "alunixa-x-custom"
     assert!(first.backup_path.is_some());
     assert!(second.backup_path.is_none());
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
-    assert!(config.contains("model_context_window = 500000"));
-    assert!(config.contains("model_auto_compact_token_limit = 400000"));
+    assert!(!config.contains("model_context_window"));
+    assert!(!config.contains("model_auto_compact_token_limit"));
+    assert!(config.contains(r#"model_catalog_json = "model-catalogs/custom-models.json""#));
+
+    let catalog: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(home.join("model-catalogs/custom-models.json")).unwrap(),
+    )
+    .unwrap();
+    let model = catalog["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["slug"] == "grok-4.5")
+        .unwrap();
+    assert_eq!(model["context_window"], 500_000);
+    assert_eq!(model["auto_compact_token_limit"], 400_000);
 }
 
 #[test]
@@ -3588,21 +3602,21 @@ experimental_bearer_token = "sk-new"
 }
 
 #[test]
-fn custom_models_use_per_model_context_limits_with_selected_root_override() {
+fn custom_models_use_per_model_context_limits_without_global_root_override() {
     let temp = tempfile::tempdir().unwrap();
     let profile = RelayProfile {
         id: "custom-models".to_string(),
         name: "Custom Models".to_string(),
         relay_mode: RelayMode::CustomModels,
-        model: "gpt-5.5".to_string(),
-        context_window: "250000".to_string(),
+        model: "gpt-5.6-terra".to_string(),
+        context_window: "272000".to_string(),
         auto_compact_enabled: true,
         auto_compact_percent: 80,
-        auto_compact_limit: "200000".to_string(),
-        config_contents: r#"model = "gpt-5.5"
+        auto_compact_limit: "271000".to_string(),
+        config_contents: r#"model = "gpt-5.6-terra"
 model_provider = "custom"
-model_context_window = 250000
-model_auto_compact_token_limit = 200000
+model_context_window = 272000
+model_auto_compact_token_limit = 271000
 
 [model_providers.custom]
 name = "custom"
@@ -3616,12 +3630,12 @@ experimental_bearer_token = "alunixa-x-custom"
         custom_models: vec![
             CustomRelayModel {
                 id: "default-model".to_string(),
-                model: "gpt-5.5".to_string(),
+                model: "gpt-5.6-terra".to_string(),
                 base_url: "https://example.test/v1".to_string(),
                 api_key: "test-key".to_string(),
-                context_window: "250000".to_string(),
+                context_window: "272000".to_string(),
                 auto_compact_enabled: true,
-                auto_compact_limit: "200000".to_string(),
+                auto_compact_limit: "271000".to_string(),
                 auto_compact_percent: 80,
                 ..CustomRelayModel::default()
             },
@@ -3630,9 +3644,9 @@ experimental_bearer_token = "alunixa-x-custom"
                 model: "gpt-5.6-sol".to_string(),
                 base_url: "https://example.test/v1".to_string(),
                 api_key: "test-key".to_string(),
-                context_window: "353000".to_string(),
+                context_window: "1050000".to_string(),
                 auto_compact_enabled: true,
-                auto_compact_limit: "282400".to_string(),
+                auto_compact_limit: "1000000".to_string(),
                 auto_compact_percent: 80,
                 ..CustomRelayModel::default()
             },
@@ -3644,8 +3658,8 @@ experimental_bearer_token = "alunixa-x-custom"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(config.contains("model_context_window = 250000"));
-    assert!(config.contains("model_auto_compact_token_limit = 200000"));
+    assert!(!config.contains("model_context_window"));
+    assert!(!config.contains("model_auto_compact_token_limit"));
 
     let catalog: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(
@@ -3657,18 +3671,24 @@ experimental_bearer_token = "alunixa-x-custom"
     )
     .unwrap();
     let models = catalog["models"].as_array().unwrap();
+    let terra = models
+        .iter()
+        .find(|model| model["slug"] == "gpt-5.6-terra")
+        .unwrap();
     let sol = models
         .iter()
         .find(|model| model["slug"] == "gpt-5.6-sol")
         .unwrap();
-    assert_eq!(sol["context_window"], 353_000);
-    assert_eq!(sol["max_context_window"], 353_000);
+    assert_eq!(terra["context_window"], 272_000);
+    assert_eq!(terra["auto_compact_token_limit"], 271_000);
+    assert_eq!(sol["context_window"], 1_050_000);
+    assert_eq!(sol["max_context_window"], 1_050_000);
     assert_eq!(sol["effective_context_window_percent"], 100);
-    assert_eq!(sol["auto_compact_token_limit"], 282_400);
+    assert_eq!(sol["auto_compact_token_limit"], 1_000_000);
 }
 
 #[test]
-fn selected_custom_model_updates_root_context_and_compaction_limit() {
+fn selected_custom_model_updates_model_without_reintroducing_global_limits() {
     let temp = tempfile::tempdir().unwrap();
     let mut profile = RelayProfile {
         id: "custom-models".to_string(),
@@ -3711,12 +3731,12 @@ base_url = "http://127.0.0.1:57321/v1"
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(config.contains("model = \"gpt-5.6-terra\""));
-    assert!(config.contains("model_context_window = 1000000"));
-    assert!(config.contains("model_auto_compact_token_limit = 990000"));
+    assert!(!config.contains("model_context_window"));
+    assert!(!config.contains("model_auto_compact_token_limit"));
 }
 
 #[test]
-fn normalize_custom_models_replaces_stale_root_context_limits() {
+fn normalize_custom_models_removes_stale_root_context_limits() {
     let mut profile = RelayProfile {
         id: "custom-models".to_string(),
         relay_mode: RelayMode::CustomModels,
@@ -3749,15 +3769,11 @@ experimental_bearer_token = "alunixa-x-custom"
 
     normalize_relay_profile_for_storage(&mut profile).unwrap();
 
+    assert!(!profile.config_contents.contains("model_context_window"));
     assert!(
-        profile
+        !profile
             .config_contents
-            .contains("model_context_window = 500000")
-    );
-    assert!(
-        profile
-            .config_contents
-            .contains("model_auto_compact_token_limit = 400000")
+            .contains("model_auto_compact_token_limit")
     );
     assert_eq!(profile.context_window, "500000");
     assert_eq!(profile.auto_compact_limit, "400000");

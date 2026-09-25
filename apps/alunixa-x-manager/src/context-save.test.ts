@@ -21,10 +21,9 @@ function profile(patch = {}) {
     ], ...patch };
 }
 
-test("custom config preview uses edited selected model, not stale profile summary", () => {
+test("custom config preview removes global limits so the model catalog remains authoritative", () => {
   const text = preview("model_context_window = 272000\nmodel_auto_compact_token_limit = 271000\n", profile());
-  assert.match(text, /^model_context_window = 1050000$/m);
-  assert.match(text, /^model_auto_compact_token_limit = 1000000$/m);
+  assert.doesNotMatch(text, /model_context_window|model_auto_compact_token_limit/);
 });
 
 test("custom preview clears old root values for an empty window and disabled compaction", () => {
@@ -34,12 +33,11 @@ test("custom preview clears old root values for an empty window and disabled com
   assert.doesNotMatch(text, /model_context_window|model_auto_compact_token_limit/);
 });
 
-test("window preview only rewrites root keys, including commented table headers", () => {
+test("custom preview removes only root limits and preserves nested profile limits", () => {
   const original = "model = 'large'\n[profiles.other] # user profile\nmodel_context_window = 123000\nmodel_auto_compact_token_limit = 100000\n";
   const text = preview(original, profile());
-  assert.match(text, /^model_context_window = 1050000$/m);
+  assert.doesNotMatch(text.split("[profiles.other]")[0], /model_context_window|model_auto_compact_token_limit/);
   assert.match(text, /\[profiles.other\] # user profile\nmodel_context_window = 123000\nmodel_auto_compact_token_limit = 100000/);
-  assert.ok(text.indexOf("1050000") < text.indexOf("[profiles.other]"));
 });
 
 test("regular preview preserves inherited window but removes disabled compaction", () => {

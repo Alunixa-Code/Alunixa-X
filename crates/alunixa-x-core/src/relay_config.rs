@@ -1950,34 +1950,13 @@ fn apply_profile_context_limits_to_config(
     config_text: &str,
 ) -> anyhow::Result<String> {
     if profile.relay_mode == crate::settings::RelayMode::CustomModels {
-        let preferred_model = profile.preferred_model_name();
-        let selected = profile
-            .custom_models
-            .iter()
-            .find(|model| model.model.eq_ignore_ascii_case(&preferred_model))
-            .or_else(|| profile.default_custom_model());
-        let Some(selected) = selected else {
-            let mut doc = parse_toml_document(config_text)?;
-            doc.as_table_mut().remove("model_context_window");
-            doc.as_table_mut().remove("model_auto_compact_token_limit");
-            return Ok(normalize_optional_toml(doc));
-        };
-        let compact_limit = if selected.auto_compact_enabled {
-            selected.auto_compact_limit.as_str()
-        } else {
-            ""
-        };
         let mut doc = parse_toml_document(config_text)?;
-        // An empty custom-model override means use that model's native default,
-        // not an inherited root override from the previous selected model.
-        if selected.context_window.trim().is_empty() {
-            doc.as_table_mut().remove("model_context_window");
-        }
-        return apply_context_limits_to_config(
-            &doc.to_string(),
-            &selected.context_window,
-            compact_limit,
-        );
+        // Root limits are global Codex overrides. In a multi-model profile they
+        // would force every later model selection to reuse the startup model's
+        // window. The generated model catalog owns these values per model.
+        doc.as_table_mut().remove("model_context_window");
+        doc.as_table_mut().remove("model_auto_compact_token_limit");
+        return Ok(normalize_optional_toml(doc));
     }
 
     apply_context_limits_to_config(
@@ -2005,7 +1984,7 @@ pub fn verify_profile_context_limits_in_config(
     for key in ["model_context_window", "model_auto_compact_token_limit"] {
         let value = |doc: &DocumentMut| doc.get(key).map(|item| item.as_integer());
         if value(&actual) != value(&expected) {
-            anyhow::bail!("上下文配置回读校验失败：{key} 与启动模型设定不一致");
+            anyhow::bail!("上下文配置回读校验失败：{key} 与当前模型配置模式不一致");
         }
     }
     Ok(())
@@ -2048,6 +2027,8 @@ fn apply_model_catalog_to_config(
         std::fs::write(&catalog_path, catalog_json)?;
         let mut doc = parse_toml_document(&config_text)?;
         doc["model_catalog_json"] = toml_edit::value(catalog_relative);
+        doc.as_table_mut().remove("model_context_window");
+        doc.as_table_mut().remove("model_auto_compact_token_limit");
         return Ok(normalize_optional_toml(doc));
     }
     if let Some(external_catalog) = live_external_model_catalog(home) {

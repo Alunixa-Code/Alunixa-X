@@ -15,8 +15,11 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
-- **当前兼容性调查进行中**：用户实际安装 Alunixa X 1.0.24 与 Codex 26.917.9434.0；当前视频设置有效、renderer 日志出现 `wallpaper_ready(kind=video)`，但用户不可见，初步指向新版页面不透明层/层级变化；同次启动明确出现 `model_app_server_request_patch_not_found`，管理器和 config/model-catalog 均为 `gpt-5.6-terra` 272000/271000，需核对 Codex 内模型元数据实际来源并恢复同步，喵~
-- 本轮修改前检查点 `751ef34`，现阶段只读诊断，未修改/重启运行中的 Codex、Helper、管理器或真实配置，喵~
+- **当前兼容性修复进行中**：用户实际安装 Alunixa X 1.0.24 与 Codex 26.917.9434.0；视频背景已通过当前实例 DOM、readyState、播放时间推进和变化帧确认正在播放；同次启动仍有新版模型请求补丁入口 `not_found`，但上下文根因已由隔离 app-server 契约复现并完成源码修复，喵~
+- 本轮修改前检查点 `5ffea60`，未修改/重启运行中的 Codex、Helper、管理器或真实配置；旧调查提交 `2112487` 和未跟踪 `.tmp` 均保留，喵~
+- 多模型上下文修复已完成定向实现：`RelayMode::CustomModels` 不再写根级 `model_context_window` 或 `model_auto_compact_token_limit`，窗口和压缩阈值只写入 `model_catalog_json` 的对应模型；管理器预览、启动审计和切换回读已同步，喵~
+- 本轮首次完整 Rust workspace 的唯一失败是过时根级窗口断言；修正后定向回归 `1/1`，最终完整 workspace 已明确退出 `0`，共 `1128 passed / 0 failed / 1 ignored`，唯一 ignored 仍是既有 app-server 子进程入口，喵~
+- 最终源码门禁已全部通过：`cargo check --workspace --all-targets --locked`、`cargo fmt --check`、前端 `118/118`、TypeScript、Vite、i18n `916+80/93/79`、品牌与 `git diff --check`；当前 Codex app-server 正反契约再次确认根覆盖为 `272000`、移除后 Sol 为 `1050000`，喵~
 - **v1.0.24正式发布验收完成**：产品1e724029b68b746c46545c33fd456e3c4a2973c7，tag对象f4915120b7d0647f58bd1ea52af501fc0be423b9；唯一Actions35109688388 completed/success，Release390023532于2026-09-16T14:56:15Z发布（新加坡2026-09-16 22:56:15）；六资产/三语正文/来源/哈希/匿名latest/三平台完成日志全部PASS喵~
 - **v1.0.24本地与正式CI门禁全部通过**：回退图片/动图/视频及明确旧项目预览，彻底移除原生WE；本地及正式Windows workspace41套件1128/0/1，正式macOS两架构各41套件1106/0/1，三平台前端118/118；真实Electron全部媒体与用户已选项目预览/失败退出1、生产管理器/俄语UI及版本/依赖/格式/文档检查PASS，未修改或重启真实实例喵~
 - 以下旧版本及早期排队/待验证/尝试方案为历史记录；本轮交付完成，不再修改冻结产品、重复派发或移动标签，后续本地审计提交不另行推送为产品更新喵~
@@ -82,6 +85,8 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- 2026-09-25 当前源码最终 Rust workspace 已退出 `0`：`1128 passed / 0 failed / 1 ignored`；首次运行唯一过时断言已改为验证根级键不存在且目录保留 `500000/400000`，定向复验 `1/1`，唯一 ignored 为既有 app-server 子进程入口，喵~
+- 2026-09-25 最终发布前源码门禁：全目标 Cargo check、fmt、前端 `118/118`、TypeScript、Vite、英语/俄语普通键 `916/916`、模板键 `80/80`、俄语后端 `93/93`、后端正则 `79/79`、品牌及 diff 全部 PASS；隔离 app-server 两次 turn 均完成且上游实际收到 `gpt-5.6-sol`，喵~
 - v1.0.24正式CI独立完成日志：Windows job104839954425为41套件1128/0/1；macOS x64 job104839954575及arm64 job104839954424各41套件1106/0/1；三平台前端均118/118，编译/打包/平台门禁与发布job104847404641全success，唯一ignored仍为既有父测试调用的子进程入口喵~
 - v1.0.24当前源码：workspace退出0，41套件1128 passed/0 failed/1 ignored；随后fixture构建退出0（1m27s），前端118/118、TS/Vite/i18n916+80/93/79、品牌/格式/版本/依赖等价/14本地文档链接/凭据新增行/diff全PASS喵~
 - 独立Electron40.1.0最终退出0且ELECTRON_WALLPAPER_PASS：小/大PNG、GIF/APNG像素变化、MP4跳转循环暂停恢复、WebM、旧Video项目、旧Scene/Web预览与用户当前所选项目预览均真解码；负对照故意失败明确退出1，不运行WE；UI上传/播放/保存/取消/失败保留/重置/明确预览/移除引擎控件/原生和脚本路由404均PASS喵~
@@ -226,8 +231,8 @@
 ### 进行中：Codex 26.917 更新后的媒体背景与上下文窗口兼容
 - 2026-09-25用户反馈更新Codex后视频背景等失效，并补充管理器上下文窗口与Codex内不一致；已完整读取XJ.md和YHYQ.md近期记录、检查Git/当前安装/进程/脱敏设置/配置/模型目录与诊断日志，喵~
 - 当前运行链路：Alunixa X 1.0.24通过debug port 9229启动Codex 26.917.9434.0/Chromium153，视频路径存在、开关启用、透明度25、未暂停；脚本/bridge加载且`wallpaper_ready`，所以不是媒体读取或解码失败，下一步检查实际可见层与导航生命周期，喵~
-- 当前上下文证据：管理器活动配置、`config.toml`和`model-catalogs/custom-mrjkc9t3.json`对启动模型均为272000窗口/271000压缩阈值；新版日志无法找到旧`model_app_server_request`补丁入口，需读取Codex UI/app-server实际显示值和新资源结构，不能先假定是保存失败，喵~
-- 修改前检查点751ef34；不热注入、不重启、不改真实配置，先用当前CDP只读截图/DOM与磁盘bundle分析复现，再在仓库fixture中修复验证，喵~
+- 当前上下文证据：使用当前 Codex `0.155.0-alpha.16.4` app-server 和临时 `CODEX_HOME`，同一 `gpt-5.6-sol` 在保留根级 `272000/271000` 时报告 `modelContextWindow=272000`，删除根级键后报告目录值 `1050000`；这直接复现了管理器与 Codex 内不一致，喵~
+- 产品修改已通过 Rust 定向配置/切换/启动审计回归、前端 `118/118`、最终 Rust workspace `1128/0/1`、全目标 check 及当前 Codex app-server 正反契约；尚未修改真实配置、尚未重启当前实例、尚未升级版本或发布，喵~
 
 ### 已完成：v1.0.24可靠媒体背景与移除原生WE
 - 最终结果：Actions35109688388 completed/success，Release390023532于2026-09-16 22:56:15新加坡时间发布；源码/标签/六资产/三语正文/Actions哈希与GitHub digest/匿名latest/三平台完成日志均PASS，证据.tmp/v1.0.24-verified.json和YHYQ.md，未自动安装或重启喵~
@@ -410,7 +415,8 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
-- 当前先完成Codex 26.917的只读失败定位：页面层级/背景computed style、运行时模型元数据、app-initial transport与新版bundle模块边界；随后补失败测试、实施最小兼容修复并用隔离新版本bundle验证，整个过程不动当前实例，喵~
+- 当前源码与本机契约门禁已完成；下一步提交产品修复，核对远端标签/正式发行后升级到新的补丁版本，更新中英俄说明，执行唯一 GitHub Actions 三平台构建并发布六资产 Release，再验证正文、来源、大小与 SHA-256，喵~
+- 视频背景本轮不再重写；当前实例已有真实播放证据，后续只在隔离新版本安装包/fixture 中做媒体冒烟，避免把已通过的链路再次引入回归，喵~
 - 当前v1.0.24交付完成：提供正式版本与升级方式；不重复构建或发布，保持当前用户进程和真实配置不变；下一任务按新需求继续，先读本文件和YHYQ.md最新验收记录喵~
 - 本轮三个electron-run目录和两个fixture副本清理已被环境在运行前拒绝；保留并停止尝试，不重复删除或改用其他工具，不影响源码/构建/发布验收喵~
 - **v1.0.23交付完成**：向用户提供正式发布结果与俄语入口，无须再次构建或发布；后续仅按新需求继续，不自动安装/重启当前程序喵~
@@ -428,6 +434,8 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-25：修正首次全量测试暴露的过时根级窗口断言；最终 workspace `1128/0/1`、全目标 check、前端 `118/118`、TS/Vite/i18n/品牌/diff 全通过，并用当前 Codex app-server 再次取得 `272000` 对照与 `1050000` 修复结果，准备提交和版本发布，喵~
+- 2026-09-25：建立修改前检查点 `5ffea60`；用当前 Codex 26.917 的隔离 app-server 复现根级上下文覆盖，确认 `272000` 会覆盖 Sol 目录的 `1050000`，随后完成多模型根键移除、模型目录权威化、管理器预览/文案同步和 Rust/前端定向回归，尚未发布，喵~
 - 2026-09-25：开始调查Codex 26.917.9434.0升级回归；确认XJ.md存在并完整读取，当前Alunixa X为1.0.24，视频已ready但用户不可见，旧模型app-server补丁入口not_found，真实配置/目录为272000/271000；建立751ef34检查点，尚无产品修改，喵~
 - 2026-09-16 22:56:15（新加坡）：v1.0.24正式发布，唯一Actions35109688388 success，Release390023532；Windows1128/0/1、macOS各1106/0/1、前端各118/118，六资产/三语正文/来源/哈希/公开latest/完成日志全PASS；右侧发行预览queued，真实配置与进程未动，五项临时输出清理被环境拒绝后保留喵~
 - 2026-09-16接续发行验收：确认XJ.md存在并完整读取；GitHub API实查唯一CI正在执行且Release尚未生成；本地1128/0/1与最终实播PASS、负对照失败及生产UI记录已复核；补正本文件当前架构/API/命令中的过时原生场景描述，保留历史阶段喵~

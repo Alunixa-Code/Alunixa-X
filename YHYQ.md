@@ -2065,3 +2065,16 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 已完成本轮修改前检查点 `5ffea60`；读取完整 `XJ.md`、完整 `YHYQ.md`、Git 状态与当前源码，保留未跟踪 `.tmp`，未修改真实 Codex 配置或运行实例，喵~
 - 已定位现有多模型写入逻辑：`apply_profile_context_limits_to_config` 仍把选中模型窗口写入根级 `model_context_window`/`model_auto_compact_token_limit`；前端预览与本地 profile patch 也沿用该逻辑，存在启动模型根覆盖后来模型目录元数据的风险，喵~
 - 下一步：使用当前安装 Codex 26.917.9434.0 的隔离 `CODEX_HOME` 与 app-server/model-list 契约验证根级覆盖行为；随后只做多模型模式的最小配置修复、管理器文案/预览同步和回归测试，不重写已验证的视频背景链路，喵~
+
+## 2026-09-25 · 多模型上下文窗口根覆盖修复
+
+- 建立本轮产品修改前检查点 `5ffea60`；完整重读 `XJ.md`/`YHYQ.md`，未修改真实 Codex 配置、当前 Codex/Helper/管理器进程或用户媒体，喵~
+- 使用当前安装 Codex `26.917.9434.0` 对应 CLI `0.155.0-alpha.16.4` 的隔离 app-server 与临时 `CODEX_HOME`，创建本机假上游响应；同一 `gpt-5.6-sol` 在根级 `model_context_window=272000` 时报告 `modelContextWindow=272000`，去掉根级窗口和压缩键后报告模型目录值 `1050000`，两次 turn 均成功完成，喵~
+- 产品修复范围：`RelayMode::CustomModels` 生成/切换/规范化时删除根级 `model_context_window` 和 `model_auto_compact_token_limit`，由 `model_catalog_json` 保存每个模型自己的窗口与压缩阈值；非多模型模式继续保留原根配置行为，喵~
+- 管理器同步：自定义多模型预览删除根级窗口键但保留嵌套 profile，界面文案改为说明模型目录权威，英文/俄文同步；增加上下文预览回归，喵~
+- 定向验证通过：前端上下文套件 `5/5`，管理器完整 TypeScript 测试 `118/118`，Rust `relay_config` 定向 `2/2`，Rust `relay_switch` 定向 `6/6`，启动审计定向 `1/1`；Rust 过滤执行过程中其余套件未执行测试正文，后续仍需全量 workspace，喵~
+- 当前尚未升级版本、构建安装包、推送或发布；下一步执行格式/i18n/TypeScript/Vite、Rust workspace 全量回归，再准备补丁版本和唯一 Actions 三平台 Release，喵~
+- 首次完整 Rust workspace 已明确结束：其余已执行套件全部通过，唯一失败为 `startup_custom_model_sync_preserves_codex_auth_and_skips_unchanged_rewrite` 仍要求旧根级 `model_context_window = 500000` 与 `model_auto_compact_token_limit = 400000`；已将该回归改为断言根级键不存在，并验证 `model-catalogs/custom-models.json` 中仍保存 `500000/400000`，接下来先跑定向回归再重跑最终 workspace，喵~
+- 修正后的定向测试 `1/1` 通过；最终完整 Rust workspace 明确退出 `0`，共 `1128 passed / 0 failed / 1 ignored`，唯一 ignored 仍为既有父测试使用的 app-server JSON-RPC 子进程入口，未新增忽略或跳过产品回归，喵~
+- 最终源码门禁全部 PASS：`cargo fmt --check`、`cargo check --workspace --all-targets --locked`、前端 `118/118`、TypeScript、Vite、i18n 英俄普通键 `916/916`、模板键 `80/80`、俄语后端 `93/93`、后端正则 `79/79`、品牌和 `git diff --check`，喵~
+- 重新运行当前 Codex `26.917.9434.0` 的隔离 app-server 正反契约，两次 turn 都完成且本机假上游实际收到 `gpt-5.6-sol`：保留根级覆盖时 `modelContextWindow=272000`，按本次产品规则移除根级键后 `modelContextWindow=1050000`，两个 probe 均退出 `0`，喵~

@@ -7227,7 +7227,7 @@ function CustomModelsRelayProfileEditor({
             ))}
           </select>
           <p className="field-hint">{t("优先使用上次有效模型；没有历史记录时使用排序第一项。")}</p>
-          <p className="field-hint">{t("保存时 config.toml 的窗口与压缩阈值跟随启动模型；其他模型的设置写入模型目录，不会自动切换启动模型。")}</p>
+          <p className="field-hint">{t("多模型模式不再写根级窗口覆盖；Codex 会从模型目录读取每个模型自己的上下文窗口与压缩阈值，切换模型后立即使用对应值。")}</p>
         </Field>
         <Field className="relay-field-goals" label={t("Codex 目标")}>
           <label className="inline-toggle">
@@ -8888,6 +8888,12 @@ function contextHeaderFromLine(line: string): { kind: ContextKind; id: string } 
 
 function applyContextLimitPreview(configContents: string, profile: RelayProfile): string {
   const custom = isCustomModelsRelayProfile(profile);
+  if (custom) {
+    return removeRootTomlKey(
+      removeRootTomlKey(configContents, "model_context_window"),
+      "model_auto_compact_token_limit",
+    );
+  }
   const selected = custom
     ? profile.customModels.find((model) => model.model.trim().toLowerCase() === profile.lastUsedModel.trim().toLowerCase())
       || profile.customModels[0]
@@ -8896,8 +8902,6 @@ function applyContextLimitPreview(configContents: string, profile: RelayProfile)
   let config = configContents;
   if (window != null) {
     config = setRootTomlIntKey(config, "model_context_window", String(window));
-  } else if (custom) {
-    config = removeRootTomlKey(config, "model_context_window");
   }
   return setRootTomlIntKey(config, "model_auto_compact_token_limit",
     selected?.autoCompactEnabled ? selected.autoCompactLimit : "");
