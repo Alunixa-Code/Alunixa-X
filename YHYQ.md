@@ -2080,3 +2080,8 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 重新运行当前 Codex `26.917.9434.0` 的隔离 app-server 正反契约，两次 turn 都完成且本机假上游实际收到 `gpt-5.6-sol`：保留根级覆盖时 `modelContextWindow=272000`，按本次产品规则移除根级键后 `modelContextWindow=1050000`，两个 probe 均退出 `0`，喵~
 - 产品修复已定向暂存并提交为 `5316541 fix: keep custom model context windows per model`，未暂存既有 `.tmp`；实时 fetch/gh 核对显示正式 latest 仍为 `v1.0.24`、`v1.0.25` 标签未占用、最近正式发行工作流均 completed 且当前无进行中任务，喵~
 - 首次标签详情只读命令因 PowerShell 在子表达式中混用语句而解析失败，命令未执行任何部分；修正语法后确认 `v1.2.66` 等是 2026-08 的历史 Codex++ 标签且目标已在远端 main 历史中，不影响当前 Alunixa X `v1.0.x` Release 采用 `v1.0.25`，喵~
+- 开始 `v1.0.25` 版本准备：只更新四个本地 Rust 包、管理器 package/package-lock 根版本与 Tauri 版本，不改 `unicode-ident 1.0.24` 等第三方依赖；新增 `CHANGELOG` 2026-09-25 条目和 `docs/releases/v1.0.25.md`，同步中英俄 README 的多模型上下文说明，喵~
+- 发行说明详细记录根级全局覆盖优先于模型目录的原因、CustomModels 与普通单模型/Pure API 的行为边界、Terra `272000` 与 Sol `1050000` app-server 正反证据、视频在当前 Codex 中的真实播放状态、升级重启方式和三平台六资产门禁，喵~
+- 首次版本一致性脚本因 PowerShell `ConvertFrom-Json` 默认模式不接受 package-lock 的空字符串属性名而退出，未修改文件；改用 `-AsHashtable` 后验证通过：Cargo 四包、package、package-lock 根和 Tauri 全为 `1.0.25`，锁文件仅本地版本字段变化，第三方 `unicode-ident 1.0.24` 保持不变，喵~
+- 对最终 `v1.0.25` 源码重新执行完整门禁并取得明确成功退出：Rust workspace `1128 passed / 0 failed / 1 ignored`，`cargo check --workspace --all-targets --locked`、fmt、前端 `118/118`、TypeScript、Vite、i18n `916+80/93/79`、品牌和 `git diff --check` 全部 PASS；唯一 ignored 仍为既有 app-server 子进程入口，喵~
+- 最终发布静态审计通过：四包/前端/Tauri 版本一致，本地 Markdown 链接无缺失，新增行凭据模式命中 `0`，Cargo/npm lock 只改本地版本字段，`git diff --check` 通过；`.tmp` 保持未跟踪且不会进入版本提交，喵~

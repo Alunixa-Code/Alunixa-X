@@ -118,7 +118,9 @@ See the [protocol fidelity matrix](docs/protocol-fidelity.md) for replay contrac
 
 ## Models, context, and image input
 
-The **startup model** supplies the root context window and compaction threshold in `config.toml`. Editing another model updates its catalog entry without silently changing the startup model. Compaction thresholds must be positive integers no larger than the context window; disabling the option removes the managed threshold.
+Starting with **v1.0.25**, multi-model profiles no longer copy the startup model's context window into root `config.toml`. `model_context_window` and `model_auto_compact_token_limit` are global Codex overrides; leaving them at the root made every later model switch reuse the startup model's limits, so the manager and Codex could report different windows.
+
+Multi-model profiles now keep context windows and compaction thresholds exclusively in `model_catalog_json`, one entry per model. The root config retains the startup model name, provider, and catalog reference, while editing another model does not silently select it. Regular single-model and Pure API profiles may still use root limits. A compaction threshold must be a positive integer no larger than its model's context window; disabling compaction removes that model's managed threshold.
 
 Set reasoning limits per provider/model according to actual upstream support. For image input, preserve images, remove them for text-only models, or analyze them through a separately configured VLM. VLM mode needs its own base URL, key, and model.
 
