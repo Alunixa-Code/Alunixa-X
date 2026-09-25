@@ -2086,3 +2086,6 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 对最终 `v1.0.25` 源码重新执行完整门禁并取得明确成功退出：Rust workspace `1128 passed / 0 failed / 1 ignored`，`cargo check --workspace --all-targets --locked`、fmt、前端 `118/118`、TypeScript、Vite、i18n `916+80/93/79`、品牌和 `git diff --check` 全部 PASS；唯一 ignored 仍为既有 app-server 子进程入口，喵~
 - 最终发布静态审计通过：四包/前端/Tauri 版本一致，本地 Markdown 链接无缺失，新增行凭据模式命中 `0`，Cargo/npm lock 只改本地版本字段，`git diff --check` 通过；`.tmp` 保持未跟踪且不会进入版本提交，喵~
 - `v1.0.25` 版本、CHANGELOG、三语 README、详细三语发行说明和项目记录已定向提交为 `b2febde release: prepare v1.0.25 context window compatibility`；核心行为提交为 `5316541`，未跟踪 `.tmp` 未暂存，准备最终冻结并让远端 main、annotated tag 和 Actions head 指向同一产品提交，喵~
+- 最终冻结提交 `9e7aa4d2a5b321400da30b59ae3dcfb646ce0c4b` 已建立；annotated `v1.0.25` 标签对象 `e07a67835c33a9ee92eff8365d5ba2023e8c35f0` 与 main 原子推送成功，远端 main/tag 解引用均与产品 SHA 一致，喵~
+- 标签 push 因最终提交含 `[skip ci]` 没有自动创建新运行；核对后仅手动派发一次 `release-assets.yml`，唯一运行 `36123937473`、event=`workflow_dispatch`、ref=`v1.0.25`、head=`9e7aa4d...`，当前 `in_progress`，后续不重复派发，喵~
+- push 提示既有 Dependabot `12` 项（`6 high / 5 moderate / 1 low`）；本版本未升级第三方依赖，也不将上下文修复描述为已解决该历史依赖清单，喵~
