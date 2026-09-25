@@ -2049,3 +2049,12 @@ ode_modules 与 dist 均按仓库绝对路径安全删除，并确认三个目�
 - 正式发行页已请求在Codex右侧浏览器显示，返回queued，未说成已在前台打开；本次没有下载安装包、修改真实config/auth、自动安装/重启Codex/Helper或关闭用户桌面引擎喵~
 - 本轮三个electron-run目录和两个fixture副本清理仍为执行环境拒绝状态，合计209503026字节保留，停止尝试；最终截图/日志/发行证据和缓存保留，原始CI日志通过API内存核验，没有新增日志下载文件喵~
 - 最终先同步XJ.md当前状态/架构/验证/部署/完成项/待办/下一步，再定向提交本地审计；产品源码保持正式v1.0.24不变喵~
+
+## 2026-09-25 · Codex 更新后媒体背景与上下文窗口不一致
+
+- 用户反馈“更新codex之后视频背景啥的失效了”，随后补充“管理器里的上下文窗口和codex内的不一样”；本轮合并调查同一次Codex更新造成的renderer与模型元数据兼容回归，喵~
+- 已找到并完整读取项目根XJ.md（455行）和YHYQ.md近期历史，读取通用历史中的“必须检查实际安装版本、bundle布局与运行日志”经验；main原有四个仅本地审计提交和未跟踪.tmp保持不变，修改前空检查点751ef34，喵~
+- 只读确认当前安装 `OpenAI.Codex 26.917.9434.0`、CLI `0.155.0-alpha.16.4`、Chromium153，Alunixa X安装/运行版本1.0.24；Codex由Alunixa X以debug port9229/helper57321启动，未重启或注入，喵~
+- 脱敏设置显示视频开关启用、媒体路径位于自有wallpapers目录、透明度25、fill、静音且未暂停；启动日志中bridge/script/settings均成功，`renderer.wallpaper_ready kind=video`，所以当前不是文件缺失、bridge未知路径或视频解码失败，下一步只读检查DOM层级/遮挡/导航，喵~
+- 上下文窗口方面，活动管理器配置、真实`config.toml`根和当前模型目录对`gpt-5.6-terra`均为272000窗口/271000自动压缩；同次新版启动明确记录`renderer.model_app_server_request_patch_not_found`，旧dispatcher相关补丁也因新版资源模块变化失败，初步怀疑Codex内显示继续使用app-server自带元数据而未应用自定义目录，需核对实时UI与新版资源，喵~
+- 只读诊断未输出或修改API Key、token、auth.json、真实对话内容；未停止任何Codex/Helper/管理器进程，未修改真实配置、壁纸媒体或系统安装，喵~
