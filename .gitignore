@@ -25,3 +25,7 @@ tools/codex-wechat/config.local.json
 # pnpm artifacts (project uses npm)
 pnpm-lock.yaml
 pnpm-workspace.yaml
+
+# Local-only Codex project memory and requirement log
+XJ.md
+YHYQ.md
