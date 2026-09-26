@@ -4,6 +4,7 @@
 - Alunixa X 为 Windows/macOS Codex 桌面增强管理器与启动器，当前实际根目录 `D:\Cursor\AlunixaX` 喵~
 
 ## 2. Goals and Requirements
+- 2026-09-26 新需求：管理器增加隐藏触发的完整沉浸式交互体验，采用独立声明式状态机、完整界面、多分支与 HE/BE/NE/TE 多结局；支持中英俄、键盘退出、减少动效和本机进度，公开更新说明只写普通体验优化，不公开入口或叙事细节，喵~
 - 2026-09-25 新反馈：Codex 更新后视频背景等媒体背景失效，且管理器上下文窗口与 Codex 内显示不一致；必须基于当前已安装 `OpenAI.Codex 26.917.9434.0` 的实际 DOM、资源和 app-server 契约修复，不以旧版本 fixture 通过替代新版实测，喵~
 - 用户补充：若动态/WE功能仍不可行，允许移除并回退最初图片背景；稳定性优先，不继续无限试错，完成当前一轮实际验证后按结果决定保留或退回喵~
 - 2026-09-16 新反馈：v1.0.23 壁纸仍然无效，启动后额外弹出 Wallpaper Engine 窗口；修复实际生产路径并验证窗口行为，不能以旧隔离测试/CI成功覆盖用户故障喵~
@@ -15,6 +16,7 @@
 - 推送产品必须由 GitHub Actions 三平台构建、发布六项 GitHub Release 安装资产并核对哈希喵~
 
 ## 3. Current Status
+- **2026-09-26 管理器体验优化本地完成**：新增按需加载的全屏沉浸式交互层、声明式故事节点与完整多结局路径，中英俄文案、逐字显示、状态轨迹、本机进度、Escape/背景/按钮退出和减少动效均已实现；前端122/122、TypeScript、Vite、i18n、品牌及真实Chromium UI门禁全部PASS，尚未升级版本或发布，喵~
 - **v1.0.25正式发布验收完成**：针对 Codex 26.917.9434.0 的多模型上下文窗口不一致已修复并发布；视频背景在当前实例中通过 DOM、readyState、播放时间推进和连续画面变化确认实际播放，因此本版没有重写已通过的媒体链路，喵~
 - 本轮修改前检查点 `5ffea60`，未修改/重启运行中的 Codex、Helper、管理器或真实配置；旧调查提交 `2112487` 和未跟踪 `.tmp` 均保留，喵~
 - 多模型上下文修复已完成定向实现：`RelayMode::CustomModels` 不再写根级 `model_context_window` 或 `model_auto_compact_token_limit`，窗口和压缩阈值只写入 `model_catalog_json` 的对应模型；管理器预览、启动审计和切换回读已同步，喵~
@@ -67,6 +69,7 @@
 - `assets/inject` 原生界面注入；`tools` 验证脚本；`docs/releases` 发行说明；`.github/workflows` CI 喵~
 
 ## 5. Architecture
+- 管理器隐藏体验使用 `React.lazy` 独立分块加载，入口不占用公开路由；纯 TypeScript 节点图负责条件、效果、轨迹和结局，React层只处理逐字渲染、转场、键盘/焦点、轻量本机进度及生命周期清理，CSS动画使用transform/opacity并遵守prefers-reduced-motion，喵~
 - v1.0.24当前方案覆盖旧原生描述：所有壁纸只有image/video；共享renderer bridge服务选中媒体，已删除wallpaper_scene模块/引擎启动/窗口捕获/项目脚本服务；旧Scene/Web只解析受目录约束的预览图片，staticPreview=true明确标记喵~
 - 普通壁纸沿用 `codexAppImageOverlay*`/muted/paused；大图/视频经既有bridge调用受限CDP File→磁盘后备Blob URL，renderer按需播放/撤销，不与DreamSkin混合；历史v1.0.22的Scene/Web自有窗口捕获在v1.0.24删除，enginePath仅作为旧配置兼容字段保留、不使用喵~
 - 生图配置已存入既有 SettingsStore 的 imageModels 有序数组，独立 Tauri 命令做脱敏读取、带版本校验的定向保存；复用全量备份，不让普通设置的旧快照覆盖新生图配置喵~
@@ -92,6 +95,7 @@
 - `node tools/i18n-verify.mjs`、`node tools/check-local-branding.mjs`、`git diff --check` 喵~
 
 ## 9. Testing and Verification
+- 2026-09-26隐藏体验门禁：前端122/122（新增节点引用/三语完整性、四结局可达、TE条件与本机进度4项），TypeScript与Vite PASS，独立分块约34.88kB/15.34kB gzip；Chromium真实UI走通HE和TE、重新开始、Escape清理、zh/en/ru、900×680减少动效与1440×900布局，截图目视PASS且无页面错误，喵~
 - v1.0.25正式CI独立完成日志：Windows job108035669641为41套件1128/0/1；macOS x64 job108035669717及arm64 job108035669681各41套件1106/0/1；三平台前端均118/118，版本、编译、打包、平台结构门禁及发布job108041575824全部success，喵~
 - 2026-09-25 当前源码最终 Rust workspace 已退出 `0`：`1128 passed / 0 failed / 1 ignored`；首次运行唯一过时断言已改为验证根级键不存在且目录保留 `500000/400000`，定向复验 `1/1`，唯一 ignored 为既有 app-server 子进程入口，喵~
 - 2026-09-25 最终发布前源码门禁：全目标 Cargo check、fmt、前端 `118/118`、TypeScript、Vite、英语/俄语普通键 `916/916`、模板键 `80/80`、俄语后端 `93/93`、后端正则 `79/79`、品牌及 diff 全部 PASS；隔离 app-server 两次 turn 均完成且上游实际收到 `gpt-5.6-sol`，喵~
@@ -141,6 +145,7 @@
 - Windows exe/zip、macOS x64 dmg/zip、macOS arm64 dmg/zip；跳过重复 push 构建后仅派发一次正式工作流喵~
 
 ## 11. Important Files
+- `src/signal-archive.ts` 为声明式节点、条件和进度规范；`components/SignalArchive.tsx` 为按需加载的完整交互界面；`tools/verify-signal-archive-ui.py` 为隔离Chromium路径/语言/生命周期回归，具体内容不写入公开README或发行说明，喵~
 - README.md / README_EN.md / README_RU.md 为完整中英俄指南；src/i18n-ru.ts 为独立俄语词典；tools/verify-russian-ui.py 为内存Tauri+生产Chromium语言验收脚本喵~
 - `wallpaper.rs` 媒体导入/旧项目预览解析/路径约束/Range；`bridge.rs::install_renderer_bridge_with_disconnect` 为两个正式启动器和实播fixture的共用入口；`wallpaper_scene.rs` 已删除；`guardian_config.rs` TOML 定向校验；`WallpaperSettings.tsx` 共用控制面板；`docs/wallpapers.md` 使用方法与兼容边界喵~
 - `image_models.rs` 有序配置/校验/脱敏/并发修订；`imagegen_mcp.rs` 每次调用读取默认/显式选择及生成编辑/凭据隔离；`ImageModelsScreen.tsx` 独立页面；`tests/image_models.rs` 配置/备份/原始字段保留回归喵~
@@ -162,6 +167,7 @@
 - 运行中队列补丁只对本地成功删除的旧 ID 转为新增，不重放结果不明的网络请求喵~
 
 ## 13. Completed Work
+- 2026-09-26：完成隐藏触发的沉浸式全屏交互、完整分支状态机、HE/BE/NE/TE、多语言、逐字与转场、可访问退出、本机进度、懒加载和自动化/视觉回归；公开CHANGELOG仅记录交互与加载体验优化，未公开具体入口和内容，喵~
 - v1.0.25修复CustomModels根级上下文窗口覆盖，改由model_catalog_json逐模型保存窗口和压缩阈值，管理器预览/切换/规范化/启动审计同步；已完成当前Codex app-server正反契约、本地全量门禁、三平台Actions、六资产正式Release及正文/来源/哈希/latest验收，喵~
 - v1.0.24统一生产媒体bridge入口、恢复普通图片背景、保留动图/视频、彻底移除WE原生启动/捕获/场景和脚本路径、旧项目明确安全静态预览、严格实播失败退出码、保留俄语/guardianv2与更新三语说明；已完成三平台全量Actions、六资产正式Release及正文/来源/哈希/公开latest/完成日志验收喵~
 - v1.0.23俄语管理器、三语言选择与切换保护、托盘/日期/HTML lang/长文案、NSIS Russian、严格i18n及生产UI验证、完整中英俄README和截图、三语Release说明及三平台六资产正式发行全部完成喵~
@@ -174,6 +180,7 @@
 - v1.0.17 上下文保存/预览、清空/禁用清理、K/M 小数单位、显式启动模型选择及回读校验完成，本地和三平台正式 CI 通过，六资产正式发行已验收喵~
 
 ## 14. Pending Work
+- 当前隐藏体验源码和本地验收已完成，尚未升级到下一补丁版本、推送或发布；如继续正式交付，须使用新标签执行唯一GitHub Actions三平台全量构建并发布六资产，公开发行说明不得出现入口或故事细节，喵~
 - Codex 26.917.9434.0 的本轮媒体与上下文兼容任务已完成开发、隔离实测、正式构建、发布和六资产验收；没有剩余产品工作，用户可安装v1.0.25并在方便时完全退出旧Codex后由新版Alunixa X重新启动，喵~
 - v1.0.24本轮三个electron-run目录及两个fixture副本清理命令被执行环境在启动前整体拒绝，共209503026字节只读确认仍保留；停止删除，不重试或换工具绕过，最终截图/日志及其他缓存保持不变喵~
 - v1.0.24开发/测试/推送/三平台构建/正式发行及验收无剩余工作；仅保留上述环境拒绝的临时文件，不重试删除；用户自行安装完整同版程序并在方便时退出旧Codex后从新版启动，当前用户实例保持不变喵~
@@ -226,6 +233,7 @@
 - gh run view --log 在整轮运行未完成时可能拒绝，等待同一运行完成后取日志，不重复派发喵~
 
 ## 18. Rollback and Recovery
+- 隐藏体验修改前检查点b54429e，需求记录95eb0db；实现集中在独立前端模块、App懒加载入口和隔离CSS，必要时定向revert，不改真实配置、任务、认证或已发布v1.0.25标签，喵~
 - v1.0.25产品冻结9e7aa4d2a5b321400da30b59ae3dcfb646ce0c4b，核心上下文修复5316541，annotated tag v1.0.25；必要时只做针对性revert并发布新版本，不移动已发布标签、不回写真实用户配置、不重写已验证的视频链路，喵~
 - v1.0.24产品冻结1e72402，原生WE撤下实现b89a85c，生产入口修复29b1197，最终标签v1.0.24；必要时只做有针对性的revert并发布新版本，不恢复黑屏离屏方案、不移动正式标签、不删除用户项目或任务；本轮收尾检查点9c1243d与审计65a613c不含额外产品变化喵~
 - 本轮生产壁纸修复前检查点509e610，原有未跟踪.tmp保留；不重启/注入当前Codex，不更改用户真实设置或WE桌面配置喵~
@@ -240,6 +248,11 @@
 - 本轮不修改用户真实配置；历史清理备份保留于对应配置目录 alunixa-x-retirement-backups 喵~
 
 ## 19. Current Task
+### 进行中：管理器沉浸式交互体验补丁交付
+- 2026-09-26用户要求按高级开发者提示增加完整隐藏交互体验；已完成声明式故事、完整界面、多分支和四类结局，并以动态分块避免增加主界面初始负担，喵~
+- 已修正UI验收暴露的逐字定时器竞态：手动显示全文时会立即清理interval，不再被下一tick写回半截文本；最新HE/TE结局截图已目视完整正文和操作按钮，喵~
+- 当前本地门禁全部通过，下一步冻结功能提交，再准备下一补丁版本和不泄露细节的中英俄发行说明，使用唯一三平台Actions发布，喵~
+
 ### 已完成：Codex 26.917 更新后的媒体背景与上下文窗口兼容
 - 2026-09-25用户反馈更新Codex后视频背景等失效，并补充管理器上下文窗口与Codex内不一致；已完整读取XJ.md和YHYQ.md近期记录、检查Git/当前安装/进程/脱敏设置/配置/模型目录与诊断日志，喵~
 - 实测运行链路：Alunixa X 1.0.24通过debug port 9229启动Codex 26.917.9434.0/Chromium153，视频路径存在、开关启用、透明度25、未暂停；脚本/bridge加载、`wallpaper_ready`、播放时间推进且连续画面变化，确认媒体读取、解码和实际播放均正常，喵~
@@ -427,6 +440,7 @@
 - 最终状态：Actions 34744977463 completed/success，Release 387828405 六资产正式发布及哈希核验完成，产品需求交付完成喵~
 
 ## 20. Next Steps
+- 当前先提交已验收的管理器体验源码和内部记录；随后升级下一补丁版本、补充通用体验优化发行说明、执行最终门禁，原子推送main与新annotated tag并只派发一次正式工作流，喵~
 - **v1.0.25交付完成**：不重复派发、重建、覆盖Release或移动标签；用户安装新版后完全退出旧Codex，再通过Alunixa X启动以加载新的CustomModels逐模型上下文配置，视频背景继续沿用已验证链路，喵~
 - 当前源码与本机契约门禁已完成；下一步提交产品修复，核对远端标签/正式发行后升级到新的补丁版本，更新中英俄说明，执行唯一 GitHub Actions 三平台构建并发布六资产 Release，再验证正文、来源、大小与 SHA-256，喵~
 - 当前完成 `v1.0.25` 版本和三语文档初稿；下一步核对版本一致性、第三方锁等价、发行说明链接和全部最终门禁，提交版本准备后原子推送 `main` 与新 annotated tag，再只派发一次正式工作流，喵~
@@ -451,6 +465,7 @@
 - 保持当前 Codex 不重启，不擅自更改真实配置；后续任务从本文件和 YHYQ.md 最新验收记录继续喵~
 
 ## 21. Change Log
+- 2026-09-26：管理器隐藏沉浸式交互本地完成，四结局状态机/中英俄/懒加载/逐字与转场/本机进度/退出清理全部实现；前端122/122、TS/Vite/i18n/品牌/真实Chromium多路径与窄窗门禁PASS，准备补丁版本交付，喵~
 - 2026-09-25 18:47:10（新加坡）：v1.0.25正式发布验收完成，唯一Actions36123937473 success，Release396523097；Windows1128/0/1、macOS各1106/0/1、三平台前端118/118，六资产/三语正文/来源/哈希/公开latest/完成日志全PASS，真实配置与运行进程未动，喵~
 - 2026-09-25：`v1.0.25` 最终本地发行门禁完成，workspace `1128/0/1`、全目标 check、前端 `118/118`、TS/Vite/i18n/品牌/fmt/diff 全部 PASS；准备最终审计、提交、标签和唯一三平台发行，喵~
 - 2026-09-25：产品修复提交 `5316541`；fetch 后核对 latest Release、标签及正式工作流，确认 `v1.0.25` 空闲且无重复发行风险；一次只读 PowerShell 标签审计命令因表达式括号语法错误在启动前失败，修正后成功，无文件修改，喵~

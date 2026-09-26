@@ -78,7 +78,7 @@ import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
 import { ImageModelsScreen } from "@/components/ImageModelsScreen";
 import { WallpaperSettings } from "@/components/WallpaperSettings";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -113,6 +113,7 @@ import {
 import { getLanguage, getLocale, isLanguage, LANGUAGE_OPTIONS, setLanguage, t, tf } from "@/i18n";
 
 const isWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent);
+const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 
 type Status = "ok" | "failed" | "not_implemented" | "not_checked" | string;
 
@@ -1064,6 +1065,9 @@ const defaultSettings: BackendSettings = {
 export function App() {
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
+  const [signalArchiveOpen, setSignalArchiveOpen] = useState(false);
+  const signalTriggerClicks = useRef<number[]>([]);
+  const signalTriggerRef = useRef<HTMLButtonElement>(null);
   const imageModelsPending = useRef({ busy: false, dirty: false });
   const [imageModelsRefresh, setImageModelsRefresh] = useState(0);
   const [notice, setNotice] = useState<{ title: string; message: string; status?: Status } | null>(null);
@@ -3129,6 +3133,20 @@ export function App() {
     [route, launchForm, settingsForm, settings, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, rolloutImageCleanup, rolloutImageCleanupBusy, zedRemoteProjects, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, officialRemote, officialRemoteBusy, pendingChatGptLogin, remotePairing],
   );
   const hasUpdate = update?.updateAvailable === true;
+  const handleSignalArchiveTrigger = () => {
+    const now = performance.now();
+    const recentClicks = [...signalTriggerClicks.current, now].filter((timestamp) => now - timestamp <= 2_200);
+    if (recentClicks.length >= 7) {
+      signalTriggerClicks.current = [];
+      setSignalArchiveOpen(true);
+      return;
+    }
+    signalTriggerClicks.current = recentClicks;
+  };
+  const closeSignalArchive = () => {
+    setSignalArchiveOpen(false);
+    window.requestAnimationFrame(() => signalTriggerRef.current?.focus());
+  };
 
   return (
     <div className={`shell ${theme}`}>
@@ -3152,7 +3170,15 @@ export function App() {
                 </button>
               ) : null}
             </div>
-            <div className="brand-subtitle">AGENT CONTROL SYSTEM</div>
+            <button
+              aria-label="Agent control system"
+              className="brand-subtitle brand-subtitle-trigger"
+              onClick={handleSignalArchiveTrigger}
+              ref={signalTriggerRef}
+              type="button"
+            >
+              AGENT CONTROL SYSTEM
+            </button>
           </div>
         </div>
         <nav className="nav">
@@ -3400,6 +3426,11 @@ export function App() {
           onConfirm={() => void confirmPendingProviderImport()}
           onDismiss={() => void dismissPendingProviderImport()}
         />
+      ) : null}
+      {signalArchiveOpen ? (
+        <Suspense fallback={<div aria-hidden="true" className="signal-archive-loading" />}>
+          <SignalArchive onClose={closeSignalArchive} />
+        </Suspense>
       ) : null}
     </div>
   );
