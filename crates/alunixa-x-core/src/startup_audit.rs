@@ -108,26 +108,21 @@ fn audit_config(
 ) -> anyhow::Result<()> {
     let doc = parse_config(contents)?;
     audit_retired_context(&doc)?;
-    audit_agent_capability_config(&doc, settings, report)?;
+    audit_agent_capability_config(&doc, report)?;
 
-    let expected_threads = crate::settings::clamp_codex_sub_agent_max_threads(
-        settings.codex_app_sub_agent_max_threads,
-    ) as i64;
-    let actual_threads = doc
+    let threads = doc
         .get("agents")
         .and_then(Item::as_table_like)
-        .and_then(|table| table.get("max_threads"))
-        .and_then(Item::as_integer)
-        .context("启动前配置校验失败：agents.max_threads 缺失或不是整数")?;
+        .and_then(|table| table.get("max_threads"));
     report.checked_section();
-    if actual_threads != expected_threads {
-        bail!("启动前配置校验失败：agents.max_threads={actual_threads}，期望={expected_threads}");
+    if threads.is_some_and(|value| !value.as_integer().is_some_and(|n| n > 0)) {
+        bail!("启动前配置校验失败：agents.max_threads 必须为正整数");
     }
 
     audit_imagegen_config(&doc, settings, helper_port)?;
     report.checked_section();
 
-    audit_wss_config(&doc, settings)?;
+    audit_wss_config(&doc)?;
     report.checked_section();
 
     if settings.relay_profiles_enabled {
@@ -159,34 +154,24 @@ fn audit_config(
 
 fn audit_agent_capability_config(
     doc: &DocumentMut,
-    settings: &BackendSettings,
     report: &mut StartupAuditReport,
 ) -> anyhow::Result<()> {
-    let actual_fast_mode = if let Some(features_item) = doc.get("features") {
+    if let Some(features_item) = doc.get("features") {
         let features = features_item
             .as_table_like()
             .context("启动前 Agent 能力校验失败：features 必须是 TOML table")?;
-        features.get("fast_mode").and_then(Item::as_bool)
-    } else {
-        None
-    };
-    report.checked_section();
-    if settings.codex_app_fast_mode {
-        if actual_fast_mode != Some(true) {
-            bail!("启动前 Agent 能力校验失败：Fast 模式已开启但 features.fast_mode 不为 true");
+        for key in ["fast_mode", "goals"] {
+            if features
+                .get(key)
+                .is_some_and(|value| value.as_bool().is_none())
+            {
+                bail!("启动前 Agent 能力校验失败：features.{key} 必须为布尔值");
+            }
+            report.checked_section();
         }
-    } else if actual_fast_mode != Some(false) {
-        bail!("启动前 Agent 能力校验失败：Fast 模式关闭需要 features.fast_mode = false");
     }
-    let goals = doc
-        .get("features")
-        .and_then(Item::as_table_like)
-        .and_then(|features| features.get("goals"))
-        .and_then(Item::as_bool);
-    report.checked_section();
-    if goals != Some(settings.codex_goals_enabled) {
-        bail!("启动前 Agent 能力校验失败：Goals 配置与管理器期望不一致");
-    }
+    // Absent means a runtime default, not "off"; an existing value may have been
+    // deliberately changed outside AX. Neither case authorizes an implicit write.
     Ok(())
 }
 
@@ -245,10 +230,7 @@ fn audit_imagegen_config(
     Ok(())
 }
 
-fn audit_wss_config(doc: &DocumentMut, settings: &BackendSettings) -> anyhow::Result<()> {
-    if !(settings.relay_profiles_enabled && settings.codex_app_disable_wss) {
-        return Ok(());
-    }
+fn audit_wss_config(doc: &DocumentMut) -> anyhow::Result<()> {
     let active = doc
         .get("model_provider")
         .and_then(Item::as_str)
@@ -257,10 +239,12 @@ fn audit_wss_config(doc: &DocumentMut, settings: &BackendSettings) -> anyhow::Re
         .get("model_providers")
         .and_then(Item::as_table_like)
         .and_then(|providers| providers.get(active))
-        .and_then(Item::as_table_like)
-        .context("启动前配置校验失败：禁用 WSS 时当前供应商配置缺失")?;
-    if provider.get("supports_websockets").and_then(Item::as_bool) != Some(false) {
-        bail!("启动前配置校验失败：禁用 WSS 时 supports_websockets 不为 false");
+        .and_then(Item::as_table_like);
+    if provider
+        .and_then(|p| p.get("supports_websockets"))
+        .is_some_and(|v| v.as_bool().is_none())
+    {
+        bail!("启动前配置校验失败：supports_websockets 必须为布尔值");
     }
     Ok(())
 }
@@ -398,7 +382,10 @@ mod tests {
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
         assert!(!config.contains("token_budget"));
         assert!(!config.contains("alunixa-x-context"));
-        assert!(config.contains("max_threads"));
+        assert!(
+            !config.contains("max_threads"),
+            "an audit must not replace CLI defaults"
+        );
         assert!(home.join("hooks.json").is_file());
         assert!(report.checked_files >= 2);
         assert!(report.repaired_items >= 1);
@@ -477,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_repairs_fast_mode_and_keeps_other_agent_features() {
+    fn audit_preserves_native_flags_changed_outside_ax() {
         let temp = tempdir().unwrap();
         let home = temp.path();
         std::fs::write(
@@ -498,17 +485,20 @@ mod tests {
 
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
         let parsed = config.parse::<toml::Value>().unwrap();
-        assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(true));
+        assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(false));
         assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
         assert_eq!(
             parsed["features"]["unrelated_feature"].as_bool(),
             Some(true)
         );
-        assert!(report.repaired_items >= 1);
+        assert_eq!(
+            report.repaired_items, 0,
+            "valid external flags require no repair"
+        );
     }
 
     #[test]
-    fn audit_explicitly_disables_fast_mode_when_agent_capability_is_disabled() {
+    fn audit_does_not_replay_stale_ax_intent_over_external_native_config() {
         let temp = tempdir().unwrap();
         let home = temp.path();
         std::fs::write(home.join("config.toml"), "[features]\nfast_mode = true\n").unwrap();
@@ -519,8 +509,70 @@ mod tests {
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
         assert_eq!(
             config.parse::<toml::Value>().unwrap()["features"]["fast_mode"].as_bool(),
-            Some(false)
+            Some(true)
         );
+    }
+
+    #[test]
+    fn missing_native_flags_keep_runtime_defaults_and_explicit_disables_survive_restart() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        let settings = settings_without_owned_runtime_features();
+        std::fs::write(home.join("config.toml"), "# preserve native defaults\n").unwrap();
+        audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
+        let doc: toml::Value = std::fs::read_to_string(home.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            doc.get("features")
+                .and_then(|f| f.get("fast_mode"))
+                .is_none()
+        );
+        crate::relay_config::set_codex_fast_mode_in_home(home, false).unwrap();
+        crate::relay_config::set_codex_goals_feature_in_home(home, false).unwrap();
+        for _ in 0..2 {
+            audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
+            let doc: toml::Value = std::fs::read_to_string(home.join("config.toml"))
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(doc["features"]["fast_mode"].as_bool(), Some(false));
+            assert_eq!(doc["features"]["goals"].as_bool(), Some(false));
+        }
+    }
+
+    #[test]
+    fn audit_preserves_external_thread_and_transport_values_and_rejects_invalid_types() {
+        let temp = tempdir().unwrap();
+        let home = temp.path();
+        let settings = BackendSettings {
+            codex_app_disable_wss: true,
+            ..settings_without_owned_runtime_features()
+        };
+        let content = "model_provider='private'\n[model_providers.private]\nsupports_websockets=true\n[agents]\nmax_threads=3\n";
+        std::fs::write(home.join("config.toml"), content).unwrap();
+        audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
+        let doc: toml::Value = std::fs::read_to_string(home.join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(doc["agents"]["max_threads"].as_integer(), Some(3));
+        assert_eq!(
+            doc["model_providers"]["private"]["supports_websockets"].as_bool(),
+            Some(true)
+        );
+        for broken in [
+            "[features]\nfast_mode='invalid'\n",
+            "[features]\ngoals='invalid'\n",
+            "[agents]\nmax_threads=-1\n",
+        ] {
+            std::fs::write(home.join("config.toml"), broken).unwrap();
+            assert!(
+                audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher"))
+                    .is_err()
+            );
+        }
     }
 
     #[test]

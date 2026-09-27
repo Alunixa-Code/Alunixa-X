@@ -112,8 +112,14 @@ fn manager_exposes_persisted_disable_wss_switch() {
 }
 
 #[test]
-fn launcher_only_applies_disable_wss_when_codex_config_exists() {
+fn launcher_never_replays_stale_native_capability_values_over_external_edits() {
     let source = include_str!("../src/launcher.rs");
-    assert!(source.contains("settings.codex_app_disable_wss"));
-    assert!(source.contains("home.join(\"config.toml\").is_file()"));
+    assert!(!source.contains("apply_wss_policy_to_home("));
+    assert!(!source.contains("set_codex_sub_agent_max_threads_in_home("));
+    let manager = include_str!("../../../apps/alunixa-x-manager/src-tauri/src/commands.rs");
+    assert!(
+        manager.contains("apply_wss_policy_to_home("),
+        "explicit manager edits still apply"
+    );
+    assert!(manager.contains("set_codex_sub_agent_max_threads_in_home("));
 }

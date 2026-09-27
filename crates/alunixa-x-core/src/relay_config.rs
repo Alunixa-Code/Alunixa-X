@@ -163,18 +163,14 @@ pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result
 
 pub fn sync_codex_agent_capabilities_in_home(
     home: &Path,
-    settings: &BackendSettings,
+    _settings: &BackendSettings,
 ) -> anyhow::Result<bool> {
     let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
-    let mut changed =
-        set_codex_sub_agent_max_threads_in_home(home, settings.codex_app_sub_agent_max_threads)?;
-    changed |= set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
-    let before_goals = read_optional_text(&home.join("config.toml"))?;
-    set_codex_goals_feature_in_home(home, settings.codex_goals_enabled)?;
-    changed |= before_goals != read_optional_text(&home.join("config.toml"))?;
-    apply_wss_policy_to_home(home, settings.codex_app_disable_wss)?;
-    changed |= repair_stale_feature_entries_in_home(home)?;
-    Ok(changed)
+    // Historical callers include launch, provider switch and login repair. AX's
+    // last intent is NOT a higher-priority configuration layer. Native capability
+    // edits are already written by explicit, revision-checked manager saves;
+    // replaying them here would silently undo external edits or CLI defaults.
+    repair_stale_feature_entries_in_home(home)
 }
 
 pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Result<()> {
@@ -510,6 +506,7 @@ pub fn apply_relay_config_to_home_with_protocol(
     }
     let codex_base_url = codex_base_url_for_protocol(base_url, protocol, proxy_port);
     let updated = upsert_model_provider_config("", &codex_base_url, bearer_token)?;
+    let updated = preserve_live_native_capabilities(home, &updated)?;
     let auth_contents = serde_json::to_string_pretty(&json!({
         "auth_mode": "apikey",
         "OPENAI_API_KEY": bearer_token
@@ -616,6 +613,7 @@ pub fn apply_relay_profile_files_to_home_with_context(
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
     let config_with_limits = apply_profile_context_limits_to_config(profile, &config_with_common)?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
+    let config_with_catalog = preserve_live_native_capabilities(home, &config_with_catalog)?;
     apply_relay_files_to_home(home, &config_with_catalog, &profile.auth_contents)
 }
 
@@ -650,6 +648,7 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
     let config_with_limits = apply_profile_context_limits_to_config(profile, &config_with_common)?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
+    let config_with_catalog = preserve_live_native_capabilities(home, &config_with_catalog)?;
 
     if matches!(
         profile.relay_mode,
@@ -687,6 +686,7 @@ pub fn apply_relay_profile_config_to_home_with_context(
     let config_with_common = merge_common_config_into_config(&profile_config, &selected_common)?;
     let config_with_limits = apply_profile_context_limits_to_config(profile, &config_with_common)?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
+    let config_with_catalog = preserve_live_native_capabilities(home, &config_with_catalog)?;
     apply_relay_config_file_to_home(home, &config_with_catalog)
 }
 
@@ -708,6 +708,7 @@ pub fn apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_gua
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
     let config_with_limits = apply_profile_context_limits_to_config(profile, &config_with_common)?;
     let config_with_catalog = apply_model_catalog_to_config(home, profile, &config_with_limits)?;
+    let config_with_catalog = preserve_live_native_capabilities(home, &config_with_catalog)?;
     apply_relay_config_file_to_home_with_computer_use_guard(
         home,
         &config_with_catalog,
@@ -1437,6 +1438,31 @@ fn remove_disabled_context_tables(table: &mut toml_edit::Table) {
             context_table.remove(&id);
         }
     }
+}
+
+/// Provider/model selection must not remove global Agent preferences. This is
+/// deliberately NOT in write_codex_live_atomic: explicit raw config editing must
+/// still be able to change or remove these fields.
+fn preserve_live_native_capabilities(home: &Path, config_text: &str) -> anyhow::Result<String> {
+    let live = parse_toml_document(&read_optional_text(&home.join("config.toml"))?)?;
+    let mut target = parse_toml_document(config_text)?;
+    for (section, keys) in [
+        ("features", &["fast_mode", "goals"][..]),
+        ("agents", &["max_threads"][..]),
+    ] {
+        let Some(source) = live.get(section) else {
+            continue;
+        };
+        let source = source
+            .as_table_like()
+            .with_context(|| format!("当前 {section} 必须为 TOML table，未切换供应商"))?;
+        for key in keys {
+            if let Some(value) = source.get(key) {
+                table_like_mut_or_insert(&mut target, section)?.insert(key, value.clone());
+            }
+        }
+    }
+    Ok(ensure_trailing_newline(target.to_string()))
 }
 
 fn write_codex_live_atomic(

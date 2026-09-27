@@ -836,7 +836,10 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("当前 thread"));
     assert!(script.contains("standard"));
     assert!(script.contains("fast"));
-    assert!(script.contains("[\"app-shared-\", \"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
+    assert!(
+        script
+            .contains("[\"app-shared-\", \"setting-storage-\", \"vscode-api-\", \"app-initial-\"]")
+    );
     assert!(script.contains("codexSettingStorageFromModule"));
     assert!(script.contains("dispatcher export unavailable"));
     assert!(!script.contains("data-codex-max-reasoning-control"));

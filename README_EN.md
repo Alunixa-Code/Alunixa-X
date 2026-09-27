@@ -171,6 +171,16 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
+### Development branch: packaged proxy and capability checks (not released)
+
+The Agent capabilities page distinguishes the ordinary registry view from the view actually read inside the selected Codex package. Automatic and manual repair only disable an enabled manual proxy with no PAC when every endpoint is loopback and repeatedly refuses connections. A disabled proxy's leftover address, a listening local proxy, and external/PAC proxies are left alone.
+
+Repair creates a backup in the same package context, changes only `ProxyEnable`, verifies the result, and reports whether existing Codex processes need restarting. Restore checks package identity and configuration revision before touching the value.
+
+Capability checks distinguish AX intent, disk/CLI defaults, and unverified runtime state. Explicit Fast/Goals disable writes `false`; failed saves roll back the UI, external edits require reload, and launch/login no longer replay stale native settings. Provider switching preserves current global Fast, Goals, and thread limits. Helper, renderer, app-server, and model-request checks are separate.
+
+The full upstream synchronization and live white-screen investigation remain unfinished. See the [38-item audit and verification limits](docs/reports/2026-09-27-startup-capability-repair.md); these development changes are not a claim that the existing release fixes every reported issue.
+
 Check **About** or GitHub Releases for a platform-specific package. An update downloads and starts the installer; it does not mean a running Codex process has loaded new functionality.
 
 Export the complete configuration before migration or major changes. **Full backups include API keys, login data, and user scripts**, even though ordinary UI responses are redacted. Restore through the configuration-import or feature-specific recovery flow. To roll back application code, use an earlier platform package and a retained backup; deleting task databases is not a wallpaper or UI fix.

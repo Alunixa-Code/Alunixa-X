@@ -403,30 +403,14 @@ where
                 }),
             );
         }
-        if settings.relay_profiles_enabled
-            && settings.codex_app_disable_wss
-            && home.join("config.toml").is_file()
-        {
-            crate::relay_config::apply_wss_policy_to_home(&home, true)?;
-        }
         if settings.relay_profiles_enabled {
             crate::relay_config::apply_preferred_model_to_home(
                 &home,
                 &settings.active_relay_profile(),
             )?;
         }
-        if let Err(error) = crate::relay_config::set_codex_sub_agent_max_threads_in_home(
-            &home,
-            settings.codex_app_sub_agent_max_threads,
-        ) {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.sub_agent_limit_config_failed_nonfatal",
-                serde_json::json!({
-                    "max_threads": settings.codex_app_sub_agent_max_threads,
-                    "message": error.to_string()
-                }),
-            );
-        }
+        // Native capability values belong to config.toml/profile layers. Do not
+        // replace external changes with the manager's last saved UI snapshot.
         if let Err(error) = hooks.ensure_plugin_marketplace_config(&settings).await {
             let _ = crate::diagnostic_log::append_diagnostic_log(
                 "launcher.plugin_marketplace_config_failed_nonfatal",
@@ -971,12 +955,6 @@ impl LaunchHooks for DefaultLaunchHooks {
         self.ensure_plugin_marketplace_config(settings).await?;
         self.ensure_imagegen_mcp_config(settings, helper_port)
             .await?;
-        if settings.relay_profiles_enabled && settings.codex_app_disable_wss {
-            let config_path = home.join("config.toml");
-            if config_path.is_file() {
-                crate::relay_config::apply_wss_policy_to_home(&home, true)?;
-            }
-        }
         let report = crate::startup_audit::audit_and_repair_before_launch(
             &home,
             settings,

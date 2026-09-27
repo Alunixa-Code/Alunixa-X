@@ -232,7 +232,8 @@ pub fn overlay_profile_for_audit(
     };
     // Internal read-only view reuses field-level override inspection; never serialize to disk.
     let mut effective = doc.clone();
-    let table = effective.as_table_mut()
+    let table = effective
+        .as_table_mut()
         .ok_or_else(|| anyhow::anyhow!("Codex 配置无法解析，能力状态未知"))?;
     table.insert("profile".into(), toml::Value::String(name.clone()));
     let mut profiles = toml::map::Map::new();
@@ -718,7 +719,10 @@ mod tests {
             ..Default::default()
         };
         let mut doc: toml::Value = base.parse().unwrap();
-        doc.as_table_mut().unwrap().insert("model_provider".into(), toml::Value::String("custom".into()));
+        doc.as_table_mut().unwrap().insert(
+            "model_provider".into(),
+            toml::Value::String("custom".into()),
+        );
         let (view, source) = overlay_profile_for_audit(dir.path(), &settings, &doc).unwrap();
         assert!(source.unwrap().ends_with("work.config.toml"));
         let audit =

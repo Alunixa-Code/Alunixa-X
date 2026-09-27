@@ -45,6 +45,56 @@ use alunixa_x_core::settings::{
 };
 
 #[test]
+fn provider_switch_preserves_external_native_capabilities_instead_of_replaying_ax_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex");
+    let store = SettingsStore::new(temp.path().join("settings.json"));
+    let mut settings = BackendSettings {
+        active_relay_id: "a".into(),
+        relay_profiles: vec![
+            pure_profile("a", "https://a.example/v1", "fixture-a"),
+            pure_profile("b", "https://b.example/v1", "fixture-b"),
+        ],
+        codex_app_fast_mode: false,
+        codex_goals_enabled: false,
+        ..Default::default()
+    };
+    store.save(&settings).unwrap();
+    settings = switch_relay_profile_in_home(&store, &home, settings, "")
+        .unwrap()
+        .settings;
+    let mut config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+    config.push_str("\n[features]\nfast_mode=true\ngoals=true\n[agents]\nmax_threads=3\n");
+    std::fs::write(home.join("config.toml"), config).unwrap();
+    settings.active_relay_id = "b".into();
+    let result = switch_relay_profile_in_home(&store, &home, settings, "a").unwrap();
+    let config: toml::Value = std::fs::read_to_string(home.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(config["features"]["fast_mode"].as_bool(), Some(true));
+    assert_eq!(config["features"]["goals"].as_bool(), Some(true));
+    assert_eq!(config["agents"]["max_threads"].as_integer(), Some(3));
+    assert_eq!(result.settings.relay_profiles.len(), 2);
+    let mut explicitly_edited = config;
+    explicitly_edited["features"]["fast_mode"] = toml::Value::Boolean(false);
+    alunixa_x_core::relay_config::apply_relay_config_file_to_home(
+        &home,
+        &toml::to_string(&explicitly_edited).unwrap(),
+    )
+    .unwrap();
+    let edited: toml::Value = std::fs::read_to_string(home.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(
+        edited["features"]["fast_mode"].as_bool(),
+        Some(false),
+        "preserving provider switches must not swallow explicit config edits"
+    );
+}
+
+#[test]
 fn switch_rolls_back_active_settings_when_live_write_fails() {
     let temp = tempfile::tempdir().unwrap();
     let store = SettingsStore::new(temp.path().join("settings.json"));

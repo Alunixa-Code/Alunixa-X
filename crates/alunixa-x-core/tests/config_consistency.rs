@@ -4,6 +4,32 @@ use alunixa_x_core::relay_config::{
 use alunixa_x_core::settings::{BackendSettings, RelayMode, RelayProfile};
 
 #[test]
+fn launch_and_login_reconciliation_preserve_native_defaults_and_external_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let settings = BackendSettings {
+        codex_app_fast_mode: false,
+        codex_goals_enabled: false,
+        codex_app_disable_wss: true,
+        ..Default::default()
+    };
+    let config = "model_provider='custom'\n[features]\nfast_mode=true\ngoals=true\n[agents]\nmax_threads=3\n[model_providers.custom]\nsupports_websockets=true\n";
+    std::fs::write(dir.path().join("config.toml"), config).unwrap();
+    std::fs::write(dir.path().join("auth.json"), b"{\"fixture\":\"retained\"}").unwrap();
+    for _ in 0..2 {
+        alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(dir.path(), &settings)
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("auth.json")).unwrap(),
+            b"{\"fixture\":\"retained\"}"
+        );
+    }
+}
+
+#[test]
 fn repeated_mcp_tables_merge_instead_of_dropping_transport_fields() {
     let input = "[mcp_servers.node]\ncommand='node'\n[mcp_servers.node]\nargs=['repl']\n[mcp_servers.node.env]\nCUSTOM='retained'\n[mcp_servers]\n";
     let doc: toml::Value = normalize_config_text(input).parse().unwrap();
