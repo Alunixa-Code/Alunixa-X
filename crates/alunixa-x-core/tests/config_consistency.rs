@@ -4,6 +4,62 @@ use alunixa_x_core::relay_config::{
 use alunixa_x_core::settings::{BackendSettings, RelayMode, RelayProfile};
 
 #[test]
+fn disabled_context_entries_remain_explicit_in_live_config() {
+    let common = "[mcp_servers.fixture]\ncommand='not-executed'\ndisabled=true\n\
+                  [plugins.'fixture@local']\nenabled=false\n";
+    let text = alunixa_x_core::relay_config::sync_live_config_context_entries(
+        "model='retained'\n", common,
+    ).unwrap();
+    let doc: toml::Value = text.parse().unwrap();
+    let mcp = doc.get("mcp_servers").and_then(|v| v.get("fixture"));
+    assert_eq!(mcp.and_then(|v| v.get("enabled")).and_then(toml::Value::as_bool), Some(false));
+    assert!(mcp.and_then(|v| v.get("disabled")).is_none());
+    assert_eq!(doc["plugins"]["fixture@local"]["enabled"].as_bool(), Some(false));
+}
+
+#[test]
+fn provider_switch_uses_live_hook_state_not_stale_profile_trust() {
+    let dir = tempfile::tempdir().unwrap();
+    let live = "model='old'\n[hooks.state.fixture]\ntrusted_hash='new-local-hash'\nenabled=false\n";
+    std::fs::write(dir.path().join("config.toml"), live).unwrap();
+    let profile = RelayProfile {
+        config_contents: "model='new'\n[hooks.state.fixture]\ntrusted_hash='stale-hash'\nenabled=true\n\
+                          [hooks.state.revoked]\ntrusted_hash='revoked-hash'\nenabled=true\n".into(),
+        ..Default::default()
+    };
+    alunixa_x_core::relay_config::apply_relay_profile_config_to_home_with_context(dir.path(), &profile, "").unwrap();
+    let doc: toml::Value = std::fs::read_to_string(dir.path().join("config.toml")).unwrap().parse().unwrap();
+    assert_eq!(doc["hooks"]["state"]["fixture"]["trusted_hash"].as_str(), Some("new-local-hash"));
+    assert_eq!(doc["hooks"]["state"]["fixture"]["enabled"].as_bool(), Some(false));
+    assert!(doc["hooks"]["state"].get("revoked").is_none());
+}
+
+#[test]
+fn provider_switch_preserves_absence_of_native_preferences_and_hook_trust() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.toml"), "model='old'\n").unwrap();
+    let profile = RelayProfile {
+        config_contents: "model='new'\n[features]\nfast_mode=false\ngoals=false\n\
+                          [agents]\nmax_threads=7\n[hooks.state.revoked]\nenabled=true\n".into(),
+        ..Default::default()
+    };
+    alunixa_x_core::relay_config::apply_relay_profile_config_to_home_with_context(dir.path(), &profile, "").unwrap();
+    let doc: toml::Value = std::fs::read_to_string(dir.path().join("config.toml")).unwrap().parse().unwrap();
+    for (section, key) in [("features", "fast_mode"), ("features", "goals"), ("agents", "max_threads"), ("hooks", "state")] {
+        assert!(doc.get(section).and_then(|v| v.get(key)).is_none(), "{section}.{key} was resurrected");
+    }
+}
+
+#[test]
+fn raw_config_editor_can_revoke_hook_trust_without_automatic_restoration() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.toml"), "[hooks.state.fixture]\nenabled=true\n").unwrap();
+    alunixa_x_core::relay_config::apply_relay_config_file_to_home(dir.path(), "model='user-edit'\n").unwrap();
+    let doc: toml::Value = std::fs::read_to_string(dir.path().join("config.toml")).unwrap().parse().unwrap();
+    assert!(doc.get("hooks").is_none());
+}
+
+#[test]
 fn launch_and_login_reconciliation_preserve_native_defaults_and_external_values() {
     let dir = tempfile::tempdir().unwrap();
     let settings = BackendSettings {

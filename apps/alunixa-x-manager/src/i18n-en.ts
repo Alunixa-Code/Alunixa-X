@@ -324,6 +324,7 @@ export const EN_PLAIN: Record<string, string> = {
   "Debug 端口": "Debug port",
   "Fast 按钮": "Fast button",
   "Fast 模式": "Fast mode",
+  "读取当前后台的 Goals 支持和默认值；开启或关闭均显式保存，重启后核对生效。": "Checks Goals support and defaults in the installed backend. Both on and off are saved explicitly; verify after restarting.",
   "GitHub Release 更新": "GitHub Release update",
   "GitHub Release 检查": "GitHub Release check",
   "Helper 端口": "Helper port",

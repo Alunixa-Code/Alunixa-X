@@ -90,7 +90,16 @@ test("native switches use audited disk values and refuse unverified or overridde
   const screen = app.slice(app.indexOf("function EnhanceScreen("), app.indexOf("\nfunction ZedRemoteScreen"));
   assert.match(screen, /checked=\{nativeChecked\("codexAppFastMode"\)\}/);
   assert.match(screen, /checked=\{nativeChecked\("codexAppDisableWss"\)\}/);
+  assert.match(screen, /checked=\{nativeChecked\("codexGoalsEnabled"\)\}/);
   assert.match(screen, /const nativeCapabilityEditable[\s\S]*?\["saved_pending_restart", "different"\]/);
+});
+
+test("immediate Agent saves retain pending explicit native edits", () => {
+  const screen = app.slice(app.indexOf("function EnhanceScreen("), app.indexOf("\nfunction ZedRemoteScreen"));
+  for (const name of ["setPersistedEnhanceFlag", "setPersistedSharedTerminalRetention"]) {
+    const body = screen.slice(screen.indexOf(`const ${name} =`)).split("\n  };")[0];
+    assert.match(body, /saveSettingsValue\(next, true, false, nativeEdits\)/);
+  }
 });
 
 test("overview readiness uses live checks and never equates port presence with health", () => {

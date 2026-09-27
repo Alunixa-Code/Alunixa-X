@@ -4953,10 +4953,11 @@ function EnhanceScreen({
   useEffect(() => { setNativeEdits([]); }, [savedRevision]);
   const nativeCapabilityEditable = (key: string) =>
     ["saved_pending_restart", "different"].includes(nativeCapabilityStates[key] || "");
-  const nativeChecked = (key: "codexAppFastMode" | "codexAppDisableWss") =>
+  type NativeBooleanKey = "codexAppFastMode" | "codexAppDisableWss" | "codexGoalsEnabled";
+  const nativeChecked = (key: NativeBooleanKey) =>
     nativeEdits.includes(key) || typeof nativeDiskValues[key] !== "boolean"
       ? form[key] : nativeDiskValues[key] as boolean;
-  const editNative = async (key: "codexAppFastMode" | "codexAppDisableWss", value: boolean, immediate = false) => {
+  const editNative = async (key: NativeBooleanKey, value: boolean, immediate = false) => {
     const keys = Array.from(new Set([...nativeEdits, key]));
     setNativeEdits(keys);
     const next = { ...form, [key]: value };
@@ -4970,7 +4971,7 @@ function EnhanceScreen({
   const setPersistedEnhanceFlag = (key: keyof BackendSettings, value: boolean) => {
     const next = { ...form, [key]: value };
     onFormChange(next);
-    void actions.saveSettingsValue(next, true);
+    void actions.saveSettingsValue(next, true, false, nativeEdits).then(() => setNativeEdits([]));
   };
   const setPersistedSharedTerminalRetention = (value: number) => {
     const next = {
@@ -4978,7 +4979,7 @@ function EnhanceScreen({
       codexAppSharedTerminalRetentionMinutes: Math.max(0, Math.min(5, Math.round(value))),
     };
     onFormChange(next);
-    void actions.saveSettingsValue(next, true);
+    void actions.saveSettingsValue(next, true, false, nativeEdits).then(() => setNativeEdits([]));
   };
   const masterEnabled = form.enhancementsEnabled;
   const patchMode = form.launchMode === "patch";
@@ -5022,6 +5023,7 @@ function EnhanceScreen({
           <label className="switch-row">
             <input
               checked={form.computerUseGuardEnabled}
+              disabled={nativeCapabilityStates.computerUseGuardEnabled === "unsupported"}
               onChange={(event) => onFormChange({ ...form, computerUseGuardEnabled: event.currentTarget.checked })}
               type="checkbox"
             />
@@ -5045,6 +5047,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
               <FeatureToggle title={t("Fast 按钮")} detail={t("显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。")} checked={form.codexAppServiceTierControls} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppServiceTierControls", value)} />
               <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={nativeChecked("codexAppFastMode")} unknown={typeof nativeDiskValues.codexAppFastMode !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppFastMode")} onChange={(value) => void editNative("codexAppFastMode", value)} />
+              <FeatureToggle title="Goals" detail={t("读取当前后台的 Goals 支持和默认值；开启或关闭均显式保存，重启后核对生效。")} checked={nativeChecked("codexGoalsEnabled")} unknown={typeof nativeDiskValues.codexGoalsEnabled !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexGoalsEnabled")} onChange={(value) => void editNative("codexGoalsEnabled", value)} />
               <div className="feature-action-row">
                 <div>
                   <strong>{t("官方远端插件缓存")}</strong>

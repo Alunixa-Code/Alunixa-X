@@ -9,7 +9,7 @@ BASE = runpy.run_path(str(Path(__file__).with_name("verify-image-models-ui.py"))
 INIT = BASE["INIT"] + r"""
 (() => {
   const original = window.__TAURI_INTERNALS__.invoke;
-  let revision = 'r1', fast = true, settings = {codexAppPath:'',relayProfiles:[],enhancementsEnabled:true,codexAppPackagedProxyRepair:true,codexAppFastMode:false};
+  let revision = 'r1', fast = true, goals = true, settings = {codexAppPath:'',relayProfiles:[],enhancementsEnabled:true,codexAppPackagedProxyRepair:true,codexAppFastMode:false,codexGoalsEnabled:false};
   window.__lastSave = null;
   window.__saveFail = false; window.__proxyState = 'dead_loopback'; window.__proxyWrites = 0;
   window.__external = false; window.__auditFail = false;
@@ -20,6 +20,7 @@ INIT = BASE["INIT"] + r"""
       if(window.__saveFail || window.__external || args.expectedRevision!==revision)
         return {status:'failed',message:'fixture write failed',settings,revision,user_scripts:{scripts:[]}};
       if(args.capabilityWrites?.includes('codexAppFastMode')) fast=args.settings.codexAppFastMode;
+      if(args.capabilityWrites?.includes('codexGoalsEnabled')) goals=args.settings.codexGoalsEnabled;
       settings=args.settings; revision+='x';
       return {status:'ok',message:'已保存，待重启生效',settings,revision,user_scripts:{scripts:[]}};
     }
@@ -29,6 +30,7 @@ INIT = BASE["INIT"] + r"""
       return {revision:window.__external?'external':revision,configPath:'fixture/config.toml',cliPath:'fixture/codex',
         scope:'global_profile_only_runtime_unknown',overrides:['environment: CODEX_HOME'],entries:[
         {key:'codexAppFastMode',desired:settings.codexAppFastMode,disk:fast,state:fast===settings.codexAppFastMode?'saved_pending_restart':'different',source:'config.toml / CLI default',dependency:'fast_mode',effect:'restart'},
+        {key:'codexGoalsEnabled',desired:settings.codexGoalsEnabled,disk:goals,state:window.__goalsUnsupported?'unsupported':goals===settings.codexGoalsEnabled?'saved_pending_restart':'different',source:'config.toml / CLI default',dependency:'goals',effect:'restart'},
         {key:'zedRemoteSyncToZedSettings',desired:true,disk:null,state:'unsupported',source:'settings',dependency:'not implemented',effect:'unknown'}]};
     }
     if(cmd==='packaged_proxy_action') {
@@ -78,7 +80,7 @@ def main():
             expect(page.locator(".ax-readiness")).to_contain_text("not_tested")
             page.locator(".nav").get_by_role("button", name="Agent 能力", exact=True).click()
             panel = page.locator(".agent-health-panel")
-            expect(panel.get_by_text("与磁盘不一致", exact=True)).to_be_visible()
+            expect(panel.get_by_text("与磁盘不一致", exact=True).first).to_be_visible()
             expect(panel.get_by_text("不支持/未实现", exact=True)).to_be_visible()
             fast_row = page.locator(".feature-toggle").filter(has=page.locator("strong").get_by_text("Fast 模式", exact=True))
             fast = fast_row.get_by_role("checkbox")
@@ -96,6 +98,22 @@ def main():
             expect(fast).not_to_be_checked()
             auto = panel.get_by_role("checkbox")
             expect(auto).to_be_checked()
+            goals_row = page.locator(".feature-toggle").filter(has=page.locator("strong").get_by_text("Goals", exact=True))
+            goals = goals_row.get_by_role("checkbox")
+            expect(goals).to_be_checked()
+            goals_row.click()
+            auto.uncheck()
+            page.wait_for_function("window.__lastSave?.settings.codexAppPackagedProxyRepair === false")
+            assert "codexGoalsEnabled" in page.evaluate("window.__lastSave.capabilityWrites")
+            expect(goals).not_to_be_checked()
+            # The immediate save of another switch must also persist the pending Goals edit.
+            panel.get_by_role("button", name="重新检测", exact=True).click()
+            expect(panel.locator("tr").filter(has_text="codexGoalsEnabled")).to_contain_text("已保存，待重启生效")
+            auto.check()
+            expect(auto).to_be_checked()
+            page.evaluate("window.__goalsUnsupported = true")
+            panel.get_by_role("button", name="重新检测", exact=True).click()
+            expect(goals).to_be_disabled()
             page.evaluate("window.__saveFail = true")
             auto.click()
             expect(auto).to_be_checked()
@@ -129,7 +147,7 @@ def main():
             expect(panel.get_by_text("检测失败，状态未知", exact=True)).to_be_visible()
             expect(panel.locator("table")).to_have_count(0)
             assert not errors, errors
-            print("AGENT_HEALTH_UI_PASS: native DOM vs spinner/overlay/hidden, false readiness, real disk/default switch, explicit disable, failed-save rollback, persistent stale revision, proxy gating, unknown, compact")
+            print("AGENT_HEALTH_UI_PASS: native DOM vs spinner/overlay/hidden, false readiness, Fast/Goals disk defaults, pending native edit across immediate save, unsupported Goals, failed-save rollback, persistent stale revision, proxy gating, unknown, compact")
         finally:
             browser.close()
 

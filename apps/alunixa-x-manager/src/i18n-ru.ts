@@ -296,6 +296,7 @@ export const RU_PLAIN: Record<string, string> = {
   "Debug 端口": "Порт отладки",
   "Fast 按钮": "Кнопка Fast",
   "Fast 模式": "Режим Fast",
+  "读取当前后台的 Goals 支持和默认值；开启或关闭均显式保存，重启后核对生效。": "Проверяет поддержку Goals и значение по умолчанию в установленном сервере. Включение и отключение сохраняются явно; проверьте после перезапуска.",
   "GitHub Release 更新": "Обновление из GitHub Releases",
   "GitHub Release 检查": "Проверка GitHub Releases",
   "Helper 端口": "Порт Helper",
