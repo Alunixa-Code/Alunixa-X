@@ -27,91 +27,34 @@ pub fn switch_relay_profile_in_home(
     }
     crate::codex_app_state::capture_app_state_snapshot_nonfatal(home, "relay_switch.before");
 
-    let original_settings = store
+    store
         .load()
         .context("读取原供应商设置失败，已停止切换以避免覆盖配置")?;
+    let target = selected_settings.active_relay_profile();
+    if !target.auth_contents.trim().is_empty() {
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&target.auth_contents)
+            .map_err(|_| anyhow::anyhow!("auth.json 不是有效 JSON 对象，未切换"))?;
+    }
     if !previous_active_relay_id.trim().is_empty()
         && previous_active_relay_id != selected_settings.active_relay_id
     {
         backfill_profile_before_switch(home, &mut selected_settings, previous_active_relay_id)?;
     }
-    let original_live_files =
-        LiveRelayFiles::capture(home).context("读取原 Codex live 配置失败，已停止切换")?;
-
     // This path represents an explicit provider/default-model selection from
     // the manager, so the submitted selection must win over an older runtime
     // model snapshot that may still be present on disk.
-    store
-        .save(&selected_settings)
-        .context("保存供应商设置失败")?;
-    let apply_result = (|| {
+    let result = crate::config_transaction::run(store.path(), home, None, || {
+        store
+            .save(&selected_settings)
+            .context("保存供应商设置失败")?;
         let selected_settings = store.load().context("读取供应商设置失败")?;
         apply_selected_relay_profile(home, &selected_settings)
-    })();
-
-    match apply_result {
-        Ok(result) => {
-            crate::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
-                home,
-                "relay_switch.after",
-            );
-            Ok(result)
-        }
-        Err(error) => {
-            let settings_restore = store.save(&original_settings);
-            let live_restore = original_live_files.restore();
-            match (settings_restore, live_restore) {
-                (Ok(()), Ok(())) => Err(error),
-                (settings_result, live_result) => anyhow::bail!(
-                    "{error}; rollback failed: settings={}, live={}",
-                    settings_result
-                        .err()
-                        .map(|failure| failure.to_string())
-                        .unwrap_or_else(|| "ok".to_string()),
-                    live_result
-                        .err()
-                        .map(|failure| failure.to_string())
-                        .unwrap_or_else(|| "ok".to_string())
-                ),
-            }
-        }
-    }
-}
-
-struct LiveRelayFiles {
-    files: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
-}
-
-impl LiveRelayFiles {
-    fn capture(home: &Path) -> anyhow::Result<Self> {
-        let files = ["config.toml", "auth.json"]
-            .into_iter()
-            .map(|name| {
-                let path = home.join(name);
-                let contents = match std::fs::read(&path) {
-                    Ok(contents) => Some(contents),
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(error) => return Err(error.into()),
-                };
-                Ok((path, contents))
-            })
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        Ok(Self { files })
-    }
-
-    fn restore(&self) -> anyhow::Result<()> {
-        for (path, contents) in &self.files {
-            match contents {
-                Some(contents) => crate::settings::atomic_write(path, contents)?,
-                None => match std::fs::remove_file(path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                },
-            }
-        }
-        Ok(())
-    }
+    })?;
+    crate::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
+        home,
+        "relay_switch.after",
+    );
+    Ok(result)
 }
 
 fn backfill_profile_before_switch(

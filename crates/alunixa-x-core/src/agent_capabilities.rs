@@ -128,11 +128,19 @@ pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
         .parse::<toml::Value>()
         .map_err(|_| anyhow::anyhow!("Codex 配置无法解析，能力状态未知"))?;
     let mut audit = inspect_values(&settings, &doc, &features)?;
-    if settings.codex_app_instructions_enabled &&
-        crate::codex_instructions::audit_model_instructions_before_launch(
-            &home, true, &settings.codex_app_instructions).is_err()
+    if settings.codex_app_instructions_enabled
+        && crate::codex_instructions::audit_model_instructions_before_launch(
+            &home,
+            true,
+            &settings.codex_app_instructions,
+        )
+        .is_err()
     {
-        if let Some(entry) = audit.entries.iter_mut().find(|entry| entry.key == "codexAppInstructionsEnabled") {
+        if let Some(entry) = audit
+            .entries
+            .iter_mut()
+            .find(|entry| entry.key == "codexAppInstructionsEnabled")
+        {
             entry.state = "missing_dependency".into();
             entry.dependency = "提示词引用、文件内容或读取权限检查未通过".into();
         }
@@ -183,7 +191,7 @@ pub fn inspect_values(
     if settings
         .codex_extra_args
         .iter()
-        .any(|a| a == "-c" || a == "-p" || a.starts_with("--config") || a.starts_with("--profile"))
+        .any(|a| a.starts_with("-c") || a.starts_with("-p") || a.starts_with("--config") || a.starts_with("--profile"))
     {
         overrides.push("launcher: config/profile arguments".into());
     }
@@ -237,12 +245,17 @@ pub fn inspect_values(
             }
         } else if key == "codexAppSubAgentMaxThreads" {
             item.source = "config.toml: agents.max_threads".into();
-            item.disk = doc
+            let scoped = selected_doc.and_then(|d| d.get("agents")).and_then(|v| v.get("max_threads"));
+            item.disk = scoped.or_else(|| doc
                 .get("agents")
-                .and_then(|v| v.get("max_threads"))
+                .and_then(|v| v.get("max_threads")))
                 .and_then(toml::Value::as_integer)
                 .map(Value::from);
-            item.state = if item.disk.as_ref() == Some(&item.desired) {
+            item.state = if item.disk.is_none() {
+                "unknown"
+            } else if scoped.is_some() {
+                "overridden"
+            } else if item.disk.as_ref() == Some(&item.desired) {
                 "saved_pending_restart"
             } else {
                 "different"
@@ -262,13 +275,16 @@ pub fn inspect_values(
             .into();
         } else if key == "codexAppInstructionsEnabled" {
             item.source = "config.toml: model_instructions_file".into();
+            let scoped = selected_doc.and_then(|d| d.get("model_instructions_file"));
             item.disk = Some(Value::Bool(
-                doc.get("model_instructions_file")
+                scoped.or_else(|| doc.get("model_instructions_file"))
                     .and_then(toml::Value::as_str)
                     .is_some_and(|v| !v.trim().is_empty()),
             ));
             item.dependency = "提示词文件存在且没有 profile/项目/参数覆盖".into();
-            item.state = if item.disk.as_ref() == Some(&item.desired) {
+            item.state = if scoped.is_some() {
+                "overridden"
+            } else if item.disk.as_ref() == Some(&item.desired) {
                 "saved_pending_restart"
             } else {
                 "different"
@@ -276,8 +292,7 @@ pub fn inspect_values(
             .into();
         } else if key == "codexAppDisableWss" {
             item.source = "config.toml: model_providers.<active>.supports_websockets".into();
-            let provider = doc
-                .get("model_provider")
+            let provider = selected_doc.and_then(|d| d.get("model_provider")).or_else(|| doc.get("model_provider"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or("openai");
             item.disk = doc
@@ -427,5 +442,22 @@ mod tests {
                 .state,
             "unsupported"
         );
+    }
+
+    #[test]
+    fn profile_overrides_threads_and_instructions_without_claiming_live_effect() {
+        let audit = inspect_values(&BackendSettings::default(), &r#"
+profile="work"
+[agents]
+max_threads=6
+[profiles.work]
+model_instructions_file="profile.md"
+[profiles.work.agents]
+max_threads=2
+"#.parse().unwrap(), &BTreeMap::new()).unwrap();
+        for key in ["codexAppSubAgentMaxThreads", "codexAppInstructionsEnabled"] {
+            assert_eq!(audit.entries.iter().find(|entry| entry.key == key).unwrap().state, "overridden");
+        }
+        assert_eq!(audit.entries.iter().find(|entry| entry.key == "codexAppSubAgentMaxThreads").unwrap().disk, Some(Value::from(2)));
     }
 }

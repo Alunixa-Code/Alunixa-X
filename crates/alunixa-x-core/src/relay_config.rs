@@ -169,6 +169,10 @@ pub fn sync_codex_agent_capabilities_in_home(
     let mut changed =
         set_codex_sub_agent_max_threads_in_home(home, settings.codex_app_sub_agent_max_threads)?;
     changed |= set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
+    let before_goals = read_optional_text(&home.join("config.toml"))?;
+    set_codex_goals_feature_in_home(home, settings.codex_goals_enabled)?;
+    changed |= before_goals != read_optional_text(&home.join("config.toml"))?;
+    apply_wss_policy_to_home(home, settings.codex_app_disable_wss)?;
     changed |= repair_stale_feature_entries_in_home(home)?;
     Ok(changed)
 }
@@ -1529,29 +1533,21 @@ fn write_codex_live_atomic(
         return Ok(None);
     }
     let backup_path = create_live_backup(home, old_config.as_deref(), old_auth.as_deref())?;
-    let mut auth_written = false;
-
-    if auth_changed {
-        if let Some(auth_bytes) = auth_bytes {
-            if let Err(error) = crate::settings::atomic_write(&auth_path, auth_bytes) {
-                return Err(error.context("写入 auth.json 失败"));
-            }
-            auth_written = true;
-        }
-    }
-
-    if config_changed {
-        if let Some(config_text) = config_text {
-            if let Err(error) = crate::settings::atomic_write(&config_path, config_text.as_bytes())
-            {
-                if auth_written {
-                    let _ = restore_optional_file(&auth_path, old_auth.as_deref());
-                }
-                let _ = restore_optional_file(&config_path, old_config.as_deref());
-                return Err(error.context("写入 config.toml 失败"));
+    crate::config_transaction::run_in_home(home, || {
+        if auth_changed {
+            if let Some(auth_bytes) = auth_bytes {
+                crate::settings::atomic_write(&auth_path, auth_bytes)
+                    .context("写入 auth.json 失败")?;
             }
         }
-    }
+        if config_changed {
+            if let Some(config_text) = config_text {
+                crate::settings::atomic_write(&config_path, config_text.as_bytes())
+                    .context("写入 config.toml 失败")?;
+            }
+        }
+        Ok(())
+    })?;
 
     Ok(backup_path)
 }
@@ -1668,17 +1664,21 @@ fn provider_table_exists(doc: &DocumentMut, provider_id: &str) -> bool {
         .is_some()
 }
 
+pub fn validate_config_text(contents: &str) -> anyhow::Result<()> {
+    parse_toml_document(contents).map(|_| ())
+}
+
 fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
     let contents = contents.trim_start_matches('\u{feff}');
     if contents.trim().is_empty() {
         Ok(DocumentMut::new())
     } else {
-        contents
-            .parse::<DocumentMut>()
-            .map_err(|error| anyhow::anyhow!(
+        contents.parse::<DocumentMut>().map_err(|error| {
+            anyhow::anyhow!(
                 "config.toml TOML 解析失败（字节偏移 {}），未输出配置正文",
                 error.span().map(|span| span.start).unwrap_or(0)
-            ))
+            )
+        })
     }
 }
 
@@ -2045,7 +2045,7 @@ fn apply_model_catalog_to_config(
         if let Some(parent) = catalog_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&catalog_path, catalog_json)?;
+        crate::settings::atomic_write(&catalog_path, catalog_json.as_bytes())?;
         let mut doc = parse_toml_document(&config_text)?;
         doc["model_catalog_json"] = toml_edit::value(catalog_relative);
         doc.as_table_mut().remove("model_context_window");
@@ -2095,7 +2095,7 @@ fn apply_model_catalog_to_config(
         &model_windows,
         fallback,
     )?;
-    std::fs::write(&catalog_path, catalog_json)?;
+    crate::settings::atomic_write(&catalog_path, catalog_json.as_bytes())?;
     let mut doc = parse_toml_document(&config_text)?;
     doc["model_catalog_json"] = toml_edit::value(catalog_relative);
     Ok(normalize_optional_toml(doc))
@@ -2269,7 +2269,7 @@ fn copy_standard_responses_catalog(
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(target, serde_json::to_string_pretty(&catalog)?)?;
+    crate::settings::atomic_write(&target, serde_json::to_string_pretty(&catalog)?.as_bytes())?;
     Ok(true)
 }
 
@@ -3366,17 +3366,6 @@ fn read_optional_bytes(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),
-    }
-}
-
-fn restore_optional_file(path: &Path, contents: Option<&[u8]>) -> anyhow::Result<()> {
-    match contents {
-        Some(contents) => crate::settings::atomic_write(path, contents),
-        None => match std::fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(error.into()),
-        },
     }
 }
 

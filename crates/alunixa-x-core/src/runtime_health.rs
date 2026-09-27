@@ -31,7 +31,6 @@ impl RendererHealth {
         self.ready_state == "complete"
             && self.has_electron_bridge
             && self.has_native_surface
-            && self.adapter_failures == 0
     }
 }
 
@@ -128,7 +127,9 @@ pub async fn inspect(status: Option<&crate::status::LaunchStatus>) -> RuntimeHea
                     "unverified"
                 }
                 .into();
-                report.reason = if view.ready() {
+                report.reason = if view.ready() && view.adapter_failures > 0 {
+                    "原生界面可见，但部分增强适配器失败；模型请求未验证。"
+                } else if view.ready() {
                     "已确认原生界面可见；app-server 与模型请求未作真实调用验证。"
                 } else {
                     "调试端口有响应，但未确认原生界面就绪；可重试或关闭增强后重新启动。"
@@ -184,7 +185,8 @@ mod tests {
         view.has_native_surface = true;
         assert!(view.ready());
         view.adapter_failures = 1;
-        assert!(!view.ready());
+        // An optional adapter failure does not turn a usable native UI into a white screen.
+        assert!(view.ready());
     }
     #[tokio::test]
     async fn missing_status_keeps_real_requests_unknown() {

@@ -1448,6 +1448,10 @@ impl SettingsStore {
         Self { path }
     }
 
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn load(&self) -> anyhow::Result<BackendSettings> {
         self.with_lock(false, || self.load_unlocked())
     }
@@ -2275,6 +2279,22 @@ fn atomic_write_unique(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyhow::Result<()> {
+    atomic_write_with_temp_impl(path, bytes, temp_path, true)
+}
+
+pub(crate) fn atomic_write_untracked(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    atomic_write_with_temp_impl(path, bytes, unique_temp_path_for(path), false)
+}
+
+fn atomic_write_with_temp_impl(
+    path: &Path,
+    bytes: &[u8],
+    temp_path: PathBuf,
+    tracked: bool,
+) -> anyhow::Result<()> {
+    if tracked {
+        crate::config_transaction::prepare_write(path)?;
+    }
     if fs::metadata(path).is_ok_and(|metadata| metadata.permissions().readonly()) {
         anyhow::bail!("目标配置只读，未覆盖原文件");
     }
@@ -2295,7 +2315,9 @@ fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyh
             )
         });
     }
-    crate::config_transaction::record_write(path, bytes);
+    if tracked {
+        crate::config_transaction::record_write(path, bytes);
+    }
     Ok(())
 }
 

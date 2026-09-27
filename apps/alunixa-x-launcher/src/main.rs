@@ -5,13 +5,11 @@ use alunixa_x_core::launcher::{
 };
 use alunixa_x_core::models::{DeleteResult, ExportResult, SessionRef};
 use alunixa_x_core::routes::{BridgeContext, BridgeDataService, BridgeRuntimeService};
-use alunixa_x_core::status::LaunchStatus;
 use alunixa_x_core::user_scripts::UserScriptManager;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 struct LauncherHooks {
@@ -265,140 +263,32 @@ fn should_recover_stale_launcher(debug_port: u16) -> bool {
 }
 
 async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<()> {
-    let hooks = LauncherHooks::default();
-    let settings = hooks.load_settings().await?;
-    ensure_alunixa_x_hooks(&settings).await;
-    alunixa_x_core::retired_context::remove_from_home(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-    )?;
-    alunixa_x_core::codex_instructions::ensure_model_instructions_before_launch(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-        settings.codex_app_instructions_enabled,
-        &settings.codex_app_instructions,
-    )
-    .context("failed to restore Codex advanced instructions before reactivation")?;
-    hooks
-        .apply_active_relay_profile(&settings)
-        .await
-        .context("failed to reconcile Codex provider before reactivation")?;
-    hooks
-        .audit_startup_config(&settings, options.helper_port)
-        .await
-        .context("Codex startup configuration audit failed before reactivation")?;
-    let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
-    save_existing_launch_status(
-        &options,
-        &app_dir,
-        "starting",
-        "Alunixa X is reconnecting to the existing Codex app.",
-    );
-    let launch_result = hooks
-        .launch_codex(
-            &app_dir,
-            options.debug_port,
-            &settings,
-            &settings.codex_extra_args,
-        )
-        .await;
-    if settings.enhancements_enabled {
-        hooks.start_helper(options.helper_port).await?;
-    }
-    let process_ids = alunixa_x_core::watcher::find_codex_processes();
-    let mut activated = false;
+    // Another launcher owns the helper, bridge and startup transaction. A second
+    // invocation may focus its window, but must not rewrite configuration, bind
+    // its port, inject a second bridge or publish a fabricated "running" status.
     #[cfg(windows)]
-    {
-        for process_id in &process_ids {
-            if alunixa_x_core::windows_activate_process_window(*process_id) {
-                activated = true;
-                break;
-            }
-        }
-    }
-    let injection_ready = if settings.enhancements_enabled {
-        hooks
-            .ensure_injection(options.debug_port, options.helper_port, &app_dir)
-            .await
-    } else {
-        false
+    let activated = alunixa_x_core::watcher::find_codex_processes().into_iter()
+        .any(alunixa_x_core::windows_activate_process_window);
+    #[cfg(not(windows))]
+    let activated = {
+        let settings = alunixa_x_core::settings::SettingsStore::default().load()?;
+        let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+            options.app_dir.as_deref(), Some(&settings.codex_app_path),
+        ).context("Codex App directory not found")?;
+        #[cfg(target_os = "macos")]
+        { tokio::process::Command::new("/usr/bin/open").arg("-a").arg(app_dir)
+            .status().await?.success() }
+        #[cfg(not(target_os = "macos"))]
+        { let _ = app_dir; false }
     };
-    let verification_error = if injection_ready {
-        hooks
-            .verify_startup_injection(options.debug_port, options.helper_port, &settings)
-            .await
-            .err()
-            .map(|error| error.to_string())
-    } else {
-        None
-    };
-    let (status, message) = if injection_ready && verification_error.is_none() {
-        hooks
-            .start_bridge_watchdog(options.debug_port, options.helper_port)
-            .await?;
-        hooks.write_status("running").await;
-        (
-            "running",
-            "Alunixa X reconnected to the existing Codex app.",
-        )
-    } else if settings.enhancements_enabled {
-        hooks.write_status("failed").await;
-        (
-            "failed",
-            "Alunixa X could not verify the injection bridge for the existing Codex app.",
-        )
-    } else if launch_result.is_ok() {
-        hooks.write_status("running").await;
-        ("running", "Codex is running with enhancements disabled.")
-    } else {
-        hooks.write_status("failed").await;
-        (
-            "failed",
-            "Alunixa X could not reactivate the existing Codex app.",
-        )
-    };
-    save_existing_launch_status(&options, &app_dir, status, message);
     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
         "launcher.activate_existing_codex",
-        json!({
-            "app_dir": app_dir.to_string_lossy(),
-            "debug_port": options.debug_port,
-            "helper_port": options.helper_port,
-            "process_ids": process_ids,
-            "activated": activated,
-            "injection_ready": injection_ready,
-            "verification_error": verification_error.as_deref(),
-            "launch_ok": launch_result.is_ok(),
-            "launch_error": launch_result.as_ref().err().map(|error| error.to_string())
-        }),
+        json!({"activated": activated, "debug_port": options.debug_port, "reusedOwner": true}),
     );
-    if settings.enhancements_enabled && status == "failed" {
-        anyhow::bail!(
-            "Alunixa X could not verify the existing Codex injection bridge: {}",
-            verification_error
-                .as_deref()
-                .unwrap_or("injection bridge unavailable")
-        );
+    if !activated {
+        anyhow::bail!("现有启动器仍占用运行环境，尚未找到可激活窗口；请查看启动状态后重试");
     }
-    launch_result.map(|_| ())
-}
-
-fn save_existing_launch_status(
-    options: &LaunchOptions,
-    app_dir: &Path,
-    status: &str,
-    message: &str,
-) {
-    let started_at_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let _ = options.status_store.save_latest(&LaunchStatus {
-        status: status.to_string(),
-        message: message.to_string(),
-        started_at_ms,
-        debug_port: Some(options.debug_port),
-        helper_port: Some(options.helper_port),
-        codex_app: Some(app_dir.to_string_lossy().to_string()),
-    });
+    Ok(())
 }
 
 fn log_launcher_already_running(debug_port: u16) {
@@ -1382,6 +1272,21 @@ mod tests {
         assert!(source.contains("acquire_single_instance_guard(options.debug_port)?"));
         assert!(source.contains("launcher_guard_port"));
         assert!(source.contains("launcher.already_running"));
+    }
+
+    #[test]
+    fn repeated_launch_only_focuses_the_existing_owner() {
+        let source = include_str!("main.rs");
+        let start = source.find("async fn activate_existing_codex_app(").unwrap();
+        let end = source[start..].find("fn log_launcher_already_running(").unwrap() + start;
+        let activation = &source[start..end];
+        for forbidden in [
+            ".start_helper(", ".launch_codex(", ".ensure_injection(",
+            ".apply_active_relay_profile(", ".save_latest(", "ensure_alunixa_x_hooks(",
+        ] {
+            assert!(!activation.contains(forbidden), "{forbidden}");
+        }
+        assert!(activation.contains("windows_activate_process_window"));
     }
 
     #[test]

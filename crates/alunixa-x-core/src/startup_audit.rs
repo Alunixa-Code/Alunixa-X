@@ -178,6 +178,12 @@ fn audit_agent_capability_config(
     } else if actual_fast_mode != Some(false) {
         bail!("启动前 Agent 能力校验失败：Fast 模式关闭需要 features.fast_mode = false");
     }
+    let goals = doc.get("features").and_then(Item::as_table_like)
+        .and_then(|features| features.get("goals")).and_then(Item::as_bool);
+    report.checked_section();
+    if goals != Some(settings.codex_goals_enabled) {
+        bail!("启动前 Agent 能力校验失败：Goals 配置与管理器期望不一致");
+    }
     Ok(())
 }
 
@@ -473,13 +479,14 @@ mod tests {
         let home = temp.path();
         std::fs::write(
             home.join("config.toml"),
-            "[features]\ngoals = true\nfast_mode = false\n",
+            "[features]\ngoals = true\nfast_mode = false\nunrelated_feature = true\n",
         )
         .unwrap();
         let settings = BackendSettings {
             enhancements_enabled: false,
             relay_profiles_enabled: false,
             codex_app_fast_mode: true,
+            codex_goals_enabled: true,
             ..BackendSettings::default()
         };
 
@@ -490,6 +497,7 @@ mod tests {
         let parsed = config.parse::<toml::Value>().unwrap();
         assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(true));
         assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
+        assert_eq!(parsed["features"]["unrelated_feature"].as_bool(), Some(true));
         assert!(report.repaired_items >= 1);
     }
 

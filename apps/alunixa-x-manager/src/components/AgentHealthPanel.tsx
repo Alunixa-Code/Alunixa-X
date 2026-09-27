@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, RotateCcw, ShieldCheck, Wrench } from "lucide-react";
 import { getLanguage } from "@/i18n";
@@ -32,8 +32,9 @@ const copy = {
     confirmRestore: "Восстановление включит прежний прокси. Продолжить?", config: "Источник настроек" },
 } as const;
 
-export function AgentHealthPanel({ autoRepair, onAutoRepairChange }: {
+export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit }: {
   autoRepair: boolean; onAutoRepairChange: (enabled: boolean) => void;
+  onAudit?: (entries: Entry[] | null) => void;
 }) {
   const text = copy[getLanguage()];
   const [audit, setAudit] = useState<Audit | null>(null);
@@ -42,21 +43,30 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange }: {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [externalChange, setExternalChange] = useState(false);
+  const sequence = useRef(0);
+  const revision = useRef<string | null>(null);
+  const onAuditRef = useRef(onAudit);
+  onAuditRef.current = onAudit;
   const refresh = useCallback(async () => {
+    const request = ++sequence.current;
     try {
       const next = await invoke<Audit>("inspect_agent_capabilities");
-      setAudit(previous => {
-        if (previous && previous.revision !== next.revision) setExternalChange(true);
-        return next;
-      });
+      if (request !== sequence.current) return;
+      if (revision.current && revision.current !== next.revision) setExternalChange(true);
+      revision.current = next.revision;
+      setAudit(next);
+      onAuditRef.current?.(next.entries);
       setError("");
-    } catch { setAudit(null); setError(text.error); }
+    } catch {
+      if (request !== sequence.current) return;
+      setAudit(null); onAuditRef.current?.(null); setError(text.error);
+    }
   }, [text.error]);
   useEffect(() => {
     void refresh();
     const focus = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", focus);
-    return () => window.removeEventListener("focus", focus);
+    return () => { sequence.current++; window.removeEventListener("focus", focus); };
   }, [refresh]);
   const operate = async (action: string) => {
     if (busy) return;
@@ -67,7 +77,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange }: {
         action, expectedRevision: proxy?.packaged?.revision ?? null, backupId: backup,
       });
       setProxy(result);
-      if (result.backupId) setBackup(result.backupId);
+      setBackup(result.backupId);
       if (result.status !== "ok") setError(result.message);
     } catch { setError(text.error); }
     finally { setBusy(""); }

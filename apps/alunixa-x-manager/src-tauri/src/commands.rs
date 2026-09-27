@@ -238,6 +238,7 @@ pub struct RelayPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayFilesPayload {
+    pub revision: String,
     pub config_path: String,
     pub auth_path: String,
     pub config_contents: String,
@@ -278,6 +279,7 @@ pub struct ContextEntriesPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveContextEntriesPayload {
+    pub revision: Option<String>,
     pub entries: alunixa_x_core::relay_config::CodexContextEntries,
 }
 
@@ -361,6 +363,7 @@ pub struct RemoveEnvConflictsPayload {
 pub struct SaveRelayFileRequest {
     pub kind: String,
     pub contents: String,
+    pub expected_revision: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -3411,6 +3414,7 @@ pub fn read_relay_files() -> CommandResult<RelayFilesPayload> {
         Err(error) => failed(
             &format!("读取配置文件失败：{error}"),
             RelayFilesPayload {
+                revision: String::new(),
                 config_path: home.join("config.toml").to_string_lossy().to_string(),
                 auth_path: home.join("auth.json").to_string_lossy().to_string(),
                 config_contents: String::new(),
@@ -3473,13 +3477,25 @@ pub fn remove_env_conflicts(
 #[tauri::command]
 pub fn save_relay_file(request: SaveRelayFileRequest) -> CommandResult<RelayFilesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    match save_relay_file_in_home(&home, &request.kind, &request.contents)
-        .and_then(|_| relay_files_payload_from_home(&home))
-    {
+    let saved = request
+        .expected_revision
+        .as_deref()
+        .filter(|revision| !revision.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("缺少文件修订号，请刷新后再保存"))
+        .and_then(|revision| {
+            alunixa_x_core::config_transaction::run(
+                &home.join("config.toml"),
+                &home,
+                Some(revision),
+                || save_relay_file_in_home(&home, &request.kind, &request.contents),
+            )
+        });
+    match saved.and_then(|_| relay_files_payload_from_home(&home)) {
         Ok(payload) => ok("配置文件已保存。", payload),
         Err(error) => failed(
             &format!("保存配置文件失败：{error}"),
             relay_files_payload_from_home(&home).unwrap_or_else(|_| RelayFilesPayload {
+                revision: String::new(),
                 config_path: home.join("config.toml").to_string_lossy().to_string(),
                 auth_path: home.join("auth.json").to_string_lossy().to_string(),
                 config_contents: String::new(),
@@ -3495,6 +3511,7 @@ pub struct RelayProfileSwitchRequest {
     pub settings: BackendSettings,
     #[serde(default)]
     pub previous_active_relay_id: String,
+    pub expected_revision: Option<String>,
 }
 
 #[tauri::command]
@@ -3533,12 +3550,21 @@ pub async fn switch_relay_profile(
                 ),
             );
         };
-        alunixa_x_core::relay_switch::switch_relay_profile_in_home(
-            &store,
-            &home,
-            settings,
-            &previous_active_relay_id,
-        )
+        request
+            .expected_revision
+            .as_deref()
+            .filter(|revision| !revision.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("缺少配置修订号，请刷新后再切换"))
+            .and_then(|revision| {
+                alunixa_x_core::config_transaction::run(store.path(), &home, Some(revision), || {
+                    alunixa_x_core::relay_switch::switch_relay_profile_in_home(
+                        &store,
+                        &home,
+                        settings,
+                        &previous_active_relay_id,
+                    )
+                })
+            })
     };
     match switch_result {
         Ok(result) => {
@@ -3676,15 +3702,23 @@ pub fn list_context_entries(
 pub fn read_live_context_entries() -> CommandResult<LiveContextEntriesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     let config_path = home.join("config.toml");
-    let config = read_optional_text_file(&config_path).unwrap_or_default();
-    match alunixa_x_core::relay_config::list_context_entries_from_common_config(&config) {
-        Ok(entries) => ok(
+    let read = (|| {
+        let _lock = alunixa_x_core::config_transaction::ConfigLock::acquire(&home)?;
+        let config = read_optional_text_file(&config_path)?;
+        Ok::<_, anyhow::Error>((
+            alunixa_x_core::relay_config::list_context_entries_from_common_config(&config)?,
+            current_config_revision(),
+        ))
+    })();
+    match read {
+        Ok((entries, revision)) => ok(
             "live 工具与插件已读取。",
-            LiveContextEntriesPayload { entries },
+            LiveContextEntriesPayload { entries, revision },
         ),
         Err(error) => failed(
             &format!("读取 live 工具与插件失败：{error}"),
             LiveContextEntriesPayload {
+                revision: None,
                 entries: empty_context_entries(),
             },
         ),
@@ -3717,60 +3751,46 @@ pub fn upsert_context_entry(request: ContextEntryRequest) -> CommandResult<Conte
 #[tauri::command]
 pub fn sync_live_context_entries(
     request: ContextSettingsRequest,
+    expected_revision: Option<String>,
 ) -> CommandResult<LiveContextEntriesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     let config_path = home.join("config.toml");
-    let current_config = match read_optional_text_file(&config_path) {
-        Ok(config) => config,
-        Err(error) => {
-            return failed(
-                &format!("读取 live config.toml 失败：{error}"),
-                LiveContextEntriesPayload {
-                    entries: empty_context_entries(),
+    let result = expected_revision
+        .as_deref()
+        .filter(|revision| !revision.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("缺少配置修订号，请刷新后再同步"))
+        .and_then(|revision| {
+            alunixa_x_core::config_transaction::run(
+                &alunixa_x_core::paths::default_settings_path(),
+                &home,
+                Some(revision),
+                || {
+                    let current = read_optional_text_file(&config_path)?;
+                    let updated = alunixa_x_core::relay_config::sync_live_config_context_entries(
+                        &current,
+                        &request.settings.relay_context_config_contents,
+                    )?;
+                    let entries =
+                        alunixa_x_core::relay_config::list_context_entries_from_common_config(
+                            &updated,
+                        )?;
+                    alunixa_x_core::settings::atomic_write(&config_path, updated.as_bytes())?;
+                    Ok(entries)
                 },
-            );
-        }
-    };
-    let updated_config = match alunixa_x_core::relay_config::sync_live_config_context_entries(
-        &current_config,
-        &request.settings.relay_context_config_contents,
-    ) {
-        Ok(config) => config,
-        Err(error) => {
-            return failed(
-                &format!("同步 live 工具与插件失败：{error}"),
-                LiveContextEntriesPayload {
-                    entries: empty_context_entries(),
-                },
-            );
-        }
-    };
-    if let Some(parent) = config_path.parent() {
-        if let Err(error) = std::fs::create_dir_all(parent) {
-            return failed(
-                &format!("创建 Codex 配置目录失败：{error}"),
-                LiveContextEntriesPayload {
-                    entries: empty_context_entries(),
-                },
-            );
-        }
-    }
-    if let Err(error) = std::fs::write(&config_path, &updated_config) {
-        return failed(
-            &format!("写入 live config.toml 失败：{error}"),
-            LiveContextEntriesPayload {
-                entries: empty_context_entries(),
-            },
-        );
-    }
-    match alunixa_x_core::relay_config::list_context_entries_from_common_config(&updated_config) {
+            )
+        });
+    match result {
         Ok(entries) => ok(
             "live 工具与插件已同步。",
-            LiveContextEntriesPayload { entries },
+            LiveContextEntriesPayload {
+                entries,
+                revision: current_config_revision(),
+            },
         ),
         Err(error) => failed(
             &format!("读取同步后的 live 工具与插件失败：{error}"),
             LiveContextEntriesPayload {
+                revision: None,
                 entries: empty_context_entries(),
             },
         ),
@@ -4779,9 +4799,11 @@ fn empty_context_entries() -> alunixa_x_core::relay_config::CodexContextEntries 
 }
 
 fn relay_files_payload_from_home(home: &std::path::Path) -> anyhow::Result<RelayFilesPayload> {
+    let _lock = alunixa_x_core::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let auth_path = home.join("auth.json");
     Ok(RelayFilesPayload {
+        revision: alunixa_x_core::config_transaction::revision(&config_path, home)?,
         config_path: config_path.to_string_lossy().to_string(),
         auth_path: auth_path.to_string_lossy().to_string(),
         config_contents: read_optional_text_file(&config_path)?,
@@ -4803,9 +4825,12 @@ fn save_relay_file_in_home(
         std::fs::create_dir_all(parent)?;
     }
     let contents = if kind == "config" {
-        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        alunixa_x_core::relay_config::validate_config_text(contents)?;
+        let existing = read_optional_text_file(&path)?;
         alunixa_x_core::codex_instructions::preserve_model_instructions_file(&existing, contents)?
     } else {
+        serde_json::from_str::<serde_json::Map<String, Value>>(contents)
+            .map_err(|_| anyhow::anyhow!("auth.json 不是有效 JSON 对象，未修改"))?;
         contents.to_string()
     };
     alunixa_x_core::settings::atomic_write(&path, contents.as_bytes())?;

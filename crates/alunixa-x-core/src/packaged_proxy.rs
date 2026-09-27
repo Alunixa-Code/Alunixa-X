@@ -13,14 +13,23 @@ pub const PROBE_ABI: &str = "ALUNIXA_X_PACKAGE_PROXY_PROBE_ABI_V1";
 pub fn probe_binary_supported(path: &Path) -> anyhow::Result<bool> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
-    if file.metadata()?.len() > 512 * 1024 * 1024 { return Ok(false); }
+    if file.metadata()?.len() > 512 * 1024 * 1024 {
+        return Ok(false);
+    }
     let mut block = [0u8; 64 * 1024];
     let mut tail = Vec::new();
     loop {
         let length = file.read(&mut block)?;
-        if length == 0 { return Ok(false); }
+        if length == 0 {
+            return Ok(false);
+        }
         tail.extend_from_slice(&block[..length]);
-        if tail.windows(PROBE_ABI.len()).any(|value| value == PROBE_ABI.as_bytes()) { return Ok(true); }
+        if tail
+            .windows(PROBE_ABI.len())
+            .any(|value| value == PROBE_ABI.as_bytes())
+        {
+            return Ok(true);
+        }
         let keep = tail.len().saturating_sub(PROBE_ABI.len() - 1);
         tail.drain(..keep);
     }

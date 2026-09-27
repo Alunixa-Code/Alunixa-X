@@ -324,7 +324,7 @@ fn restore_base_theme(config_path: &Path, backup_path: &Path) -> anyhow::Result<
         document.remove("desktop");
     }
     write_config(config_path, document.to_string().as_bytes())?;
-    std::fs::remove_file(backup_path).with_context(|| {
+    crate::config_transaction::remove_file(backup_path).with_context(|| {
         format!(
             "failed to remove restored Dream Skin backup {}",
             backup_path.display()

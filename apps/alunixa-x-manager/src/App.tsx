@@ -479,6 +479,7 @@ type RemotePairingStatusResult = CommandResult<{
 }>;
 
 type RelayFilesResult = CommandResult<{
+  revision: string;
   configPath: string;
   authPath: string;
   configContents: string;
@@ -586,6 +587,7 @@ type ContextEntriesResult = CommandResult<{
 }>;
 
 type LiveContextEntriesResult = CommandResult<{
+  revision?: string | null;
   entries: CodexContextEntries;
 }>;
 
@@ -1711,9 +1713,14 @@ export function App() {
   };
 
   const syncLiveContextEntries = async (next: BackendSettings, silent = false) => {
-    const result = await run(() => call<LiveContextEntriesResult>("sync_live_context_entries", { request: { settings: next } }));
+    const result = await run(() => call<LiveContextEntriesResult>("sync_live_context_entries", {
+      request: { settings: next }, expectedRevision: settingsRevisionRef.current,
+    }));
     if (result) {
-      setLiveContextEntries(result.entries);
+      if (isSuccessStatus(result.status)) {
+        setLiveContextEntries(result.entries);
+        settingsRevisionRef.current = result.revision ?? null;
+      }
       if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("工具与插件"), result, { silentSuccess: true });
     }
     return result;
@@ -2389,13 +2396,16 @@ export function App() {
   };
 
   const saveRelayFile = async (kind: "config" | "auth", contents: string, silent = false): Promise<boolean> => {
-    const result = await run(() => call<RelayFilesResult>("save_relay_file", { request: { kind, contents } }));
+    const result = await run(() => call<RelayFilesResult>("save_relay_file", {
+      request: { kind, contents, expectedRevision: relayFiles?.revision ?? null },
+    }));
     if (result) {
       setRelayFiles(result);
       if (!silent || !isSuccessStatus(result.status)) {
         showNotice(kind === "config" ? "config.toml" : "auth.json", result.message, result.status);
       }
       await refreshRelay(true);
+      if (isSuccessStatus(result.status)) await refreshSettings(true);
     }
     return !!result && isSuccessStatus(result.status);
   };
@@ -2406,11 +2416,12 @@ export function App() {
         request: { settings: next, kind, id, tomlBody },
       }),
     );
-    if (!result) return null;
-    let normalized = normalizeSettings(result.settings);
-    if (await saveSettingsValue(normalized, true, true)) {
-      normalized = normalizeSettings(normalized);
+    if (!result || !isSuccessStatus(result.status)) {
+      if (result) showResultNotice(t("工具与插件"), result);
+      return null;
     }
+    let normalized = normalizeSettings(result.settings);
+    if (!await saveSettingsValue(normalized, true, true)) return null;
     setSettingsForm(normalized);
     if (!isSuccessStatus(result.status)) showResultNotice(t("工具与插件"), result);
     return normalized;
@@ -2422,11 +2433,12 @@ export function App() {
         request: { settings: next, kind, id },
       }),
     );
-    if (!result) return null;
-    let normalized = normalizeSettings(result.settings);
-    if (await saveSettingsValue(normalized, true, true)) {
-      normalized = normalizeSettings(normalized);
+    if (!result || !isSuccessStatus(result.status)) {
+      if (result) showResultNotice(t("工具与插件"), result);
+      return null;
     }
+    let normalized = normalizeSettings(result.settings);
+    if (!await saveSettingsValue(normalized, true, true)) return null;
     setSettingsForm(normalized);
     if (!isSuccessStatus(result.status)) showResultNotice(t("工具与插件"), result);
     return normalized;
@@ -2531,7 +2543,7 @@ export function App() {
     try {
       const result = await run(() =>
         call<RelaySwitchResult>("switch_relay_profile", {
-          request: { settings: switchSettings, previousActiveRelayId },
+          request: { settings: switchSettings, previousActiveRelayId, expectedRevision: settingsRevisionRef.current },
         }),
       );
       if (!result) {
@@ -2566,6 +2578,7 @@ export function App() {
         user_scripts: result.user_scripts as UserScriptInventory,
       });
       setSettingsForm(selectedSettings);
+      await refreshSettings(true);
       const currentSelected = activeRelayProfile(selectedSettings);
       logDiagnostic("switchRelayProfile.ok", {
         targetRelayId: currentSelected.id,
@@ -4923,6 +4936,9 @@ function EnhanceScreen({
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
+  const [nativeCapabilityStates, setNativeCapabilityStates] = useState<Record<string, string>>({});
+  const nativeCapabilityEditable = (key: string) =>
+    ["saved_pending_restart", "different", "overridden"].includes(nativeCapabilityStates[key] || "");
   const setEnhanceFlag = (key: keyof BackendSettings, value: boolean) => onFormChange({ ...form, [key]: value });
   const setPersistedEnhanceFlag = (key: keyof BackendSettings, value: boolean) => {
     const next = { ...form, [key]: value };
@@ -4953,6 +4969,7 @@ function EnhanceScreen({
   return (
     <>
       <AgentHealthPanel autoRepair={form.codexAppPackagedProxyRepair ?? true}
+        onAudit={entries => setNativeCapabilityStates(Object.fromEntries((entries ?? []).map(entry => [entry.key, entry.state])))}
         onAutoRepairChange={value => setPersistedEnhanceFlag("codexAppPackagedProxyRepair", value)} />
       <Panel className="enhance-panel">
         <CardHead title={t("Codex增强")} detail={t("会话删除、导出、项目移动和用户脚本等界面能力")} />
@@ -4994,7 +5011,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("插件列表全量展示")} detail={t("进入插件页后自动连续展开“更多”，尽量一次显示完整插件列表。")} checked={form.codexAppPluginAutoExpand} disabled={!masterEnabled || !patchMode} onChange={(value) => setEnhanceFlag("codexAppPluginAutoExpand", value)} />
               <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
               <FeatureToggle title={t("Fast 按钮")} detail={t("显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。")} checked={form.codexAppServiceTierControls} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppServiceTierControls", value)} />
-              <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={form.codexAppFastMode} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
+              <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={form.codexAppFastMode} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppFastMode")} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
               <div className="feature-action-row">
                 <div>
                   <strong>{t("官方远端插件缓存")}</strong>

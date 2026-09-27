@@ -12,39 +12,115 @@ use sha2::{Digest, Sha256};
 
 thread_local! {
     static LOCKS: RefCell<HashMap<PathBuf, (File, usize)>> = RefCell::new(HashMap::new());
-    static WRITES: RefCell<Vec<HashMap<PathBuf, Vec<u8>>>> = RefCell::new(Vec::new());
+    static WRITES: RefCell<Vec<JournalState>> = RefCell::new(Vec::new());
+}
+
+struct JournalState {
+    directory: PathBuf,
+    original: Vec<(PathBuf, Option<Vec<u8>>)>,
+    writes: HashMap<PathBuf, Option<Vec<u8>>>,
 }
 
 struct WriteJournal(bool);
 impl WriteJournal {
-    fn begin() -> Self {
-        WRITES.with(|writes| writes.borrow_mut().push(HashMap::new()));
+    fn begin(state: JournalState) -> Self {
+        WRITES.with(|writes| writes.borrow_mut().push(state));
         Self(true)
     }
-    fn finish(mut self) -> HashMap<PathBuf, Vec<u8>> {
+    fn finish(mut self) -> JournalState {
         self.0 = false;
-        WRITES.with(|writes| writes.borrow_mut().pop().unwrap_or_default())
+        WRITES.with(|writes| writes.borrow_mut().pop().expect("active write journal"))
     }
 }
 impl Drop for WriteJournal {
     fn drop(&mut self) {
-        if self.0 { WRITES.with(|writes| { writes.borrow_mut().pop(); }); }
+        if self.0 {
+            WRITES.with(|writes| {
+                writes.borrow_mut().pop();
+            });
+        }
     }
 }
 fn journal_key(path: &Path) -> PathBuf {
-    match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) => fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()).join(name),
-        _ => path.to_path_buf(),
-    }
+    // Keep the identity stable when a previously absent parent directory is created.
+    let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    #[cfg(windows)]
+    let path = PathBuf::from(
+        path.to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_lowercase(),
+    );
+    path
 }
+fn digest(bytes: Option<&[u8]>) -> Option<Vec<u8>> {
+    bytes.map(|bytes| Sha256::digest(bytes).to_vec())
+}
+
+/// Called immediately before replacement by every atomic configuration writer.
+/// This also captures model catalogs and auxiliary files created inside an operation.
+pub(crate) fn prepare_write(path: &Path) -> anyhow::Result<()> {
+    WRITES.with(|journals| {
+        let mut journals = journals.borrow_mut();
+        if journals.is_empty() {
+            return Ok(());
+        }
+        let key = journal_key(path);
+        let current = read_optional(path)?;
+        for journal in journals.iter_mut() {
+            if let Some((_, original)) =
+                journal.original.iter().find(|(p, _)| journal_key(p) == key)
+            {
+                let expected = journal
+                    .writes
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| digest(original.as_deref()));
+                if digest(current.as_deref()) != expected {
+                    bail!("配置在保存期间被外部更新，未覆盖新配置");
+                }
+            } else {
+                let index = journal.original.len();
+                if let Some(bytes) = &current {
+                    crate::settings::atomic_write_untracked(
+                        &journal.directory.join(format!("{index}.bak")),
+                        bytes,
+                    )?;
+                }
+                journal.original.push((path.to_path_buf(), current.clone()));
+                write_manifest(&journal.directory, &journal.original)?;
+            }
+        }
+        Ok(())
+    })
+}
+
 pub(crate) fn record_write(path: &Path, bytes: &[u8]) {
+    record_state(path, Some(bytes));
+}
+
+fn record_state(path: &Path, bytes: Option<&[u8]>) {
     WRITES.with(|writes| {
         let mut writes = writes.borrow_mut();
-        if writes.is_empty() { return; }
-        let digest = Sha256::digest(bytes).to_vec();
+        if writes.is_empty() {
+            return;
+        }
+        let digest = digest(bytes);
         let key = journal_key(path);
-        for journal in writes.iter_mut() { journal.insert(key.clone(), digest.clone()); }
+        for journal in writes.iter_mut() {
+            journal.writes.insert(key.clone(), digest.clone());
+        }
     });
+}
+
+pub(crate) fn remove_file(path: &Path) -> anyhow::Result<()> {
+    prepare_write(path)?;
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    record_state(path, None);
+    Ok(())
 }
 
 /// Acquire before settings-store locks, never across an await. Nested config writers reuse it.
@@ -108,7 +184,11 @@ impl Drop for ConfigLock {
 
 fn read_optional(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
     match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() || meta.len() > 32 * 1024 * 1024 => {
+        Ok(meta)
+            if !meta.is_file()
+                || meta.file_type().is_symlink()
+                || meta.len() > 32 * 1024 * 1024 =>
+        {
             bail!("配置文件不是可安全更新的普通文件")
         }
         Ok(_) => Ok(Some(
@@ -119,7 +199,7 @@ fn read_optional(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
     }
 }
 
-pub fn protected_paths(settings: &Path, home: &Path) -> Vec<PathBuf> {
+pub fn protected_paths(settings: &Path, home: &Path) -> anyhow::Result<Vec<PathBuf>> {
     let mut files = vec![settings.to_path_buf()];
     files.extend(
         [
@@ -133,12 +213,32 @@ pub fn protected_paths(settings: &Path, home: &Path) -> Vec<PathBuf> {
         .into_iter()
         .map(|p| home.join(p)),
     );
-    files
+    // Directory membership and file names are part of the revision, not only file bytes.
+    match fs::read_dir(home.join("model-catalogs")) {
+        Ok(entries) => {
+            let mut catalogs = Vec::new();
+            for entry in entries {
+                let path = entry?.path();
+                if path.extension().is_some_and(|e| e == "json") {
+                    catalogs.push(path);
+                }
+            }
+            catalogs.sort();
+            files.extend(catalogs);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => bail!("模型目录无法读取，配置状态未知"),
+    }
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|path| seen.insert(journal_key(path)));
+    Ok(files)
 }
 
 pub fn revision(settings: &Path, home: &Path) -> anyhow::Result<String> {
     let mut hash = Sha256::new();
-    for path in protected_paths(settings, home) {
+    for path in protected_paths(settings, home)? {
+        hash.update(journal_key(&path).as_os_str().as_encoded_bytes());
+        hash.update([0]);
         let bytes = read_optional(&path)?;
         hash.update([u8::from(bytes.is_some())]);
         if let Some(bytes) = bytes {
@@ -161,7 +261,7 @@ pub fn run<T>(
             bail!("配置已被其他页面或程序修改，请刷新后重试；未覆盖新配置");
         }
     }
-    let original = protected_paths(settings, home)
+    let original = protected_paths(settings, home)?
         .into_iter()
         .map(|p| read_optional(&p).map(|bytes| (p, bytes)))
         .collect::<anyhow::Result<Vec<_>>>()?;
@@ -177,20 +277,41 @@ pub fn run<T>(
         .join("alunixa-x-config-transactions")
         .join(uuid::Uuid::new_v4().to_string());
     fs::create_dir_all(&directory)?;
-    let mut manifest = Vec::new();
-    for (index, (path, bytes)) in original.iter().enumerate() {
-        if let Some(bytes) = bytes {
-            crate::settings::atomic_write(&directory.join(format!("{index}.bak")), bytes)?;
-        }
-        manifest.push(serde_json::json!({"path": path, "existed": bytes.is_some(), "backup": format!("{index}.bak")}));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
     }
-    crate::settings::atomic_write(
-        &directory.join("manifest.json"),
-        &serde_json::to_vec(&manifest)?,
-    )?;
-    let journal = WriteJournal::begin();
-    let result = operation();
-    let writes = journal.finish();
+    for (index, (_, bytes)) in original.iter().enumerate() {
+        if let Some(bytes) = bytes {
+            crate::settings::atomic_write_untracked(
+                &directory.join(format!("{index}.bak")),
+                bytes,
+            )?;
+        }
+    }
+    write_manifest(&directory, &original)?;
+    let journal = WriteJournal::begin(JournalState {
+        directory,
+        original,
+        writes: HashMap::new(),
+    });
+    let mut result = operation();
+    let JournalState {
+        original, writes, ..
+    } = journal.finish();
+    // A successful call is still not a successful save if an external writer replaced it.
+    if result.is_ok() {
+        for (path, _) in &original {
+            if let Some(written) = writes.get(&journal_key(path)) {
+                if !read_optional(path).is_ok_and(|current| digest(current.as_deref()) == *written)
+                {
+                    result = Err(anyhow::anyhow!("配置回读不一致，检测到外部更新"));
+                    break;
+                }
+            }
+        }
+    }
     match result {
         Ok(value) => Ok(value),
         Err(_) => {
@@ -198,28 +319,50 @@ pub fn run<T>(
             for (path, bytes) in original.iter().rev() {
                 // An auth refresh or external edit that this operation never wrote belongs to
                 // its original writer. Never restore the snapshot over it.
-                let Some(written) = writes.get(&journal_key(path)) else { continue; };
+                let Some(written) = writes.get(&journal_key(path)) else {
+                    continue;
+                };
                 if read_optional(path).is_ok_and(|current| &current == bytes) {
                     continue;
                 }
-                if !read_optional(path)?.as_ref().is_some_and(|current| Sha256::digest(current).as_slice() == written) {
+                if !read_optional(path).is_ok_and(|current| digest(current.as_deref()) == *written)
+                {
                     conflict = true;
                     continue;
                 }
                 match bytes {
                     Some(bytes) => crate::settings::atomic_write(path, bytes)
                         .context("配置回滚失败；请从 alunixa-x-config-transactions 恢复")?,
-                    None => match fs::remove_file(path) {
-                        Ok(()) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(_) => bail!("配置回滚失败；请从 alunixa-x-config-transactions 恢复"),
-                    },
+                    None => remove_file(path)
+                        .context("配置回滚失败；请从 alunixa-x-config-transactions 恢复")?,
                 }
             }
-            if conflict { bail!("保存失败；已回滚本次修改并保留外部新配置，备份位于 alunixa-x-config-transactions"); }
+            if conflict {
+                bail!(
+                    "保存失败；已回滚本次修改并保留外部新配置，备份位于 alunixa-x-config-transactions"
+                );
+            }
             bail!("配置保存失败，已恢复原设置及关联文件；未更换密钥、模型或接口")
         }
     }
+}
+
+/// Home-only writers must not capture the caller's unrelated global AX settings.
+pub fn run_in_home<T>(
+    home: &Path,
+    operation: impl FnOnce() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
+    run(&home.join("config.toml"), home, None, operation)
+}
+
+fn write_manifest(directory: &Path, original: &[(PathBuf, Option<Vec<u8>>)]) -> anyhow::Result<()> {
+    let manifest = original.iter().enumerate().map(|(index, (path, bytes))| {
+        serde_json::json!({"path": path, "existed": bytes.is_some(), "backup": format!("{index}.bak")})
+    }).collect::<Vec<_>>();
+    crate::settings::atomic_write_untracked(
+        &directory.join("manifest.json"),
+        &serde_json::to_vec(&manifest)?,
+    )
 }
 
 #[cfg(test)]
@@ -310,6 +453,74 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("外部"));
         assert_eq!(fs::read_to_string(settings).unwrap(), "{}");
         assert_eq!(fs::read_to_string(config).unwrap(), "x=3\n");
-        assert_eq!(fs::read_to_string(auth).unwrap(), "{\"token\":\"refreshed-fixture\"}");
+        assert_eq!(
+            fs::read_to_string(auth).unwrap(),
+            "{\"token\":\"refreshed-fixture\"}"
+        );
+    }
+
+    #[test]
+    fn external_change_before_write_is_not_overwritten_and_success_requires_readback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "x=1\n").unwrap();
+        let result = run_in_home(dir.path(), || {
+            fs::write(&path, "x=2\n")?;
+            crate::settings::atomic_write(&path, b"x=3\n")
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "x=2\n");
+        let result = run_in_home(dir.path(), || {
+            crate::settings::atomic_write(&path, b"x=3\n")?;
+            fs::write(&path, "x=4\n")?;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "x=4\n");
+    }
+
+    #[test]
+    fn catalog_membership_changes_revision_and_new_auxiliary_files_are_rolled_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        let before = revision(&settings, dir.path()).unwrap();
+        fs::create_dir(dir.path().join("model-catalogs")).unwrap();
+        let catalog = dir.path().join("model-catalogs/new.json");
+        fs::write(&catalog, "{}").unwrap();
+        assert_ne!(revision(&settings, dir.path()).unwrap(), before);
+        fs::remove_file(&catalog).unwrap();
+        let new_file = dir.path().join("new-parent/state.json");
+        let result: anyhow::Result<()> = run(&settings, dir.path(), None, || {
+            crate::settings::atomic_write(&catalog, b"{}")?;
+            crate::settings::atomic_write(&new_file, b"{}")?;
+            bail!("fixture failure")
+        });
+        assert!(result.is_err());
+        assert!(!catalog.exists());
+        assert!(!new_file.exists());
+        assert_eq!(revision(&settings, dir.path()).unwrap(), before);
+    }
+
+    #[test]
+    fn nested_rollback_retains_parent_ownership_and_deleted_state_is_recoverable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let auxiliary = dir.path().join("owned-state.json");
+        fs::write(&path, "x=1\n").unwrap();
+        fs::write(&auxiliary, "{}").unwrap();
+        let result: anyhow::Result<()> = run_in_home(dir.path(), || {
+            crate::settings::atomic_write(&path, b"x=2\n")?;
+            let nested: anyhow::Result<()> = run_in_home(dir.path(), || {
+                crate::settings::atomic_write(&path, b"x=3\n")?;
+                bail!("nested fixture failure")
+            });
+            assert!(nested.is_err());
+            assert_eq!(fs::read_to_string(&path)?, "x=2\n");
+            remove_file(&auxiliary)?;
+            bail!("outer fixture failure")
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "x=1\n");
+        assert_eq!(fs::read_to_string(&auxiliary).unwrap(), "{}");
     }
 }

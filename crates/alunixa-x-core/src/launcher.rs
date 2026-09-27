@@ -205,15 +205,26 @@ pub trait LaunchHooks: Send + Sync {
         self.inject(debug_port, helper_port).await
     }
     async fn ensure_injection(&self, debug_port: u16, helper_port: u16, app_dir: &Path) -> bool {
+        // The inner injectors also retry. Bound the whole phase, not only the outer loop.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(45);
         for attempt in 1..=120 {
-            let result = match self.bridge_context(debug_port, app_dir).await {
-                Ok(Some(ctx)) => self.inject_bridge(debug_port, helper_port, ctx).await,
-                Ok(None) => self.inject(debug_port, helper_port).await,
-                Err(error) => Err(error),
-            };
+            let result = tokio::time::timeout_at(deadline, async {
+                match self.bridge_context(debug_port, app_dir).await {
+                    Ok(Some(ctx)) => self.inject_bridge(debug_port, helper_port, ctx).await,
+                    Ok(None) => self.inject(debug_port, helper_port).await,
+                    Err(error) => Err(error),
+                }
+            }).await;
             match result {
-                Ok(()) => return true,
-                Err(error) => {
+                Ok(Ok(())) => return true,
+                Err(_) => {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.injection_deadline_exceeded",
+                        serde_json::json!({"stage": "renderer_bridge", "attempt": attempt, "timeoutSeconds": 45}),
+                    );
+                    return false;
+                }
+                Ok(Err(error)) => {
                     let _ = crate::diagnostic_log::append_diagnostic_log(
                         "launcher.ensure_injection_retry_failed",
                         serde_json::json!({
@@ -1074,7 +1085,10 @@ impl LaunchHooks for DefaultLaunchHooks {
                 if settings.codex_app_packaged_proxy_repair {
                     let report = crate::packaged_proxy::inspect_or_repair(
                         app_dir,
-                        &crate::install::option_or_current_exe(&None, crate::install::SILENT_BINARY),
+                        &crate::install::option_or_current_exe(
+                            &None,
+                            crate::install::SILENT_BINARY,
+                        ),
                         "repair_at_startup",
                         None,
                         None,
