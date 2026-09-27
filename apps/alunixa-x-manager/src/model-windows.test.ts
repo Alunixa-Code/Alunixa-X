@@ -91,7 +91,9 @@ describe("model-windows helpers", () => {
       /isSuccessStatus\(result\.status\) && requestId === settingsSaveRequestRef\.current/,
     );
     assert.match(source, /if \(result && isSuccessStatus\(result\.status\)\)/);
-    assert.match(source, /if \(result && !silent\) showResultNotice\(t\("设置已加载"\), result\)/);
+    const refresh = source.slice(source.indexOf("const refreshSettings = async"), source.indexOf("const refreshScriptMarket"));
+    assert.match(refresh, /settingsRevisionRef\.current = null/);
+    assert.match(refresh, /setSettings\(result\);\s+showResultNotice\(t\("设置已加载"\), result\)/);
   });
 
   it("共享终端释放时间使用 0 到 5 分钟的持久化滑块", () => {

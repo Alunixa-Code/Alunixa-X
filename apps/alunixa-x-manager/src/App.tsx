@@ -1200,7 +1200,11 @@ export function App() {
       if (!silent) showResultNotice(t("设置已加载"), result, { silentSuccess: true });
       return normalized;
     }
-    if (result && !silent) showResultNotice(t("设置已加载"), result);
+    if (result) {
+      settingsRevisionRef.current = null;
+      setSettings(result);
+      showResultNotice(t("设置已加载"), result);
+    }
     return null;
   };
 
@@ -3375,6 +3379,7 @@ export function App() {
           {route === "enhance" && settings && isSuccessStatus(settings.status) ? (
             <EnhanceScreen
               form={settingsForm}
+              savedRevision={(settings as SettingsResult & { revision?: string }).revision}
               pluginMarketplaceProgress={pluginMarketplaceProgress}
               remotePluginMarketplace={remotePluginMarketplace}
               remotePluginMarketplaceProgress={remotePluginMarketplaceProgress}
@@ -3630,6 +3635,8 @@ function OverviewScreen({
             <span>Helper · UI</span>
           </div>
           <small>{runtime?.reason ?? t("等待首次启动")}</small>
+          {overview?.latest_launch?.status === "failed" ?
+            <small role="alert">{overview.latest_launch.message}</small> : null}
           <small>Model request: {runtime?.modelRequest ?? "not_tested"}</small>
         </div>
       </section>
@@ -4923,6 +4930,7 @@ function envConflictSourceLabel(source: string): string {
 
 function EnhanceScreen({
   form,
+  savedRevision,
   pluginMarketplaceProgress,
   remotePluginMarketplace,
   remotePluginMarketplaceProgress,
@@ -4930,6 +4938,7 @@ function EnhanceScreen({
   actions,
 }: {
   form: BackendSettings;
+  savedRevision?: string;
   pluginMarketplaceProgress: TaskProgress;
   remotePluginMarketplace: RemotePluginMarketplaceResult | null;
   remotePluginMarketplaceProgress: TaskProgress;
@@ -4969,8 +4978,11 @@ function EnhanceScreen({
   return (
     <>
       <AgentHealthPanel autoRepair={form.codexAppPackagedProxyRepair ?? true}
+        savedRevision={savedRevision}
+        onReload={() => actions.refreshSettings(false)}
         onAudit={entries => setNativeCapabilityStates(Object.fromEntries((entries ?? []).map(entry => [entry.key, entry.state])))}
         onAutoRepairChange={value => setPersistedEnhanceFlag("codexAppPackagedProxyRepair", value)} />
+      <fieldset disabled={!Object.keys(nativeCapabilityStates).length} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <Panel className="enhance-panel">
         <CardHead title={t("Codex增强")} detail={t("会话删除、导出、项目移动和用户脚本等界面能力")} />
         <CardContent>
@@ -5236,6 +5248,7 @@ function EnhanceScreen({
           </Toolbar>
         </CardContent>
       </Panel>
+      </fieldset>
     </>
   );
 }

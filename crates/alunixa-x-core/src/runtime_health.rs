@@ -2,6 +2,111 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::time::Duration;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RendererError {
+    pub kind: String,
+    pub asset: String,
+    pub line: u64,
+    pub column: u64,
+}
+
+static FIRST_ERRORS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<u16, RendererError>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+pub fn clear_renderer_error(port: u16) {
+    if let Ok(mut errors) = FIRST_ERRORS.lock() {
+        errors.remove(&port);
+    }
+}
+
+pub(crate) fn remember_renderer_error(target: &str, event: &Value) {
+    let Some(port) = url::Url::parse(target).ok().and_then(|u| u.port()) else {
+        return;
+    };
+    let Some(error) = sanitized_renderer_error(event) else {
+        return;
+    };
+    if let Ok(mut errors) = FIRST_ERRORS.lock() {
+        if errors.len() >= 16 && !errors.contains_key(&port) {
+            return;
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) = errors.entry(port) {
+            entry.insert(error.clone());
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.first_renderer_exception",
+                serde_json::json!({"stage": "native_renderer", "debugPort": port, "error": error}),
+            );
+        }
+    }
+}
+
+fn first_renderer_error(port: u16) -> Option<RendererError> {
+    FIRST_ERRORS.lock().ok()?.get(&port).cloned()
+}
+
+fn sanitized_renderer_error(event: &Value) -> Option<RendererError> {
+    if event.get("method")?.as_str()? != "Runtime.exceptionThrown" {
+        return None;
+    }
+    let details = event.pointer("/params/exceptionDetails")?;
+    // Never record exception text/description, argument values, URL queries or local paths.
+    let kind = details
+        .pointer("/exception/className")
+        .and_then(Value::as_str)
+        .unwrap_or("Error");
+    let kind = if [
+        "Error",
+        "TypeError",
+        "ReferenceError",
+        "SyntaxError",
+        "RangeError",
+        "URIError",
+        "EvalError",
+        "AggregateError",
+    ]
+    .contains(&kind)
+    {
+        kind
+    } else {
+        "Error"
+    };
+    let frame = details.pointer("/stackTrace/callFrames/0");
+    let url = details
+        .get("url")
+        .and_then(Value::as_str)
+        .or_else(|| frame?.get("url")?.as_str())
+        .unwrap_or("");
+    let asset = url::Url::parse(url)
+        .ok()
+        .filter(|u| u.scheme() == "app" && u.host_str() == Some("-"))
+        .and_then(|u| u.path().strip_prefix("/assets/").map(ToOwned::to_owned))
+        .filter(|s| {
+            s.len() <= 128
+                && s.ends_with(".js")
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        })
+        .unwrap_or_else(|| "unattributed-script".into());
+    Some(RendererError {
+        kind: kind.into(),
+        asset,
+        line: details
+            .get("lineNumber")
+            .or_else(|| frame?.get("lineNumber"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            + 1,
+        column: details
+            .get("columnNumber")
+            .or_else(|| frame?.get("columnNumber"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            + 1,
+    })
+}
+
 pub const RENDERER_HEALTH_SCRIPT: &str = r#"(() => {
   const visible = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
   const native = selector => [...document.querySelectorAll(selector)].some(el =>
@@ -9,7 +114,7 @@ pub const RENDERER_HEALTH_SCRIPT: &str = r#"(() => {
   return {
     readyState: document.readyState,
     hasElectronBridge: !!window.electronBridge,
-    hasNativeSurface: native('main [contenteditable="true"],[data-testid="composer"],[data-testid="thread-composer"],[data-testid="conversation-turn"]'),
+    hasNativeSurface: native('.ProseMirror[contenteditable="true"],main [contenteditable="true"],[data-testid="composer"],[data-testid="thread-composer"],[data-testid="conversation-turn"]'),
     loading: native('[role="progressbar"],[data-testid="loading-spinner"],[aria-busy="true"]'),
     adapterFailures: Array.isArray(window.__alunixaXModelPatchFailures) ? window.__alunixaXModelPatchFailures.length : 0,
     rootChildren: (document.getElementById('root') || document.getElementById('app'))?.childElementCount ?? 0
@@ -28,9 +133,7 @@ pub struct RendererHealth {
 }
 impl RendererHealth {
     pub fn ready(&self) -> bool {
-        self.ready_state == "complete"
-            && self.has_electron_bridge
-            && self.has_native_surface
+        self.ready_state == "complete" && self.has_electron_bridge && self.has_native_surface
     }
 }
 
@@ -44,6 +147,7 @@ pub struct RuntimeHealth {
     pub app_server: String,
     pub model_request: String,
     pub renderer_detail: Option<RendererHealth>,
+    pub first_error: Option<RendererError>,
     pub reason: String,
 }
 
@@ -80,6 +184,7 @@ pub async fn inspect(status: Option<&crate::status::LaunchStatus>) -> RuntimeHea
         app_server: "not_tested".into(),
         model_request: "not_tested".into(),
         renderer_detail: None,
+        first_error: None,
         reason: "尚未取得运行时证据。".into(),
     };
     let Some(status) = status else {
@@ -116,6 +221,7 @@ pub async fn inspect(status: Option<&crate::status::LaunchStatus>) -> RuntimeHea
         }
     }
     if let Some(port) = status.debug_port {
+        report.first_error = first_renderer_error(port);
         match probe_renderer(port).await {
             Ok(view) => {
                 report.cdp = "ready".into();
@@ -155,10 +261,20 @@ pub async fn wait_for_native_ui(debug_port: u16) -> anyhow::Result<()> {
             return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
+            let first_error = first_renderer_error(debug_port);
             let _ = crate::diagnostic_log::append_diagnostic_log(
                 "launcher.native_ui_unconfirmed",
-                serde_json::json!({"stage": "native_renderer", "observation": view}),
+                serde_json::json!({"stage": "native_renderer", "observation": view, "firstError": first_error}),
             );
+            if let Some(error) = first_error {
+                anyhow::bail!(
+                    "原生界面未就绪；首次捕获异常：{}，{}:{}:{}；请查看启动诊断或关闭增强后重试",
+                    error.kind,
+                    error.asset,
+                    error.line,
+                    error.column
+                );
+            }
             anyhow::bail!(
                 "原生界面初始化未通过：菜单注入不等于界面可用；请检查启动诊断或关闭增强后重试"
             );
@@ -194,5 +310,23 @@ mod tests {
         assert_eq!(report.model_request, "not_tested");
         assert_eq!(report.app_server, "not_tested");
         assert_eq!(report.helper, "unknown");
+    }
+
+    #[test]
+    fn first_exception_metadata_never_exposes_messages_tokens_or_paths() {
+        let event = serde_json::json!({"method":"Runtime.exceptionThrown","params":{"exceptionDetails":{
+            "text":"fixture-secret", "exception":{"className":"TypeError", "description":"fixture-secret"},
+            "url":"app://-/assets/app-shared-fixture.js?token=fixture-secret", "lineNumber":4, "columnNumber":8
+        }}});
+        let value = sanitized_renderer_error(&event).unwrap();
+        assert_eq!(value.asset, "app-shared-fixture.js");
+        assert_eq!(value.line, 5);
+        assert!(!serde_json::to_string(&value).unwrap().contains("secret"));
+        let mut external = event;
+        external["params"]["exceptionDetails"]["url"] = Value::from("file:///private/secret.js");
+        assert_eq!(
+            sanitized_renderer_error(&external).unwrap().asset,
+            "unattributed-script"
+        );
     }
 }

@@ -214,7 +214,8 @@ pub trait LaunchHooks: Send + Sync {
                     Ok(None) => self.inject(debug_port, helper_port).await,
                     Err(error) => Err(error),
                 }
-            }).await;
+            })
+            .await;
             match result {
                 Ok(Ok(())) => return true,
                 Err(_) => {
@@ -490,6 +491,7 @@ where
             helper_started = true;
         }
 
+        crate::runtime_health::clear_renderer_error(debug_port);
         let launch = hooks
             .launch_codex(&app_dir, debug_port, &settings, &settings.codex_extra_args)
             .await?;
@@ -557,7 +559,8 @@ where
                     hooks.terminate_codex(launch).await;
                 }
             }
-            let message = error.to_string();
+            // Preserve the initialization stage and nested cause in the failure shown by AX.
+            let message = format!("{error:#}");
             let failure = launch_status("failed", &message, debug_port, helper_port, &app_dir);
             let _ = status_store.save_latest(&failure);
             hooks.write_status("failed").await;

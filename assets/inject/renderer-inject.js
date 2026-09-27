@@ -19,93 +19,48 @@
 
   function installAlunixaXFastStartup() {
     const config = window.__ALUNIXA_X_FAST_STARTUP__;
-    if (!config || config.enabled !== true) return;
-    if (window.__alunixaXFastStartupInstalled === "1") return;
-    window.__alunixaXFastStartupInstalled = "1";
+    const previous = window.__alunixaXFastStartupRuntime;
+    if (!config || config.enabled !== true) {
+      previous?.dispose?.();
+      return;
+    }
+    if (previous?.version === "2") return;
+    previous?.dispose?.();
+    if (typeof window.fetch !== "function") return;
     const timeoutMs = Math.max(100, Math.min(Number(config.statsigTimeoutMs) || 800, 3000));
     const statsigHosts = new Set([
-      "ab.chatgpt.com",
-      "featureassets.org",
-      "prodregistryv2.org",
-      "api.statsigcdn.com",
-      "statsigapi.net",
-      "cloudflare-dns.com",
+      "ab.chatgpt.com", "featureassets.org", "prodregistryv2.org",
+      "api.statsigcdn.com", "statsigapi.net", "cloudflare-dns.com",
     ]);
-
-    const isStatsigUrl = (input) => {
-      try {
-        const url = new URL(typeof input === "string" ? input : input?.url ?? "", window.location.href);
-        return statsigHosts.has(url.hostname);
-      } catch {
-        return false;
-      }
-    };
-
-    const timeoutSignal = (signal) => {
+    const originalFetch = window.fetch;
+    const patchedFetch = (input, init = undefined) => {
+      let url;
+      try { url = new URL(typeof input === "string" ? input : input?.url ?? "", window.location.href); }
+      catch { return originalFetch.call(window, input, init); }
+      if (!statsigHosts.has(url.hostname)) return originalFetch.call(window, input, init);
+      const callerSignal = init?.signal ?? input?.signal;
       const controller = new AbortController();
+      const abort = () => controller.abort(callerSignal?.reason);
+      if (callerSignal?.aborted) abort();
+      else callerSignal?.addEventListener("abort", abort, { once: true });
       const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-      const clear = () => window.clearTimeout(timer);
-      if (signal) {
-        if (signal.aborted) controller.abort();
-        else signal.addEventListener("abort", () => controller.abort(), { once: true });
-      }
-      return { signal: controller.signal, clear };
-    };
-
-    const patchFetch = () => {
-      if (typeof window.fetch !== "function" || window.fetch.__alunixaXFastStartupPatched) return;
-      const originalFetch = window.fetch.bind(window);
-      const patchedFetch = (input, init = undefined) => {
-        if (!isStatsigUrl(input)) return originalFetch(input, init);
-        const { signal, clear } = timeoutSignal(init?.signal);
-        const nextInit = { ...(init || {}), signal };
-        return originalFetch(input, nextInit).finally(clear);
+      const cleanup = () => {
+        window.clearTimeout(timer);
+        callerSignal?.removeEventListener("abort", abort);
       };
-      patchedFetch.__alunixaXFastStartupPatched = true;
-      window.fetch = patchedFetch;
+      try {
+        return Promise.resolve(originalFetch.call(window, input, { ...(init || {}), signal: controller.signal })).finally(cleanup);
+      } catch (error) { cleanup(); throw error; }
     };
-
-    const markStatsigReady = (client) => {
-      if (!client || typeof client !== "object" || client.__alunixaXFastStartupReadyPatched) return;
-      client.__alunixaXFastStartupReadyPatched = true;
-      const markReady = () => {
-        try {
-          if (client.loadingStatus && client.loadingStatus !== "Ready") client.loadingStatus = "Ready";
-        } catch {
-        }
-        try {
-          if (typeof client.$emt === "function") client.$emt({ name: "values_updated" });
-        } catch {
-        }
-      };
-      if (typeof client.initializeAsync === "function") {
-        const originalInitializeAsync = client.initializeAsync.bind(client);
-        client.initializeAsync = (...args) => Promise.race([
-          originalInitializeAsync(...args).catch(() => null),
-          new Promise((resolve) => window.setTimeout(() => resolve(null), timeoutMs)),
-        ]).finally(markReady);
-      }
-      markReady();
-    };
-
-    const statsigClients = () => {
-      const root = window.__STATSIG__ || globalThis.__STATSIG__;
-      if (!root || typeof root !== "object") return [];
-      const clients = [root.firstInstance, typeof root.instance === "function" ? root.instance() : null];
-      if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances));
-      return clients.filter((client, index, array) => client && typeof client === "object" && array.indexOf(client) === index);
-    };
-
-    const patchStatsigRoot = () => statsigClients().forEach(markStatsigReady);
-
-    patchFetch();
-    patchStatsigRoot();
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      patchFetch();
-      patchStatsigRoot();
-      if (Date.now() - startedAt > 5000) window.clearInterval(timer);
-    }, 50);
+    // Bound optional telemetry requests; never invent Statsig Ready/events or resolve
+    // failed initialization as success. The native application owns its state machine.
+    window.fetch = patchedFetch;
+    window.__alunixaXFastStartupInstalled = "2";
+    window.__alunixaXFastStartupRuntime = { version: "2", dispose() {
+      if (window.fetch === patchedFetch) window.fetch = originalFetch;
+      delete window.__alunixaXFastStartupInstalled;
+      delete window.__alunixaXFastStartupRuntime;
+    } };
   }
 
   function installAlunixaXForceChineseLocale() {
@@ -2081,16 +2036,18 @@
   function appServerFallbackAssetUrls() {
     const preferred = codexAppAssetCandidateUrls().filter((url) => {
       const name = (url.split("/").pop() || "").toLowerCase();
-      return /use-host-config|app-server-manager-signals|app-initial|app-main|page-|chatg|signals|server-manager/.test(name);
+      return /use-host-config|app-server-manager-signals|app-shared|app-primary|app-initial|app-main|page-|chatg|signals|server-manager/.test(name);
     });
     preferred.sort((left, right) => {
       const score = (url) => {
         const name = (url.split("/").pop() || "").toLowerCase();
         if (name.includes("use-host-config")) return 0;
         if (name.includes("app-server-manager-signals")) return 1;
-        if (name.includes("app-initial")) return 2;
-        if (name.includes("app-main")) return 3;
-        return 4;
+        if (name.includes("app-shared")) return 2;
+        if (name.includes("app-initial")) return 3;
+        if (name.includes("app-primary")) return 4;
+        if (name.includes("app-main")) return 5;
+        return 6;
       };
       return score(left) - score(right) || right.length - left.length;
     });
@@ -2304,10 +2261,10 @@
 
   async function codexProjectlessContextFactory() {
     const errors = [];
-    for (const assetPrefix of ["projectless-thread-", "app-initial-"]) {
+    for (const assetPrefix of ["projectless-thread-", "app-initial-", "app-shared-"]) {
       try {
         const module = await loadCodexAppModule(assetPrefix);
-        const factory = codexProjectlessContextFactoryFromModule(module, assetPrefix !== "app-initial-");
+        const factory = codexProjectlessContextFactoryFromModule(module, assetPrefix === "projectless-thread-");
         if (factory) return { factory, assetPrefix };
         errors.push(`${assetPrefix}: projectless context factory unavailable`);
       } catch (error) {
@@ -2319,10 +2276,10 @@
 
   async function codexSettingStorageModule() {
     const errors = [];
-    for (const assetPrefix of ["setting-storage-", "app-initial-"]) {
+    for (const assetPrefix of ["setting-storage-", "app-shared-", "app-initial-"]) {
       try {
         const module = await loadCodexAppModule(assetPrefix);
-        const storage = codexSettingStorageFromModule(module, assetPrefix !== "app-initial-");
+        const storage = codexSettingStorageFromModule(module, assetPrefix === "setting-storage-");
         if (storage) return storage;
         errors.push(`${assetPrefix}: setting storage exports unavailable`);
       } catch (error) {
@@ -3345,7 +3302,7 @@
 
   async function loadCodexDispatcher() {
     const errors = [];
-    for (const assetPrefix of ["setting-storage-", "vscode-api-", "app-initial-"]) {
+    for (const assetPrefix of ["app-shared-", "setting-storage-", "vscode-api-", "app-initial-"]) {
       try {
         const module = await loadCodexAppModule(assetPrefix);
         const dispatcher = codexServiceTierDispatcherFromModule(module);
@@ -3446,6 +3403,18 @@
     ) || null;
   }
 
+  async function loadCodexTerminalManager() {
+    for (const prefix of ["app-shared-", "app-initial-"]) {
+      try {
+        const manager = codexTerminalManagerFromModule(await loadCodexAppModule(prefix));
+        if (manager) return manager;
+      } catch {
+        // Try the other supported bundle layout; never invoke an arbitrary export.
+      }
+    }
+    throw new Error("Codex terminal manager unavailable");
+  }
+
   function stripCodexTerminalControls(value) {
     return String(value || "")
       .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, "")
@@ -3541,13 +3510,11 @@
 
     const manager = async () => {
       if (state.manager) return state.manager;
-      state.modulePromise = state.modulePromise || loadCodexAppModule("app-initial-");
-      const module = await state.modulePromise.catch((error) => {
+      state.modulePromise = state.modulePromise || loadCodexTerminalManager();
+      const terminalManager = await state.modulePromise.catch((error) => {
         state.modulePromise = null;
         throw error;
       });
-      const terminalManager = codexTerminalManagerFromModule(module);
-      if (!terminalManager) throw new Error("Codex terminal manager unavailable");
       state.manager = terminalManager;
       if (!terminalManager.__alunixaXSharedTerminalOriginalWrite) {
         terminalManager.__alunixaXSharedTerminalActivityListeners = new Set();
@@ -6522,10 +6489,10 @@
     if (!codexStateApiPromise) {
       codexStateApiPromise = (async () => {
         const errors = [];
-        for (const assetPrefix of ["vscode-api-", "app-initial-"]) {
+        for (const assetPrefix of ["vscode-api-", "app-shared-", "app-initial-"]) {
           try {
             const module = await loadCodexAppModule(assetPrefix);
-            const call = codexHostRpcFromModule(module, assetPrefix !== "app-initial-");
+            const call = codexHostRpcFromModule(module, assetPrefix === "vscode-api-");
             if (call) return call;
             errors.push(`${assetPrefix}: host RPC export unavailable`);
           } catch (error) {

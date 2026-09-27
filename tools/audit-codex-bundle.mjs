@@ -14,7 +14,7 @@ export function readAsarAssets(path) {
     const entries = JSON.parse(header.toString()).files?.webview?.files?.assets?.files;
     if (!entries) throw new Error("Codex webview assets are unavailable");
     return Object.entries(entries)
-      .filter(([name]) => /^app-(initial|main)-.*\.js$/.test(name))
+      .filter(([name]) => /^app-(initial|main|shared|primary)-.*\.js$/.test(name))
       .map(([name, entry]) => {
         if (entry.unpacked || entry.size > 32 * 1024 * 1024) throw new Error(`Unsupported asset: ${name}`);
         const body = Buffer.alloc(entry.size);
@@ -74,7 +74,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   if (!path) throw new Error("Usage: node tools/audit-codex-bundle.mjs <Codex app.asar>");
   const reports = readAsarAssets(path).map(({ name, source }) => auditBundleSource(name, source));
   const initial = reports.find((report) => report.asset.startsWith("app-initial-"));
-  const missing = Object.entries(initial?.contracts ?? {}).filter(([, values]) => !values.length).map(([key]) => key);
+  // Recent desktop builds split native services into app-shared/app-primary.
+  const missing = Object.keys(initial?.contracts ?? {}).filter((key) =>
+    !reports.some((report) => report.contracts[key].length));
   console.log(JSON.stringify({ mode: "read-only-static-contract-audit", reports, missing }, null, 2));
   if (!initial || missing.length) process.exitCode = 1;
 }

@@ -15,26 +15,31 @@ const copy = {
     capability: "能力", unknown: "未知", saved: "已保存", saved_pending_restart: "已保存，待重启生效", unverified: "运行时未验证",
     unsupported: "不支持/未实现", different: "与磁盘不一致", overridden: "profile 覆盖", missing_dependency: "缺少依赖",
     footer: "全局/profile 检查；项目、启动参数和运行中任务可能覆盖配置", enabled: "开", disabled: "关", restart: "需要重新启动相关 Codex 进程",
-    confirmRestore: "恢复会重新启用备份中的代理，是否继续？", config: "配置来源" },
+    confirmRestore: "恢复会重新启用备份中的代理，是否继续？", config: "配置来源", reload: "重新读取配置",
+    dependency: "依赖与支持条件", effect: "生效时机", restartEffect: "重启后核对", nextRequest: "后续请求" },
   en: { title: "Runtime and configuration", refresh: "Check again", proxy: "Packaged app proxy", repair: "Back up and repair", restore: "Restore last backup",
     auto: "Repair dead packaged proxies before launch", check: "Inspect proxy", pending: "Checking", error: "Check failed; state unknown",
     missing: "Application context unavailable", changed: "External configuration changed. Refresh settings before saving.", desired: "Manager intent", disk: "Disk / CLI default", state: "Verification",
     capability: "Capability", unknown: "Unknown", saved: "Saved", saved_pending_restart: "Saved; restart pending", unverified: "Runtime unverified",
     unsupported: "Unsupported / not implemented", different: "Differs from disk", overridden: "Profile override", missing_dependency: "Missing dependency",
     footer: "Global/profile only; project, launch arguments and running tasks may override these values", enabled: "On", disabled: "Off", restart: "Restart the affected Codex processes",
-    confirmRestore: "Restoring re-enables the backed-up proxy. Continue?", config: "Configuration source" },
+    confirmRestore: "Restoring re-enables the backed-up proxy. Continue?", config: "Configuration source", reload: "Reload configuration",
+    dependency: "Dependencies and support", effect: "When applied", restartEffect: "Verify after restart", nextRequest: "Next request" },
   ru: { title: "Проверка среды и настроек", refresh: "Проверить снова", proxy: "Прокси приложения", repair: "Сохранить и исправить", restore: "Восстановить копию",
     auto: "Исправлять неработающий прокси пакета при запуске", check: "Проверить прокси", pending: "Проверка", error: "Проверка не удалась; состояние неизвестно",
     missing: "Контекст приложения недоступен", changed: "Внешние настройки изменены. Обновите их перед сохранением.", desired: "В менеджере", disk: "Файл / по умолчанию CLI", state: "Проверка",
     capability: "Возможность", unknown: "Неизвестно", saved: "Сохранено", saved_pending_restart: "Сохранено; нужен перезапуск", unverified: "Работа не проверена",
     unsupported: "Не поддерживается / не реализовано", different: "Отличается от файла", overridden: "Переопределено профилем", missing_dependency: "Нет зависимости",
     footer: "Только глобальный файл/профиль; проект, аргументы и активные задачи могут переопределить значения", enabled: "Вкл.", disabled: "Выкл.", restart: "Перезапустите соответствующие процессы Codex",
-    confirmRestore: "Восстановление включит прежний прокси. Продолжить?", config: "Источник настроек" },
+    confirmRestore: "Восстановление включит прежний прокси. Продолжить?", config: "Источник настроек", reload: "Перечитать настройки",
+    dependency: "Зависимости и поддержка", effect: "Применение", restartEffect: "Проверить после перезапуска", nextRequest: "Следующий запрос" },
 } as const;
 
-export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit }: {
+export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, savedRevision, onReload }: {
   autoRepair: boolean; onAutoRepairChange: (enabled: boolean) => void;
   onAudit?: (entries: Entry[] | null) => void;
+  savedRevision?: string | null;
+  onReload?: () => Promise<unknown>;
 }) {
   const text = copy[getLanguage()];
   const [audit, setAudit] = useState<Audit | null>(null);
@@ -63,11 +68,14 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit }: {
     }
   }, [text.error]);
   useEffect(() => {
+    // A confirmed save/reload is not an external modification.
+    revision.current = savedRevision ?? null;
+    setExternalChange(false);
     void refresh();
     const focus = () => { if (document.visibilityState === "visible") void refresh(); };
     window.addEventListener("focus", focus);
     return () => { sequence.current++; window.removeEventListener("focus", focus); };
-  }, [refresh]);
+  }, [refresh, savedRevision]);
   const operate = async (action: string) => {
     if (busy) return;
     if (action === "restore" && !window.confirm(text.confirmRestore)) return;
@@ -89,9 +97,10 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit }: {
     <header><h2><ShieldCheck size={18} />{text.title}</h2>
       <button type="button" onClick={() => void refresh()}><RefreshCw size={15} />{text.refresh}</button></header>
     {error ? <p role="alert">{error}</p> : null}
-    {externalChange ? <p role="status">{text.changed}</p> : null}
+    {externalChange ? <p role="status">{text.changed} {onReload ?
+      <button type="button" onClick={() => void onReload()}>{text.reload}</button> : null}</p> : null}
     <div className="agent-health-proxy">
-      <label><input type="checkbox" checked={autoRepair} onChange={e => onAutoRepairChange(e.currentTarget.checked)} />{text.auto}</label>
+      <label><input type="checkbox" disabled={!audit || externalChange} checked={autoRepair} onChange={e => onAutoRepairChange(e.currentTarget.checked)} />{text.auto}</label>
       <div className="agent-health-actions">
         <button disabled={!!busy} type="button" onClick={() => void operate("inspect")}><RefreshCw size={15} />{text.check}</button>
         <button disabled={!!busy || proxy?.packaged?.state !== "dead_loopback"} type="button" onClick={() => void operate("repair")}><Wrench size={15} />{text.repair}</button>
@@ -107,7 +116,10 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit }: {
       <div className="agent-health-table"><table>
         <thead><tr><th>{text.capability}</th><th>{text.desired}</th><th>{text.disk}</th><th>{text.state}</th></tr></thead>
         <tbody>{audit.entries.map(entry => <tr key={entry.key} title={`${entry.source}\n${entry.dependency}`}>
-          <td><code>{entry.key}</code></td><td>{show(entry.desired)}</td><td>{show(entry.disk)}</td><td>{stateLabel(entry.state)}</td>
+          <td><details><summary><code>{entry.key}</code></summary>
+            <p>{text.config}: {entry.source}</p><p>{text.dependency}: {entry.dependency}</p>
+            <p>{text.effect}: {entry.effect === "restart" ? text.restartEffect : entry.effect === "next_request" ? text.nextRequest : text.unknown}</p>
+          </details></td><td>{show(entry.desired)}</td><td>{show(entry.disk)}</td><td>{stateLabel(entry.state)}</td>
         </tr>)}</tbody>
       </table></div>
       <p>{text.footer}</p>

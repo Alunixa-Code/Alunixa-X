@@ -92,14 +92,13 @@ pub fn parse_features(output: &str) -> BTreeMap<String, Feature> {
         .collect()
 }
 
-pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
-    let settings = crate::settings::SettingsStore::default().load()?;
-    let home = crate::codex_home::default_codex_home_dir();
-    let cli = crate::official_remote::find_codex_cli_executable(Some(&settings.codex_app_path));
+pub async fn discover_features(cli: Option<&std::path::Path>) -> BTreeMap<String, Feature> {
     let mut features = BTreeMap::new();
-    if let Some(cli) = &cli {
+    if let Some(cli) = cli {
         // Feature defaults come from the installed binary, with no user/project overrides.
-        let tmp = tempfile::tempdir()?;
+        let Ok(tmp) = tempfile::tempdir() else {
+            return features;
+        };
         let mut command = tokio::process::Command::new(cli);
         command
             .args(["features", "list"])
@@ -116,6 +115,129 @@ pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
             }
         }
     }
+    features
+}
+
+pub async fn supports_profile_files(cli: Option<&std::path::Path>) -> Option<bool> {
+    let cli = cli?;
+    let tmp = tempfile::tempdir().ok()?;
+    std::fs::write(tmp.path().join("ax-probe.config.toml"), "").ok()?;
+    let mut command = tokio::process::Command::new(cli);
+    command.args(["--profile", "ax-probe", "features", "list"])
+        .env("CODEX_HOME", tmp.path()).current_dir(tmp.path()).kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(crate::windows_create_no_window());
+    let output = tokio::time::timeout(std::time::Duration::from_secs(6), command.output()).await.ok()?.ok()?;
+    if output.status.success() { Some(true) }
+    else if String::from_utf8_lossy(&output.stderr).contains("not found") { Some(false) }
+    else { None }
+}
+
+pub fn selected_profile_argument(args: &[String]) -> anyhow::Result<Option<String>> {
+    let mut selected = None;
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--" { break; }
+        let name = if arg == "--profile" || arg == "-p" {
+            Some(args.next().map(String::as_str).ok_or_else(|| anyhow::anyhow!("profile 参数缺少名称"))?)
+        } else { arg.strip_prefix("--profile=").or_else(|| arg.strip_prefix("-p=").filter(|n| !n.is_empty())) };
+        if let Some(name) = name {
+            if name.is_empty() || name.len() > 128 || !name.chars().all(|c| c.is_ascii_alphanumeric() || "-_".contains(c)) {
+                anyhow::bail!("profile 名称无法安全解析，状态未知");
+            }
+            selected = Some(name.to_owned());
+        }
+    }
+    Ok(selected)
+}
+
+pub fn overlay_profile_for_audit(
+    home: &std::path::Path, settings: &BackendSettings, doc: &toml::Value,
+) -> anyhow::Result<(toml::Value, Option<String>)> {
+    let Some(name) = selected_profile_argument(&settings.codex_extra_args)? else {
+        return Ok((doc.clone(), None));
+    };
+    let path = home.join(format!("{name}.config.toml"));
+    let profile = match std::fs::read_to_string(&path) {
+        Ok(text) => text.parse::<toml::Value>().map_err(|_| anyhow::anyhow!("独立 profile 配置无法解析，状态未知"))?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            doc.get("profiles").and_then(|p| p.get(&name)).cloned()
+                .ok_or_else(|| anyhow::anyhow!("所选 profile 配置无法读取，状态未知"))?
+        }
+        Err(_) => anyhow::bail!("所选 profile 配置无法读取，状态未知"),
+    };
+    // Internal read-only view reuses field-level override inspection; never serialize to disk.
+    let mut effective = doc.clone();
+    effective["profile"] = toml::Value::String(name.clone());
+    let mut profiles = toml::map::Map::new();
+    profiles.insert(name, profile);
+    effective["profiles"] = toml::Value::Table(profiles);
+    Ok((effective, Some(path.display().to_string())))
+}
+
+pub fn validate_native_feature_changes(
+    previous: &BackendSettings,
+    next: &BackendSettings,
+    features: &BTreeMap<String, Feature>,
+) -> anyhow::Result<()> {
+    for (feature, changed) in [
+        (
+            "fast_mode",
+            previous.codex_app_fast_mode != next.codex_app_fast_mode,
+        ),
+        (
+            "goals",
+            previous.codex_goals_enabled != next.codex_goals_enabled,
+        ),
+    ] {
+        if changed && !features.get(feature).is_some_and(|f| f.stage != "removed") {
+            anyhow::bail!(
+                "当前 Codex 未确认支持 features.{feature}，未写入；请核对所选桌面后台并刷新能力检测"
+            );
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_profile_feature_change(
+    doc: &toml::Value, feature: &str, enabled: bool,
+) -> anyhow::Result<()> {
+    if let Some(value) = doc.get("profile").and_then(toml::Value::as_str)
+        .and_then(|profile| doc.get("profiles")?.get(profile)?.get("features")?.get(feature))
+    {
+        if value.as_bool() != Some(enabled) {
+            anyhow::bail!("当前 profile 覆盖 features.{feature}；请先编辑该 profile，未将根级保存伪装为已生效");
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_profile_feature_changes_in_home(
+    home: &std::path::Path, previous: &BackendSettings, next: &BackendSettings,
+) -> anyhow::Result<()> {
+    let config = match std::fs::read_to_string(home.join("config.toml")) {
+        Ok(config) => config,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(_) => anyhow::bail!("Codex 配置无法读取，未保存"),
+    };
+    let doc = config.parse::<toml::Value>()
+        .map_err(|_| anyhow::anyhow!("Codex 配置无法解析，未保存"))?;
+    let (doc, _) = overlay_profile_for_audit(home, next, &doc)?;
+    for (feature, before, after) in [
+        ("fast_mode", previous.codex_app_fast_mode, next.codex_app_fast_mode),
+        ("goals", previous.codex_goals_enabled, next.codex_goals_enabled),
+    ] {
+        if before != after { validate_profile_feature_change(&doc, feature, after)?; }
+    }
+    Ok(())
+}
+
+pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
+    let settings = crate::settings::SettingsStore::default().load()?;
+    let home = crate::codex_home::default_codex_home_dir();
+    let cli = crate::official_remote::find_codex_cli_executable(Some(&settings.codex_app_path));
+    let features = discover_features(cli.as_deref()).await;
+    let profile_files = supports_profile_files(cli.as_deref()).await;
     let _lock = crate::config_transaction::ConfigLock::acquire(&home)?;
     let settings = crate::settings::SettingsStore::default().load()?;
     let config_path = home.join("config.toml");
@@ -127,7 +249,17 @@ pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
     let doc = config
         .parse::<toml::Value>()
         .map_err(|_| anyhow::anyhow!("Codex 配置无法解析，能力状态未知"))?;
+    if profile_files == Some(true) && (doc.get("profile").is_some() || doc.get("profiles").is_some()) {
+        anyhow::bail!("当前 Codex 已移除内嵌 profile/profiles；请备份后迁移到独立 *.config.toml 文件，未自动覆盖用户配置");
+    }
+    let (doc, profile_path) = overlay_profile_for_audit(&home, &settings, &doc)?;
     let mut audit = inspect_values(&settings, &doc, &features)?;
+    if let Some(path) = profile_path {
+        audit.overrides.push(format!("profile file (launcher selection; running task unverified): {path}"));
+        for item in &mut audit.entries {
+            if item.state == "overridden" { item.source.push_str(&format!(" / {path}")); }
+        }
+    }
     if settings.codex_app_instructions_enabled
         && crate::codex_instructions::audit_model_instructions_before_launch(
             &home,
@@ -188,11 +320,12 @@ pub fn inspect_values(
     if selected.is_some() {
         overrides.push("config.toml: profile".into());
     }
-    if settings
-        .codex_extra_args
-        .iter()
-        .any(|a| a.starts_with("-c") || a.starts_with("-p") || a.starts_with("--config") || a.starts_with("--profile"))
-    {
+    if settings.codex_extra_args.iter().any(|a| {
+        a.starts_with("-c")
+            || a.starts_with("-p")
+            || a.starts_with("--config")
+            || a.starts_with("--profile")
+    }) {
         overrides.push("launcher: config/profile arguments".into());
     }
     for &key in KEYS {
@@ -245,10 +378,11 @@ pub fn inspect_values(
             }
         } else if key == "codexAppSubAgentMaxThreads" {
             item.source = "config.toml: agents.max_threads".into();
-            let scoped = selected_doc.and_then(|d| d.get("agents")).and_then(|v| v.get("max_threads"));
-            item.disk = scoped.or_else(|| doc
-                .get("agents")
-                .and_then(|v| v.get("max_threads")))
+            let scoped = selected_doc
+                .and_then(|d| d.get("agents"))
+                .and_then(|v| v.get("max_threads"));
+            item.disk = scoped
+                .or_else(|| doc.get("agents").and_then(|v| v.get("max_threads")))
                 .and_then(toml::Value::as_integer)
                 .map(Value::from);
             item.state = if item.disk.is_none() {
@@ -277,7 +411,8 @@ pub fn inspect_values(
             item.source = "config.toml: model_instructions_file".into();
             let scoped = selected_doc.and_then(|d| d.get("model_instructions_file"));
             item.disk = Some(Value::Bool(
-                scoped.or_else(|| doc.get("model_instructions_file"))
+                scoped
+                    .or_else(|| doc.get("model_instructions_file"))
                     .and_then(toml::Value::as_str)
                     .is_some_and(|v| !v.trim().is_empty()),
             ));
@@ -292,7 +427,9 @@ pub fn inspect_values(
             .into();
         } else if key == "codexAppDisableWss" {
             item.source = "config.toml: model_providers.<active>.supports_websockets".into();
-            let provider = selected_doc.and_then(|d| d.get("model_provider")).or_else(|| doc.get("model_provider"))
+            let provider = selected_doc
+                .and_then(|d| d.get("model_provider"))
+                .or_else(|| doc.get("model_provider"))
                 .and_then(toml::Value::as_str)
                 .unwrap_or("openai");
             item.disk = doc
@@ -445,8 +582,70 @@ mod tests {
     }
 
     #[test]
+    fn removed_or_unavailable_native_capabilities_refuse_edits_but_not_unrelated_saves() {
+        let previous = BackendSettings::default();
+        let mut next = previous.clone();
+        assert!(validate_native_feature_changes(&previous, &next, &BTreeMap::new()).is_ok());
+        next.codex_app_fast_mode = !previous.codex_app_fast_mode;
+        assert!(validate_native_feature_changes(&previous, &next, &BTreeMap::new()).is_err());
+        assert!(
+            validate_native_feature_changes(
+                &previous,
+                &next,
+                &parse_features("fast_mode removed false")
+            )
+            .is_err()
+        );
+        assert!(
+            validate_native_feature_changes(
+                &previous,
+                &next,
+                &parse_features("fast_mode stable true")
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn explicit_edit_cannot_claim_to_disable_a_feature_overridden_by_profile() {
+        let doc = "profile='work'\n[profiles.work.features]\nfast_mode=true".parse().unwrap();
+        assert!(validate_profile_feature_change(&doc, "fast_mode", false).is_err());
+        assert!(validate_profile_feature_change(&doc, "fast_mode", true).is_ok());
+        assert!(validate_profile_feature_change(&doc, "goals", false).is_ok());
+    }
+
+    #[test]
+    fn every_boolean_capability_survives_save_reload_and_accurate_audit() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::settings::SettingsStore::new(dir.path().join("settings.json"));
+        let defaults = serde_json::to_value(BackendSettings::default()).unwrap();
+        let features = parse_features("fast_mode stable true\ngoals stable true");
+        for &key in KEYS {
+            if !defaults[key].is_boolean() { continue; }
+            for enabled in [true, false] {
+                let mut json = defaults.clone();
+                json[key] = Value::Bool(enabled);
+                let settings: BackendSettings = serde_json::from_value(json).unwrap();
+                store.save(&settings).unwrap();
+                let reloaded = crate::settings::SettingsStore::new(store.path().to_path_buf()).load().unwrap();
+                let doc = format!("[features]\nfast_mode={}\ngoals={}\n",
+                    reloaded.codex_app_fast_mode, reloaded.codex_goals_enabled).parse().unwrap();
+                let report = inspect_values(&reloaded, &doc, &features).unwrap();
+                let entry = report.entries.iter().find(|e| e.key == key).unwrap();
+                assert_eq!(entry.desired, Value::Bool(enabled), "{key}");
+                assert!(!["enabled", "ready", "running"].contains(&entry.state.as_str()), "{key}");
+                if ["codexAppFastMode", "codexGoalsEnabled"].contains(&key) {
+                    assert_eq!(entry.disk, Some(Value::Bool(enabled)), "{key}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn profile_overrides_threads_and_instructions_without_claiming_live_effect() {
-        let audit = inspect_values(&BackendSettings::default(), &r#"
+        let audit = inspect_values(
+            &BackendSettings::default(),
+            &r#"
 profile="work"
 [agents]
 max_threads=6
@@ -454,10 +653,31 @@ max_threads=6
 model_instructions_file="profile.md"
 [profiles.work.agents]
 max_threads=2
-"#.parse().unwrap(), &BTreeMap::new()).unwrap();
+"#
+            .parse()
+            .unwrap(),
+            &BTreeMap::new(),
+        )
+        .unwrap();
         for key in ["codexAppSubAgentMaxThreads", "codexAppInstructionsEnabled"] {
-            assert_eq!(audit.entries.iter().find(|entry| entry.key == key).unwrap().state, "overridden");
+            assert_eq!(
+                audit
+                    .entries
+                    .iter()
+                    .find(|entry| entry.key == key)
+                    .unwrap()
+                    .state,
+                "overridden"
+            );
         }
-        assert_eq!(audit.entries.iter().find(|entry| entry.key == "codexAppSubAgentMaxThreads").unwrap().disk, Some(Value::from(2)));
+        assert_eq!(
+            audit
+                .entries
+                .iter()
+                .find(|entry| entry.key == "codexAppSubAgentMaxThreads")
+                .unwrap()
+                .disk,
+            Some(Value::from(2))
+        );
     }
 }

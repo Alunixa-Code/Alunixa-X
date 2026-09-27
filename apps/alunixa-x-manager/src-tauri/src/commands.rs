@@ -1369,6 +1369,19 @@ pub async fn save_settings(
             );
         }
     };
+    if settings.codex_app_fast_mode != previous.codex_app_fast_mode
+        || settings.codex_goals_enabled != previous.codex_goals_enabled
+    {
+        let cli = alunixa_x_core::official_remote::find_codex_cli_executable(Some(
+            &settings.codex_app_path,
+        ));
+        let features = alunixa_x_core::agent_capabilities::discover_features(cli.as_deref()).await;
+        if let Err(error) = alunixa_x_core::agent_capabilities::validate_native_feature_changes(
+            &previous, &settings, &features,
+        ) {
+            return failed(&error.to_string(), fallback_settings_payload());
+        }
+    }
     if settings.codex_app_path != previous.codex_app_path && !settings.codex_app_path.is_empty() {
         let executable =
             alunixa_x_core::app_paths::build_codex_executable(Path::new(&settings.codex_app_path));
@@ -1398,6 +1411,10 @@ pub async fn save_settings(
         &alunixa_x_core::relay_config::default_codex_home_dir(),
         expected_revision.as_deref(),
         || {
+            let home = alunixa_x_core::relay_config::default_codex_home_dir();
+            alunixa_x_core::agent_capabilities::validate_profile_feature_changes_in_home(
+                &home, &previous, &settings,
+            )?;
             SettingsStore::default()
                 .save_preserving_runtime_model_selection(&settings)
                 .and_then(|_| {

@@ -213,6 +213,13 @@ pub fn protected_paths(settings: &Path, home: &Path) -> anyhow::Result<Vec<PathB
         .into_iter()
         .map(|p| home.join(p)),
     );
+    // Named profiles are a separate configuration layer in newer Codex versions.
+    let mut profiles = fs::read_dir(home)?
+        .map(|entry| entry.map(|e| e.path()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    profiles.retain(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".config.toml")));
+    profiles.sort();
+    files.extend(profiles);
     // Directory membership and file names are part of the revision, not only file bytes.
     match fs::read_dir(home.join("model-catalogs")) {
         Ok(entries) => {
@@ -314,7 +321,10 @@ pub fn run<T>(
     }
     match result {
         Ok(value) => Ok(value),
-        Err(_) => {
+        Err(error) => {
+            // Error chains can embed TOML/auth source lines. Expose controlled
+            // actionable categories, never a raw serialization/parser error.
+            let reason = safe_failure_reason(&error);
             let mut conflict = false;
             for (path, bytes) in original.iter().rev() {
                 // An auth refresh or external edit that this operation never wrote belongs to
@@ -342,9 +352,30 @@ pub fn run<T>(
                     "保存失败；已回滚本次修改并保留外部新配置，备份位于 alunixa-x-config-transactions"
                 );
             }
-            bail!("配置保存失败，已恢复原设置及关联文件；未更换密钥、模型或接口")
+            bail!("配置保存失败（{reason}），已恢复原设置及关联文件；未更换密钥、模型或接口")
         }
     }
+}
+
+fn safe_failure_reason(error: &anyhow::Error) -> &'static str {
+    for cause in error.chain() {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            return match io.kind() {
+                std::io::ErrorKind::PermissionDenied => "没有写入权限",
+                std::io::ErrorKind::NotFound => "目标路径不存在",
+                std::io::ErrorKind::AlreadyExists => "目标路径冲突",
+                _ => "文件读写失败",
+            };
+        }
+        let message = cause.to_string();
+        if message.starts_with("当前 profile 覆盖 features.") {
+            return "profile 覆盖目标能力，请先编辑对应 profile";
+        }
+        if message.contains("外部更新") || message.contains("其他页面") {
+            return "外部配置已变化，请刷新后重试";
+        }
+    }
+    "关联配置策略未完成，请查看能力核对与本地备份"
 }
 
 /// Home-only writers must not capture the caller's unrelated global AX settings.
@@ -522,5 +553,14 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "x=1\n");
         assert_eq!(fs::read_to_string(&auxiliary).unwrap(), "{}");
+    }
+
+    #[test]
+    fn save_error_reports_actionable_categories_without_parser_input() {
+        assert_eq!(safe_failure_reason(&std::io::Error::from(std::io::ErrorKind::PermissionDenied).into()), "没有写入权限");
+        let error = anyhow::anyhow!("fixture-parser-secret");
+        assert!(!safe_failure_reason(&error).contains("secret"));
+        let error = anyhow::anyhow!("当前 profile 覆盖 features.fast_mode");
+        assert!(safe_failure_reason(&error).contains("profile"));
     }
 }

@@ -113,6 +113,7 @@
   --sidebar-muted: 267 15% 20%;
   --sidebar-border: 267 11% 23%;
   --surface-raised: 0 0% 12.9%;
+  --shadow-color: 0 0% 0%;
   --surface-sunken: 0 0% 7%;
   --brand-accent: 267 84% 68%;
   --switch-track: 0 0% 28%;
@@ -147,6 +148,7 @@
   --sidebar-muted: 267 22% 92%;
   --sidebar-border: 267 15% 87%;
   --surface-raised: 0 0% 100%;
+  --shadow-color: 0 0% 0%;
   --surface-sunken: 0 0% 97.6%;
   --brand-accent: 267 72% 50%;
   --switch-track: 0 0% 78%;
@@ -5399,6 +5401,7 @@ select {
   --sidebar-muted: 225 31% 15%;
   --sidebar-border: 224 30% 20%;
   --surface-raised: 221 36% 12%;
+  --shadow-color: 0 0% 0%;
   --surface-sunken: 224 52% 6%;
   --brand-accent: 193 96% 62%;
   --brand-violet: 251 91% 72%;
@@ -5432,6 +5435,7 @@ select {
   --sidebar-muted: 221 39% 91%;
   --sidebar-border: 219 31% 84%;
   --surface-raised: 0 0% 100%;
+  --shadow-color: 0 0% 0%;
   --surface-sunken: 218 45% 96%;
   --brand-accent: 203 92% 42%;
   --brand-violet: 250 69% 59%;

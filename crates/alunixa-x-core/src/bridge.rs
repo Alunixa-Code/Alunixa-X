@@ -583,6 +583,9 @@ where
         if value.get("method").and_then(Value::as_str) == Some("Runtime.bindingCalled") {
             self.binding_calls.push_back(value.clone());
         }
+        if let Some(generation) = &self.generation {
+            crate::runtime_health::remember_renderer_error(&generation.target, &value);
+        }
 
         Ok(Some(value))
     }

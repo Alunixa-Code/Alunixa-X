@@ -267,19 +267,31 @@ async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<
     // invocation may focus its window, but must not rewrite configuration, bind
     // its port, inject a second bridge or publish a fabricated "running" status.
     #[cfg(windows)]
-    let activated = alunixa_x_core::watcher::find_codex_processes().into_iter()
+    let activated = alunixa_x_core::watcher::find_codex_processes()
+        .into_iter()
         .any(alunixa_x_core::windows_activate_process_window);
     #[cfg(not(windows))]
     let activated = {
         let settings = alunixa_x_core::settings::SettingsStore::default().load()?;
         let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
-            options.app_dir.as_deref(), Some(&settings.codex_app_path),
-        ).context("Codex App directory not found")?;
+            options.app_dir.as_deref(),
+            Some(&settings.codex_app_path),
+        )
+        .context("Codex App directory not found")?;
         #[cfg(target_os = "macos")]
-        { tokio::process::Command::new("/usr/bin/open").arg("-a").arg(app_dir)
-            .status().await?.success() }
+        {
+            tokio::process::Command::new("/usr/bin/open")
+                .arg("-a")
+                .arg(app_dir)
+                .status()
+                .await?
+                .success()
+        }
         #[cfg(not(target_os = "macos"))]
-        { let _ = app_dir; false }
+        {
+            let _ = app_dir;
+            false
+        }
     };
     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
         "launcher.activate_existing_codex",
@@ -1277,12 +1289,21 @@ mod tests {
     #[test]
     fn repeated_launch_only_focuses_the_existing_owner() {
         let source = include_str!("main.rs");
-        let start = source.find("async fn activate_existing_codex_app(").unwrap();
-        let end = source[start..].find("fn log_launcher_already_running(").unwrap() + start;
+        let start = source
+            .find("async fn activate_existing_codex_app(")
+            .unwrap();
+        let end = source[start..]
+            .find("fn log_launcher_already_running(")
+            .unwrap()
+            + start;
         let activation = &source[start..end];
         for forbidden in [
-            ".start_helper(", ".launch_codex(", ".ensure_injection(",
-            ".apply_active_relay_profile(", ".save_latest(", "ensure_alunixa_x_hooks(",
+            ".start_helper(",
+            ".launch_codex(",
+            ".ensure_injection(",
+            ".apply_active_relay_profile(",
+            ".save_latest(",
+            "ensure_alunixa_x_hooks(",
         ] {
             assert!(!activation.contains(forbidden), "{forbidden}");
         }
