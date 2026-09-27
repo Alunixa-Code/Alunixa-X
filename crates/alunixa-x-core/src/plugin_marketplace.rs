@@ -657,6 +657,22 @@ fn ensure_marketplace_configs_with_plugins(
     marketplace_root: &Path,
     plugin_ids: &[String],
 ) -> anyhow::Result<bool> {
+    crate::config_transaction::run_in_home(home, || {
+        ensure_marketplace_configs_with_plugins_inner(
+            home,
+            marketplace_names,
+            marketplace_root,
+            plugin_ids,
+        )
+    })
+}
+
+fn ensure_marketplace_configs_with_plugins_inner(
+    home: &Path,
+    marketplace_names: &[&str],
+    marketplace_root: &Path,
+    plugin_ids: &[String],
+) -> anyhow::Result<bool> {
     let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read(&config_path) {
@@ -801,16 +817,20 @@ fn merge_marketplace_configs_and_plugins_into_text(
     if !plugin_ids.is_empty() {
         let plugins = table_mut_or_insert(&mut doc, "plugins")?;
         for plugin_id in plugin_ids {
-            let existing_enabled = plugins
-                .get(plugin_id)
-                .and_then(Item::as_table)
-                .and_then(|table| table.get("enabled"))
-                .and_then(Item::as_bool);
-            if plugins.get(plugin_id).and_then(Item::as_table).is_none() {
+            if !plugins.contains_key(plugin_id) {
                 plugins[plugin_id] = toml_edit::table();
             }
-            if existing_enabled.is_none() {
-                plugins[plugin_id]["enabled"] = toml_edit::value(true);
+            let entry = plugins
+                .get_mut(plugin_id)
+                .and_then(Item::as_table_like_mut)
+                .context("插件配置必须是 TOML table，未覆盖已有设置")?;
+            if let Some(enabled) = entry.get("enabled") {
+                anyhow::ensure!(
+                    enabled.as_bool().is_some(),
+                    "插件 enabled 必须为布尔值，未覆盖已有设置"
+                );
+            } else {
+                entry.insert("enabled", toml_edit::value(true));
             }
         }
     }
@@ -875,9 +895,12 @@ fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
     if contents.trim().is_empty() {
         Ok(DocumentMut::new())
     } else {
-        contents
-            .parse::<DocumentMut>()
-            .map_err(|error| anyhow::anyhow!("config.toml TOML parse failed: {error}"))
+        contents.parse::<DocumentMut>().map_err(|error| {
+            anyhow::anyhow!(
+                "config.toml TOML parse failed at byte {}; configuration contents omitted",
+                error.span().map(|span| span.start).unwrap_or(0)
+            )
+        })
     }
 }
 
@@ -885,8 +908,8 @@ fn table_mut_or_insert<'a>(doc: &'a mut DocumentMut, key: &str) -> anyhow::Resul
     if !doc.as_table().contains_key(key) {
         doc[key] = toml_edit::table();
     }
-    if doc.get(key).and_then(Item::as_table).is_none() {
-        doc[key] = toml_edit::table();
+    if let Some(inline) = doc.get(key).and_then(Item::as_inline_table).cloned() {
+        doc[key] = Item::Table(inline.into_table());
     }
     doc.get_mut(key)
         .and_then(Item::as_table_mut)
@@ -1144,6 +1167,71 @@ mod tests {
         assert_eq!(
             parsed["plugins"]["customer-support@role-specific-plugins"]["enabled"].as_bool(),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn disabled_plugin_survives_tools_sync_and_repeated_startup_registration() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_role_specific_marketplace(home);
+        ensure_role_specific_plugins_marketplace_config(home).unwrap();
+        let config = home.join("config.toml");
+        let current = std::fs::read_to_string(&config).unwrap();
+        let disabled = crate::relay_config::sync_live_config_context_entries(
+            &current,
+            "[plugins.'sales@role-specific-plugins']\nenabled=false\n",
+        )
+        .unwrap();
+        std::fs::write(&config, disabled).unwrap();
+        for _ in 0..2 {
+            ensure_role_specific_plugins_marketplace_config(home).unwrap();
+            let doc: DocumentMut = std::fs::read_to_string(&config).unwrap().parse().unwrap();
+            assert_eq!(
+                doc["plugins"]["sales@role-specific-plugins"]["enabled"].as_bool(),
+                Some(false)
+            );
+            assert_eq!(
+                doc["plugins"]["customer-support@role-specific-plugins"]["enabled"].as_bool(),
+                Some(true)
+            );
+        }
+    }
+
+    #[test]
+    fn startup_registration_preserves_inline_plugin_disable_and_custom_values() {
+        let dir = tempfile::tempdir().unwrap();
+        write_role_specific_marketplace(dir.path());
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "[plugins]\n'sales@role-specific-plugins'={enabled=false, custom='retained'}\n",
+        )
+        .unwrap();
+        ensure_role_specific_plugins_marketplace_config(dir.path()).unwrap();
+        let doc: DocumentMut = std::fs::read_to_string(dir.path().join("config.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            doc["plugins"]["sales@role-specific-plugins"]["enabled"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            doc["plugins"]["sales@role-specific-plugins"]["custom"].as_str(),
+            Some("retained")
+        );
+    }
+
+    #[test]
+    fn startup_registration_does_not_replace_invalid_plugin_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        write_role_specific_marketplace(dir.path());
+        let original = "[plugins.'sales@role-specific-plugins']\nenabled='not-a-boolean'\n";
+        std::fs::write(dir.path().join("config.toml"), original).unwrap();
+        assert!(ensure_role_specific_plugins_marketplace_config(dir.path()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+            original
         );
     }
 

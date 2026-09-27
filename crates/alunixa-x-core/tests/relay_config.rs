@@ -826,7 +826,11 @@ enabled = true
     let updated = sync_live_config_context_entries(live, disabled).unwrap();
 
     assert!(updated.contains(r#"model = "gpt-5""#));
-    assert!(!updated.contains("[mcp_servers.ida-pro-mcp]"));
+    let disabled_doc: toml::Value = updated.parse().unwrap();
+    assert_eq!(
+        disabled_doc["mcp_servers"]["ida-pro-mcp"]["enabled"].as_bool(),
+        Some(false)
+    );
     assert!(updated.contains("[plugins.\"browser@openai-bundled\"]"));
 
     let enabled = r#"[mcp_servers.ida-pro-mcp]
@@ -1172,7 +1176,7 @@ path = "plugin.js"
 }
 
 #[test]
-fn apply_relay_files_with_context_skips_disabled_global_context() {
+fn apply_relay_files_with_context_preserves_explicit_plugin_disable() {
     let temp = tempfile::tempdir().unwrap();
     let selection = RelayContextSelection {
         mcp_servers: vec!["enabled_one".to_string()],
@@ -1212,7 +1216,11 @@ enabled = true
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(config.contains("[mcp_servers.enabled_one]"));
     assert!(config.contains("[plugins.enabled_two]"));
-    assert!(!config.contains("[plugins.disabled_one]"));
+    let doc: toml::Value = config.parse().unwrap();
+    assert_eq!(
+        doc["plugins"]["disabled_one"]["enabled"].as_bool(),
+        Some(false)
+    );
     assert!(!config.contains("[skills.disabled_skill]"));
 }
 
@@ -3301,11 +3309,15 @@ command = "disabled"
     assert!(updated.contains(r#"command = "manual""#));
     assert!(updated.contains("[mcp_servers.managed]"));
     assert!(updated.contains(r#"command = "new""#));
-    assert!(!updated.contains("[mcp_servers.disabled]"));
+    let doc: toml::Value = updated.parse().unwrap();
+    assert_eq!(
+        doc["mcp_servers"]["disabled"]["enabled"].as_bool(),
+        Some(false)
+    );
 }
 
 #[test]
-fn sync_live_config_context_entries_removes_disabled_managed_entries_from_live() {
+fn sync_live_config_context_entries_explicitly_disables_managed_entries_in_live() {
     let live = r#"model = "gpt-5"
 
 [mcp_servers.manual]
@@ -3322,7 +3334,11 @@ command = "old"
     let updated = sync_live_config_context_entries(live, context).unwrap();
 
     assert!(updated.contains("[mcp_servers.manual]"));
-    assert!(!updated.contains("[mcp_servers.managed]"));
+    let doc: toml::Value = updated.parse().unwrap();
+    assert_eq!(
+        doc["mcp_servers"]["managed"]["enabled"].as_bool(),
+        Some(false)
+    );
 }
 
 #[test]

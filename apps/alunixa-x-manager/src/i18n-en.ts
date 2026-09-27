@@ -1123,6 +1123,19 @@ export const EN_TEMPLATE: Record<string, string> = {
 // at the display layer (showNotice wraps message with t()). Exact-match first,
 // then pattern-based for messages that embed dynamic values.
 export const EN_BACKEND: Record<string, string> = {
+  "无法读取应用隔离代理视图，未修改任何代理。": "The packaged app proxy view could not be read. No proxy was changed.",
+  "应用隔离代理已启用，但所有本机端口均拒绝连接。可备份后定向关闭该代理。": "The packaged proxy is enabled, but all loopback ports refuse connections. Back it up before disabling this proxy.",
+  "已备份并关闭失效的应用隔离代理，回读一致。已有 Codex 进程需重新启动。": "The dead packaged proxy was backed up and disabled; readback matched. Restart existing Codex processes.",
+  "应用隔离手动代理未启用；残留地址不作为故障。": "The packaged manual proxy is disabled. A leftover address is not a fault.",
+  "应用存在 PAC 配置，自动修复不更改自动代理。": "A PAC configuration exists. Automatic repair leaves it unchanged.",
+  "应用使用外部或无法安全判定的代理，已保留。": "The external or unclassified proxy was left unchanged.",
+  "应用本机代理端口可连接，已保留；此检查不代表上游请求成功。": "The loopback proxy is reachable and was preserved. This does not verify upstream requests.",
+  "代理状态未知，未修改。": "Proxy state is unknown; nothing was changed.",
+  "应用隔离注册表代理仅适用于 Windows 打包应用。": "Isolated registry proxy inspection is only available for packaged Windows apps.",
+  "无法读取有效配置或能力信息，状态未知": "The effective configuration or capability information could not be read; state unknown.",
+  "config.toml 无法解析；请修正语法后重新检测，未使用默认值替代": "config.toml could not be parsed. Fix its syntax and check again; defaults were not substituted.",
+  "所选 profile 无法读取或解析；请核对启动参数与独立配置文件，状态未知": "The selected profile could not be read or parsed. Check launch arguments and the separate profile file; state unknown.",
+  "当前后台不支持内嵌 profile/profiles；请先备份，再迁移到独立 *.config.toml 并用 --profile 选择，状态未知": "This backend does not support embedded profile/profiles. Back up and migrate to separate *.config.toml files selected with --profile; state unknown.",
   "Wallpaper Engine 场景支持已移除且没有可用预览图，请上传图片或视频": "Wallpaper Engine scenes are no longer supported and no usable preview is available. Import an image or video.",
   "后端版本已读取。": "Backend version loaded.",
   "启动参数已读取。": "Launch arguments loaded.",
@@ -1225,6 +1238,7 @@ export const EN_BACKEND: Record<string, string> = {
 // Pattern-based backend translations: [regex, replacement template].
 // Checked when EN_BACKEND exact match fails — covers messages with dynamic values.
 export const EN_BACKEND_PATTERNS: Array<[RegExp, string]> = [
+  [/^应用隔离代理检测失败（(.+)），未确认修复；请重新检测。$/, "Packaged proxy inspection failed ($1). Repair is unconfirmed; check again."],
   [/^启动静默入口失败：(.+)$/, "Failed to launch silent entrypoint: $1"],
   [/^无法启动 (.+?)：(.+)$/, "Cannot launch $1: $2"],
   [/^设置已保存。(.*)$/, "Settings saved.$1"],

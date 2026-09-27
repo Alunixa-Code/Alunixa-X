@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RefreshCw, RotateCcw, ShieldCheck, Wrench } from "lucide-react";
-import { getLanguage } from "@/i18n";
+import { getLanguage, t } from "@/i18n";
 
 type View = { package: string | null; viewId: string; enabled: number | null; state: string; revision: string; loopbackEndpoints: string[] };
 type ProxyReport = { status: string; message: string; packaged: View | null; host: View | null; repaired: boolean; restartRequired: boolean; backupId: string | null };
@@ -69,7 +69,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
     } catch (cause) {
       if (request !== sequence.current) return;
       setAudit(null); onAuditRef.current?.(null);
-      setError(typeof cause === "string" ? `${text.error}: ${cause}` : text.error);
+      setError(typeof cause === "string" ? `${text.error}: ${t(cause)}` : text.error);
     }
   }, [text.error]);
   useEffect(() => {
@@ -91,7 +91,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
       });
       setProxy(result);
       setBackup(result.backupId);
-      if (result.status !== "ok") setError(result.message);
+      if (result.status !== "ok") setError(t(result.message));
     } catch { setError(text.error); }
     finally { setBusy(""); }
   };
@@ -112,7 +112,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
         <button disabled={!!busy || !backup} type="button" onClick={() => void operate("restore")}><RotateCcw size={15} />{text.restore}</button>
       </div>
       {busy ? <p role="status">{text.pending}</p> : null}
-      <p>{proxy?.message || text.missing}</p>
+      <p>{proxy?.message ? t(proxy.message) : text.missing}</p>
       {proxy ? <dl>
         <dt>{text.hostProxy}</dt><dd><code>ProxyEnable={proxy.host?.enabled ?? "?"} · {proxy.host?.state ?? text.unknown}</code></dd>
         <dt>{text.packageProxy}</dt><dd><code>ProxyEnable={proxy.packaged?.enabled ?? "?"} · {proxy.packaged?.state ?? text.unknown}</code></dd>
@@ -129,7 +129,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
         <thead><tr><th>{text.capability}</th><th>{text.desired}</th><th>{text.disk}</th><th>{text.state}</th></tr></thead>
         <tbody>{audit.entries.map(entry => <tr key={entry.key} title={`${entry.source}\n${entry.dependency}`}>
           <td><details><summary><code>{entry.key}</code></summary>
-            <p>{text.config}: {entry.source}</p><p>{text.dependency}: {entry.dependency}</p>
+            <p>{text.config}: {entry.source}</p><p>{text.dependency}: {t(entry.dependency)}</p>
             <p>{text.effect}: {entry.effect === "restart" ? text.restartEffect : entry.effect === "next_request" ? text.nextRequest : text.unknown}</p>
           </details></td><td>{show(entry.desired)}</td><td>{show(entry.disk)}</td><td>{stateLabel(entry.state)}</td>
         </tr>)}</tbody>

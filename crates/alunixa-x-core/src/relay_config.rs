@@ -1229,7 +1229,7 @@ pub fn filter_common_config_for_selection(
     let sanitized_common = sanitize_common_config_contents(common_config);
     let mut filtered = parse_toml_document(&sanitized_common)?;
     filter_context_tables_for_selection(filtered.as_table_mut(), selection);
-    remove_disabled_context_tables(filtered.as_table_mut());
+    normalize_context_enabled_flags(filtered.as_table_mut());
     Ok(normalize_optional_toml(filtered))
 }
 
@@ -1242,7 +1242,7 @@ fn filter_common_config_for_profile(
     } else {
         let sanitized_common = sanitize_common_config_contents(common_config);
         let mut filtered = parse_toml_document(&sanitized_common)?;
-        remove_disabled_context_tables(filtered.as_table_mut());
+        normalize_context_enabled_flags(filtered.as_table_mut());
         Ok(normalize_optional_toml(filtered))
     }
 }
@@ -1260,7 +1260,7 @@ pub fn sync_live_config_context_entries(
     let managed_doc = parse_toml_document(&normalized_context)?;
     remove_managed_context_entries(live_doc.as_table_mut(), managed_doc.as_table());
     let mut context_doc = managed_doc;
-    remove_disabled_context_tables(context_doc.as_table_mut());
+    normalize_context_enabled_flags(context_doc.as_table_mut());
     merge_managed_context_tables(live_doc.as_table_mut(), context_doc.as_table());
     Ok(normalize_optional_toml(live_doc))
 }
@@ -1419,7 +1419,7 @@ fn preserve_unmanaged_context_table(
     }
 }
 
-fn remove_disabled_context_tables(table: &mut toml_edit::Table) {
+fn normalize_context_enabled_flags(table: &mut toml_edit::Table) {
     for table_name in ["mcp_servers", "skills", "plugins"] {
         let Some(item) = table.get_mut(table_name) else {
             continue;
@@ -1430,12 +1430,28 @@ fn remove_disabled_context_tables(table: &mut toml_edit::Table) {
         let disabled_ids: Vec<String> = context_table
             .iter()
             .filter_map(|(id, item)| {
-                let enabled = item.as_table().map(context_entry_enabled).unwrap_or(true);
+                let enabled = item
+                    .as_table_like()
+                    .map(|entry| {
+                        entry.get("enabled").and_then(Item::as_bool) != Some(false)
+                            && entry.get("disabled").and_then(Item::as_bool) != Some(true)
+                    })
+                    .unwrap_or(true);
                 (!enabled).then_some(id.to_string())
             })
             .collect();
         for id in disabled_ids {
-            context_table.remove(&id);
+            if table_name == "skills" {
+                // Legacy skill tables are not the current filesystem skill API.
+                // Keep their existing filtering until the dedicated migration.
+                context_table.remove(&id);
+            } else if let Some(entry) = context_table.get_mut(&id).and_then(Item::as_table_like_mut)
+            {
+                // Missing entries may be re-enabled by a lower layer or startup
+                // marketplace registration. Preserve the explicit disable.
+                entry.remove("disabled");
+                entry.insert("enabled", toml_edit::value(false));
+            }
         }
     }
 }
@@ -1444,25 +1460,40 @@ fn remove_disabled_context_tables(table: &mut toml_edit::Table) {
 /// deliberately NOT in write_codex_live_atomic: explicit raw config editing must
 /// still be able to change or remove these fields.
 fn preserve_live_native_capabilities(home: &Path, config_text: &str) -> anyhow::Result<String> {
-    let live = parse_toml_document(&read_optional_text(&home.join("config.toml"))?)?;
+    let path = home.join("config.toml");
+    let live = parse_toml_document(&read_optional_text(&path)?)?;
     let mut target = parse_toml_document(config_text)?;
     for (section, keys) in [
         ("features", &["fast_mode", "goals"][..]),
         ("agents", &["max_threads"][..]),
     ] {
-        let Some(source) = live.get(section) else {
-            continue;
-        };
-        let source = source
-            .as_table_like()
-            .with_context(|| format!("当前 {section} 必须为 TOML table，未切换供应商"))?;
+        let source = live
+            .get(section)
+            .map(|item| {
+                item.as_table_like()
+                    .with_context(|| format!("当前 {section} 必须为 TOML table，未切换供应商"))
+            })
+            .transpose()?;
         for key in keys {
-            if let Some(value) = source.get(key) {
+            if let Some(value) = source.and_then(|table| table.get(key)) {
                 table_like_mut_or_insert(&mut target, section)?.insert(key, value.clone());
+            } else if path.exists() {
+                // Absence also has meaning: the user chose the runtime default,
+                // not a stale preference carried inside a provider snapshot.
+                if let Some(table) = target.get_mut(section).and_then(Item::as_table_like_mut) {
+                    table.remove(key);
+                }
             }
         }
+        if target
+            .get(section)
+            .and_then(Item::as_table_like)
+            .is_some_and(|table| table.is_empty())
+        {
+            target.as_table_mut().remove(section);
+        }
     }
-    Ok(ensure_trailing_newline(target.to_string()))
+    preserve_live_hook_state_config(home, &ensure_trailing_newline(target.to_string()))
 }
 
 fn write_codex_live_atomic(
@@ -1514,12 +1545,6 @@ fn write_codex_live_atomic(
                 config_text,
             )?,
         ),
-        None => None,
-    };
-    let config_text = config_text.as_deref();
-
-    let config_text = match config_text {
-        Some(config_text) => Some(preserve_live_hook_state_config(home, config_text)?),
         None => None,
     };
     let config_text = config_text.as_deref();
@@ -1621,43 +1646,28 @@ fn preserve_live_marketplace_configs(home: &Path, config_text: &str) -> anyhow::
 
 fn preserve_live_hook_state_config(home: &Path, config_text: &str) -> anyhow::Result<String> {
     let live_config = read_optional_text(&home.join("config.toml"))?;
-    if live_config.trim().is_empty() {
-        return Ok(config_text.to_string());
-    }
-
     let mut target = parse_toml_document(config_text)?;
     let live = parse_toml_document(&live_config)?;
-    let Some(live_state) = live
+    let live_state = live
         .get("hooks")
         .and_then(Item::as_table_like)
         .and_then(|hooks| hooks.get("state"))
+        .cloned();
+    if let Some(state) = live_state {
+        anyhow::ensure!(
+            state.as_table_like().is_some(),
+            "当前 hooks.state 必须是 TOML table"
+        );
+        table_like_mut_or_insert(&mut target, "hooks")?.insert("state", state);
+    } else if let Some(hooks) = target.get_mut("hooks").and_then(Item::as_table_like_mut) {
+        hooks.remove("state");
+    }
+    if target
+        .get("hooks")
         .and_then(Item::as_table_like)
-    else {
-        return Ok(ensure_trailing_newline(target.to_string()));
-    };
-    if live_state.is_empty() {
-        return Ok(ensure_trailing_newline(target.to_string()));
-    }
-
-    if target.get("hooks").is_none() {
-        target["hooks"] = toml_edit::table();
-    }
-    let Some(target_hooks) = target.get_mut("hooks").and_then(Item::as_table_like_mut) else {
-        return Ok(ensure_trailing_newline(target.to_string()));
-    };
-    if target_hooks.get("state").is_none() {
-        target_hooks.insert("state", toml_edit::table());
-    }
-    let Some(target_state) = target_hooks
-        .get_mut("state")
-        .and_then(Item::as_table_like_mut)
-    else {
-        return Ok(ensure_trailing_newline(target.to_string()));
-    };
-    for (key, state) in live_state.iter() {
-        if target_state.get(key).is_none() {
-            target_state.insert(key, state.clone());
-        }
+        .is_some_and(|hooks| hooks.is_empty())
+    {
+        target.as_table_mut().remove("hooks");
     }
 
     Ok(ensure_trailing_newline(target.to_string()))
@@ -3635,7 +3645,7 @@ mod tests {
     }
 
     #[test]
-    fn relay_config_write_preserves_hook_trust_state() {
+    fn provider_config_write_preserves_hook_trust_state() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
@@ -3643,7 +3653,15 @@ mod tests {
         )
         .unwrap();
 
-        apply_relay_config_file_to_home(temp.path(), "model = \"new\"\n").unwrap();
+        apply_relay_profile_config_to_home_with_context(
+            temp.path(),
+            &RelayProfile {
+                config_contents: "model = \"new\"\n".into(),
+                ..Default::default()
+            },
+            "",
+        )
+        .unwrap();
         let written = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
 
         assert!(written.contains("model = \"new\""));
