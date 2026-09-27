@@ -171,7 +171,7 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
-### Development branch: packaged proxy and capability checks (not released)
+### v1.0.28: packaged proxy and capability checks
 
 The Agent capabilities page distinguishes the ordinary registry view from the view actually read inside the selected Codex package. Automatic and manual repair only disable an enabled manual proxy with no PAC when every endpoint is loopback and repeatedly refuses connections. A disabled proxy's leftover address, a listening local proxy, and external/PAC proxies are left alone.
 
@@ -179,7 +179,7 @@ Repair creates a backup in the same package context, changes only `ProxyEnable`,
 
 Capability checks distinguish AX intent, disk/CLI defaults, and unverified runtime state. Explicit Fast/Goals disable writes `false`; failed saves roll back the UI, external edits require reload, and launch/login no longer replay stale native settings. Provider switching preserves current global Fast, Goals, and thread limits. Helper, renderer, app-server, and model-request checks are separate.
 
-The full upstream synchronization and live white-screen investigation remain unfinished. See the [38-item audit and verification limits](docs/reports/2026-09-27-startup-capability-repair.md); these development changes are not a claim that the existing release fixes every reported issue.
+The full upstream synchronization and live white-screen investigation remain unfinished. See the [38-item audit and verification limits](docs/reports/2026-09-27-startup-capability-repair.md); this patch delivers the scoped fixes below, not a claim that every reported issue is resolved.
 
 Check **About** or GitHub Releases for a platform-specific package. An update downloads and starts the installer; it does not mean a running Codex process has loaded new functionality.
 
