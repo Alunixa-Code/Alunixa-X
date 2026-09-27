@@ -52,8 +52,15 @@ def main():
             # Fresh process is used for every invocation, not a cached/in-memory switch.
             assert features() == actual
         config.write_text('[features]\nfast_mode=false\n', encoding="utf-8")
-        (home / "fixture.config.toml").write_text('[features]\nfast_mode=true\n', encoding="utf-8")
-        assert features("--profile", "fixture")["fast_mode"] is True, "Profile file override contract changed"
+        # Modern `features list` rejects --profile. Read a disabled MCP sentinel:
+        # this exercises the real profile loader without starting tools or a model.
+        (home / "fixture.config.toml").write_text(
+            '[features]\nfast_mode=true\n[mcp_servers.ax_profile_probe]\n'
+            'command="ax-profile-probe-not-executed"\nenabled=false\n', encoding="utf-8")
+        profile = run("--profile", "fixture", "mcp", "list", "--json")
+        assert profile.returncode == 0, "Profile file loader failed"
+        assert any(item["name"] == "ax_profile_probe" and item["enabled"] is False
+                   for item in json.loads(profile.stdout)), "Profile layer was not read"
         config.write_text('profile="fixture"\n[profiles.fixture]\n', encoding="utf-8")
         legacy = run("features", "list")
         assert legacy.returncode != 0 and "legacy" in legacy.stderr
@@ -64,7 +71,7 @@ def main():
         assert features()["fast_mode"] is False
         print(json.dumps({"version": version.stdout.strip(), "defaultFast": defaults.get("fast_mode"),
                           "defaultGoals": defaults.get("goals"), "explicitOnOffFreshProcess": True,
-                          "profileFileOverride": True, "legacyProfileRejected": True, "guardianInvalidRejected": True,
+                          "profileFileLoader": True, "legacyProfileRejected": True, "guardianInvalidRejected": True,
                           "mode": "isolated CLI parsing; no desktop or model requests"}))
         print("CAPABILITY_CLI_PASS")
 

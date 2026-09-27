@@ -214,10 +214,18 @@ pub fn protected_paths(settings: &Path, home: &Path) -> anyhow::Result<Vec<PathB
         .map(|p| home.join(p)),
     );
     // Named profiles are a separate configuration layer in newer Codex versions.
-    let mut profiles = fs::read_dir(home)?
-        .map(|entry| entry.map(|e| e.path()))
-        .collect::<std::io::Result<Vec<_>>>()?;
-    profiles.retain(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.ends_with(".config.toml")));
+    let mut profiles = match fs::read_dir(home) {
+        Ok(entries) => entries
+            .map(|entry| entry.map(|e| e.path()))
+            .collect::<std::io::Result<Vec<_>>>()?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(_) => bail!("profile 目录无法读取，配置状态未知"),
+    };
+    profiles.retain(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".config.toml"))
+    });
     profiles.sort();
     files.extend(profiles);
     // Directory membership and file names are part of the revision, not only file bytes.
@@ -368,7 +376,7 @@ fn safe_failure_reason(error: &anyhow::Error) -> &'static str {
             };
         }
         let message = cause.to_string();
-        if message.starts_with("当前 profile 覆盖 features.") {
+        if message.starts_with("当前 profile 覆盖") {
             return "profile 覆盖目标能力，请先编辑对应 profile";
         }
         if message.contains("外部更新") || message.contains("其他页面") {
@@ -557,10 +565,43 @@ mod tests {
 
     #[test]
     fn save_error_reports_actionable_categories_without_parser_input() {
-        assert_eq!(safe_failure_reason(&std::io::Error::from(std::io::ErrorKind::PermissionDenied).into()), "没有写入权限");
+        assert_eq!(
+            safe_failure_reason(&std::io::Error::from(std::io::ErrorKind::PermissionDenied).into()),
+            "没有写入权限"
+        );
         let error = anyhow::anyhow!("fixture-parser-secret");
         assert!(!safe_failure_reason(&error).contains("secret"));
         let error = anyhow::anyhow!("当前 profile 覆盖 features.fast_mode");
         assert!(safe_failure_reason(&error).contains("profile"));
     }
+}
+#[test]
+fn profiles_participate_in_revisions_including_creation_and_external_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("new-home");
+    let settings = dir.path().join("settings.json");
+    let initial = revision(&settings, &home).unwrap();
+    fs::create_dir(&home).unwrap();
+    assert_eq!(revision(&settings, &home).unwrap(), initial);
+    let profile = home.join("work.config.toml");
+    fs::write(&profile, "[features]\nfast_mode=false\n").unwrap();
+    let created = revision(&settings, &home).unwrap();
+    assert_ne!(created, initial);
+    fs::write(&profile, "[features]\nfast_mode=true\n").unwrap();
+    assert_ne!(revision(&settings, &home).unwrap(), created);
+    assert!(
+        run(
+            &settings,
+            &home,
+            Some(&created),
+            || -> anyhow::Result<()> {
+                panic!("stale profile must reject a save");
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        fs::read_to_string(&profile).unwrap(),
+        "[features]\nfast_mode=true\n"
+    );
 }

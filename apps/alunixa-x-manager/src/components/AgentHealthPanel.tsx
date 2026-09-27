@@ -16,7 +16,8 @@ const copy = {
     unsupported: "不支持/未实现", different: "与磁盘不一致", overridden: "profile 覆盖", missing_dependency: "缺少依赖",
     footer: "全局/profile 检查；项目、启动参数和运行中任务可能覆盖配置", enabled: "开", disabled: "关", restart: "需要重新启动相关 Codex 进程",
     confirmRestore: "恢复会重新启用备份中的代理，是否继续？", config: "配置来源", reload: "重新读取配置",
-    dependency: "依赖与支持条件", effect: "生效时机", restartEffect: "重启后核对", nextRequest: "后续请求" },
+    dependency: "依赖与支持条件", effect: "生效时机", restartEffect: "重启后核对", nextRequest: "后续请求",
+    hostProxy: "普通进程视图", packageProxy: "应用包实际视图", endpoints: "本机端点" },
   en: { title: "Runtime and configuration", refresh: "Check again", proxy: "Packaged app proxy", repair: "Back up and repair", restore: "Restore last backup",
     auto: "Repair dead packaged proxies before launch", check: "Inspect proxy", pending: "Checking", error: "Check failed; state unknown",
     missing: "Application context unavailable", changed: "External configuration changed. Refresh settings before saving.", desired: "Manager intent", disk: "Disk / CLI default", state: "Verification",
@@ -24,7 +25,8 @@ const copy = {
     unsupported: "Unsupported / not implemented", different: "Differs from disk", overridden: "Profile override", missing_dependency: "Missing dependency",
     footer: "Global/profile only; project, launch arguments and running tasks may override these values", enabled: "On", disabled: "Off", restart: "Restart the affected Codex processes",
     confirmRestore: "Restoring re-enables the backed-up proxy. Continue?", config: "Configuration source", reload: "Reload configuration",
-    dependency: "Dependencies and support", effect: "When applied", restartEffect: "Verify after restart", nextRequest: "Next request" },
+    dependency: "Dependencies and support", effect: "When applied", restartEffect: "Verify after restart", nextRequest: "Next request",
+    hostProxy: "Host process view", packageProxy: "Actual package view", endpoints: "Loopback endpoints" },
   ru: { title: "Проверка среды и настроек", refresh: "Проверить снова", proxy: "Прокси приложения", repair: "Сохранить и исправить", restore: "Восстановить копию",
     auto: "Исправлять неработающий прокси пакета при запуске", check: "Проверить прокси", pending: "Проверка", error: "Проверка не удалась; состояние неизвестно",
     missing: "Контекст приложения недоступен", changed: "Внешние настройки изменены. Обновите их перед сохранением.", desired: "В менеджере", disk: "Файл / по умолчанию CLI", state: "Проверка",
@@ -32,7 +34,8 @@ const copy = {
     unsupported: "Не поддерживается / не реализовано", different: "Отличается от файла", overridden: "Переопределено профилем", missing_dependency: "Нет зависимости",
     footer: "Только глобальный файл/профиль; проект, аргументы и активные задачи могут переопределить значения", enabled: "Вкл.", disabled: "Выкл.", restart: "Перезапустите соответствующие процессы Codex",
     confirmRestore: "Восстановление включит прежний прокси. Продолжить?", config: "Источник настроек", reload: "Перечитать настройки",
-    dependency: "Зависимости и поддержка", effect: "Применение", restartEffect: "Проверить после перезапуска", nextRequest: "Следующий запрос" },
+    dependency: "Зависимости и поддержка", effect: "Применение", restartEffect: "Проверить после перезапуска", nextRequest: "Следующий запрос",
+    hostProxy: "Обычный процесс", packageProxy: "Контекст пакета", endpoints: "Локальные адреса" },
 } as const;
 
 export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, savedRevision, onReload }: {
@@ -57,14 +60,16 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
     try {
       const next = await invoke<Audit>("inspect_agent_capabilities");
       if (request !== sequence.current) return;
-      if (revision.current && revision.current !== next.revision) setExternalChange(true);
-      revision.current = next.revision;
+      const stale = !!revision.current && revision.current !== next.revision;
+      if (stale) setExternalChange(true);
+      if (!stale) revision.current = next.revision;
       setAudit(next);
-      onAuditRef.current?.(next.entries);
+      onAuditRef.current?.(stale ? null : next.entries);
       setError("");
-    } catch {
+    } catch (cause) {
       if (request !== sequence.current) return;
-      setAudit(null); onAuditRef.current?.(null); setError(text.error);
+      setAudit(null); onAuditRef.current?.(null);
+      setError(typeof cause === "string" ? `${text.error}: ${cause}` : text.error);
     }
   }, [text.error]);
   useEffect(() => {
@@ -100,7 +105,7 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
     {externalChange ? <p role="status">{text.changed} {onReload ?
       <button type="button" onClick={() => void onReload()}>{text.reload}</button> : null}</p> : null}
     <div className="agent-health-proxy">
-      <label><input type="checkbox" disabled={!audit || externalChange} checked={autoRepair} onChange={e => onAutoRepairChange(e.currentTarget.checked)} />{text.auto}</label>
+      <label><input type="checkbox" disabled={!audit || externalChange || audit.entries.find(entry => entry.key === "codexAppPackagedProxyRepair")?.state === "unsupported"} checked={autoRepair} onChange={e => onAutoRepairChange(e.currentTarget.checked)} />{text.auto}</label>
       <div className="agent-health-actions">
         <button disabled={!!busy} type="button" onClick={() => void operate("inspect")}><RefreshCw size={15} />{text.check}</button>
         <button disabled={!!busy || proxy?.packaged?.state !== "dead_loopback"} type="button" onClick={() => void operate("repair")}><Wrench size={15} />{text.repair}</button>
@@ -108,7 +113,14 @@ export function AgentHealthPanel({ autoRepair, onAutoRepairChange, onAudit, save
       </div>
       {busy ? <p role="status">{text.pending}</p> : null}
       <p>{proxy?.message || text.missing}</p>
-      {proxy?.packaged ? <code>{proxy.packaged.package} · {proxy.packaged.state} · view:{proxy.packaged.viewId.slice(0, 12)}</code> : null}
+      {proxy ? <dl>
+        <dt>{text.hostProxy}</dt><dd><code>ProxyEnable={proxy.host?.enabled ?? "?"} · {proxy.host?.state ?? text.unknown}</code></dd>
+        <dt>{text.packageProxy}</dt><dd><code>ProxyEnable={proxy.packaged?.enabled ?? "?"} · {proxy.packaged?.state ?? text.unknown}</code></dd>
+      </dl> : null}
+      {proxy?.packaged ? <>
+        <code>{proxy.packaged.package} · view:{proxy.packaged.viewId.slice(0, 12)}</code>
+        {proxy.packaged.loopbackEndpoints.length ? <p>{text.endpoints}: <code>{proxy.packaged.loopbackEndpoints.join(", ")}</code></p> : null}
+      </> : null}
       {proxy?.restartRequired ? <p role="status">{text.restart}</p> : null}
     </div>
     {audit ? <>

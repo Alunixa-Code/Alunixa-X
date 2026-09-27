@@ -836,7 +836,8 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("当前 thread"));
     assert!(script.contains("standard"));
     assert!(script.contains("fast"));
-    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"app-shared-\", \"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
+    assert!(script.contains("codexSettingStorageFromModule"));
     assert!(script.contains("dispatcher export unavailable"));
     assert!(!script.contains("data-codex-max-reasoning-control"));
     assert!(!script.contains("codexAppMaxReasoningOverride"));
@@ -877,8 +878,9 @@ fn injection_script_prompts_for_markdown_export_path_when_supported() {
 fn injection_script_discovers_compatible_app_asset_without_hardcoded_hash() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("[\"vscode-api-\", \"app-initial-\"]"));
-    assert!(script.contains("[\"setting-storage-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"vscode-api-\", \"app-shared-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"setting-storage-\", \"app-shared-\", \"app-initial-\"]"));
+    assert!(script.contains("codexHostRpcFromModule"));
     assert!(script.contains("codexAppAssetUrlFromScriptText"));
     assert!(script.contains("fetch(src"));
     assert!(!script.contains("vscode-api-Dc9pX2Bc.js"));
@@ -1244,7 +1246,7 @@ fn injection_script_applies_projectless_main_window_contract() {
     assert!(script.contains("installCodexProjectlessNewTaskButtons"));
     assert!(script.contains("codexProjectlessMainWindowVersion = \"5\""));
     assert!(script.contains("generic-new-task-button"));
-    assert!(script.contains("[\"projectless-thread-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"projectless-thread-\", \"app-initial-\", \"app-shared-\"]"));
     assert!(script.contains("codexProjectlessContextFactoryFromModule"));
     assert!(script.contains("projectless_thread_start_overridden"));
     assert!(script.contains("projectless_app_server_start_overridden"));

@@ -106,7 +106,9 @@ fn manager_exposes_persisted_disable_wss_switch() {
     let source = include_str!("../../../apps/alunixa-x-manager/src/App.tsx");
     assert!(source.contains("codexAppDisableWss: boolean"));
     assert!(source.contains("禁用 WSS"));
-    assert!(source.contains("setPersistedEnhanceFlag(\"codexAppDisableWss\", value)"));
+    assert!(source.contains("editNative(\"codexAppDisableWss\", value, true)"));
+    assert!(source.contains("checked={nativeChecked(\"codexAppDisableWss\")}"));
+    assert!(source.contains("capabilityWrites"));
 }
 
 #[test]

@@ -1254,7 +1254,9 @@ pub async fn inspect_agent_capabilities()
 -> Result<alunixa_x_core::agent_capabilities::CapabilityAudit, String> {
     alunixa_x_core::agent_capabilities::inspect()
         .await
-        .map_err(|_| "无法读取有效配置或能力信息，状态未知".into())
+        .map_err(|error| {
+            alunixa_x_core::agent_capabilities::inspection_error_message(&error).into()
+        })
 }
 
 fn current_config_revision() -> Option<String> {
@@ -1344,6 +1346,7 @@ pub fn repair_codex_feature_config() -> Result<bool, String> {
 pub async fn save_settings(
     settings: BackendSettings,
     expected_revision: Option<String>,
+    capability_writes: Option<Vec<String>>,
 ) -> CommandResult<SettingsPayload> {
     if expected_revision.is_none() {
         return failed(
@@ -1369,15 +1372,25 @@ pub async fn save_settings(
             );
         }
     };
-    if settings.codex_app_fast_mode != previous.codex_app_fast_mode
-        || settings.codex_goals_enabled != previous.codex_goals_enabled
+    let native_baseline = match alunixa_x_core::agent_capabilities::native_edit_baseline(
+        &previous,
+        &settings,
+        capability_writes.as_deref().unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(error) => return failed(&error.to_string(), fallback_settings_payload()),
+    };
+    if settings.codex_app_fast_mode != native_baseline.codex_app_fast_mode
+        || settings.codex_goals_enabled != native_baseline.codex_goals_enabled
     {
         let cli = alunixa_x_core::official_remote::find_codex_cli_executable(Some(
             &settings.codex_app_path,
         ));
         let features = alunixa_x_core::agent_capabilities::discover_features(cli.as_deref()).await;
         if let Err(error) = alunixa_x_core::agent_capabilities::validate_native_feature_changes(
-            &previous, &settings, &features,
+            &native_baseline,
+            &settings,
+            &features,
         ) {
             return failed(&error.to_string(), fallback_settings_payload());
         }
@@ -1413,7 +1426,9 @@ pub async fn save_settings(
         || {
             let home = alunixa_x_core::relay_config::default_codex_home_dir();
             alunixa_x_core::agent_capabilities::validate_profile_feature_changes_in_home(
-                &home, &previous, &settings,
+                &home,
+                &native_baseline,
+                &settings,
             )?;
             SettingsStore::default()
                 .save_preserving_runtime_model_selection(&settings)
@@ -1430,7 +1445,7 @@ pub async fn save_settings(
                     .map(|_| ())
                 })
                 .and_then(|_| {
-                    if settings.codex_app_fast_mode == previous.codex_app_fast_mode {
+                    if settings.codex_app_fast_mode == native_baseline.codex_app_fast_mode {
                         return Ok(());
                     }
                     alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
@@ -1440,7 +1455,7 @@ pub async fn save_settings(
                     .map(|_| ())
                 })
                 .and_then(|_| {
-                    if settings.codex_goals_enabled == previous.codex_goals_enabled {
+                    if settings.codex_goals_enabled == native_baseline.codex_goals_enabled {
                         return Ok(());
                     }
                     alunixa_x_core::relay_config::set_codex_goals_feature_in_home(
@@ -1449,7 +1464,7 @@ pub async fn save_settings(
                     )
                 })
                 .and_then(|_| {
-                    if settings.codex_app_disable_wss == previous.codex_app_disable_wss {
+                    if settings.codex_app_disable_wss == native_baseline.codex_app_disable_wss {
                         return Ok(());
                     }
                     alunixa_x_core::relay_config::apply_wss_policy_to_home(

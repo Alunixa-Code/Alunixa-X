@@ -12,7 +12,7 @@ const core = readFileSync(new URL("../../../crates/alunixa-x-core/src/agent_capa
 test("every boolean Agent control is covered by the capability inventory", () => {
   const start = app.indexOf("function EnhanceScreen(");
   const end = app.indexOf("\nfunction ZedRemoteScreen", start);
-  const keys = [...app.slice(start, end).matchAll(/set(?:Persisted)?EnhanceFlag\("([^"]+)"/g)].map(m => m[1]);
+  const keys = [...app.slice(start, end).matchAll(/(?:set(?:Persisted)?EnhanceFlag|editNative)\("([^"]+)"/g)].map(m => m[1]);
   for (const key of new Set(keys)) assert.ok(core.includes(`"${key}"`), key);
   for (const key of ["computerUseGuardEnabled", "enhancementsEnabled", "codexAppPackagedProxyRepair"]) {
     assert.ok(core.includes(`"${key}"`));
@@ -25,7 +25,7 @@ function saveHarness(results: Array<"ok" | "failed" | "null">) {
   const code = ts.transpileModule(app.slice(start, end) + "\nglobalThis.save = saveSettingsValue;", {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText;
-  const calls: Array<{ expectedRevision: string | null }> = [];
+  const calls: Array<{ expectedRevision: string | null; capabilityWrites?: string[] }> = [];
   const notices: unknown[] = [];
   let form: unknown = null;
   let serial = 1;
@@ -76,6 +76,21 @@ test("queued saves use the revision produced by the previous successful write", 
   assert.equal(await second, true);
   assert.deepEqual(h.calls.map(c => c.expectedRevision), ["r1", "r2"]);
   assert.deepEqual(h.form(), { codexAppPackagedProxyRepair: true });
+});
+
+test("an explicit native edit remains explicit even when its value equals old AX intent", async () => {
+  const h = saveHarness(["ok", "ok"]);
+  assert.equal(await h.save({ codexAppFastMode: false }, true, false, ["codexAppFastMode"]), true);
+  assert.deepEqual(Array.from(h.calls[0].capabilityWrites ?? []), ["codexAppFastMode"]);
+  assert.equal(await h.save({ codexAppPackagedProxyRepair: false }, true), true);
+  assert.deepEqual(Array.from(h.calls[1].capabilityWrites ?? []), []);
+});
+
+test("native switches use audited disk values and refuse unverified or overridden edits", () => {
+  const screen = app.slice(app.indexOf("function EnhanceScreen("), app.indexOf("\nfunction ZedRemoteScreen"));
+  assert.match(screen, /checked=\{nativeChecked\("codexAppFastMode"\)\}/);
+  assert.match(screen, /checked=\{nativeChecked\("codexAppDisableWss"\)\}/);
+  assert.match(screen, /const nativeCapabilityEditable[\s\S]*?\["saved_pending_restart", "different"\]/);
 });
 
 test("overview readiness uses live checks and never equates port presence with health", () => {

@@ -2142,12 +2142,13 @@ export function App() {
     next: BackendSettings,
     silent = true,
     suppressNotice = false,
+    capabilityWrites: string[] = [],
   ): Promise<boolean> => {
     const normalized = normalizeSettings(next);
     setSettingsForm(normalized);
     const requestId = ++settingsSaveRequestRef.current;
     const persist = async () => {
-      const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized, expectedRevision: settingsRevisionRef.current }));
+      const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized, expectedRevision: settingsRevisionRef.current, capabilityWrites }));
       if (result && isSuccessStatus(result.status) && requestId === settingsSaveRequestRef.current) {
         setSettings(result);
         setSettingsForm(normalizeSettings(result.settings));
@@ -3490,6 +3491,7 @@ type Actions = {
     settings: BackendSettings,
     silent?: boolean,
     suppressNotice?: boolean,
+    capabilityWrites?: string[],
   ) => Promise<boolean>;
   exportFullConfig: () => Promise<void>;
   importFullConfig: () => Promise<void>;
@@ -4946,8 +4948,24 @@ function EnhanceScreen({
   actions: Actions;
 }) {
   const [nativeCapabilityStates, setNativeCapabilityStates] = useState<Record<string, string>>({});
+  const [nativeDiskValues, setNativeDiskValues] = useState<Record<string, unknown>>({});
+  const [nativeEdits, setNativeEdits] = useState<string[]>([]);
+  useEffect(() => { setNativeEdits([]); }, [savedRevision]);
   const nativeCapabilityEditable = (key: string) =>
-    ["saved_pending_restart", "different", "overridden"].includes(nativeCapabilityStates[key] || "");
+    ["saved_pending_restart", "different"].includes(nativeCapabilityStates[key] || "");
+  const nativeChecked = (key: "codexAppFastMode" | "codexAppDisableWss") =>
+    nativeEdits.includes(key) || typeof nativeDiskValues[key] !== "boolean"
+      ? form[key] : nativeDiskValues[key] as boolean;
+  const editNative = async (key: "codexAppFastMode" | "codexAppDisableWss", value: boolean, immediate = false) => {
+    const keys = Array.from(new Set([...nativeEdits, key]));
+    setNativeEdits(keys);
+    const next = { ...form, [key]: value };
+    onFormChange(next);
+    if (immediate) {
+      await actions.saveSettingsValue(next, true, false, keys);
+      setNativeEdits([]);
+    }
+  };
   const setEnhanceFlag = (key: keyof BackendSettings, value: boolean) => onFormChange({ ...form, [key]: value });
   const setPersistedEnhanceFlag = (key: keyof BackendSettings, value: boolean) => {
     const next = { ...form, [key]: value };
@@ -4980,7 +4998,10 @@ function EnhanceScreen({
       <AgentHealthPanel autoRepair={form.codexAppPackagedProxyRepair ?? true}
         savedRevision={savedRevision}
         onReload={() => actions.refreshSettings(false)}
-        onAudit={entries => setNativeCapabilityStates(Object.fromEntries((entries ?? []).map(entry => [entry.key, entry.state])))}
+        onAudit={entries => {
+          setNativeCapabilityStates(Object.fromEntries((entries ?? []).map(entry => [entry.key, entry.state])));
+          setNativeDiskValues(Object.fromEntries((entries ?? []).map(entry => [entry.key, entry.disk])));
+        }}
         onAutoRepairChange={value => setPersistedEnhanceFlag("codexAppPackagedProxyRepair", value)} />
       <fieldset disabled={!Object.keys(nativeCapabilityStates).length} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       <Panel className="enhance-panel">
@@ -5023,7 +5044,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("插件列表全量展示")} detail={t("进入插件页后自动连续展开“更多”，尽量一次显示完整插件列表。")} checked={form.codexAppPluginAutoExpand} disabled={!masterEnabled || !patchMode} onChange={(value) => setEnhanceFlag("codexAppPluginAutoExpand", value)} />
               <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
               <FeatureToggle title={t("Fast 按钮")} detail={t("显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。")} checked={form.codexAppServiceTierControls} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppServiceTierControls", value)} />
-              <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={form.codexAppFastMode} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppFastMode")} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
+              <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={nativeChecked("codexAppFastMode")} unknown={typeof nativeDiskValues.codexAppFastMode !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppFastMode")} onChange={(value) => void editNative("codexAppFastMode", value)} />
               <div className="feature-action-row">
                 <div>
                   <strong>{t("官方远端插件缓存")}</strong>
@@ -5203,7 +5224,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
               <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Alunixa X 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
-              <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={form.codexAppDisableWss} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableWss", value)} />
+              <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={nativeChecked("codexAppDisableWss")} unknown={typeof nativeDiskValues.codexAppDisableWss !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppDisableWss")} onChange={(value) => void editNative("codexAppDisableWss", value, true)} />
               <FeatureToggle title={t("性能保护")} detail={t("减少后台 CDP、日志和页面扫描，在大对话切换时降低渲染压力，并清理会触发全盘 Git 探测的过宽历史工作区。")} checked={form.codexAppPerformanceProtection} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPerformanceProtection", value)} />
               <FeatureToggle title={t("原生菜单栏位置")} detail={t("把 Alunixa X 菜单插入 Codex 顶部原生菜单栏。")} checked={form.codexAppNativeMenuPlacement} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuPlacement", value)} />
               <FeatureToggle title={t("原生菜单汉化")} detail={t("启动时通过本地主进程调试端口汉化 Codex 原生菜单；不修改安装包。需重启 Codex 才生效。")} checked={form.codexAppNativeMenuLocalization} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuLocalization", value)} />
@@ -5244,7 +5265,7 @@ function EnhanceScreen({
             <span>{t("如果使用官方模式或官方混入 API 模式，通常不需要开启插件市场解锁。")}</span>
           </div>
           <Toolbar>
-            <Button onClick={() => void actions.saveSettings()}>{t("保存增强设置")}</Button>
+            <Button onClick={() => void actions.saveSettingsValue(form, false, false, nativeEdits).then(() => setNativeEdits([]))}>{t("保存增强设置")}</Button>
           </Toolbar>
         </CardContent>
       </Panel>
@@ -8115,17 +8136,21 @@ function FeatureToggle({
   detail,
   checked,
   disabled = false,
+  unknown = false,
   onChange,
 }: {
   title: string;
   detail: string;
   checked: boolean;
   disabled?: boolean;
+  unknown?: boolean;
   onChange: (value: boolean) => void;
 }) {
   return (
     <label className={`feature-toggle ${disabled ? "disabled" : ""}`}>
       <input
+        ref={node => { if (node) node.indeterminate = unknown; }}
+        aria-checked={unknown ? "mixed" : checked}
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.checked)}

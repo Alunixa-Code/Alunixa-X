@@ -2877,6 +2877,14 @@ body {
   transform: translateX(16px);
 }
 
+.feature-toggle > input:indeterminate ~ .toggle-switch-visual {
+  background: hsl(var(--muted-foreground) / 0.45);
+}
+
+.feature-toggle > input:indeterminate ~ .toggle-switch-visual .toggle-switch-thumb {
+  transform: translateX(8px);
+}
+
 .feature-toggle > input:focus-visible ~ .toggle-switch-visual,
 .switch-row > input:focus-visible ~ .toggle-switch-visual,
 .inline-toggle > input:focus-visible ~ .toggle-switch-visual {
