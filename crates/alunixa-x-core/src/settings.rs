@@ -2295,6 +2295,7 @@ fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyh
             )
         });
     }
+    crate::config_transaction::record_write(path, bytes);
     Ok(())
 }
 

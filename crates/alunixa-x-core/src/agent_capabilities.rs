@@ -128,6 +128,15 @@ pub async fn inspect() -> anyhow::Result<CapabilityAudit> {
         .parse::<toml::Value>()
         .map_err(|_| anyhow::anyhow!("Codex 配置无法解析，能力状态未知"))?;
     let mut audit = inspect_values(&settings, &doc, &features)?;
+    if settings.codex_app_instructions_enabled &&
+        crate::codex_instructions::audit_model_instructions_before_launch(
+            &home, true, &settings.codex_app_instructions).is_err()
+    {
+        if let Some(entry) = audit.entries.iter_mut().find(|entry| entry.key == "codexAppInstructionsEnabled") {
+            entry.state = "missing_dependency".into();
+            entry.dependency = "提示词引用、文件内容或读取权限检查未通过".into();
+        }
+    }
     audit.revision =
         crate::config_transaction::revision(&crate::paths::default_settings_path(), &home)?;
     audit.config_path = config_path.display().to_string();

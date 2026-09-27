@@ -7,6 +7,25 @@ use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+pub const PROBE_ABI: &str = "ALUNIXA_X_PACKAGE_PROXY_PROBE_ABI_V1";
+
+/// Do not execute an old launcher with an unknown flag: it might launch the desktop instead.
+pub fn probe_binary_supported(path: &Path) -> anyhow::Result<bool> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() > 512 * 1024 * 1024 { return Ok(false); }
+    let mut block = [0u8; 64 * 1024];
+    let mut tail = Vec::new();
+    loop {
+        let length = file.read(&mut block)?;
+        if length == 0 { return Ok(false); }
+        tail.extend_from_slice(&block[..length]);
+        if tail.windows(PROBE_ABI.len()).any(|value| value == PROBE_ABI.as_bytes()) { return Ok(true); }
+        let keep = tail.len().saturating_sub(PROBE_ABI.len() - 1);
+        tail.drain(..keep);
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxySnapshot {
@@ -33,6 +52,7 @@ pub enum ProxyState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProxyViewReport {
+    pub observer_pid: u32,
     pub package: Option<String>,
     pub view_id: String,
     pub enabled: Option<u32>,
@@ -199,6 +219,7 @@ fn probe_port(address: SocketAddr) -> PortState {
 
 fn report_view(snapshot: &ProxySnapshot) -> ProxyViewReport {
     ProxyViewReport {
+        observer_pid: std::process::id(),
         package: snapshot.package.clone(),
         view_id: snapshot.view_id.clone(),
         enabled: snapshot.enabled,
@@ -343,7 +364,7 @@ pub fn run_probe_request(path: &Path) -> anyhow::Result<()> {
         })();
         let result = match operation {
             Ok((snapshot, backup_id)) => serde_json::json!({
-                "nonce": request.nonce, "view": report_view(&snapshot),
+                "abi": PROBE_ABI, "nonce": request.nonce, "view": report_view(&snapshot),
                 "backupId": backup_id, "error": null
             }),
             // Only fixed diagnostic categories leave the package context.
@@ -547,5 +568,17 @@ mod tests {
         );
         registry.0.borrow_mut().package = None;
         assert!(repair(&registry, &revision, dir.path(), |_| PortState::Refused).is_err());
+    }
+
+    #[test]
+    fn old_launchers_are_rejected_without_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("fixture.bin");
+        std::fs::write(&file, b"old launcher").unwrap();
+        assert!(!probe_binary_supported(&file).unwrap());
+        let mut bytes = vec![0u8; 65530];
+        bytes.extend_from_slice(PROBE_ABI.as_bytes());
+        std::fs::write(&file, bytes).unwrap();
+        assert!(probe_binary_supported(&file).unwrap());
     }
 }

@@ -12,6 +12,39 @@ use sha2::{Digest, Sha256};
 
 thread_local! {
     static LOCKS: RefCell<HashMap<PathBuf, (File, usize)>> = RefCell::new(HashMap::new());
+    static WRITES: RefCell<Vec<HashMap<PathBuf, Vec<u8>>>> = RefCell::new(Vec::new());
+}
+
+struct WriteJournal(bool);
+impl WriteJournal {
+    fn begin() -> Self {
+        WRITES.with(|writes| writes.borrow_mut().push(HashMap::new()));
+        Self(true)
+    }
+    fn finish(mut self) -> HashMap<PathBuf, Vec<u8>> {
+        self.0 = false;
+        WRITES.with(|writes| writes.borrow_mut().pop().unwrap_or_default())
+    }
+}
+impl Drop for WriteJournal {
+    fn drop(&mut self) {
+        if self.0 { WRITES.with(|writes| { writes.borrow_mut().pop(); }); }
+    }
+}
+fn journal_key(path: &Path) -> PathBuf {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()).join(name),
+        _ => path.to_path_buf(),
+    }
+}
+pub(crate) fn record_write(path: &Path, bytes: &[u8]) {
+    WRITES.with(|writes| {
+        let mut writes = writes.borrow_mut();
+        if writes.is_empty() { return; }
+        let digest = Sha256::digest(bytes).to_vec();
+        let key = journal_key(path);
+        for journal in writes.iter_mut() { journal.insert(key.clone(), digest.clone()); }
+    });
 }
 
 /// Acquire before settings-store locks, never across an await. Nested config writers reuse it.
@@ -155,11 +188,22 @@ pub fn run<T>(
         &directory.join("manifest.json"),
         &serde_json::to_vec(&manifest)?,
     )?;
-    match operation() {
+    let journal = WriteJournal::begin();
+    let result = operation();
+    let writes = journal.finish();
+    match result {
         Ok(value) => Ok(value),
         Err(_) => {
+            let mut conflict = false;
             for (path, bytes) in original.iter().rev() {
+                // An auth refresh or external edit that this operation never wrote belongs to
+                // its original writer. Never restore the snapshot over it.
+                let Some(written) = writes.get(&journal_key(path)) else { continue; };
                 if read_optional(path).is_ok_and(|current| &current == bytes) {
+                    continue;
+                }
+                if !read_optional(path)?.as_ref().is_some_and(|current| Sha256::digest(current).as_slice() == written) {
+                    conflict = true;
                     continue;
                 }
                 match bytes {
@@ -172,6 +216,7 @@ pub fn run<T>(
                     },
                 }
             }
+            if conflict { bail!("保存失败；已回滚本次修改并保留外部新配置，备份位于 alunixa-x-config-transactions"); }
             bail!("配置保存失败，已恢复原设置及关联文件；未更换密钥、模型或接口")
         }
     }
@@ -195,9 +240,9 @@ mod tests {
         .unwrap();
         let before = revision(&settings, &home).unwrap();
         let result: anyhow::Result<()> = run(&settings, &home, Some(&before), || {
-            fs::write(&settings, b"{\"changed\":true}")?;
-            fs::write(home.join("config.toml"), "model='other'\n")?;
-            fs::write(home.join("hooks.json"), "{}")?;
+            crate::settings::atomic_write(&settings, b"{\"changed\":true}")?;
+            crate::settings::atomic_write(&home.join("config.toml"), b"model='other'\n")?;
+            crate::settings::atomic_write(&home.join("hooks.json"), b"{}")?;
             bail!("fixture failure")
         });
         assert!(result.is_err());
@@ -243,5 +288,28 @@ mod tests {
             .open(dir.path().join("alunixa-x-config.lock"))
             .unwrap();
         file.try_lock_exclusive().unwrap();
+    }
+
+    #[test]
+    fn rollback_does_not_overwrite_external_auth_refresh_or_newer_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("settings.json");
+        let config = dir.path().join("config.toml");
+        let auth = dir.path().join("auth.json");
+        fs::write(&settings, "{}").unwrap();
+        fs::write(&config, "x=1\n").unwrap();
+        fs::write(&auth, "{\"token\":\"old-fixture\"}").unwrap();
+        let result: anyhow::Result<()> = run(&settings, dir.path(), None, || {
+            crate::settings::atomic_write(&settings, b"{\"changed\":true}")?;
+            crate::settings::atomic_write(&config, b"x=2\n")?;
+            // Simulate a non-AX writer after our last write and before failure.
+            fs::write(&auth, "{\"token\":\"refreshed-fixture\"}")?;
+            fs::write(&config, "x=3\n")?;
+            bail!("fixture failure")
+        });
+        assert!(result.unwrap_err().to_string().contains("外部"));
+        assert_eq!(fs::read_to_string(settings).unwrap(), "{}");
+        assert_eq!(fs::read_to_string(config).unwrap(), "x=3\n");
+        assert_eq!(fs::read_to_string(auth).unwrap(), "{\"token\":\"refreshed-fixture\"}");
     }
 }

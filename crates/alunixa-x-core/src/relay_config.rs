@@ -1675,7 +1675,10 @@ fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
     } else {
         contents
             .parse::<DocumentMut>()
-            .map_err(|error| anyhow::anyhow!("config.toml TOML 解析失败：{error}"))
+            .map_err(|error| anyhow::anyhow!(
+                "config.toml TOML 解析失败（字节偏移 {}），未输出配置正文",
+                error.span().map(|span| span.start).unwrap_or(0)
+            ))
     }
 }
 

@@ -1074,7 +1074,7 @@ impl LaunchHooks for DefaultLaunchHooks {
                 if settings.codex_app_packaged_proxy_repair {
                     let report = crate::packaged_proxy::inspect_or_repair(
                         app_dir,
-                        &std::env::current_exe()?,
+                        &crate::install::option_or_current_exe(&None, crate::install::SILENT_BINARY),
                         "repair_at_startup",
                         None,
                         None,

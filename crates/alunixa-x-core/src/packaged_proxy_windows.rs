@@ -193,6 +193,9 @@ pub async fn invoke_package(
     expected: Option<String>,
     backup_id: Option<String>,
 ) -> anyhow::Result<(ProxyViewReport, Option<String>)> {
+    if !probe_binary_supported(launcher).unwrap_or(false) {
+        bail!("proxy_probe_launcher_upgrade_required");
+    }
     if !["inspect", "repair", "repair_at_startup", "restore"].contains(&action) {
         bail!("invalid_proxy_action");
     }
@@ -257,6 +260,9 @@ pub async fn invoke_package(
             bail!("{error}");
         }
         bail!("package_proxy_operation_failed");
+    }
+    if value.get("abi").and_then(|v| v.as_str()) != Some(PROBE_ABI) {
+        bail!("package_probe_abi_mismatch");
     }
     let view: ProxyViewReport =
         serde_json::from_value(value.get("view").cloned().unwrap_or_default())
