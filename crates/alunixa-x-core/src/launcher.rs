@@ -151,6 +151,12 @@ pub trait LaunchHooks: Send + Sync {
     async fn apply_active_relay_profile(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
+    async fn ensure_active_protocol_proxy_config(
+        &self,
+        _settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn ensure_computer_use_config(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
@@ -442,6 +448,7 @@ where
         }
         let protocol_proxy_enabled = relay_protocol_proxy_enabled(&settings);
         if protocol_proxy_enabled {
+            hooks.ensure_active_protocol_proxy_config(&settings).await?;
             helper_port = crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT;
         }
         hooks
@@ -757,6 +764,16 @@ fn helper_bind_host() -> String {
 
 #[async_trait(?Send)]
 impl LaunchHooks for DefaultLaunchHooks {
+    async fn ensure_active_protocol_proxy_config(
+        &self,
+        settings: &BackendSettings,
+    ) -> anyhow::Result<()> {
+        crate::relay_config::ensure_active_protocol_proxy_config_in_home(
+            &crate::codex_home::default_codex_home_dir(),
+            settings,
+        )
+        .map(|_| ())
+    }
     fn resolve_app_dir(
         &self,
         app_dir: Option<&Path>,
@@ -1053,6 +1070,30 @@ impl LaunchHooks for DefaultLaunchHooks {
                 build_packaged_activation(app_dir, debug_port, &launch_extra_args)
             };
             if let Some(activation) = activation {
+                #[cfg(windows)]
+                if settings.codex_app_packaged_proxy_repair {
+                    let report = crate::packaged_proxy::inspect_or_repair(
+                        app_dir,
+                        &std::env::current_exe()?,
+                        "repair_at_startup",
+                        None,
+                        None,
+                    )
+                    .await;
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.packaged_proxy_check",
+                        &report,
+                    );
+                    if report
+                        .packaged
+                        .as_ref()
+                        .is_some_and(|p| p.state == crate::packaged_proxy::ProxyState::DeadLoopback)
+                    {
+                        anyhow::bail!(
+                            "应用隔离代理指向失效本机端口且未修复，请在 Agent 能力页检查并恢复"
+                        );
+                    }
+                }
                 let CodexLaunch::PackagedActivation {
                     app_user_model_id,
                     arguments,
@@ -3742,7 +3783,7 @@ async fn verify_startup_model_injection(
             anyhow::bail!("Alunixa X startup model unlock adapters were not installed");
         }
     }
-    Ok(())
+    crate::runtime_health::wait_for_native_ui(debug_port).await
 }
 
 fn runtime_evaluate_result_is_true(result: &Value) -> bool {

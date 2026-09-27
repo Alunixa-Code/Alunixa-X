@@ -117,6 +117,7 @@ fn sync_model_instructions(
     instructions: &str,
     explicit_save: bool,
 ) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = read_optional_text(&config_path)?.unwrap_or_default();
     let mut doc = parse_config(&existing)?;

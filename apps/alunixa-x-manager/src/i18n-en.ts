@@ -97,8 +97,6 @@ export const EN_PLAIN: Record<string, string> = {
     "From provider routing to local tools and the desktop agent, every critical state stays visible in one continuous view.",
   "启动 Agent 轨道": "Launch agent rail",
   "重新扫描": "Scan again",
-  "链路在线": "links ready",
-  "运行时已连接": "Runtime connected",
   "等待首次启动": "Waiting for first launch",
   "Agent 运行轨道": "Agent rail",
   "当前控制链路": "Current control chain",
@@ -756,8 +754,8 @@ export const EN_PLAIN: Record<string, string> = {
   "释放并注册内置缓存": "Extract and register embedded cache",
   "显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。":
     "Show the service-tier toggle; prefer the current model's service-tier metadata for Fast support, with legacy compatibility.",
-  "开启后在 Codex config.toml 的 [features] 写入 fast_mode = true；关闭后移除 Alunixa X 管理的该项。":
-    "When enabled, write fast_mode = true under [features] in Codex config.toml; when disabled, remove only the entry managed by Alunixa X.",
+  "开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。":
+    "Write fast_mode = true when on and false when off, instead of restoring the enabled default. Saved changes require a restart.",
   "暂无": "None",
   "暂无启动状态。": "No launch status yet.",
   "暂无描述。": "No description.",

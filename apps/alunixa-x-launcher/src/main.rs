@@ -41,6 +41,10 @@ impl Default for LauncherHooks {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("--alunixa-x-proxy-probe") {
+        let path = args.get(1).context("proxy_probe_request_missing")?;
+        return alunixa_x_core::packaged_proxy::run_probe_request(Path::new(path));
+    }
     if args.iter().any(|arg| arg == "--alunixa-x-hook") {
         return alunixa_x_core::codex_hooks::run_hook_from_stdio().await;
     }
@@ -464,6 +468,14 @@ where
 
 #[async_trait::async_trait(?Send)]
 impl LaunchHooks for LauncherHooks {
+    async fn ensure_active_protocol_proxy_config(
+        &self,
+        settings: &alunixa_x_core::settings::BackendSettings,
+    ) -> anyhow::Result<()> {
+        self.core
+            .ensure_active_protocol_proxy_config(settings)
+            .await
+    }
     fn resolve_app_dir(
         &self,
         app_dir: Option<&std::path::Path>,

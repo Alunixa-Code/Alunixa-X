@@ -77,6 +77,7 @@ import {
 import { ProviderPresetSelector } from "@/components/ProviderPresetSelector";
 import { ImageModelsScreen } from "@/components/ImageModelsScreen";
 import { WallpaperSettings } from "@/components/WallpaperSettings";
+import { AgentHealthPanel } from "@/components/AgentHealthPanel";
 import type { PresetPatch } from "@/components/ProviderPresetSelector";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
@@ -182,6 +183,7 @@ type BackendSettings = {
   relayProfilesEnabled: boolean;
   enhancementsEnabled: boolean;
   computerUseGuardEnabled: boolean;
+  codexAppPackagedProxyRepair: boolean;
   codexAppPluginMarketplaceUnlock: boolean;
   codexAppPluginAutoExpand: boolean;
   codexAppModelWhitelistUnlock: boolean;
@@ -949,6 +951,7 @@ const defaultSettings: BackendSettings = {
   relayProfilesEnabled: true,
   enhancementsEnabled: true,
   computerUseGuardEnabled: false,
+  codexAppPackagedProxyRepair: true,
   codexAppPluginMarketplaceUnlock: true,
   codexAppPluginAutoExpand: true,
   codexAppModelWhitelistUnlock: true,
@@ -1126,6 +1129,8 @@ export function App() {
   const [settingsForm, setSettingsForm] = useState<BackendSettings>({ ...defaultSettings });
   const settingsSaveQueueRef = useRef(Promise.resolve());
   const settingsSaveRequestRef = useRef(0);
+  const settingsRevisionRef = useRef<string | null>(null);
+  const committedSettingsRef = useRef<BackendSettings | null>(null);
   const [providerSyncProgress, setProviderSyncProgress] = useState<ProviderSyncProgress>({
     active: false,
     percent: 0,
@@ -1181,6 +1186,8 @@ export function App() {
   const refreshSettings = async (silent = false) => {
     const result = await run(() => call<SettingsResult>("load_settings"));
     if (result && isSuccessStatus(result.status)) {
+      settingsRevisionRef.current = (result as SettingsResult & { revision?: string }).revision ?? null;
+      committedSettingsRef.current = normalizeSettings(result.settings);
       setSettings(result);
       const normalized = normalizeSettings(result.settings);
       setSettingsForm(normalized);
@@ -2129,10 +2136,17 @@ export function App() {
     setSettingsForm(normalized);
     const requestId = ++settingsSaveRequestRef.current;
     const persist = async () => {
-      const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
+      const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized, expectedRevision: settingsRevisionRef.current }));
       if (result && isSuccessStatus(result.status) && requestId === settingsSaveRequestRef.current) {
         setSettings(result);
         setSettingsForm(normalizeSettings(result.settings));
+      }
+      if (result && isSuccessStatus(result.status)) {
+        settingsRevisionRef.current = (result as SettingsResult & { revision?: string }).revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      } else if (requestId === settingsSaveRequestRef.current) {
+        // A failed optimistic edit must not remain visibly enabled.
+        setSettingsForm(normalizeSettings(committedSettingsRef.current ?? settings?.settings ?? defaultSettings));
       }
       if (result && !suppressNotice && (!silent || !isSuccessStatus(result.status))) {
         showNotice(t("设置保存"), result.message, result.status);
@@ -3345,7 +3359,7 @@ export function App() {
               actions={actions}
             />
           ) : null}
-          {route === "enhance" ? (
+          {route === "enhance" && settings && isSuccessStatus(settings.status) ? (
             <EnhanceScreen
               form={settingsForm}
               pluginMarketplaceProgress={pluginMarketplaceProgress}
@@ -3354,6 +3368,11 @@ export function App() {
               onFormChange={setSettingsForm}
               actions={actions}
             />
+          ) : null}
+          {route === "enhance" && (!settings || !isSuccessStatus(settings.status)) ? (
+            <Panel><CardContent><p role="alert">{t("未知")}</p>
+              <Button onClick={() => void refreshSettings(false)}><RefreshCw className="h-4 w-4" />{t("刷新")}</Button>
+            </CardContent></Panel>
           ) : null}
           {route === "zedRemote" ? (
             <ZedRemoteScreen projects={zedRemoteProjects} form={settingsForm} onFormChange={setSettingsForm} actions={actions} />
@@ -3550,12 +3569,20 @@ function OverviewScreen({
   pluginMarketplaceProgress: TaskProgress;
   actions: Actions;
 }) {
+  const [runtime, setRuntime] = useState<{ helper: string; renderer: string; modelRequest: string; reason: string } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    invoke<{ helper: string; renderer: string; modelRequest: string; reason: string }>("inspect_runtime_health")
+      .then(value => { if (alive) setRuntime(value); })
+      .catch(() => { if (alive) setRuntime(null); });
+    return () => { alive = false; };
+  }, [overview]);
   const health = healthItems(overview);
   const profile = activeRelayProfile(settings);
   const selectedModel = profile.lastUsedModel || profile.model || t("等待选择模型");
   const entrypointsReady = health.slice(1).every((item) => item.ok);
   const codexReady = Boolean(overview?.codex_version && overview?.codex_app.status === "found");
-  const helperReady = Boolean(overview?.latest_launch?.helper_port);
+  const helperReady = runtime?.helper === "ready";
   const runtimeState = overview?.latest_launch?.status || "idle";
   const railNodes = [
     { id: "provider", label: t("供应商"), value: profile.name || t("默认供应商"), ready: settings.relayProfilesEnabled, icon: Server },
@@ -3564,7 +3591,7 @@ function OverviewScreen({
     { id: "codex", label: "Codex", value: overview?.codex_version || t("等待检测"), ready: codexReady, icon: Workflow },
     { id: "runtime", label: t("运行"), value: runtimeState === "idle" ? t("待机") : statusLabel(runtimeState), ready: helperReady, icon: Activity },
   ];
-  const readyCount = railNodes.filter((node) => node.ready).length;
+  const readyCount = [helperReady, runtime?.renderer === "ready"].filter(Boolean).length;
   return (
     <div className="overview-deck">
       <section className="ax-hero">
@@ -3585,11 +3612,12 @@ function OverviewScreen({
           </div>
         </div>
         <div className="ax-readiness">
-          <div className="ax-readiness-ring" style={{ "--readiness": `${readyCount / railNodes.length}` } as CSSProperties}>
-            <strong>{readyCount}/{railNodes.length}</strong>
-            <span>{t("链路在线")}</span>
+          <div className="ax-readiness-ring" style={{ "--readiness": `${readyCount / 2}` } as CSSProperties}>
+            <strong>{readyCount}/2</strong>
+            <span>Helper · UI</span>
           </div>
-          <small>{helperReady ? t("运行时已连接") : t("等待首次启动")}</small>
+          <small>{runtime?.reason ?? t("等待首次启动")}</small>
+          <small>Model request: {runtime?.modelRequest ?? "not_tested"}</small>
         </div>
       </section>
 
@@ -4924,6 +4952,8 @@ function EnhanceScreen({
     : t("未发现本地缓存；点击按钮会从 Alunixa X 内置快照释放并注册，无需官方账号预缓存。");
   return (
     <>
+      <AgentHealthPanel autoRepair={form.codexAppPackagedProxyRepair ?? true}
+        onAutoRepairChange={value => setPersistedEnhanceFlag("codexAppPackagedProxyRepair", value)} />
       <Panel className="enhance-panel">
         <CardHead title={t("Codex增强")} detail={t("会话删除、导出、项目移动和用户脚本等界面能力")} />
         <CardContent>
@@ -4964,7 +4994,7 @@ function EnhanceScreen({
               <FeatureToggle title={t("插件列表全量展示")} detail={t("进入插件页后自动连续展开“更多”，尽量一次显示完整插件列表。")} checked={form.codexAppPluginAutoExpand} disabled={!masterEnabled || !patchMode} onChange={(value) => setEnhanceFlag("codexAppPluginAutoExpand", value)} />
               <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
               <FeatureToggle title={t("Fast 按钮")} detail={t("显示服务模式切换按钮；优先按当前模型的服务等级元数据判断 Fast 支持，保留旧版兼容。")} checked={form.codexAppServiceTierControls} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppServiceTierControls", value)} />
-              <FeatureToggle title={t("Fast 模式")} detail={t("开启后在 Codex config.toml 的 [features] 写入 fast_mode = true；关闭后移除 Alunixa X 管理的该项。")} checked={form.codexAppFastMode} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
+              <FeatureToggle title={t("Fast 模式")} detail={t("开启写入 fast_mode = true；关闭写入 false，避免恢复默认开启；保存后待重启生效。")} checked={form.codexAppFastMode} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastMode", value)} />
               <div className="feature-action-row">
                 <div>
                   <strong>{t("官方远端插件缓存")}</strong>
@@ -5152,7 +5182,7 @@ function EnhanceScreen({
             <FeatureGroup title={t("远程项目")} detail={t("连接 Zed Remote 和 upstream worktree 辅助能力。")}>
               <FeatureToggle title="Zed Remote open" detail={t("远程 SSH 文件引用可直接用 Zed Remote Development 打开。")} checked={form.codexAppZedRemoteOpen} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppZedRemoteOpen", value)} />
               <FeatureToggle title={t("Zed 项目记录")} detail={t("维护 Alunixa X 自己的远程项目最近列表。")} checked={form.zedRemoteProjectRegistryEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("zedRemoteProjectRegistryEnabled", value)} />
-              <FeatureToggle title={t("同步 Zed settings")} detail={t("高级选项，默认关闭；当前实现不主动改写 Zed settings。")} checked={form.zedRemoteSyncToZedSettings} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("zedRemoteSyncToZedSettings", value)} />
+              <FeatureToggle title={t("同步 Zed settings")} detail={t("高级选项，默认关闭；当前实现不主动改写 Zed settings。")} checked={false} disabled={true} onChange={() => {}} />
               <FeatureToggle title="Upstream worktree" detail={t("从最新 upstream 分支创建 Git worktree。")} checked={form.codexAppUpstreamWorktreeCreate} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppUpstreamWorktreeCreate", value)} />
             </FeatureGroup>
           </div>

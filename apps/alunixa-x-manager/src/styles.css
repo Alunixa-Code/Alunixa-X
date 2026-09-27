@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+.agent-health-panel { display: grid; gap: 12px; padding: 16px 0; min-width: 0; }
+.agent-health-panel header, .agent-health-panel h2, .agent-health-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.agent-health-panel header { justify-content: space-between; }
+.agent-health-panel h2 { font-size: 16px; margin: 0; }
+.agent-health-panel button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid hsl(var(--border)); border-radius: 6px; }
+.agent-health-panel button:disabled { opacity: .45; cursor: default; }
+.agent-health-panel button:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.agent-health-panel p, .agent-health-panel td, .agent-health-panel label { font-size: 12px; line-height: 1.6; }
+.agent-health-panel code { font-size: 11px; overflow-wrap: anywhere; }
+.agent-health-panel [role=alert], .agent-health-panel [role=status] { color: hsl(var(--status-warning)); }
+.agent-health-proxy { display: grid; gap: 10px; border-block: 1px solid hsl(var(--border)); padding-block: 14px; }
+.agent-health-proxy label { display: flex; align-items: center; gap: 8px; }
+.agent-health-table { overflow: auto; max-height: 320px; border: 1px solid hsl(var(--border)); }
+.agent-health-table table { width: 100%; border-collapse: collapse; }
+.agent-health-table th, .agent-health-table td { text-align: left; padding: 7px 10px; border-bottom: 1px solid hsl(var(--border)); }
+.agent-health-table th { font-size: 12px; position: sticky; top: 0; background: hsl(var(--card)); }
+
 .image-models-screen { max-width: 1040px; margin-inline: auto; display: grid; gap: 16px; }
 .image-models-toolbar, .image-model-editor-heading, .image-model-row-main, .image-model-row-title,
 .image-model-editor-actions, .image-model-row-actions, .image-model-delete { display: flex; align-items: center; gap: 12px; }

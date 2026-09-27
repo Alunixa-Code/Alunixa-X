@@ -86,6 +86,7 @@ pub fn apply_alunixa_x_hooks_in_home(
     launcher_path: &Path,
     codex_home: &Path,
 ) -> anyhow::Result<HookInstallResult> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(codex_home)?;
     let path = codex_home.join("hooks.json");
     let mut root = read_hooks_document(&path)?;
     let hooks = hooks_object_mut(&mut root)?;

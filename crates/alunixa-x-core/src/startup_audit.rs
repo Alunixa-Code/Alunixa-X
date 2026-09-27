@@ -175,8 +175,8 @@ fn audit_agent_capability_config(
         if actual_fast_mode != Some(true) {
             bail!("启动前 Agent 能力校验失败：Fast 模式已开启但 features.fast_mode 不为 true");
         }
-    } else if actual_fast_mode.is_some() {
-        bail!("启动前 Agent 能力校验失败：Fast 模式已关闭但 features.fast_mode 仍残留");
+    } else if actual_fast_mode != Some(false) {
+        bail!("启动前 Agent 能力校验失败：Fast 模式关闭需要 features.fast_mode = false");
     }
     Ok(())
 }
@@ -240,15 +240,16 @@ fn audit_wss_config(doc: &DocumentMut, settings: &BackendSettings) -> anyhow::Re
     if !(settings.relay_profiles_enabled && settings.codex_app_disable_wss) {
         return Ok(());
     }
-    if doc.get("model_provider").and_then(Item::as_str) != Some("openai_http") {
-        bail!("启动前配置校验失败：禁用 WSS 时 model_provider 不一致");
-    }
+    let active = doc
+        .get("model_provider")
+        .and_then(Item::as_str)
+        .unwrap_or("openai");
     let provider = doc
         .get("model_providers")
         .and_then(Item::as_table_like)
-        .and_then(|providers| providers.get("openai_http"))
+        .and_then(|providers| providers.get(active))
         .and_then(Item::as_table_like)
-        .context("启动前配置校验失败：禁用 WSS 时 openai_http 配置缺失")?;
+        .context("启动前配置校验失败：禁用 WSS 时当前供应商配置缺失")?;
     if provider.get("supports_websockets").and_then(Item::as_bool) != Some(false) {
         bail!("启动前配置校验失败：禁用 WSS 时 supports_websockets 不为 false");
     }
@@ -493,7 +494,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_removes_fast_mode_when_agent_capability_is_disabled() {
+    fn audit_explicitly_disables_fast_mode_when_agent_capability_is_disabled() {
         let temp = tempdir().unwrap();
         let home = temp.path();
         std::fs::write(home.join("config.toml"), "[features]\nfast_mode = true\n").unwrap();
@@ -502,7 +503,10 @@ mod tests {
         audit_and_repair_before_launch(home, &settings, 57321, Path::new("launcher")).unwrap();
 
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
-        assert!(!config.contains("fast_mode"));
+        assert_eq!(
+            config.parse::<toml::Value>().unwrap()["features"]["fast_mode"].as_bool(),
+            Some(false)
+        );
     }
 
     #[test]

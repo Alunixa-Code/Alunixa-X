@@ -2304,14 +2304,19 @@ fn session_index_cleanup_write_failure_reports_backup_and_preserves_original() {
     let original = format!("{}\n", session_index_line(stale_id, "stale"));
     fs::write(home.join("session_index.jsonl"), &original).unwrap();
     let preview = preview_session_index_cleanup(Some(&home)).unwrap();
-    fs::create_dir(home.join("session_index.jsonl.tmp")).unwrap();
+    let index = home.join("session_index.jsonl");
+    let original_permissions = fs::metadata(&index).unwrap().permissions();
+    let mut readonly = original_permissions.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(&index, readonly).unwrap();
 
-    let error = apply_session_index_cleanup(
+    let result = apply_session_index_cleanup(
         Some(&home),
         &preview.snapshot_sha256,
         &[stale_id.to_string()],
-    )
-    .unwrap_err();
+    );
+    fs::set_permissions(&index, original_permissions).unwrap();
+    let error = result.unwrap_err();
 
     assert!(error.message.contains("原子写入"));
     let backup = error.backup_dir.expect("failure must expose backup");

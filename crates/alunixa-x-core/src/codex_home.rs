@@ -8,7 +8,7 @@ pub fn default_codex_home_dir() -> PathBuf {
 }
 
 fn codex_home_env_dir_is_valid(path: &PathBuf) -> bool {
-    !path.as_os_str().is_empty() && !path.to_string_lossy().trim().is_empty() && path.is_dir()
+    !path.as_os_str().is_empty() && !path.to_string_lossy().trim().is_empty()
 }
 
 fn default_user_codex_home_dir() -> PathBuf {
@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn default_codex_home_dir_ignores_empty_or_missing_codex_home_env() {
+    fn default_codex_home_dir_honors_uncreated_home_but_ignores_empty_value() {
         let _lock = CODEX_HOME_ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("missing-codex-home");
@@ -88,9 +88,9 @@ mod tests {
 
         {
             let _guard = CodexHomeEnvGuard::set(&missing);
-            assert_eq!(default_codex_home_dir(), expected);
-            assert_eq!(crate::relay_config::default_codex_home_dir(), expected);
-            assert_eq!(crate::codex_sqlite::default_codex_home_dir(), expected);
+            assert_eq!(default_codex_home_dir(), missing);
+            assert_eq!(crate::relay_config::default_codex_home_dir(), missing);
+            assert_eq!(crate::codex_sqlite::default_codex_home_dir(), missing);
         }
     }
 }

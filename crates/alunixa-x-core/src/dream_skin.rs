@@ -226,6 +226,7 @@ pub fn sync_dream_skin_base_theme_in_home(
     enabled: bool,
     theme: &DreamSkinThemeConfig,
 ) -> anyhow::Result<()> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let backup_path = state_dir.join(BACKUP_FILE);
     if enabled {

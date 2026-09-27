@@ -110,6 +110,10 @@ pub fn strip_settings_value(value: &mut Value) -> anyhow::Result<bool> {
 }
 
 pub fn remove_from_home(home: &Path) -> anyhow::Result<bool> {
+    if !home.exists() {
+        return Ok(false);
+    }
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     edit_file(&home.join("config.toml"), |text| strip_config(text))
 }
 

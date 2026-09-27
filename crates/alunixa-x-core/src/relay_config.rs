@@ -113,6 +113,7 @@ pub fn set_codex_sub_agent_max_threads_in_home(
     home: &Path,
     max_threads: u8,
 ) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     std::fs::create_dir_all(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read_to_string(&config_path) {
@@ -136,10 +137,10 @@ pub fn set_codex_sub_agent_max_threads_in_home(
 }
 
 pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read_to_string(&config_path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound && !enabled => return Ok(false),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => {
             return Err(error)
@@ -148,17 +149,8 @@ pub fn set_codex_fast_mode_in_home(home: &Path, enabled: bool) -> anyhow::Result
     };
     let mut doc = parse_toml_document(&existing)?;
 
-    if enabled {
-        let features = table_like_mut_or_insert(&mut doc, "features")?;
-        if features.get("fast_mode").and_then(Item::as_bool) != Some(true) {
-            features.insert("fast_mode", toml_edit::value(true));
-        }
-    } else if let Some(features) = table_like_mut_if_exists(&mut doc, "features") {
-        features.remove("fast_mode");
-        if features.is_empty() {
-            doc.as_table_mut().remove("features");
-        }
-    }
+    let features = table_like_mut_or_insert(&mut doc, "features")?;
+    features.insert("fast_mode", toml_edit::value(enabled));
 
     let updated = ensure_trailing_newline(doc.to_string());
     if updated == normalize_config_text_for_write(&existing) {
@@ -173,6 +165,7 @@ pub fn sync_codex_agent_capabilities_in_home(
     home: &Path,
     settings: &BackendSettings,
 ) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let mut changed =
         set_codex_sub_agent_max_threads_in_home(home, settings.codex_app_sub_agent_max_threads)?;
     changed |= set_codex_fast_mode_in_home(home, settings.codex_app_fast_mode)?;
@@ -181,24 +174,14 @@ pub fn sync_codex_agent_capabilities_in_home(
 }
 
 pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Result<()> {
-    std::fs::create_dir_all(home)?;
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let updated = match parse_toml_document(&existing) {
-        Ok(mut doc) => {
-            if enabled {
-                let features = table_mut_or_insert(&mut doc, "features")?;
-                features["goals"] = toml_edit::value(true);
-            } else if let Some(features) = table_mut_if_exists(&mut doc, "features") {
-                features.remove("goals");
-                if features.is_empty() {
-                    doc.as_table_mut().remove("features");
-                }
-            }
-            ensure_trailing_newline(doc.to_string())
-        }
-        Err(_) => set_codex_goals_feature_text_fallback(&existing, enabled),
-    };
+    let existing = read_optional_text(&config_path)?;
+    let mut doc = existing
+        .parse::<DocumentMut>()
+        .map_err(|_| anyhow::anyhow!("config.toml 无法解析，未修改 Goals"))?;
+    table_like_mut_or_insert(&mut doc, "features")?.insert("goals", toml_edit::value(enabled));
+    let updated = ensure_trailing_newline(doc.to_string());
     crate::settings::atomic_write(&config_path, updated.as_bytes())
 }
 
@@ -206,6 +189,7 @@ pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Re
 /// parser.  This is intentionally narrow: unknown user features and all
 /// provider/model settings are preserved byte-for-byte by `toml_edit`.
 pub fn repair_stale_feature_entries_in_home(home: &Path) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read_to_string(&config_path) {
         Ok(contents) => contents,
@@ -239,6 +223,7 @@ pub fn set_codex_imagegen_mcp_in_home(
     helper_port: u16,
     enabled: bool,
 ) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     std::fs::create_dir_all(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read_to_string(&config_path) {
@@ -286,34 +271,6 @@ pub fn set_codex_imagegen_mcp_in_home(
     Ok(true)
 }
 
-fn set_codex_goals_feature_text_fallback(existing: &str, enabled: bool) -> String {
-    let mut kept = Vec::new();
-    let mut skipping_features = false;
-
-    for line in existing.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[features]" {
-            skipping_features = true;
-            continue;
-        }
-        if skipping_features && trimmed.starts_with('[') && trimmed.ends_with(']') {
-            skipping_features = false;
-        }
-        if !skipping_features {
-            kept.push(line);
-        }
-    }
-
-    let mut updated = kept.join("\n").trim_end().to_string();
-    if enabled {
-        if !updated.is_empty() {
-            updated.push_str("\n\n");
-        }
-        updated.push_str("[features]\ngoals = true");
-    }
-    ensure_trailing_newline(updated)
-}
-
 fn table_mut_or_insert<'a>(doc: &'a mut DocumentMut, key: &str) -> anyhow::Result<&'a mut Table> {
     if !doc.as_table().contains_key(key) {
         doc[key] = toml_edit::table();
@@ -340,13 +297,6 @@ fn table_like_mut_or_insert<'a>(
     doc.get_mut(key)
         .and_then(Item::as_table_like_mut)
         .ok_or_else(|| anyhow::anyhow!("{key} 必须是 TOML table"))
-}
-
-fn table_like_mut_if_exists<'a>(
-    doc: &'a mut DocumentMut,
-    key: &str,
-) -> Option<&'a mut dyn TableLike> {
-    doc.get_mut(key).and_then(Item::as_table_like_mut)
 }
 
 pub fn relay_status_from_home(home: &Path) -> RelayStatus {
@@ -429,6 +379,36 @@ pub fn responses_proxy_configured_in_home(home: &Path) -> bool {
             )
             .as_str(),
         )
+}
+
+pub fn ensure_active_protocol_proxy_config_in_home(
+    home: &Path,
+    settings: &BackendSettings,
+) -> anyhow::Result<bool> {
+    if !settings.relay_profiles_enabled || !settings.active_relay_uses_protocol_proxy() {
+        return Ok(false);
+    }
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
+    let path = home.join("config.toml");
+    let before = std::fs::read_to_string(&path).context("活动代理配置不可读取")?;
+    let mut doc = parse_toml_document(&before)?;
+    let provider = active_or_default_provider_id(&doc);
+    let table = doc
+        .get_mut("model_providers")
+        .and_then(Item::as_table_like_mut)
+        .and_then(|providers| providers.get_mut(&provider))
+        .and_then(Item::as_table_like_mut)
+        .context("活动协议代理缺少供应商配置，未创建默认供应商")?;
+    let expected = crate::protocol_proxy::local_responses_proxy_base_url(
+        crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+    );
+    if table.get("base_url").and_then(Item::as_str) == Some(&expected) {
+        return Ok(false);
+    }
+    table.insert("base_url", toml_edit::value(expected));
+    create_live_backup(home, Some(before.as_bytes()), None)?;
+    crate::settings::atomic_write(&path, doc.to_string().as_bytes())?;
+    Ok(true)
 }
 
 /// Returns whether the installed Codex Desktop is in the version range that
@@ -654,6 +634,7 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
     common_config_contents: &str,
     preserve_computer_use_guard: bool,
 ) -> anyhow::Result<RelayApplyResult> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let selected_common = if profile.use_common_config {
         filter_common_config_for_profile(common_config_contents, profile)?
     } else {
@@ -711,6 +692,7 @@ pub fn apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_gua
     common_config_contents: &str,
     preserve_computer_use_guard: bool,
 ) -> anyhow::Result<RelayApplyResult> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let selected_common = if profile.use_common_config {
         filter_common_config_for_profile(common_config_contents, profile)?
     } else {
@@ -766,37 +748,66 @@ pub fn apply_relay_config_file_to_home_with_computer_use_guard(
 
 /// Forces the active provider to use HTTP Responses instead of WebSocket transport.
 pub fn apply_wss_policy_to_home(home: &Path, disable_wss: bool) -> anyhow::Result<()> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let contents = std::fs::read_to_string(&config_path)
         .with_context(|| format!("读取 {} 失败", config_path.display()))?;
-    let mut document = contents.parse::<toml_edit::DocumentMut>()?;
-    let provider = "openai_http";
+    let mut document = parse_toml_document(&contents)?;
+    let state_path = home.join("alunixa-x-wss-policy.json");
+    let mut states: serde_json::Map<String, Value> = match std::fs::read(&state_path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|_| anyhow::anyhow!("WSS 策略备份无效，未更改配置"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
+        Err(_) => anyhow::bail!("WSS 策略备份无法读取，未更改配置"),
+    };
+    let active = root_key_string(&contents, "model_provider").unwrap_or_else(|| "openai".into());
+    let provider = if disable_wss && active == "openai" {
+        "openai_http"
+    } else {
+        &active
+    };
     if disable_wss {
-        // Clone the active provider first so custom base URLs and auth settings survive the switch.
-        let source_provider = root_key_string(&contents, "model_provider");
-        let source_table = source_provider
-            .as_deref()
-            .and_then(|_| document.get("model_providers").and_then(Item::as_table))
-            .and_then(|providers| source_provider.as_deref().and_then(|id| providers.get(id)))
-            .and_then(Item::as_table_like)
-            .map(|table| {
-                table
-                    .iter()
-                    .map(|(key, item)| (key.to_string(), item.clone()))
-                    .collect::<Vec<_>>()
-            });
-        document["model_provider"] = toml_edit::value(provider);
-        let table = ensure_provider_table(&mut document, provider)?;
-        if let Some(entries) = source_table {
-            for (key, item) in entries {
-                table.insert(&key, item);
-            }
+        if !states.contains_key(provider) {
+            let before = document
+                .get("model_providers")
+                .and_then(|p| p.get(provider))
+                .and_then(|p| p.get("supports_websockets"))
+                .and_then(Item::as_bool);
+            states.insert(provider.into(), json!({"before": before, "source": active}));
+            crate::settings::atomic_write(&state_path, &serde_json::to_vec(&states)?)?;
         }
-        table["name"] = toml_edit::value("OpenAI HTTP only");
-        table["wire_api"] = toml_edit::value("responses");
+        if provider != active {
+            document["model_provider"] = toml_edit::value(provider);
+        }
+        let table = ensure_provider_table(&mut document, provider)?;
+        if active == "openai" {
+            table["name"] = toml_edit::value("OpenAI HTTP only");
+            table["wire_api"] = toml_edit::value("responses");
+            table["requires_openai_auth"] = toml_edit::value(true);
+        }
         table["supports_websockets"] = toml_edit::value(false);
+    } else if let Some(before) = states.get(&active) {
+        let table = ensure_provider_table(&mut document, &active)?;
+        if table.get("supports_websockets").and_then(Item::as_bool) != Some(false) {
+            anyhow::bail!("WSS 配置已被外部修改，未覆盖，请刷新");
+        }
+        if let Some(value) = before.get("before").and_then(Value::as_bool) {
+            table["supports_websockets"] = toml_edit::value(value);
+        } else {
+            table.remove("supports_websockets");
+        }
+        if active == "openai_http" && before.get("source").and_then(Value::as_str) == Some("openai")
+        {
+            document["model_provider"] = toml_edit::value("openai");
+        }
+        states.remove(&active);
+    } else {
+        // Legacy or externally managed values have no reversible provenance.
+        return Ok(());
     }
-    crate::settings::atomic_write(&config_path, document.to_string().as_bytes())
+    create_live_backup(home, Some(contents.as_bytes()), None)?;
+    crate::settings::atomic_write(&config_path, document.to_string().as_bytes())?;
+    crate::settings::atomic_write(&state_path, &serde_json::to_vec(&states)?)
 }
 
 pub fn apply_pure_api_config_to_home_with_protocol(
@@ -1430,6 +1441,7 @@ fn write_codex_live_atomic(
     auth_bytes: Option<&[u8]>,
     preserve_computer_use_guard: bool,
 ) -> anyhow::Result<Option<String>> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     std::fs::create_dir_all(home)?;
     let config_path = home.join("config.toml");
     let auth_path = home.join("auth.json");
@@ -1743,42 +1755,46 @@ pub fn normalize_config_text(contents: &str) -> String {
 }
 
 fn normalize_duplicate_toml_text(contents: &str) -> String {
-    let mut seen_root_keys = HashSet::new();
-    let mut seen_headers = HashSet::new();
-    let mut kept = Vec::new();
-    let mut skipping_duplicate_table = false;
+    if contents.parse::<DocumentMut>().is_ok() {
+        return normalize_text_toml(contents.to_owned());
+    }
+    // Upstream cd1eba2: merge repeated table fragments, never discard their fields.
+    // Unparseable input is retained for the caller to reject, not silently rewritten.
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    let mut root_keys = HashSet::new();
     let mut in_root = true;
-
     for line in contents.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_root = false;
-            skipping_duplicate_table = !seen_headers.insert(trimmed.to_string());
-            if skipping_duplicate_table {
-                continue;
+            if !current.trim().is_empty() {
+                blocks.push(std::mem::take(&mut current));
             }
-            kept.push(line);
-            continue;
-        }
-
-        if skipping_duplicate_table {
-            continue;
-        }
-
-        if in_root && !trimmed.is_empty() && !trimmed.starts_with('#') {
+            in_root = false;
+            root_keys.clear();
+        } else if in_root && !trimmed.is_empty() && !trimmed.starts_with('#') {
             if let Some((key, _)) = trimmed.split_once('=') {
-                let key = key.trim();
-                if !key.is_empty() && !key.contains('.') && !seen_root_keys.insert(key.to_string())
-                {
-                    continue;
+                if !root_keys.insert(key.trim().to_owned()) && !current.trim().is_empty() {
+                    blocks.push(std::mem::take(&mut current));
+                    root_keys.clear();
+                    root_keys.insert(key.trim().to_owned());
                 }
             }
         }
-
-        kept.push(line);
+        current.push_str(line);
+        current.push('\n');
     }
-
-    normalize_text_toml(kept.join("\n"))
+    if !current.trim().is_empty() {
+        blocks.push(current);
+    }
+    let mut merged = DocumentMut::new();
+    for block in blocks {
+        let Ok(part) = block.parse::<DocumentMut>() else {
+            return contents.to_owned();
+        };
+        merge_toml_table_like(merged.as_table_mut(), part.as_table());
+    }
+    normalize_optional_toml(merged)
 }
 
 fn strip_common_config_text_fallback(config_text: &str, common_config: &str) -> String {
@@ -2005,7 +2021,9 @@ fn apply_model_catalog_to_config(
     // 仅当现有指针指向本 profile 自己生成的 catalog 时才重新生成。
     if let Some(existing) = root_key_string(&config_text, "model_catalog_json") {
         if existing != catalog_relative {
-            if is_cc_switch_model_catalog(&existing) {
+            if is_alunixa_x_managed_model_catalog(home, &existing)
+                || is_cc_switch_model_catalog(&existing)
+            {
                 config_text = remove_root_key(&config_text, "model_catalog_json");
             } else if custom_responses
                 && copy_standard_responses_catalog(home, &existing, &catalog_relative)?
@@ -3089,6 +3107,7 @@ fn normalize_custom_models_profile(profile: &mut RelayProfile) -> anyhow::Result
 }
 
 pub fn apply_preferred_model_to_home(home: &Path, profile: &RelayProfile) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     if matches!(
         profile.relay_mode,
         crate::settings::RelayMode::Aggregate | crate::settings::RelayMode::Official
@@ -3615,7 +3634,7 @@ mod tests {
     }
 
     #[test]
-    fn disable_wss_writes_http_only_provider_contract() {
+    fn disable_wss_preserves_custom_provider_identity() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(
             temp.path().join("config.toml"),
@@ -3625,8 +3644,8 @@ mod tests {
 
         apply_wss_policy_to_home(temp.path(), true).unwrap();
         let written = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-        assert!(written.contains("model_provider = \"openai_http\""));
-        assert!(written.contains("name = \"OpenAI HTTP only\""));
+        assert!(written.contains("model_provider = \"custom\""));
+        assert!(written.contains("name = \"Custom\""));
         assert!(written.contains("wire_api = \"responses\""));
         assert!(written.contains("supports_websockets = false"));
         assert!(written.contains("base_url = \"https://example.com/v1\""));

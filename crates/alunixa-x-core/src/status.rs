@@ -45,7 +45,9 @@ impl StatusStore {
             }
         };
 
-        Ok(serde_json::from_str(&contents).ok())
+        serde_json::from_str(&contents)
+            .map(Some)
+            .map_err(|_| anyhow::anyhow!("运行状态文件无效，当前状态未知"))
     }
 }
 
@@ -93,12 +95,12 @@ mod tests {
     }
 
     #[test]
-    fn status_store_load_latest_bad_json_returns_none() {
+    fn status_store_load_latest_bad_json_returns_error() {
         let dir = temp_dir();
         let path = dir.join("latest-status.json");
         std::fs::write(&path, "{bad json").unwrap();
         let store = StatusStore::new(path);
 
-        assert_eq!(store.load_latest().unwrap(), None);
+        assert!(store.load_latest().is_err());
     }
 }

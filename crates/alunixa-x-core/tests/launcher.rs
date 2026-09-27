@@ -833,6 +833,10 @@ fn ports_detects_existing_codex_cdp_page() {
         let mut request = [0_u8; 1024];
         let _ = stream.read(&mut request).unwrap();
         let body = r#"[{"id":"page-1","type":"page","title":"Codex","url":"app://-/index.html","webSocketDebuggerUrl":"ws://127.0.0.1/devtools/page/page-1"}]"#;
+        let body = body.replace(
+            "ws://127.0.0.1/devtools",
+            &format!("ws://127.0.0.1:{port}/devtools"),
+        );
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}",

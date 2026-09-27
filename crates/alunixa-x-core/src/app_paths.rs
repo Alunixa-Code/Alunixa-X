@@ -1,8 +1,9 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::process::Command;
 use std::time::SystemTime;
+
+#[cfg(windows)]
+use anyhow::{Context, bail};
 
 #[derive(Debug, Clone, Copy)]
 struct AppPackageSpec {
@@ -19,32 +20,41 @@ const CODEX_PACKAGE_EXECUTABLES: &[&str] = &[
     "Codex (Beta).exe",
     "codex.exe",
 ];
-const STANDALONE_CODEX_EXECUTABLES: &[&str] = &[
-    "ChatGPT.exe",
-    "ChatGPT (Beta).exe",
-    "Codex.exe",
-    "Codex (Beta).exe",
-    "codex.exe",
+const STANDALONE_CODEX_EXECUTABLES: &[&str] = CODEX_PACKAGE_EXECUTABLES;
+
+#[cfg(windows)]
+const OPENAI_PACKAGE_FAMILY_NAMES: &[&str] = &[
+    "OpenAI.Codex_2p2nqsd0c76g0",
+    "OpenAI.CodexBeta_2p2nqsd0c76g0",
+    "OpenAI.ChatGPT-Desktop_2p2nqsd0c76g0",
 ];
+
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RegisteredWindowsPackage {
+    pub full_name: String,
+    pub install_location: PathBuf,
+}
 
 const APP_PACKAGE_SPECS: &[AppPackageSpec] = &[
     AppPackageSpec {
         identity: "OpenAI.Codex",
         app_id: "App",
         executable_names: CODEX_PACKAGE_EXECUTABLES,
-        priority: 1,
+        priority: 2,
     },
     AppPackageSpec {
         identity: "OpenAI.CodexBeta",
         app_id: "App",
         executable_names: CODEX_PACKAGE_EXECUTABLES,
-        priority: 1,
+        priority: 2,
     },
     AppPackageSpec {
         identity: "OpenAI.ChatGPT-Desktop",
         app_id: "App",
         executable_names: CODEX_PACKAGE_EXECUTABLES,
-        priority: 2,
+        // Preserve this product's explicit Codex preference when both applications exist.
+        priority: 1,
     },
 ];
 
@@ -61,12 +71,7 @@ pub fn find_latest_codex_app_dir(root: &Path) -> Option<PathBuf> {
             Some((spec.priority, version, app_dir))
         })
         .collect::<Vec<_>>();
-    matches.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .reverse()
-            .then_with(|| left.1.cmp(&right.1))
-    });
+    matches.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let (_, _, latest) = matches.pop()?;
     Some(latest)
 }
@@ -81,8 +86,14 @@ pub fn find_latest_codex_app_dir_from_roots(roots: &[PathBuf]) -> Option<PathBuf
 pub fn find_latest_codex_app_dir_default() -> Option<PathBuf> {
     #[cfg(windows)]
     {
-        find_latest_codex_app_dir_from_roots(&windows_app_package_roots())
-            .or_else(find_latest_codex_app_dir_from_appx_package)
+        // 注册信息是 Store 当前状态的权威来源；查询失败时再退回目录扫描。
+        if let Ok(Some(appx)) = find_latest_codex_app_dir_from_appx_package() {
+            return Some(appx);
+        }
+        windows_app_package_roots()
+            .iter()
+            .filter_map(|root| find_latest_codex_app_dir(root))
+            .max_by(compare_app_dir_candidates)
     }
 
     #[cfg(not(windows))]
@@ -92,30 +103,127 @@ pub fn find_latest_codex_app_dir_default() -> Option<PathBuf> {
 }
 
 #[cfg(windows)]
-fn find_latest_codex_app_dir_from_appx_package() -> Option<PathBuf> {
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            "$names=@('OpenAI.Codex','OpenAI.CodexBeta','OpenAI.ChatGPT-Desktop'); Get-AppxPackage | Where-Object { $names -contains $_.Name } | Sort-Object @{Expression={if ($_.Name -like 'OpenAI.Codex*') {0} else {1}};Ascending=$true}, @{Expression={$_.Version};Descending=$true} | Select-Object -First 1 -ExpandProperty InstallLocation",
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    latest_appx_install_location_from_output(&String::from_utf8_lossy(&output.stdout))
-        .and_then(|location| normalize_codex_app_path(Path::new(&location)))
+fn find_latest_codex_app_dir_from_appx_package() -> anyhow::Result<Option<PathBuf>> {
+    Ok(registered_windows_packages()?
+        .into_iter()
+        .filter(|package| is_supported_windows_app_package_name(&package.full_name))
+        .filter_map(|package| normalize_codex_app_path(&package.install_location))
+        .max_by(compare_app_dir_candidates))
 }
 
-pub fn latest_appx_install_location_from_output(output: &str) -> Option<String> {
-    output
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .map(ToString::to_string)
+#[cfg(windows)]
+pub(crate) fn registered_windows_packages() -> anyhow::Result<Vec<RegisteredWindowsPackage>> {
+    // AppX 包在 Codex 更新后会改变 full name 和安装目录，不能跨启动周期缓存。
+    query_registered_windows_packages()
+}
+
+#[cfg(windows)]
+fn query_registered_windows_packages() -> anyhow::Result<Vec<RegisteredWindowsPackage>> {
+    let mut packages = Vec::new();
+    for family_name in OPENAI_PACKAGE_FAMILY_NAMES {
+        for full_name in package_full_names_for_family(family_name)? {
+            let install_location = package_path_by_full_name(&full_name)
+                .with_context(|| format!("failed to resolve registered package {full_name}"))?;
+            packages.push(RegisteredWindowsPackage {
+                full_name,
+                install_location,
+            });
+        }
+    }
+    Ok(packages)
+}
+
+#[cfg(windows)]
+fn package_full_names_for_family(family_name: &str) -> anyhow::Result<Vec<String>> {
+    use windows::Win32::Foundation::{
+        APPMODEL_ERROR_NO_PACKAGE, ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS,
+    };
+    use windows::Win32::Storage::Packaging::Appx::GetPackagesByPackageFamily;
+    use windows::core::{PCWSTR, PWSTR};
+
+    let family = family_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut count = 0u32;
+    let mut buffer_length = 0u32;
+    let first = unsafe {
+        GetPackagesByPackageFamily(
+            PCWSTR(family.as_ptr()),
+            &mut count,
+            None,
+            &mut buffer_length,
+            PWSTR(std::ptr::null_mut()),
+        )
+    };
+    if first == APPMODEL_ERROR_NO_PACKAGE || (first == ERROR_SUCCESS && count == 0) {
+        return Ok(Vec::new());
+    }
+    if first != ERROR_INSUFFICIENT_BUFFER {
+        bail!("GetPackagesByPackageFamily failed with {}", first.0);
+    }
+
+    let mut pointers = vec![PWSTR(std::ptr::null_mut()); count as usize];
+    let mut buffer = vec![0u16; buffer_length as usize];
+    let status = unsafe {
+        GetPackagesByPackageFamily(
+            PCWSTR(family.as_ptr()),
+            &mut count,
+            Some(pointers.as_mut_ptr()),
+            &mut buffer_length,
+            PWSTR(buffer.as_mut_ptr()),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        bail!("GetPackagesByPackageFamily failed with {}", status.0);
+    }
+    buffer.truncate(buffer_length as usize);
+    buffer
+        .split(|value| *value == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| String::from_utf16(value).context("invalid package full name"))
+        .collect()
+}
+
+#[cfg(windows)]
+fn package_path_by_full_name(full_name: &str) -> anyhow::Result<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use windows::Win32::Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS};
+    use windows::Win32::Storage::Packaging::Appx::GetPackagePathByFullName;
+    use windows::core::{PCWSTR, PWSTR};
+
+    let full_name = full_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut path_length = 0u32;
+    let first = unsafe {
+        GetPackagePathByFullName(
+            PCWSTR(full_name.as_ptr()),
+            &mut path_length,
+            PWSTR(std::ptr::null_mut()),
+        )
+    };
+    if first != ERROR_INSUFFICIENT_BUFFER {
+        bail!("GetPackagePathByFullName failed with {}", first.0);
+    }
+    let mut path = vec![0u16; path_length as usize];
+    let status = unsafe {
+        GetPackagePathByFullName(
+            PCWSTR(full_name.as_ptr()),
+            &mut path_length,
+            PWSTR(path.as_mut_ptr()),
+        )
+    };
+    if status != ERROR_SUCCESS {
+        bail!("GetPackagePathByFullName failed with {}", status.0);
+    }
+    let end = path
+        .iter()
+        .position(|value| *value == 0)
+        .unwrap_or(path.len());
+    Ok(PathBuf::from(OsString::from_wide(&path[..end])))
 }
 
 #[cfg(windows)]
@@ -131,6 +239,14 @@ fn windows_app_package_roots() -> Vec<PathBuf> {
     roots.sort();
     roots.dedup();
     roots
+}
+
+pub fn latest_appx_install_location_from_output(output: &str) -> Option<String> {
+    output
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(ToString::to_string)
 }
 
 pub fn user_data_candidates() -> Vec<PathBuf> {
@@ -226,10 +342,30 @@ pub fn resolve_codex_app_dir_with_saved(
     {
         // 已保存路径无效（例如误选 Alunixa X）时回退自动探测
         if let Some(path) = normalize_codex_app_path(Path::new(saved)) {
+            #[cfg(windows)]
+            if is_codex_store_package_dir(&path) {
+                // Store 更新会生成新的版本目录；注册查询成功时选择当前最高版本，
+                // 查询失败则保留已保存路径，兼容离线或受限环境。
+                return Some(resolve_saved_store_path(
+                    path,
+                    find_latest_codex_app_dir_from_appx_package(),
+                ));
+            }
             return Some(path);
         }
     }
     resolve_codex_app_dir(None)
+}
+
+#[cfg(windows)]
+fn resolve_saved_store_path(
+    saved_path: PathBuf,
+    current: anyhow::Result<Option<PathBuf>>,
+) -> PathBuf {
+    match current {
+        Ok(Some(current)) => current,
+        Ok(None) | Err(_) => saved_path,
+    }
 }
 
 pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
@@ -237,7 +373,7 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    // 拒绝把 Alunixa X 安装目录误当成 Codex 桌面应用
+    // 拒绝把 Alunixa X 管理工具安装目录误当成 Codex 桌面应用
     if is_alunixa_x_plus_path(path) {
         return None;
     }
@@ -292,9 +428,7 @@ fn is_alunixa_x_plus_path(path: &Path) -> bool {
         let lower = name.to_ascii_lowercase();
         if lower == "codex++"
             || lower == "codexplusplus"
-            || lower == "alunixa-x"
-            || lower == "alunixa x"
-            || lower == "alunixa x launch"
+            || lower == "alunixa-x-plus"
             || lower.contains("alunixa-x-manager")
         {
             return true;
@@ -307,9 +441,6 @@ fn is_alunixa_x_plus_path(path: &Path) -> bool {
     normalized.contains("\\programs\\codex++")
         || normalized.contains("\\codex++\\")
         || normalized.ends_with("\\codex++")
-        || normalized.contains("\\programs\\alunixa x")
-        || normalized.contains("\\alunixa x\\")
-        || normalized.ends_with("\\alunixa x")
 }
 
 fn is_codex_store_package_dir(path: &Path) -> bool {
@@ -349,9 +480,6 @@ pub fn find_bundled_codex_cli(app_dir: &Path) -> Option<PathBuf> {
     candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
-/// Return Codex Desktop's user-writable CLI cache, newest first.
-///
-/// Current Windows Store builds mirror the packaged CLI and its sidecars into
 /// `%LOCALAPPDATA%\OpenAI\Codex\bin\<content-id>`. External desktop clients
 /// should prefer that mirror over starting a child directly from WindowsApps,
 /// whose package path can become inaccessible or stale after an app update.
@@ -575,14 +703,9 @@ pub(crate) fn is_supported_windows_app_package_name(package_name: &str) -> bool 
 }
 
 pub(crate) fn is_supported_app_executable_name(name: &str) -> bool {
-    [
-        "Codex.exe",
-        "Codex (Beta).exe",
-        "ChatGPT.exe",
-        "ChatGPT (Beta).exe",
-    ]
-    .into_iter()
-    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    CODEX_PACKAGE_EXECUTABLES
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 fn package_spec_from_path(path: &Path) -> Option<AppPackageSpec> {
@@ -595,7 +718,7 @@ fn compare_app_dir_candidates(left: &PathBuf, right: &PathBuf) -> std::cmp::Orde
     app_dir_sort_key(left).cmp(&app_dir_sort_key(right))
 }
 
-fn app_dir_sort_key(app_dir: &Path) -> Option<(std::cmp::Reverse<u8>, Vec<u32>)> {
+fn app_dir_sort_key(app_dir: &Path) -> Option<(u8, Vec<u32>)> {
     let spec = package_spec_from_path(app_dir)?;
     let package_dir = if app_dir
         .file_name()
@@ -606,10 +729,7 @@ fn app_dir_sort_key(app_dir: &Path) -> Option<(std::cmp::Reverse<u8>, Vec<u32>)>
     } else {
         app_dir
     };
-    Some((
-        std::cmp::Reverse(spec.priority),
-        version_tuple(package_dir)?,
-    ))
+    Some((spec.priority, version_tuple(package_dir)?))
 }
 
 fn package_entry_dir(package_dir: &Path, spec: AppPackageSpec) -> Option<PathBuf> {
@@ -649,9 +769,14 @@ fn codex_package_parts(package_name: &str) -> Option<(AppPackageSpec, &str, &str
         let Some((version, rest)) = rest.split_once('_') else {
             continue;
         };
-        let Some((_, publisher_id)) = rest.rsplit_once("__") else {
+        // MSIX full name 的 resource id 可能为 `~`，例如
+        // `Name_1.2.3.0_neutral_~_publisher`; 也兼容无 resource id 时的 `x64__publisher`。
+        let Some((_, publisher_id)) = rest.rsplit_once('_') else {
             continue;
         };
+        if publisher_id.is_empty() {
+            continue;
+        }
         return Some((*spec, version, publisher_id));
     }
     None
@@ -663,6 +788,32 @@ fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'
     }
     let (head, rest) = value.split_at(prefix.len());
     head.eq_ignore_ascii_case(prefix).then_some(rest)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::resolve_saved_store_path;
+    use std::path::PathBuf;
+
+    #[test]
+    fn saved_store_path_prefers_current_registered_package() {
+        let saved = PathBuf::from(r"C:\old\app");
+        let current = PathBuf::from(r"C:\new\app");
+        assert_eq!(
+            resolve_saved_store_path(saved, Ok(Some(current.clone()))),
+            current
+        );
+    }
+
+    #[test]
+    fn saved_store_path_falls_back_when_registration_is_unavailable() {
+        let saved = PathBuf::from(r"C:\old\app");
+        assert_eq!(resolve_saved_store_path(saved.clone(), Ok(None)), saved);
+        assert_eq!(
+            resolve_saved_store_path(saved.clone(), Err(anyhow::anyhow!("query failed"))),
+            saved
+        );
+    }
 }
 
 #[cfg(test)]

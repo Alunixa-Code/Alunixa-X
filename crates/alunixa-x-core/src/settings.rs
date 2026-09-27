@@ -460,6 +460,8 @@ pub struct BackendSettings {
     pub enhancements_enabled: bool,
     #[serde(rename = "computerUseGuardEnabled", default)]
     pub computer_use_guard_enabled: bool,
+    #[serde(rename = "codexAppPackagedProxyRepair", default = "default_true")]
+    pub codex_app_packaged_proxy_repair: bool,
     #[serde(rename = "codexAppPluginMarketplaceUnlock", default = "default_true")]
     pub codex_app_plugin_marketplace_unlock: bool,
     #[serde(rename = "codexAppPluginAutoExpand", default = "default_true")]
@@ -684,6 +686,7 @@ impl Default for BackendSettings {
             relay_profiles_enabled: true,
             enhancements_enabled: true,
             computer_use_guard_enabled: false,
+            codex_app_packaged_proxy_repair: true,
             codex_app_plugin_marketplace_unlock: true,
             codex_app_plugin_auto_expand: true,
             codex_app_model_whitelist_unlock: true,
@@ -1534,7 +1537,13 @@ impl SettingsStore {
     fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         let mut settings = normalize_settings_config_sections(settings.clone())?;
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
-        let bytes = serde_json::to_vec_pretty(&settings)?;
+        let mut raw = self.load_raw_object()?;
+        for (key, value) in settings_to_object(&settings) {
+            raw.insert(key, value);
+        }
+        let mut value = Value::Object(raw);
+        crate::retired_context::strip_settings_value(&mut value)?;
+        let bytes = serde_json::to_vec_pretty(&value)?;
         atomic_write_unique(&self.path, &bytes)
     }
 
@@ -1588,6 +1597,13 @@ impl SettingsStore {
     where
         F: FnOnce() -> anyhow::Result<T>,
     {
+        let _config_guard = if exclusive && self.path == crate::paths::default_settings_path() {
+            Some(crate::config_transaction::ConfigLock::acquire(
+                &crate::codex_home::default_codex_home_dir(),
+            )?)
+        } else {
+            None
+        };
         let lock_path = settings_lock_path(&self.path);
         if let Some(parent) = lock_path.parent() {
             fs::create_dir_all(parent)
@@ -1716,6 +1732,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
         target.insert("computerUseGuardEnabled".to_string(), Value::Bool(value));
     }
     merge_bool_setting(target, source, "codexAppPluginMarketplaceUnlock");
+    merge_bool_setting(target, source, "codexAppPackagedProxyRepair");
     merge_bool_setting(target, source, "codexAppPluginAutoExpand");
     merge_bool_setting(target, source, "codexAppModelWhitelistUnlock");
     merge_bool_setting(target, source, "codexAppSessionDelete");
@@ -2250,7 +2267,7 @@ fn normalize_text_config(contents: String) -> String {
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    atomic_write_with_temp(path, bytes, temp_path_for(path))
+    atomic_write_unique(path, bytes)
 }
 
 fn atomic_write_unique(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -2258,6 +2275,9 @@ fn atomic_write_unique(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyhow::Result<()> {
+    if fs::metadata(path).is_ok_and(|metadata| metadata.permissions().readonly()) {
+        anyhow::bail!("目标配置只读，未覆盖原文件");
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;
@@ -2310,16 +2330,6 @@ fn replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
         )?;
     }
     Ok(())
-}
-
-fn temp_path_for(path: &Path) -> PathBuf {
-    let mut temp_path = path.to_path_buf();
-    let extension = path.extension().and_then(|value| value.to_str());
-    temp_path.set_extension(match extension {
-        Some(extension) => format!("{extension}.tmp"),
-        None => "tmp".to_string(),
-    });
-    temp_path
 }
 
 fn unique_temp_path_for(path: &Path) -> PathBuf {

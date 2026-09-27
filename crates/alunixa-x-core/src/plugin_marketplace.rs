@@ -55,6 +55,7 @@ pub fn ensure_role_specific_plugins_marketplace_config(home: &Path) -> anyhow::R
 /// Remove only marketplace entries owned by Alunixa X.  User-selected
 /// `openai-curated` and other third-party marketplace entries are preserved.
 pub fn remove_alunixa_x_marketplace_config(home: &Path) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let path = home.join("config.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -656,6 +657,7 @@ fn ensure_marketplace_configs_with_plugins(
     marketplace_root: &Path,
     plugin_ids: &[String],
 ) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read(&config_path) {
         Ok(bytes) => String::from_utf8(bytes)
@@ -722,6 +724,7 @@ fn managed_reserved_marketplace_config_present(home: &Path) -> bool {
 }
 
 fn cleanup_managed_reserved_marketplace_configs(home: &Path) -> anyhow::Result<bool> {
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let path = home.join("config.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,

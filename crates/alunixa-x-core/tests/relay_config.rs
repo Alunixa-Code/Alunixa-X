@@ -1650,7 +1650,7 @@ fn set_codex_sub_agent_max_threads_preserves_config_and_clamps_value() {
 }
 
 #[test]
-fn set_codex_fast_mode_writes_and_removes_only_managed_feature() {
+fn set_codex_fast_mode_writes_explicit_boolean_and_preserves_other_features() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("config.toml"),
@@ -1667,7 +1667,7 @@ fn set_codex_fast_mode_writes_and_removes_only_managed_feature() {
     assert!(set_codex_fast_mode_in_home(temp.path(), false).unwrap());
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     let parsed = config.parse::<toml::Value>().unwrap();
-    assert!(parsed["features"].get("fast_mode").is_none());
+    assert_eq!(parsed["features"]["fast_mode"].as_bool(), Some(false));
     assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
 }
 
@@ -1692,7 +1692,7 @@ fn set_codex_fast_mode_preserves_inline_feature_table() {
     assert_eq!(parsed["features"]["goals"].as_bool(), Some(true));
 }
 #[test]
-fn set_codex_goals_feature_tolerates_invalid_existing_toml() {
+fn set_codex_goals_feature_rejects_invalid_existing_toml_without_writing() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("config.toml"),
@@ -1707,11 +1707,39 @@ last_updated = "2026-05-25T11:52:46Z"
     )
     .unwrap();
 
-    set_codex_goals_feature_in_home(temp.path(), true).unwrap();
+    let before = std::fs::read(temp.path().join("config.toml")).unwrap();
+    assert!(set_codex_goals_feature_in_home(temp.path(), true).is_err());
+    assert_eq!(
+        std::fs::read(temp.path().join("config.toml")).unwrap(),
+        before
+    );
+}
 
-    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(config.contains("[features]"));
-    assert!(config.contains("goals = true"));
+#[test]
+fn wss_policy_keeps_custom_provider_and_restores_its_original_boolean() {
+    use alunixa_x_core::relay_config::apply_wss_policy_to_home;
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    let original = "model_provider='fixture'\n[model_providers.fixture]\nbase_url='http://example.test/v1'\nsupports_websockets=true\n";
+    std::fs::write(&config, original).unwrap();
+    apply_wss_policy_to_home(dir.path(), true).unwrap();
+    let v: toml::Value = std::fs::read_to_string(&config).unwrap().parse().unwrap();
+    assert_eq!(v["model_provider"].as_str(), Some("fixture"));
+    assert_eq!(
+        v["model_providers"]["fixture"]["supports_websockets"].as_bool(),
+        Some(false)
+    );
+    apply_wss_policy_to_home(dir.path(), false).unwrap();
+    let v: toml::Value = std::fs::read_to_string(&config).unwrap().parse().unwrap();
+    assert_eq!(v["model_provider"].as_str(), Some("fixture"));
+    assert_eq!(
+        v["model_providers"]["fixture"]["supports_websockets"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        v["model_providers"]["fixture"]["base_url"].as_str(),
+        Some("http://example.test/v1")
+    );
 }
 
 #[test]
