@@ -109,17 +109,89 @@ fn sanitized_renderer_error(event: &Value) -> Option<RendererError> {
 
 pub const RENDERER_HEALTH_SCRIPT: &str = r#"(() => {
   const visible = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
-  const native = selector => [...document.querySelectorAll(selector)].some(el =>
-    !el.closest('[id^="alunixa-"],[class^="alunixa-"],[data-alunixa-x]') && visible(el));
+  const nativeElement = el => !el.closest('[id^="alunixa-"],[class^="alunixa-"],[data-alunixa-x]') && visible(el);
+  const native = selector => [...document.querySelectorAll(selector)].some(nativeElement);
+  const loading = native('[role="progressbar"],[data-testid="loading-spinner"],[aria-busy="true"]');
+  const composer = native('.ProseMirror[contenteditable="true"],main [contenteditable="true"],[data-testid="composer"],[data-testid="thread-composer"],[data-testid="conversation-turn"]');
+  const shell = native('main,[role="main"],nav,[role="navigation"],aside,[data-testid*="sidebar"],[data-testid*="settings"],[data-testid*="login"]');
+  const recoveryLabel = value => /^(try again|retry|重试|再试一次|повторить|попробовать снова)$/i.test((value || '').replace(/\s+/g, ' ').trim());
+  const recoveryAction = [...document.querySelectorAll('button,[role="button"]')].some(el =>
+    nativeElement(el) && (recoveryLabel(el.getAttribute('aria-label')) || recoveryLabel(el.textContent)));
+
   return {
     readyState: document.readyState,
     hasElectronBridge: !!window.electronBridge,
-    hasNativeSurface: native('.ProseMirror[contenteditable="true"],main [contenteditable="true"],[data-testid="composer"],[data-testid="thread-composer"],[data-testid="conversation-turn"]'),
-    loading: native('[role="progressbar"],[data-testid="loading-spinner"],[aria-busy="true"]'),
+    hasNativeSurface: !recoveryAction && (composer || (shell && !loading)),
+    loading,
     adapterFailures: Array.isArray(window.__alunixaXModelPatchFailures) ? window.__alunixaXModelPatchFailures.length : 0,
     rootChildren: (document.getElementById('root') || document.getElementById('app'))?.childElementCount ?? 0
   };
 })()"#;
+
+// Uses the preload IPC contract, not an AX injection global or a dynamically
+// imported app module (either can be unavailable during a native white screen).
+// Only enum metadata leaves the renderer; never return error text or config.
+const LOCAL_APP_SERVER_RECOVERY_SCRIPT: &str = r#"(async () => {
+  const bridge = window.electronBridge;
+  if (typeof bridge?.sendMessageFromView !== 'function') return JSON.stringify({ status: 'unavailable', state: 'unknown' });
+  const marker = '__alunixaXNativeStartupRecovery';
+  const runtime = window[marker] ||= { attempted: false, outcome: 'not_requested' };
+  const query = () => new Promise(resolve => {
+    const requestId = `ax-startup-${globalThis.crypto.randomUUID()}`;
+    let timer;
+    let settled = false;
+    const finish = value => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(value);
+    };
+    const onMessage = event => {
+      const message = event?.data;
+      if (message?.type !== 'fetch-response' || message.requestId !== requestId) return;
+      if (message.responseType !== 'success') return finish(null);
+      try { finish(JSON.parse(message.bodyJsonString)); } catch { finish(null); }
+    };
+    window.addEventListener('message', onMessage);
+    timer = window.setTimeout(() => finish(null), 2000);
+    try {
+      Promise.resolve(bridge.sendMessageFromView({
+        type: 'fetch', requestId, method: 'POST',
+        url: 'vscode://codex/app-server-connection-state',
+        body: JSON.stringify({ hostId: 'local' })
+      })).catch(() => finish(null));
+    } catch { finish(null); }
+  });
+  const raw = await query();
+  const state = ['connected', 'connecting', 'restarting', 'disconnected', 'error'].includes(raw?.state) ? raw.state : 'unknown';
+  const code = raw?.error?.code;
+  const errorCode = code == null ? null : ['connection-failed', 'restart-required', 'login-required', 'update-required'].includes(code) ? code : 'other';
+  const report = status => JSON.stringify({ status, state, errorCode });
+  if (state === 'connected') return report('connected');
+  // A login/version/config problem is not a stalled transport. Do not loop it.
+  if (state === 'unknown' || (errorCode != null && !['connection-failed', 'restart-required'].includes(errorCode))) return report('unavailable');
+  if (runtime.attempted) return report(runtime.outcome);
+  if (state === 'restarting') return report('already_restarting');
+  if (state === 'error' && errorCode == null) return report('unavailable');
+  // Claim before invoking IPC, so concurrent checks cannot dispatch twice.
+  runtime.attempted = true;
+  runtime.outcome = 'requested';
+  try {
+    Promise.resolve(bridge.sendMessageFromView({
+      type: 'codex-app-server-restart', hostId: 'local', intent: 'restart', errorMessage: null
+    })).then(() => { runtime.outcome = 'completed'; }, () => { runtime.outcome = 'failed'; });
+  } catch { runtime.outcome = 'failed'; }
+  return report(runtime.outcome);
+})()"#;
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeRecoveryObservation {
+    status: String,
+    state: String,
+    error_code: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,34 +325,178 @@ pub async fn inspect(status: Option<&crate::status::LaunchStatus>) -> RuntimeHea
     report
 }
 
-pub async fn wait_for_native_ui(debug_port: u16) -> anyhow::Result<()> {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-    loop {
-        let view = probe_renderer(debug_port).await.ok();
-        if view.as_ref().is_some_and(RendererHealth::ready) {
-            return Ok(());
-        }
-        if tokio::time::Instant::now() >= deadline {
-            let first_error = first_renderer_error(debug_port);
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.native_ui_unconfirmed",
-                serde_json::json!({"stage": "native_renderer", "observation": view, "firstError": first_error}),
-            );
-            if let Some(error) = first_error {
-                anyhow::bail!(
-                    "原生界面未就绪；首次捕获异常：{}，{}:{}:{}；请查看启动诊断或关闭增强后重试",
-                    error.kind,
-                    error.asset,
-                    error.line,
-                    error.column
-                );
+async fn wait_for_native_ui_until(
+    debug_port: u16,
+    deadline: tokio::time::Instant,
+) -> Option<RendererHealth> {
+    wait_for_native_ui_with(deadline, || probe_renderer(debug_port)).await
+}
+
+async fn wait_for_native_ui_with<P, F>(
+    deadline: tokio::time::Instant,
+    mut probe: P,
+) -> Option<RendererHealth>
+where
+    P: FnMut() -> F,
+    F: std::future::Future<Output = anyhow::Result<RendererHealth>>,
+{
+    let mut last_view = None;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout_at(deadline, probe()).await {
+            Ok(Ok(view)) => {
+                let ready = view.ready();
+                last_view = Some(view);
+                if ready {
+                    return last_view;
+                }
             }
-            anyhow::bail!(
-                "原生界面初始化未通过：菜单注入不等于界面可用；请检查启动诊断或关闭增强后重试"
+            Ok(Err(_)) => {}
+            Err(_) => break,
+        }
+        tokio::time::sleep_until(
+            (tokio::time::Instant::now() + Duration::from_millis(700)).min(deadline),
+        )
+        .await;
+    }
+    last_view
+}
+
+async fn request_local_app_server_restart(
+    debug_port: u16,
+) -> anyhow::Result<NativeRecoveryObservation> {
+    let targets = crate::cdp::list_targets(debug_port).await?;
+    let target = crate::cdp::pick_injectable_codex_page_target(&targets)?;
+    let socket = target
+        .web_socket_debugger_url
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("CDP target unavailable"))?;
+    let reply = tokio::time::timeout(
+        Duration::from_secs(6),
+        crate::bridge::evaluate_script_with_await_promise(
+            socket,
+            LOCAL_APP_SERVER_RECOVERY_SCRIPT,
+            true,
+        ),
+    )
+    .await??;
+    let value = reply
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("app-server recovery returned no result"))?;
+    let result: NativeRecoveryObservation = serde_json::from_str(value)?;
+    if ![
+        "unavailable",
+        "connected",
+        "already_restarting",
+        "requested",
+        "completed",
+        "failed",
+    ]
+    .contains(&result.status.as_str())
+        || ![
+            "unknown",
+            "connected",
+            "connecting",
+            "restarting",
+            "disconnected",
+            "error",
+        ]
+        .contains(&result.state.as_str())
+        || result.error_code.as_deref().is_some_and(|code| {
+            ![
+                "connection-failed",
+                "restart-required",
+                "login-required",
+                "update-required",
+                "other",
+            ]
+            .contains(&code)
+        })
+    {
+        anyhow::bail!("app-server recovery returned invalid metadata");
+    }
+    Ok(result)
+}
+
+pub async fn wait_for_native_ui(debug_port: u16) -> anyhow::Result<()> {
+    let initial = wait_for_native_ui_until(
+        debug_port,
+        tokio::time::Instant::now() + Duration::from_secs(10),
+    )
+    .await;
+    if initial.as_ref().is_some_and(RendererHealth::ready) {
+        return Ok(());
+    }
+
+    let mut observation = None;
+    // A renderer exception does not prove the backend is healthy. Probe the
+    // actual native connection, and restart only an eligible local transport.
+    match tokio::time::timeout(
+        Duration::from_secs(8),
+        request_local_app_server_restart(debug_port),
+    )
+    .await
+    {
+        Ok(Ok(result)) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.local_app_server_recovery_observed",
+                serde_json::json!({"stage": "app_server", "observation": result}),
+            );
+            observation = Some(result);
+        }
+        _ => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.local_app_server_restart_unavailable",
+                serde_json::json!({"stage": "app_server"}),
             );
         }
-        tokio::time::sleep(Duration::from_millis(700)).await;
     }
+    let recovery_attempted = observation.as_ref().is_some_and(|result| {
+        matches!(result.status.as_str(), "requested" | "completed" | "failed")
+    });
+    // Wait even when IPC was unavailable or the backend was already connected:
+    // a slowly rendering UI must not be turned into another restart loop.
+    let recovered = wait_for_native_ui_until(
+        debug_port,
+        tokio::time::Instant::now() + Duration::from_secs(25),
+    )
+    .await;
+    if recovered.as_ref().is_some_and(RendererHealth::ready) {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "launcher.native_ui_recovered",
+            serde_json::json!({"stage": "native_renderer", "appServerRecoveryAttempted": recovery_attempted}),
+        );
+        return Ok(());
+    }
+
+    let first_error = first_renderer_error(debug_port);
+    let final_view = recovered.or(initial);
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "launcher.native_ui_unconfirmed",
+        serde_json::json!({
+            "stage": "native_renderer",
+            "observation": final_view,
+            "firstError": first_error.clone(),
+            "appServerRecoveryAttempted": recovery_attempted
+        }),
+    );
+    if let Some(error) = first_error {
+        anyhow::bail!(
+            "原生界面未就绪；首次捕获异常：{}，{}:{}:{}；Codex 已保留打开，请查看启动诊断后重试",
+            error.kind,
+            error.asset,
+            error.line,
+            error.column
+        );
+    }
+    if recovery_attempted {
+        anyhow::bail!(
+            "已请求 Codex 内置 app-server 重启，但界面仍未确认；窗口已保留，可在原生错误页点击 Try again"
+        );
+    }
+    anyhow::bail!(
+        "原生界面尚未确认，未自动重启本地 app-server（已连接、正在重启或状态不支持/无法确认）；窗口已保留，可在原生错误页点击 Try again"
+    )
 }
 
 #[cfg(test)]
@@ -328,5 +544,48 @@ mod tests {
             sanitized_renderer_error(&external).unwrap().asset,
             "unattributed-script"
         );
+    }
+
+    #[tokio::test]
+    async fn native_wait_retains_last_observation_at_deadline() {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(20);
+        let result = wait_for_native_ui_with(deadline, || async {
+            Ok(RendererHealth {
+                ready_state: "complete".into(),
+                has_electron_bridge: true,
+                has_native_surface: false,
+                loading: true,
+                adapter_failures: 0,
+                root_children: 2,
+            })
+        })
+        .await
+        .expect("deadline must preserve the last successful non-ready observation");
+        assert!(result.loading);
+        assert_eq!(result.root_children, 2);
+        assert!(!result.ready());
+    }
+
+    #[tokio::test]
+    async fn native_wait_bounds_a_hanging_probe() {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(20);
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            wait_for_native_ui_with(deadline, || {
+                std::future::pending::<anyhow::Result<RendererHealth>>()
+            }),
+        )
+        .await
+        .expect("probe must respect the overall deadline");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn recovery_uses_native_app_server_restart_without_process_termination() {
+        assert!(LOCAL_APP_SERVER_RECOVERY_SCRIPT.contains("app-server-connection-state"));
+        assert!(LOCAL_APP_SERVER_RECOVERY_SCRIPT.contains("codex-app-server-restart"));
+        assert!(!LOCAL_APP_SERVER_RECOVERY_SCRIPT.contains("__alunixaXRecoverLocalAppServer"));
+        assert!(!LOCAL_APP_SERVER_RECOVERY_SCRIPT.contains("TerminateProcess"));
+        assert!(!LOCAL_APP_SERVER_RECOVERY_SCRIPT.contains("taskkill"));
     }
 }

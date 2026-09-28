@@ -1,5 +1,27 @@
 # 启动与能力配置排查
 
+## v1.0.29 白屏与闪退补充证据
+
+- **AX 闪退根因已确认**：v1.0.28 已成功加载 renderer 注入、模型目录、dispatcher 和壁纸后，`wait_for_native_ui` 在 20 秒内未找到原生 composer，返回验证错误；启动流程此前已把 `keep_launched_on_error` 设为 `false`，错误清理随后对打包激活取得的 `ChatGPT.exe` 主 PID 调用 `TerminateProcess`。日志中的 `renderer.startup_model_injection_ready`、`renderer.service_tier_dispatcher_patch_installed`、`launcher.native_ui_unconfirmed` 与最终 failed 状态按顺序对应，窗口退出是 AX 主动清理，不是未证实的随机崩溃。
+- **官方直接启动的白屏原因仍未确认**：用户稳定复现为直接启动也白屏，手动结束其子 `codex.exe` 后出现原生错误页，点击 `Try again` 恢复。只读进程时间证据显示主 `ChatGPT.exe` 先启动，当前工作的 app-server `codex.exe` 是用户重试后才生成；这证明后台生命周期可恢复，但不能据此断定首次 app-server 为什么卡住。
+原生恢复契约已核实：对当前安装 `app.asar` 的 preload、主进程 fetch handler、连接注册表和 restart 实现做只读核对。恢复不再依赖增强注入成功或动态导入的 dispatcher，而是通过 `electronBridge.sendMessageFromView` 查询 `vscode://codex/app-server-connection-state`。该端点直接解构 JSON body，必须传 `{hostId: "local"}`，不能包装成 `{params: ...}`；嵌套错误会误查未定义主机并返回 disconnected，已通过失败→修复通过的协议回归纠正。符合恢复条件时发送与原生 Try again 相同的 `codex-app-server-restart`，使用 `hostId: "local"`、`intent: "restart"`、`errorMessage: null`，不直接调用 OS 终止进程接口。
+
+2026-09-28 最终源码生命周期取代早期说明：正式启动入口 `LauncherHooks` 已补齐 `wait_for_native_ui` 委托，避免 trait 默认空实现绕过恢复。启用增强时，不论注入是否成功，都进入有界原生健康确认：先等 UI 最多 10 秒，再以最多 8 秒外层等待查询实际连接，仅对 connecting/disconnected 或 connection-failed/restart-required 尝试一次本地恢复，随后再等 UI 最多 25 秒。connected、restarting、登录/升级/未知错误不重启；renderer 异常本身不作为禁止查询后台的依据。并发检查不会重复派发；IPC 返回 requested/completed 不是界面成功证据，只有真实原生 DOM 满足健康条件才成功。关闭增强时保留不自动恢复的边界，启动消息明确说明原生界面未验证，不再宣称 launcher ready。
+
+Codex 创建成功后的注入、验证、watchdog、原生 UI 和状态持久化失败均保留窗口及 LaunchHandle，以 running_degraded 描述未完成阶段，不再转入终止桌面的清理路径；Helper 可能承载协议代理，必须一起保留。多个降级阶段累计记录，诊断仅保存固定阶段、白名单枚举及布尔值。启动前配置审计或真正创建进程失败仍返回错误。状态文件无法写入时不能承诺磁盘状态已刷新，只能保留句柄并报告固定诊断。Windows PID 等待失败改为继续进程/CDP存活确认；LaunchHandle 的等待错误会重试，不能把等待API失败当成自然退出而提前关闭Helper。
+- **界面判定**：composer、主页、设置、登录、导航和侧栏壳层可证明原生 UI 存在；spinner、`aria-busy`、AX 自身 DOM、隐藏元素和带 `Try again` / `Retry` / 中俄重试文案的错误页不会冒充成功。
+- **边界**：没有重启当前已经恢复的真实任务，也没有在活动会话上热触发 app-server restart；因此新二进制的真实直接启动/AX 启动对照仍需安装后现场验证。源码回归和实际包契约不等同于该现场复测。
+
+## 2026-09-28 本轮隔离验证与剩余门禁
+
+最终源码的 `cargo test -p alunixa-x-core --locked -j 2` 明确退出 0：含 doc-tests 共 30 个结果块，合计 1027 passed、0 failed、1 ignored。其中核心单元 363 passed/1 ignored、launcher 集成 86 passed；新增正式入口委托、等待截止保留最后观测、挂起探针超时、Helper 等待错误保活均通过。生产 launcher 包另跑 6 项测试通过，`cargo check -p alunixa-x-launcher --locked -j 2` 和本轮四个 Rust 文件的定向 rustfmt 检查通过。此处是 Linux 隔离环境结果，不是 Windows cfg 分支执行或完整 workspace/三平台门禁；没有新增忽略项。
+
+前端 139 项测试、TypeScript、英俄字典和占位符检查通过：普通键各 916/916、模板各 80/80、俄语后端 106/106、后端正则英俄各 80/80。使用原 package-lock 在临时目录执行 npm ci 后，生产 Vite 构建通过；未修改用户现有 node_modules 或锁文件。最新构建的完整 `verify-agent-health-ui.py` 在隔离 Chromium 通过，覆盖原生加载/AX覆盖层/隐藏DOM/重复或翻译 aria-label 的重试错误页，以及 Fast/Goals 磁盘默认、即时保存未提交编辑、失败回滚、外部配置变化、代理入口门控和窄窗。这些 UI 测试使用模拟后端，不写真实配置、注册表或运行实例。
+
+仍未完成的是 Windows 新二进制直接启动与 AX 启动对照、真实白屏恢复及首个后台卡住原因、模型请求和正式安装包/三平台发行。本轮没有安装、发布或重启真实 Codex，没有对活动窗口热注入恢复消息，没有删除 auth、会话或重置用户配置。仅可将本轮称为源码修复与隔离回归完成，不能称现场故障已全部解决。
+
+本轮未创建 Git 提交：现有 `.git/index.lock` 阻塞正常暂存，未擅自删除该锁或修改当前索引/分支。已在独立临时索引核验基于 `6a7b223` 的定向补丁，只含本轮 11 个源码、测试及报告文件，排除行尾噪声、XJ/YHYQ、配置、凭据和临时输出；补丁保存于本地 `.tmp/startup-recovery-2026-09-28.patch`。恢复正常仓库写入后应先检查并发操作，再提交这 11 个路径。回退应优先使用提交后的定向 revert；当前未提交补丁只能在确认后续改动无冲突并通过反向应用检查后定向撤销，不使用 reset --hard，不覆盖凭据。
+
 ## 证据边界
 
 | 问题 | 已有证据 | 尚未确认 |

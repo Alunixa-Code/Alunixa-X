@@ -117,14 +117,27 @@ impl std::fmt::Debug for LaunchHandle {
 
 impl LaunchHandle {
     pub async fn wait_for_codex_exit(&self) -> anyhow::Result<()> {
-        let result = self
-            .hooks
-            .wait_for_codex_exit(&self.launch, self.debug_port)
-            .await;
+        loop {
+            if self
+                .hooks
+                .wait_for_codex_exit(&self.launch, self.debug_port)
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            // A failed wait is not proof of process exit. Keep the launcher and
+            // its protocol helper alive and retry instead of tearing them down.
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.process_wait_retry",
+                serde_json::json!({"processExitConfirmed": false}),
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
         if self.helper_started {
             self.hooks.shutdown_helper(self.helper_port).await;
         }
-        result
+        Ok(())
     }
 }
 
@@ -249,6 +262,9 @@ pub trait LaunchHooks: Send + Sync {
     ) -> anyhow::Result<()> {
         Ok(())
     }
+    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn start_bridge_watchdog(
         &self,
         _debug_port: u16,
@@ -328,8 +344,6 @@ where
         &app_dir,
     ))?;
     let mut helper_started = false;
-    let mut launched = None;
-    let mut keep_launched_on_error = false;
 
     let result: anyhow::Result<LaunchHandle> = async {
         let home = crate::relay_config::default_codex_home_dir();
@@ -460,7 +474,8 @@ where
             settings.codex_app_instructions_enabled,
             &settings.codex_app_instructions,
         )
-        .context("failed to restore Codex advanced instructions before launch")? {
+        .context("failed to restore Codex advanced instructions before launch")?
+        {
             let _ = crate::diagnostic_log::append_diagnostic_log(
                 "launcher.model_instructions_restored",
                 serde_json::json!({ "checkedBeforeLaunch": true }),
@@ -479,46 +494,93 @@ where
         let launch = hooks
             .launch_codex(&app_dir, debug_port, &settings, &settings.codex_extra_args)
             .await?;
-        launched = Some(launch.clone());
-        keep_launched_on_error = true;
-        if settings.computer_use_guard_enabled {
-            hooks.start_computer_use_guard_watchdog(&settings).await?;
-        }
+        // Once Codex has started, post-launch enhancement or status-persistence
+        // failures must not terminate the desktop process or stop its helper.
+        // The returned handle retains the helper until natural Codex exit.
 
+        let mut final_status = "running";
+        // With enhancements explicitly off, respect the no-recovery boundary.
+        // Running describes process lifecycle, not verified native UI readiness.
+        let mut final_message = if settings.enhancements_enabled {
+            "Alunixa X launcher ready"
+        } else {
+            "Codex 已启动；增强已关闭，原生界面未验证，未自动重启 app-server"
+        }
+        .to_string();
+        if settings.computer_use_guard_enabled {
+            if hooks
+                .start_computer_use_guard_watchdog(&settings)
+                .await
+                .is_err()
+            {
+                mark_post_launch_degraded(
+                    &mut final_status,
+                    &mut final_message,
+                    "computer-use guard watchdog",
+                );
+            }
+        }
         if settings.enhancements_enabled {
             let injection_ready = hooks
                 .ensure_injection(debug_port, helper_port, &app_dir)
                 .await;
             if injection_ready {
-                keep_launched_on_error = false;
-                hooks
+                if hooks
                     .verify_startup_injection(debug_port, helper_port, &settings)
                     .await
-                    .context("Alunixa X startup injection verification failed")?;
+                    .is_err()
+                {
+                    mark_post_launch_degraded(
+                        &mut final_status,
+                        &mut final_message,
+                        "startup injection verification",
+                    );
+                } else if hooks
+                    .start_bridge_watchdog(debug_port, helper_port)
+                    .await
+                    .is_err()
+                {
+                    mark_post_launch_degraded(
+                        &mut final_status,
+                        &mut final_message,
+                        "bridge watchdog",
+                    );
+                }
                 // 注入成功后页面已加载，此时可以通过 CDP 清理 Electron Local Storage
                 // 中残留的带后缀模型名，避免模型选择器继续显示废弃项。
                 crate::codex_local_storage::sanitize_local_storage_model_suffixes_nonfatal(
                     debug_port,
                 )
                 .await;
-                hooks.start_bridge_watchdog(debug_port, helper_port).await?;
             } else {
-                keep_launched_on_error = false;
-                anyhow::bail!(
-                    "Alunixa X startup injection failed; Codex was closed to avoid running with stale provider or model state"
+                mark_post_launch_degraded(
+                    &mut final_status,
+                    &mut final_message,
+                    "startup injection",
                 );
+            }
+
+            // Native UI recovery is independent of enhancement injection and its
+            // verification. Try the bounded native restart even when injection
+            // timed out, without claiming the enhancement bridge is ready.
+            if hooks.wait_for_native_ui(debug_port).await.is_err() {
+                mark_post_launch_degraded(&mut final_status, &mut final_message, "native Codex UI");
             }
         }
 
         let status = launch_status(
-            "running",
-            "Alunixa X launcher ready",
+            final_status,
+            &final_message,
             debug_port,
             helper_port,
             &app_dir,
         );
-        options.status_store.save_latest(&status)?;
-        hooks.write_status("running").await;
+        if options.status_store.save_latest(&status).is_err() {
+            // The helper may also carry the active protocol proxy. A failed
+            // status write must not tear down an otherwise launched session.
+            mark_post_launch_degraded(&mut final_status, &mut final_message, "status persistence");
+        }
+        hooks.write_status(final_status).await;
 
         Ok(LaunchHandle {
             debug_port,
@@ -538,12 +600,8 @@ where
             if helper_started {
                 hooks.shutdown_helper(helper_port).await;
             }
-            if let Some(launch) = &launched {
-                if !keep_launched_on_error {
-                    hooks.terminate_codex(launch).await;
-                }
-            }
-            // Preserve the initialization stage and nested cause in the failure shown by AX.
+            // Only pre-launch errors reach this branch; preserve their stage
+            // and nested cause in the failure shown by AX.
             let message = format!("{error:#}");
             let failure = launch_status("failed", &message, debug_port, helper_port, &app_dir);
             let _ = status_store.save_latest(&failure);
@@ -555,6 +613,27 @@ where
 
 fn relay_protocol_proxy_enabled(settings: &BackendSettings) -> bool {
     settings.active_relay_uses_protocol_proxy()
+}
+
+fn mark_post_launch_degraded(status: &mut &'static str, message: &mut String, stage: &'static str) {
+    if *status == "running_degraded" {
+        // Preserve earlier failures when another independent stage degrades.
+        message.push_str(&format!(" 另有未完成阶段：{stage}。"));
+    } else {
+        *message = format!(
+            "Codex 已启动，但以下启动阶段未完成：{stage}。窗口已保留，将继续等待 Codex 自然退出；增强功能或原生界面可能尚未就绪。可在原生错误页点击 Try again 继续恢复。"
+        );
+    }
+    *status = "running_degraded";
+    // Only fixed stage identifiers and booleans belong in degraded diagnostics;
+    // upstream errors can contain local paths, tokens, or renderer content.
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "launcher.post_launch_degraded",
+        serde_json::json!({
+            "stage": stage,
+            "processPreserved": true
+        }),
+    );
 }
 
 fn imagegen_mcp_executable_path(launcher_path: &Path) -> PathBuf {
@@ -1216,6 +1295,9 @@ impl LaunchHooks for DefaultLaunchHooks {
     ) -> anyhow::Result<()> {
         verify_startup_model_injection(debug_port, helper_port, settings).await
     }
+    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
+        crate::runtime_health::wait_for_native_ui(debug_port).await
+    }
     async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         let reconnect: BridgeReconnectHandler = Arc::new(move || {
             Box::pin(async move {
@@ -1296,7 +1378,14 @@ impl LaunchHooks for DefaultLaunchHooks {
             }
             CodexLaunch::PackagedActivation { process_id, .. } => {
                 if let Some(process_id) = process_id {
-                    wait_for_windows_process_id(*process_id).await?;
+                    if wait_for_windows_process_id(*process_id).await.is_err() {
+                        // A PID can disappear before OpenProcess, or its wait
+                        // handle can fail. Confirm liveness below in either case.
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "launcher.packaged_process_wait_fallback",
+                            serde_json::json!({"processExitConfirmed": false}),
+                        );
+                    }
                 }
             }
         }
@@ -3778,7 +3867,7 @@ async fn verify_startup_model_injection(
             anyhow::bail!("Alunixa X startup model unlock adapters were not installed");
         }
     }
-    crate::runtime_health::wait_for_native_ui(debug_port).await
+    Ok(())
 }
 
 fn runtime_evaluate_result_is_true(result: &Value) -> bool {
@@ -4603,6 +4692,57 @@ mod tests {
         assert!(should_probe_launcher_cdp(true, false));
         assert!(!should_probe_launcher_cdp(true, true));
         assert!(!should_probe_launcher_cdp(false, false));
+    }
+
+    #[test]
+    fn post_launch_failures_are_reported_as_degraded_without_close_message() {
+        let mut status = "running";
+        let mut message = "Alunixa X launcher ready".to_string();
+
+        mark_post_launch_degraded(&mut status, &mut message, "startup injection verification");
+
+        assert_eq!(status, "running_degraded");
+        assert!(message.contains("窗口已保留"));
+        assert!(message.contains("自然退出"));
+        assert!(message.contains("Try again"));
+        assert!(message.contains("startup injection verification"));
+        assert!(!message.contains("原因："));
+        assert!(!message.contains("launcher ready"));
+        assert!(!message.contains("terminate"));
+        assert!(!message.contains("关闭"));
+    }
+
+    #[test]
+    fn post_launch_failure_status_can_be_used_after_injection_timeout() {
+        let mut status = "running";
+        let mut message = "Alunixa X launcher ready".to_string();
+
+        mark_post_launch_degraded(&mut status, &mut message, "startup injection");
+
+        assert_eq!(status, "running_degraded");
+        assert!(message.contains("已启动"));
+        assert!(message.contains("窗口已保留"));
+    }
+
+    #[test]
+    fn post_launch_degraded_status_preserves_all_failed_stages_in_order() {
+        let mut status = "running";
+        let mut message = "Alunixa X launcher ready".to_string();
+
+        mark_post_launch_degraded(&mut status, &mut message, "startup injection");
+        let first_message = message.clone();
+        mark_post_launch_degraded(&mut status, &mut message, "native Codex UI");
+        mark_post_launch_degraded(&mut status, &mut message, "status persistence");
+
+        assert_eq!(status, "running_degraded");
+        assert!(message.starts_with(&first_message));
+        assert!(
+            message.find("startup injection").unwrap() < message.find("native Codex UI").unwrap()
+        );
+        assert!(
+            message.find("native Codex UI").unwrap() < message.find("status persistence").unwrap()
+        );
+        assert!(!message.contains("launcher ready"));
     }
 
     #[test]

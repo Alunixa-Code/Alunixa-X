@@ -603,6 +603,10 @@ impl LaunchHooks for LauncherHooks {
             .await
     }
 
+    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
+        self.core.wait_for_native_ui(debug_port).await
+    }
+
     async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         let bridge_context = self
             .bridge_context

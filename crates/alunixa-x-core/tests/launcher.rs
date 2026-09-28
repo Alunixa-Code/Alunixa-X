@@ -8,7 +8,7 @@ use alunixa_x_core::app_paths::{
     resolve_codex_app_dir_with_saved, user_data_candidates_from,
 };
 use alunixa_x_core::launcher::{
-    CodexLaunch, DefaultLaunchHooks, LaunchHooks, LaunchOptions, MacosCleanupPolicy,
+    CodexLaunch, DefaultLaunchHooks, LaunchHandle, LaunchHooks, LaunchOptions, MacosCleanupPolicy,
     build_codex_arguments, build_codex_arguments_for_settings,
     build_codex_arguments_with_native_menu_inspector, build_codex_command,
     build_codex_command_with_native_menu_inspector, build_macos_cleanup_command,
@@ -25,6 +25,14 @@ use alunixa_x_core::ports::{
 use alunixa_x_core::settings::{BackendSettings, RelayMode, RelayProfile, RelayProtocol};
 use alunixa_x_core::status::StatusStore;
 use futures_util::StreamExt;
+
+#[test]
+fn production_launcher_delegates_native_ui_recovery_to_core() {
+    let source = include_str!("../../../apps/alunixa-x-launcher/src/main.rs").replace("\r\n", "\n");
+    assert!(source.contains(
+        "async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {\n        self.core.wait_for_native_ui(debug_port).await\n    }"
+    ));
+}
 
 #[test]
 fn app_paths_find_latest_windows_package_prefers_highest_version_app_dir() {
@@ -1064,6 +1072,9 @@ async fn launch_lifecycle_runs_enabled_maintenance_and_applies_reloaded_relay_pr
             "launch:9229",
             "computer-use-guard-watchdog",
             "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
             "status:running",
             "wait-codex",
             "shutdown-helper:57321",
@@ -1187,6 +1198,9 @@ async fn launch_lifecycle_keeps_js_injection_in_relay_mode() {
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
             "status:running",
             "wait-codex",
             "shutdown-helper:57321",
@@ -1231,6 +1245,9 @@ async fn launch_lifecycle_skips_helper_and_injection_when_enhancements_disabled(
             "wait-codex",
         ]
     );
+    let status = handle.status_store.load_latest().unwrap().unwrap();
+    assert!(status.message.contains("原生界面未验证"));
+    assert!(!status.message.contains("launcher ready"));
 }
 
 #[tokio::test]
@@ -1270,6 +1287,9 @@ async fn launch_lifecycle_runs_computer_use_guard_when_enabled() {
             "launch:9229",
             "computer-use-guard-watchdog",
             "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
             "status:running",
             "wait-codex",
             "shutdown-helper:57321",
@@ -1468,8 +1488,77 @@ experimental_bearer_token = "sk-test"
     assert!(events.contains(&"launch:9229".to_string()));
 }
 
+async fn assert_helper_lives_until_codex_exit(
+    handle: &LaunchHandle,
+    events: &Arc<Mutex<Vec<String>>>,
+) {
+    let shutdown = format!("shutdown-helper:{}", handle.helper_port);
+    let before_wait = events.lock().unwrap().clone();
+    assert!(!before_wait.contains(&shutdown));
+    assert!(
+        !before_wait
+            .iter()
+            .any(|event| event.starts_with("terminate-"))
+    );
+    assert!(!before_wait.contains(&"wait-codex".to_string()));
+
+    handle.wait_for_codex_exit().await.unwrap();
+
+    let after_wait = events.lock().unwrap().clone();
+    assert_eq!(&after_wait[..before_wait.len()], before_wait.as_slice());
+    assert_eq!(
+        &after_wait[before_wait.len()..],
+        &["wait-codex".to_string(), shutdown]
+    );
+    assert!(
+        !after_wait
+            .iter()
+            .any(|event| event.starts_with("terminate-"))
+    );
+}
+
 #[tokio::test]
-async fn launch_lifecycle_fails_and_terminates_codex_when_injection_fails() {
+async fn failed_process_wait_keeps_helper_until_exit_is_confirmed() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone());
+    *hooks.wait_failures.lock().unwrap() = 1;
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: StatusStore::new(temp.path().join("latest-status.json")),
+        },
+        &hooks,
+    )
+    .await
+    .unwrap();
+    let before_wait = events.lock().unwrap().len();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        handle.wait_for_codex_exit(),
+    )
+    .await
+    .expect("the second wait confirms exit")
+    .unwrap();
+    assert_eq!(
+        &events.lock().unwrap()[before_wait..],
+        &["wait-codex", "wait-codex", "shutdown-helper:57321"]
+    );
+}
+
+#[test]
+fn packaged_wait_error_falls_through_to_process_liveness_confirmation() {
+    let source = include_str!("../src/launcher.rs");
+    assert!(source.contains("wait_for_windows_process_id(*process_id).await.is_err()"));
+    assert!(!source.contains("wait_for_windows_process_id(*process_id).await?"));
+}
+
+#[tokio::test]
+async fn launch_lifecycle_degrades_and_recovers_native_ui_when_injection_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1477,7 +1566,7 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_injection_fails() {
     let events = Arc::new(Mutex::new(Vec::<String>::new()));
     let hooks = FakeHooks::new(events.clone()).with_inject_error("inject failed");
 
-    let error = launch_and_inject_with_hooks(
+    let handle = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -1487,9 +1576,8 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_injection_fails() {
         &hooks,
     )
     .await
-    .unwrap_err();
+    .expect("injection timeout must preserve Codex and its helper");
 
-    assert!(error.to_string().contains("startup injection failed"));
     assert_eq!(
         *events.lock().unwrap(),
         vec![
@@ -1500,26 +1588,30 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_injection_fails() {
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
-            "shutdown-helper:57321",
-            "terminate-codex",
-            "status:failed",
+            "wait-native-ui",
+            "status:running_degraded",
         ]
     );
     let status = status_store.load_latest().unwrap().unwrap();
-    assert_eq!(status.status, "failed");
-    assert!(status.message.contains("startup injection failed"));
+    assert_eq!(status.status, "running_degraded");
+    assert!(status.message.contains("startup injection"));
+    assert!(status.message.contains("窗口已保留"));
+    assert!(!status.message.contains("inject failed"));
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
 }
 
 #[tokio::test]
-async fn launch_lifecycle_fails_and_terminates_codex_when_startup_verification_fails() {
+async fn launch_lifecycle_degrades_without_watchdog_when_startup_verification_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
     let status_store = StatusStore::new(temp.path().join("latest-status.json"));
     let events = Arc::new(Mutex::new(Vec::<String>::new()));
-    let hooks = FakeHooks::new(events.clone()).with_verify_error("model unlock adapter missing");
+    let hooks = FakeHooks::new(events.clone())
+        .with_verify_error("model unlock adapter missing: sk-private-test")
+        .with_bridge_watchdog_error("watchdog must not run after failed verification");
 
-    let error = launch_and_inject_with_hooks(
+    let handle = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -1529,13 +1621,8 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_startup_verification_f
         &hooks,
     )
     .await
-    .unwrap_err();
+    .expect("verification failure must preserve Codex and its helper");
 
-    assert!(
-        error
-            .to_string()
-            .contains("startup injection verification failed")
-    );
     assert_eq!(
         *events.lock().unwrap(),
         vec![
@@ -1547,18 +1634,206 @@ async fn launch_lifecycle_fails_and_terminates_codex_when_startup_verification_f
             "launch:9229",
             "inject:9229:57321",
             "verify-injection",
-            "shutdown-helper:57321",
-            "terminate-codex",
+            "wait-native-ui",
+            "status:running_degraded",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "running_degraded");
+    assert!(status.message.contains("startup injection verification"));
+    assert!(!status.message.contains("model unlock adapter missing"));
+    assert!(!status.message.contains("sk-private-test"));
+    assert!(!status.message.contains("bridge watchdog"));
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
+}
+
+#[tokio::test]
+async fn launch_lifecycle_keeps_codex_open_when_native_ui_recovery_is_degraded() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_native_ui_error("native app-server restart did not become ready");
+
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .expect("native UI timeout must preserve Codex and its helper");
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "start-helper:57321",
+            "launch:9229",
+            "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
+            "status:running_degraded",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "running_degraded");
+    assert!(status.message.contains("native Codex UI"));
+    assert!(status.message.contains("Try again"));
+    assert!(
+        !status
+            .message
+            .contains("native app-server restart did not become ready")
+    );
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
+}
+
+#[tokio::test]
+async fn launch_lifecycle_degrades_when_bridge_watchdog_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_bridge_watchdog_error("bridge reconnect failed: sk-private-test");
+
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .expect("watchdog failure must preserve Codex and its helper");
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "start-helper:57321",
+            "launch:9229",
+            "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
+            "status:running_degraded",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "running_degraded");
+    assert!(status.message.contains("bridge watchdog"));
+    assert!(!status.message.contains("bridge reconnect failed"));
+    assert!(!status.message.contains("sk-private-test"));
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
+}
+
+#[tokio::test]
+async fn launch_lifecycle_preserves_multiple_post_launch_failure_stages() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_settings(BackendSettings {
+            computer_use_guard_enabled: true,
+            ..BackendSettings::default()
+        })
+        .with_computer_use_guard_watchdog_error("guard failed: sk-private-test")
+        .with_inject_error("inject failed: sk-private-test")
+        .with_native_ui_error("native failed: sk-private-test");
+
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .expect("independent post-launch failures must retain the launch handle");
+
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "computer-use-guard",
+            "start-helper:57321",
+            "launch:9229",
+            "computer-use-guard-watchdog",
+            "inject:9229:57321",
+            "wait-native-ui",
+            "status:running_degraded",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "running_degraded");
+    let guard = status.message.find("computer-use guard watchdog").unwrap();
+    let injection = status.message.find("startup injection").unwrap();
+    let native_ui = status.message.find("native Codex UI").unwrap();
+    assert!(guard < injection && injection < native_ui);
+    assert!(!status.message.contains("sk-private-test"));
+    assert!(!status.message.contains("launcher ready"));
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
+}
+
+#[tokio::test]
+async fn launch_lifecycle_stops_before_start_when_config_audit_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_store = StatusStore::new(temp.path().join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone()).with_audit_error("invalid provider config");
+
+    let error = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
+            status_store: status_store.clone(),
+        },
+        &hooks,
+    )
+    .await
+    .expect_err("real configuration errors must still block launch");
+
+    assert!(format!("{error:#}").contains("invalid provider config"));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "audit-startup-config",
             "status:failed",
         ]
     );
     let status = status_store.load_latest().unwrap().unwrap();
     assert_eq!(status.status, "failed");
-    assert!(
-        status
-            .message
-            .contains("startup injection verification failed")
-    );
+    assert!(status.message.contains("invalid provider config"));
 }
 
 #[tokio::test]
@@ -1751,7 +2026,7 @@ async fn launch_lifecycle_stops_before_start_when_initial_status_save_fails() {
 }
 
 #[tokio::test]
-async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
+async fn launch_lifecycle_preserves_packaged_codex_and_helper_when_status_save_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1765,9 +2040,9 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
             arguments: "--remote-debugging-port=9229".to_string(),
             process_id: Some(4242),
         })
-        .with_status_parent_to_break(status_parent);
+        .with_status_parent_to_break(status_parent.clone());
 
-    let error = launch_and_inject_with_hooks(
+    let handle = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -1777,9 +2052,10 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
         &hooks,
     )
     .await
-    .unwrap_err();
+    .expect("a post-launch status write failure must not tear down the session");
 
-    assert!(error.to_string().contains("failed to create directory"));
+    assert_eq!(handle.launch.process_id(), Some(4242));
+    assert!(status_parent.is_file());
     assert_eq!(
         *events.lock().unwrap(),
         vec![
@@ -1790,15 +2066,70 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
-            "shutdown-helper:57321",
-            "terminate-packaged:4242",
-            "status:failed",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
+            "status:running_degraded",
         ]
     );
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
 }
 
 #[tokio::test]
-async fn launch_lifecycle_terminates_packaged_process_when_injection_fails() {
+async fn launch_lifecycle_preserves_protocol_proxy_when_status_save_fails_without_enhancements() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let status_parent = temp.path().join("status-parent");
+    std::fs::create_dir_all(&status_parent).unwrap();
+    let status_store = StatusStore::new(status_parent.join("latest-status.json"));
+    let events = Arc::new(Mutex::new(Vec::<String>::new()));
+    let hooks = FakeHooks::new(events.clone())
+        .with_settings(BackendSettings {
+            enhancements_enabled: false,
+            relay_profiles_enabled: false,
+            active_relay_id: "official-mix".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "official-mix".to_string(),
+                relay_mode: RelayMode::Official,
+                official_mix_api_key: true,
+                protocol: RelayProtocol::Responses,
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        })
+        .with_status_parent_to_break(status_parent.clone());
+
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 58123,
+            status_store,
+        },
+        &hooks,
+    )
+    .await
+    .expect("the active protocol proxy must outlive a failed status write");
+
+    assert_eq!(handle.helper_port, 57321);
+    assert!(status_parent.is_file());
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:58123",
+            "load-settings",
+            "start-helper:57321",
+            "launch:9229",
+            "status:running_degraded",
+        ]
+    );
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
+}
+
+#[tokio::test]
+async fn launch_lifecycle_preserves_packaged_process_when_injection_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -1812,24 +2143,37 @@ async fn launch_lifecycle_terminates_packaged_process_when_injection_fails() {
         })
         .with_inject_error("inject failed");
 
-    let error = launch_and_inject_with_hooks(
+    let handle = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
             helper_port: 57321,
-            status_store,
+            status_store: status_store.clone(),
         },
         &hooks,
     )
     .await
-    .unwrap_err();
+    .expect("injection timeout must preserve a packaged Codex process too");
 
-    assert!(error.to_string().contains("startup injection failed"));
-    let events = events.lock().unwrap().clone();
-    assert!(events.contains(&"shutdown-helper:57321".to_string()));
-    assert!(events.contains(&"terminate-packaged:4242".to_string()));
-    assert!(events.contains(&"status:failed".to_string()));
-    assert!(!events.contains(&"status:running_degraded".to_string()));
+    assert_eq!(handle.launch.process_id(), Some(4242));
+    assert_eq!(
+        *events.lock().unwrap(),
+        vec![
+            "select-debug:9229",
+            "select-helper:57321",
+            "load-settings",
+            "apply-relay",
+            "start-helper:57321",
+            "launch:9229",
+            "inject:9229:57321",
+            "wait-native-ui",
+            "status:running_degraded",
+        ]
+    );
+    let status = status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.status, "running_degraded");
+    assert!(status.message.contains("startup injection"));
+    assert_helper_lives_until_codex_exit(&handle, &events).await;
 }
 
 #[tokio::test]
@@ -1878,6 +2222,9 @@ async fn launch_continues_when_plugin_marketplace_config_fails() {
             "start-helper:57321",
             "launch:9229",
             "inject:9229:57321",
+            "verify-injection",
+            "bridge-watchdog",
+            "wait-native-ui",
             "status:running"
         ]
     );
@@ -1928,9 +2275,14 @@ struct FakeHooks {
     launch_error: Option<String>,
     inject_error: Option<String>,
     verify_error: Option<String>,
+    native_ui_error: Option<String>,
+    bridge_watchdog_error: Option<String>,
+    computer_use_guard_watchdog_error: Option<String>,
+    audit_error: Option<String>,
     provider_sync_unsupported: bool,
     plugin_marketplace_error: Option<String>,
     status_parent_to_break: Option<PathBuf>,
+    wait_failures: Arc<Mutex<usize>>,
 }
 
 impl FakeHooks {
@@ -1946,9 +2298,14 @@ impl FakeHooks {
             launch_error: None,
             inject_error: None,
             verify_error: None,
+            native_ui_error: None,
+            bridge_watchdog_error: None,
+            computer_use_guard_watchdog_error: None,
+            audit_error: None,
             provider_sync_unsupported: false,
             plugin_marketplace_error: None,
             status_parent_to_break: None,
+            wait_failures: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -1969,6 +2326,26 @@ impl FakeHooks {
 
     fn with_verify_error(mut self, message: &str) -> Self {
         self.verify_error = Some(message.to_string());
+        self
+    }
+
+    fn with_native_ui_error(mut self, message: &str) -> Self {
+        self.native_ui_error = Some(message.to_string());
+        self
+    }
+
+    fn with_bridge_watchdog_error(mut self, message: &str) -> Self {
+        self.bridge_watchdog_error = Some(message.to_string());
+        self
+    }
+
+    fn with_computer_use_guard_watchdog_error(mut self, message: &str) -> Self {
+        self.computer_use_guard_watchdog_error = Some(message.to_string());
+        self
+    }
+
+    fn with_audit_error(mut self, message: &str) -> Self {
+        self.audit_error = Some(message.to_string());
         self
     }
 
@@ -2056,6 +2433,18 @@ impl LaunchHooks for FakeHooks {
         Ok(())
     }
 
+    async fn audit_startup_config(
+        &self,
+        _settings: &BackendSettings,
+        _helper_port: u16,
+    ) -> anyhow::Result<()> {
+        if let Some(message) = &self.audit_error {
+            self.event("audit-startup-config");
+            anyhow::bail!(message.clone());
+        }
+        Ok(())
+    }
+
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
         self.event(format!("start-helper:{helper_port}"));
         Ok(())
@@ -2082,6 +2471,12 @@ impl LaunchHooks for FakeHooks {
         if let Some(message) = &self.launch_error {
             anyhow::bail!(message.clone());
         }
+        // Break only after the initial status write and successful fake launch,
+        // including sessions that use the helper solely as a protocol proxy.
+        if let Some(path) = &self.status_parent_to_break {
+            std::fs::remove_dir_all(path).unwrap();
+            std::fs::write(path, "not a directory").unwrap();
+        }
         Ok(self.launch_result.clone())
     }
 
@@ -2095,10 +2490,6 @@ impl LaunchHooks for FakeHooks {
 
     async fn ensure_injection(&self, debug_port: u16, helper_port: u16, _app_dir: &Path) -> bool {
         self.event(format!("inject:{debug_port}:{helper_port}"));
-        if let Some(path) = &self.status_parent_to_break {
-            std::fs::remove_dir_all(path).unwrap();
-            std::fs::write(path, "not a directory").unwrap();
-        }
         self.inject_error.is_none()
     }
 
@@ -2108,8 +2499,16 @@ impl LaunchHooks for FakeHooks {
         _helper_port: u16,
         _settings: &BackendSettings,
     ) -> anyhow::Result<()> {
+        self.event("verify-injection");
         if let Some(message) = &self.verify_error {
-            self.event("verify-injection");
+            anyhow::bail!(message.clone());
+        }
+        Ok(())
+    }
+
+    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> {
+        self.event("wait-native-ui");
+        if let Some(message) = &self.native_ui_error {
             anyhow::bail!(message.clone());
         }
         Ok(())
@@ -2120,6 +2519,10 @@ impl LaunchHooks for FakeHooks {
         _debug_port: u16,
         _helper_port: u16,
     ) -> anyhow::Result<()> {
+        self.event("bridge-watchdog");
+        if let Some(message) = &self.bridge_watchdog_error {
+            anyhow::bail!(message.clone());
+        }
         Ok(())
     }
 
@@ -2128,6 +2531,9 @@ impl LaunchHooks for FakeHooks {
         _settings: &BackendSettings,
     ) -> anyhow::Result<()> {
         self.event("computer-use-guard-watchdog");
+        if let Some(message) = &self.computer_use_guard_watchdog_error {
+            anyhow::bail!(message.clone());
+        }
         Ok(())
     }
 
@@ -2141,6 +2547,11 @@ impl LaunchHooks for FakeHooks {
         _debug_port: u16,
     ) -> anyhow::Result<()> {
         self.event("wait-codex");
+        let mut failures = self.wait_failures.lock().unwrap();
+        if *failures > 0 {
+            *failures -= 1;
+            anyhow::bail!("fixture wait error is not process exit");
+        }
         Ok(())
     }
 

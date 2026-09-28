@@ -3637,8 +3637,12 @@ function OverviewScreen({
             <span>Helper · UI</span>
           </div>
           <small>{runtime?.reason ?? t("等待首次启动")}</small>
-          {overview?.latest_launch?.status === "failed" ?
-            <small role="alert">{overview.latest_launch.message}</small> : null}
+          {overview?.latest_launch?.status === "failed" || overview?.latest_launch?.status === "running_degraded" ?
+            <small role={overview.latest_launch.status === "failed" ? "alert" : "status"}>
+              {overview.latest_launch.status === "running_degraded"
+                ? t("Codex 窗口已保留，但部分启动阶段尚未完成；增强功能或原生界面可能不可用。若出现原生错误页，可点击 Try again。")
+                : overview.latest_launch.message}
+            </small> : null}
           <small>Model request: {runtime?.modelRequest ?? "not_tested"}</small>
         </div>
       </section>
@@ -8459,10 +8463,13 @@ function Badge({ status }: { status: string }) {
 
 function LatestLaunch({ status }: { status: LaunchStatus | null }) {
   if (!status) return <div className="empty">{t("暂无启动状态。")}</div>;
+  const message = status.status === "running_degraded"
+    ? t("Codex 窗口已保留，但部分启动阶段尚未完成；增强功能或原生界面可能不可用。若出现原生错误页，可点击 Try again。")
+    : status.message;
   return (
     <div className="metric-list latest-launch-metrics">
       <Metric className="latest-launch-status" label={t("状态")} value={status.status} />
-      <Metric className="latest-launch-message" label={t("消息")} value={status.message} />
+      <Metric className="latest-launch-message" label={t("消息")} value={message} />
       <Metric label="Debug" value={String(status.debug_port ?? "-")} />
       <Metric label="Helper" value={String(status.helper_port ?? "-")} />
       <Metric className="latest-launch-time" label={t("时间")} value={formatTime(status.started_at_ms)} />

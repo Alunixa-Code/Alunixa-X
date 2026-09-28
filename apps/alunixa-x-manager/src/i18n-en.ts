@@ -98,6 +98,7 @@ export const EN_PLAIN: Record<string, string> = {
   "启动 Agent 轨道": "Launch agent rail",
   "重新扫描": "Scan again",
   "等待首次启动": "Waiting for first launch",
+  "Codex 窗口已保留，但部分启动阶段尚未完成；增强功能或原生界面可能不可用。若出现原生错误页，可点击 Try again。": "The Codex window remains open, but some startup stages did not complete. Enhancements or the native UI may be unavailable. Use Try again if the native error page appears.",
   "Agent 运行轨道": "Agent rail",
   "当前控制链路": "Current control chain",
   "在线": "Online",

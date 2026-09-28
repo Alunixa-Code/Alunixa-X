@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
+import { randomUUID } from "node:crypto";
+
+const healthSource = readFileSync(new URL("../../../crates/alunixa-x-core/src/runtime_health.rs", import.meta.url), "utf8");
+const recoveryScript = healthSource.match(/const LOCAL_APP_SERVER_RECOVERY_SCRIPT: &str = r#"([\s\S]*?)"#;/)?.[1];
+assert.ok(recoveryScript);
 
 const renderer = readFileSync(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
 function source(name: string) {
@@ -61,6 +67,103 @@ test("dispatcher and shared terminal discover both split and legacy layouts with
   await assert.rejects(compile("loadCodexTerminalManager", {
     loadCodexAppModule: async () => ({}), codexTerminalManagerFromModule: compile("codexTerminalManagerFromModule"),
   })(), /unavailable/);
+});
+
+function nativeRecoveryFixture(initial: Record<string, unknown> | null) {
+  let connection = initial;
+  let mode = "normal";
+  const calls: Record<string, any>[] = [];
+  const listeners = new Set<(event: unknown) => void>();
+  const timers = new Map<number, () => void>();
+  let nextTimer = 0;
+  const win: Record<string, any> = {
+    addEventListener: (_: string, fn: (event: unknown) => void) => listeners.add(fn),
+    removeEventListener: (_: string, fn: (event: unknown) => void) => listeners.delete(fn),
+    setTimeout: (fn: () => void) => { timers.set(++nextTimer, fn); return nextTimer; },
+    clearTimeout: (id: number) => timers.delete(id),
+    electronBridge: { sendMessageFromView: (message: Record<string, any>) => {
+      calls.push(message);
+      if (message.type !== "fetch") {
+        if (mode === "restart-reject") return Promise.reject(new Error("fixture-private-path"));
+        return new Promise(() => {}); // A restart IPC can remain pending during handshake.
+      }
+      if (mode === "query-throw") throw new Error("fixture-secret");
+      if (mode === "query-reject") return Promise.reject(new Error("fixture-secret"));
+      if (mode === "timeout") return Promise.resolve();
+      // The native fetch handler spreads the JSON body directly into the endpoint.
+      // A nested `params` object queries an undefined host and returns disconnected.
+      const { hostId } = JSON.parse(message.body);
+      const response = hostId === "local" ? connection : { state: "disconnected", error: null };
+      queueMicrotask(() => {
+        for (const fn of [...listeners]) fn({ data: { type: "fetch-response", requestId: message.requestId,
+          responseType: mode === "query-error" ? "error" : "success",
+          bodyJsonString: mode === "malformed" ? "{" : JSON.stringify(response) } });
+      });
+      return Promise.resolve();
+    } },
+  };
+  const context = vm.createContext({ window: win, crypto: { randomUUID } });
+  return { win, calls, listeners, timers,
+    setConnection: (next: Record<string, unknown>) => { connection = next; },
+    setMode: (next: string) => { mode = next; },
+    run: async () => JSON.parse(await vm.runInContext(recoveryScript!, context, { timeout: 1000 })),
+  };
+}
+
+test("native startup recovery queries actual local state and restarts without AX injection", async () => {
+  const fixture = nativeRecoveryFixture({ state: "connecting", error: null });
+  assert.equal(fixture.win.__alunixaXRecoverLocalAppServer, undefined);
+  assert.deepEqual(await fixture.run(), { status: "requested", state: "connecting", errorCode: null });
+  assert.equal(fixture.calls[0].url, "vscode://codex/app-server-connection-state");
+  assert.deepEqual(JSON.parse(fixture.calls[0].body), { hostId: "local" });
+  assert.deepEqual(JSON.parse(JSON.stringify(fixture.calls[1])), {
+    type: "codex-app-server-restart", hostId: "local", intent: "restart", errorMessage: null,
+  });
+  assert.equal(fixture.listeners.size, 0);
+  assert.equal(fixture.timers.size, 0);
+});
+
+test("native startup recovery is one-shot even for concurrent probes and rejected restart IPC", async () => {
+  for (const mode of ["normal", "restart-reject"]) {
+    const fixture = nativeRecoveryFixture({ state: "error", error: { code: "connection-failed", message: "fixture-secret" } });
+    fixture.setMode(mode);
+    const reports = await Promise.all([fixture.run(), fixture.run(), fixture.run()]);
+    await fixture.run();
+    assert.equal(fixture.calls.filter(call => call.type === "codex-app-server-restart").length, 1);
+    assert.ok(!JSON.stringify(reports).includes("fixture-secret"));
+    if (mode === "restart-reject") assert.equal((await fixture.run()).status, "failed");
+    fixture.setConnection({ state: "connected", error: null });
+    assert.equal((await fixture.run()).status, "connected");
+  }
+});
+
+test("healthy, already restarting, unknown and login/update/config states never restart", async () => {
+  for (const connection of [null, { state: "connected" }, { state: "restarting" }, { state: "unexpected" },
+    { state: "error" }, { state: "error", error: { code: "login-required" } },
+    { state: "error", error: { code: "update-required" } },
+    { state: "error", error: { code: "config-invalid", message: "fixture-secret" } }]) {
+    const fixture = nativeRecoveryFixture(connection);
+    const report = await fixture.run();
+    assert.equal(fixture.calls.filter(call => call.type === "codex-app-server-restart").length, 0);
+    assert.ok(!JSON.stringify(report).includes("fixture-secret"));
+    assert.equal(fixture.listeners.size, 0);
+  }
+});
+
+test("unavailable native IPC fails closed and cleans timers/listeners", async () => {
+  for (const mode of ["query-throw", "query-reject", "query-error", "malformed", "timeout"]) {
+    const fixture = nativeRecoveryFixture({ state: "connecting" });
+    fixture.setMode(mode);
+    const pending = fixture.run();
+    if (mode === "timeout") for (const expire of [...fixture.timers.values()]) expire();
+    assert.equal((await pending).status, "unavailable");
+    assert.equal(fixture.calls.filter(call => call.type === "codex-app-server-restart").length, 0);
+    assert.equal(fixture.listeners.size, 0);
+    assert.equal(fixture.timers.size, 0);
+  }
+  const fixture = nativeRecoveryFixture(null);
+  fixture.win.electronBridge = undefined;
+  assert.equal((await fixture.run()).status, "unavailable");
 });
 
 test("request candidates prioritize shared services without discarding legacy bundles", () => {

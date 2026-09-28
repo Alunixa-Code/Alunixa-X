@@ -70,6 +70,22 @@ def main():
             assert probe.evaluate(health_script)["hasNativeSurface"] is True
             probe.locator("main").evaluate("node => node.style.display = 'none'")
             assert probe.evaluate(health_script)["hasNativeSurface"] is False
+            probe.locator("#root").evaluate("""root => {
+                root.innerHTML = '<main><nav>Threads</nav><section>Home</section></main>';
+            }""")
+            assert probe.evaluate(health_script)["hasNativeSurface"] is True
+            probe.locator("#root").evaluate("""root => {
+                root.innerHTML = '<main><button>Try again</button></main>';
+            }""")
+            assert probe.evaluate(health_script)["hasNativeSurface"] is False
+            probe.locator("#root").evaluate("""root => {
+                root.innerHTML = '<main><button aria-label="Try again">Try again</button></main>';
+            }""")
+            assert probe.evaluate(health_script)["hasNativeSurface"] is False
+            probe.locator("#root").evaluate("""root => {
+                root.innerHTML = '<main><button aria-label="重试">Retry</button></main>';
+            }""")
+            assert probe.evaluate(health_script)["hasNativeSurface"] is False
             probe.close()
             page = browser.new_page(viewport={"width": 1280, "height": 900})
             errors = []

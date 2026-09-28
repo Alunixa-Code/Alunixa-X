@@ -171,6 +171,17 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
+### v1.0.29: white-screen app-server recovery without closing Codex
+
+The reported reproduction showed that the current Codex build can also remain on a white screen when launched directly. Terminating its `codex.exe` app-server makes the native error page appear, and `Try again` starts a working backend. In v1.0.28, Alunixa X treated the same delayed native UI as a fatal injection failure and terminated the entire `ChatGPT.exe`, which appeared as a launch crash.
+
+v1.0.29 keeps verified injection/model failures strict, but treats an unconfirmed native UI as recoverable. It sends the same local `codex-app-server-restart` message used by Codex's native recovery page, waits once more, and leaves the desktop, helper and bridge running as `running_degraded` if readiness is still unconfirmed.
+
+- It does not terminate `ChatGPT.exe`, run global process cleanup, or reset sessions, providers, keys, `auth.json`, or `config.toml`.
+- Home, settings, sign-in and sidebar shells count as usable native UI; loading spinners, Alunixa X overlays and a visible `Try again` recovery page do not.
+- Automatic recovery applies when launching through Alunixa X after bridge injection. A launch from the official Codex shortcut remains under the official app's lifecycle.
+- The active recovered Codex session was not restarted during development. Fully exit the old Codex process after installing, then launch through Alunixa X to verify the new path.
+
 ### v1.0.28: packaged proxy and capability checks
 
 The Agent capabilities page distinguishes the ordinary registry view from the view actually read inside the selected Codex package. Automatic and manual repair only disable an enabled manual proxy with no PAC when every endpoint is loopback and repeatedly refuses connections. A disabled proxy's leftover address, a listening local proxy, and external/PAC proxies are left alone.
