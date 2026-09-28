@@ -271,3 +271,6 @@ With Python Playwright/Chromium installed and the frontend built, `python tools/
 Alunixa X is distributed under the [GNU Affero General Public License v3.0](LICENSE), SPDX `AGPL-3.0-only`. It contains code evolved from CodexPlusPlus and its contributor history; the original copyright and license notices remain in effect. New Alunixa X work is maintained by Alunixa-Code.
 
 Alunixa X is an independent third-party project. It is not affiliated with OpenAI and does not grant rights to OpenAI, ChatGPT, Codex, or other third-party trademarks or assets.
+
+
+  Codex：https://github.com/Wangnov/codex-app-mirror/releases#release-codex-app-26.915.31945
