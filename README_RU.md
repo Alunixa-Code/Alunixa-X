@@ -399,3 +399,6 @@ python tools/verify-russian-ui.py
 Лицензия — [GNU Affero General Public License v3.0](LICENSE), SPDX `AGPL-3.0-only`. Проект содержит код, развивавшийся из CodexPlusPlus; исходные сведения об авторстве и лицензировании сохраняются. Новые изменения Alunixa X поддерживает Alunixa-Code.
 
 Alunixa X — независимый сторонний проект, не связанный с OpenAI. Права на марки и ресурсы OpenAI, ChatGPT, Codex и других компаний не передаются вместе с этим проектом. Обновления Codex могут менять интерфейс, CDP и формат локальных данных, поэтому отдельным интеграциям может потребоваться адаптация.
+
+
+  Codex：https://github.com/Wangnov/codex-app-mirror/releases#release-codex-app-26.915.31945
