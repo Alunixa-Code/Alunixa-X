@@ -322,6 +322,9 @@ scripts/installer/          Windows NSIS 与 macOS DMG 打包
 <p align="center">
   <img src="assets/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="210">
   <img src="assets/images/sponsor-wechat.jpg" alt="微信赞赏码" width="210">
+
+
+  Codex：https://github.com/Wangnov/codex-app-mirror/releases#release-codex-app-26.915.31945
 </p>
 
 ## 开源与兼容性
