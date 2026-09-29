@@ -97,9 +97,8 @@ test("DreamSkin deep links accept only canonical version identifiers", () => {
 });
 
 test("DreamSkin adapts and releases the modern Codex main surface", () => {
-  assert.match(windowsThemeSource, /const ensureShellMain = \(\) =>/);
-  assert.match(windowsThemeSource, /MainContentSurface/);
-  // The bundled community renderer is a byte-exact third-party compatibility snapshot.
-  // Its historical DOM marker must not be rebranded in-place.
-  assert.match(windowsThemeSource, /data-codex-plus-dream-surface/);
+  assert.match(windowsThemeSource, /codex-dream-skin-selectors\/1/);
+  assert.match(windowsThemeSource, /_MainContentSurface_/);
+  assert.match(windowsThemeSource, /_ComposerLayoutRoot_/);
+  assert.match(windowsThemeSource, /data-ds-part/);
 });
