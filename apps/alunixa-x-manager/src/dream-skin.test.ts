@@ -32,6 +32,14 @@ const windowsThemeSource = readFileSync(
   path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "windows", "renderer-inject.js"),
   "utf8",
 );
+const windowsThemeCss = readFileSync(
+  path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "windows", "dream-skin.css"),
+  "utf8",
+);
+const macosThemeCss = readFileSync(
+  path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "macos", "dream-skin.css"),
+  "utf8",
+);
 
 test("DreamSkin defaults are neutral and preserve safe custom fields", () => {
   const defaults = defaultDreamSkinTheme();
@@ -101,4 +109,11 @@ test("DreamSkin adapts and releases the modern Codex main surface", () => {
   assert.match(windowsThemeSource, /_MainContentSurface_/);
   assert.match(windowsThemeSource, /_ComposerLayoutRoot_/);
   assert.match(windowsThemeSource, /data-ds-part/);
+});
+
+test("DreamSkin hides only the top-fade element, never the conversation container", () => {
+  for (const css of [windowsThemeCss, macosThemeCss]) {
+    assert.doesNotMatch(css, /:is\([^)]*\[data-app-shell-main-content-top-fade\][^)]*\)\s*\{\s*display:\s*none/i);
+    assert.match(css, /:is\(\.app-shell-main-content-top-fade, \[class\*="_MainContentTopFade_"\]\)\s*\{\s*display:\s*none/i);
+  }
 });

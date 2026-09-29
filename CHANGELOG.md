@@ -1,6 +1,8 @@
 ## 1.0.31 - 2026-09-29
 
-- 修正上游 DreamSkin selector contract 迁移后的跨平台兼容测试，确保 macOS 与 Windows CI 使用同一套现代选择器契约喵~
+- 修复 DreamSkin 在 Codex/ChatGPT Desktop 26.924.x 中用裸 `[data-app-shell-main-content-top-fade]` 选择器隐藏整个对话容器的问题，仅保留对真实 top-fade 元素的处理喵~
+- renderer dispatcher 适配新版分块布局：优先 `app-shared`，命名资源失配时在已加载应用分块中有界兜底，不再持续依赖已移除的旧资源名喵~
+- 增加危险 DreamSkin 选择器负向回归、Windows/macOS 字节哈希和 dispatcher fallback 回归；增强适配失败继续降级而不终止 Codex 喵~
 - 保留 v1.0.30 的非广告上游同步、启动前配置覆盖和应用包代理覆盖行为喵~
 
 ## 1.0.30 - 2026-09-29

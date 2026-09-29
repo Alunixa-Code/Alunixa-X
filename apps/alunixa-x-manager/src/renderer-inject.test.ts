@@ -117,6 +117,18 @@ describe("renderer injection compatibility", () => {
     assert.match(renderer, /appServerModelRequestPatchPromise/);
   });
 
+  it("falls back to loaded app bundles when Codex moves dispatcher exports", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /async function loadCodexDispatcher\(\)/);
+    assert.match(renderer, /for \(const url of appServerFallbackAssetUrls\(\)\)/);
+    assert.match(renderer, /codexServiceTierDispatcherFromModule\(await import\(url\)\)/);
+    assert.match(renderer, /codexServiceTierDispatcherPatchFailures >= codexAppModuleMaxAttempts/);
+  });
+
   it("normalizes official mixed-mode Remote Control providers", async () => {
     const renderer = await readFile(
       new URL("../../../assets/inject/renderer-inject.js", import.meta.url),

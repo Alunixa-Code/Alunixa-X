@@ -3302,6 +3302,7 @@
 
   async function loadCodexDispatcher() {
     const errors = [];
+    const seenUrls = new Set();
     for (const assetPrefix of ["app-shared-", "setting-storage-", "vscode-api-", "app-initial-"]) {
       try {
         const module = await loadCodexAppModule(assetPrefix);
@@ -3310,6 +3311,20 @@
         errors.push(`${assetPrefix}: dispatcher export unavailable`);
       } catch (error) {
         errors.push(`${assetPrefix}: ${error?.message || String(error)}`);
+      }
+    }
+    // Codex 26.924 moved several renderer services between hashed chunks. The
+    // named compatibility prefixes above remain the cheap path; if they miss,
+    // inspect only already-loaded app bundles instead of repeatedly failing or
+    // importing every asset in the application.
+    for (const url of appServerFallbackAssetUrls()) {
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+      try {
+        const dispatcher = codexServiceTierDispatcherFromModule(await import(url));
+        if (dispatcher) return { dispatcher, assetPrefix: url };
+      } catch (error) {
+        errors.push(`fallback: ${error?.name || "Error"}`);
       }
     }
     throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);

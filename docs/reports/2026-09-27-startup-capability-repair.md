@@ -175,3 +175,9 @@ AX settings 是期望值，不是 Codex 的有效配置；Codex 还可能读取 
 未完成逐项验证前不得宣称“全部同步完成”。
 
 已定向迁移路径发现/CDP、TOML 语义合并、受管模型目录切换、协议代理启动校验、基础控件和 asInvoker；不使用机械整树覆盖来丢弃本地协议保真、媒体与俄语。原始映射共有 164 路径，其中 52 个三方冲突、7 个排除项；该映射是审查清单，**不是 164 路径已经迁入的证明**。
+## 2026-09-29 Codex 26.924 补充证据
+
+- 上游 issue 2323/2332 给出了真实 DOM A/B：DreamSkin 的裸 `[data-app-shell-main-content-top-fade]` 分支命中整条内容容器，`display:none !important` 使对话流和 composer 同时变成 `0×0`；仓库 Windows/macOS 两份 CSS 确实包含该规则，已移除裸属性分支并锁定新哈希喵~
+- 上游 issue 2322 确认 Codex 26.924 调整 renderer 分块后，旧 `setting-storage-`/`vscode-api-`/`app-initial-` 发现可能失效；但 issue 维护者同时明确 dispatcher 补丁失败不是无限转圈根因的已证实因果。Alunixa X 已优先查找当前 `app-shared-`，并新增仅针对已加载应用分块的有界 fallback 喵~
+- issue 2322 中“卸载并清空状态后恢复”只证明持久化状态相关，尚不能确定具体写入者或字段；本修复不全量清空状态，继续按用户要求在每次 AX 启动前事务性重写所选 config/auth，并在应用包上下文覆盖代理开关喵~
+- 本轮未把直接启动 Codex 自身的首次 app-server 卡住声明为已确认修复；AX 的既有策略仍是一次原生 restart、有限等待、失败后保留窗口和 Try again，而不是结束 ChatGPT.exe 喵~
