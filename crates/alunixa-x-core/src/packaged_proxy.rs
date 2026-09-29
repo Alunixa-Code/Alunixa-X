@@ -291,6 +291,44 @@ pub fn repair<R: ProxyRegistry>(
     Ok((readback, Some(id)))
 }
 
+/// Startup policy explicitly treats the packaged-app proxy view as AX-owned.
+/// It rewrites only `ProxyEnable` in the package context, backs up the complete
+/// prior snapshot, and verifies the readback. Host Internet Settings are never
+/// touched and the retained server/PAC values remain restorable.
+pub fn enforce_disabled_at_startup<R: ProxyRegistry>(
+    registry: &R,
+    backup_dir: &Path,
+) -> anyhow::Result<(ProxySnapshot, Option<String>)> {
+    let before = registry.read()?;
+    if before.package.is_none() {
+        bail!("package_identity_missing");
+    }
+    if before.enabled != Some(1) {
+        return Ok((before, None));
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let mut after = before.clone();
+    after.enabled = Some(0);
+    let backup = Backup {
+        before: before.clone(),
+        after_revision: snapshot_revision(&after),
+    };
+    std::fs::create_dir_all(backup_dir)?;
+    crate::settings::atomic_write(
+        &backup_dir.join(format!("{id}.json")),
+        &serde_json::to_vec(&backup)?,
+    )?;
+    if registry.read()? != before {
+        bail!("proxy_changed_refresh_required");
+    }
+    registry.set_enabled(Some(0))?;
+    let readback = registry.read()?;
+    if readback != after {
+        bail!("proxy_readback_mismatch");
+    }
+    Ok((readback, Some(id)))
+}
+
 pub fn restore<R: ProxyRegistry>(
     registry: &R,
     backup_dir: &Path,
@@ -353,11 +391,9 @@ pub fn run_probe_request(path: &Path) -> anyhow::Result<()> {
                     &request.backup_dir,
                     probe_port,
                 )?,
-                "repair_at_startup" => repair(
+                "repair_at_startup" | "enforce_at_startup" => enforce_disabled_at_startup(
                     &registry,
-                    &snapshot_revision(&before),
                     &request.backup_dir,
-                    probe_port,
                 )?,
                 "restore" => (
                     restore(
@@ -577,6 +613,17 @@ mod tests {
         );
         registry.0.borrow_mut().package = None;
         assert!(repair(&registry, &revision, dir.path(), |_| PortState::Refused).is_err());
+    }
+
+    #[test]
+    fn startup_enforcement_rewrites_enabled_proxy_even_when_port_is_healthy() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Fake(RefCell::new(snapshot()));
+        let (after, backup) = enforce_disabled_at_startup(&registry, dir.path()).unwrap();
+        assert_eq!(after.enabled, Some(0));
+        assert_eq!(after.server, "127.0.0.1:43210");
+        assert!(backup.is_some());
+        assert!(dir.path().join(format!("{}.json", backup.unwrap())).is_file());
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
+use base64::Engine;
 use futures_util::stream::FuturesUnordered;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -195,6 +196,53 @@ pub async fn evaluate_script_with_timeout(
         )
         .await?;
     ensure_runtime_evaluate_succeeded(response)
+}
+
+fn capture_screenshot_params() -> Value {
+    json!({
+        "format": "png",
+        "fromSurface": true,
+        "captureBeyondViewport": false,
+    })
+}
+
+pub async fn send_cdp_command(
+    websocket_url: &str,
+    method: &str,
+    params: Value,
+) -> anyhow::Result<Value> {
+    let socket = connect_cdp_websocket(websocket_url).await?;
+    let mut session = CdpSession::new(socket);
+    session
+        .send_command(next_message_id(), method, params)
+        .await
+}
+
+pub async fn capture_page_screenshot(
+    websocket_url: &str,
+    output_path: &std::path::Path,
+) -> anyhow::Result<u64> {
+    let response = send_cdp_command(
+        websocket_url,
+        "Page.captureScreenshot",
+        capture_screenshot_params(),
+    )
+    .await?;
+    let encoded = response
+        .get("result")
+        .and_then(|result| result.get("data"))
+        .and_then(Value::as_str)
+        .filter(|data| !data.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Page.captureScreenshot returned no image data"))?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .context("failed to decode screenshot PNG")?;
+    if !bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) {
+        bail!("Page.captureScreenshot returned invalid PNG data");
+    }
+    crate::settings::atomic_write(output_path, &bytes)
+        .with_context(|| format!("failed to save screenshot {}", output_path.display()))?;
+    Ok(bytes.len() as u64)
 }
 
 pub async fn run_periodic_evaluations<F>(

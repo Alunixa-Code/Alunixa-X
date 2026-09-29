@@ -191,6 +191,15 @@ v1.0.23 增加俄语。右上角的语言下拉框可以直接选择 **简体中
 
 ## 更新、备份与回退
 
+### v1.0.30：上游非广告同步与启动前强制配置
+
+本版同步 CodexPlusPlus v1.2.48 至 v1.4.0 的非广告修复和界面变化，包含聚合路由、自动压缩、代码高亮、原生浏览器状态、DreamSkin 新 selector、模型元数据和多项管理器界面改进；Alunixa X 原有代理、壁纸、俄语、协议保真和白屏恢复逻辑继续保留喵~
+
+每次通过 Alunixa X 启动 Codex 前，管理器都会重新应用当前供应商配置和首选模型；Windows 打包应用代理也会在实际应用包上下文中备份并重新写入 `ProxyEnable=0`，回读成功后才继续启动。备份保留完整原值，不改普通 HKCU 代理、不删除会话、供应商或密钥喵~
+
+广告、赞助商、推广链接、广告脚本和广告资源没有同步喵~
+
+
 ### v1.0.29：白屏后台自动恢复与不闪退
 
 用户现场证明：直接启动当前 Codex 也可能一直白屏；结束它的 `codex.exe` app-server 后会出现原生错误页，再点击 `Try again` 即可进入。v1.0.28 在同类等待超时后还会主动结束整个 `ChatGPT.exe`，因此从 Alunixa X 启动表现为窗口闪退。
@@ -322,9 +331,6 @@ scripts/installer/          Windows NSIS 与 macOS DMG 打包
 <p align="center">
   <img src="assets/images/sponsor-alipay.jpg" alt="支付宝赞赏码" width="210">
   <img src="assets/images/sponsor-wechat.jpg" alt="微信赞赏码" width="210">
-
-
-  Codex：https://github.com/Wangnov/codex-app-mirror/releases#release-codex-app-26.915.31945
 </p>
 
 ## 开源与兼容性

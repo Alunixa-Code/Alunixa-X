@@ -3315,6 +3315,24 @@
     throw new Error(`Codex dispatcher unavailable (${errors.join("; ")})`);
   }
 
+  async function recoverCodexLocalAppServer() {
+    const { dispatcher, assetPrefix } = await loadCodexDispatcher();
+    if (!dispatcher || typeof dispatcher.dispatchMessage !== "function") {
+      throw new Error("Codex dispatcher unavailable");
+    }
+    // This is the same native recovery contract used by Codex's Try again page.
+    // It asks the desktop host to replace the local app-server connection without
+    // terminating the Electron/ChatGPT process or touching user configuration.
+    dispatcher.dispatchMessage("codex-app-server-restart", {
+      hostId: "local",
+      intent: "restart",
+      errorMessage: null,
+    });
+    sendAlunixaXDiagnostic("local_app_server_restart_dispatched", { assetPrefix });
+    return { status: "dispatched", assetPrefix };
+  }
+  window.__alunixaXRecoverLocalAppServer = recoverCodexLocalAppServer;
+
   let codexServiceTierDispatcherPatchPromise = null;
   let codexServiceTierDispatcherPatchFailures = 0;
   let codexServiceTierDispatcherPatchSignature = "";

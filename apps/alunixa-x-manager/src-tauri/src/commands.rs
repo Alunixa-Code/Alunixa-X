@@ -5160,6 +5160,7 @@ fn load_overview_payload() -> (
             codex_app: codex_app
                 .as_deref()
                 .map(|path| path.to_string_lossy().to_string()),
+            aumid: None,
         });
     }
     (codex_app, install::inspect_entrypoints(), latest_launch)

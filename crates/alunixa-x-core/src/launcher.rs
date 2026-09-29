@@ -401,9 +401,13 @@ where
                 }
             }
         }
-        if settings.relay_profiles_enabled {
-            hooks.apply_active_relay_profile(&settings).await?;
-        }
+        // Reapply the currently selected manager configuration on every AX
+        // launch so external edits cannot leave Codex on a stale provider.
+        hooks.apply_active_relay_profile(&settings).await?;
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "launcher.startup_config_reapplied",
+            serde_json::json!({ "source": "manager_settings" }),
+        );
         let codex_version = crate::app_paths::codex_app_version(&app_dir);
         if crate::relay_config::ensure_requires_openai_auth_for_new_codex(
             &home,
@@ -417,12 +421,10 @@ where
                 }),
             );
         }
-        if settings.relay_profiles_enabled {
-            crate::relay_config::apply_preferred_model_to_home(
-                &home,
-                &settings.active_relay_profile(),
-            )?;
-        }
+        crate::relay_config::apply_preferred_model_to_home(
+            &home,
+            &settings.active_relay_profile(),
+        )?;
         // Native capability values belong to config.toml/profile layers. Do not
         // replace external changes with the manager's last saved UI snapshot.
         if let Err(error) = hooks.ensure_plugin_marketplace_config(&settings).await {
@@ -880,9 +882,6 @@ impl LaunchHooks for DefaultLaunchHooks {
     }
 
     async fn apply_active_relay_profile(&self, settings: &BackendSettings) -> anyhow::Result<()> {
-        if !settings.relay_profiles_enabled {
-            return Ok(());
-        }
         let mut profile = settings.active_relay_profile();
         crate::relay_config::normalize_relay_profile_for_storage(&mut profile)
             .context("failed to validate the active provider before Codex startup")?;
@@ -1149,7 +1148,7 @@ impl LaunchHooks for DefaultLaunchHooks {
                             &None,
                             crate::install::SILENT_BINARY,
                         ),
-                        "repair_at_startup",
+                        "enforce_at_startup",
                         None,
                         None,
                     )
@@ -4416,6 +4415,7 @@ fn launch_status(
         debug_port: Some(debug_port),
         helper_port: Some(helper_port),
         codex_app: Some(app_dir.to_string_lossy().to_string()),
+        aumid: None,
     }
 }
 

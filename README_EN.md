@@ -171,6 +171,15 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
+### v1.0.30: non-ad upstream sync and startup configuration enforcement
+
+This version synchronizes non-advertising fixes and UI changes from CodexPlusPlus v1.2.48 through v1.4.0, including aggregate routes, auto compact, code highlighting, native browser status, modern DreamSkin selectors, model metadata, and manager UI improvements. Alunixa X proxy, wallpaper, Russian, protocol-fidelity, and startup-recovery layers are retained喵~
+
+Before every Codex launch through Alunixa X, the selected provider configuration and preferred model are reapplied. For packaged Windows Codex, the proxy view is backed up and `ProxyEnable=0` is rewritten inside the actual package context before launch, then read back. The normal user proxy view, sessions, providers, and keys are not deleted喵~
+
+Advertising, sponsors, promotional links, ad scripts, and ad assets are excluded喵~
+
+
 ### v1.0.29: white-screen app-server recovery without closing Codex
 
 The reported reproduction showed that the current Codex build can also remain on a white screen when launched directly. Terminating its `codex.exe` app-server makes the native error page appear, and `Try again` starts a working backend. In v1.0.28, Alunixa X treated the same delayed native UI as a fatal injection failure and terminated the entire `ChatGPT.exe`, which appeared as a launch crash.
@@ -271,6 +280,3 @@ With Python Playwright/Chromium installed and the frontend built, `python tools/
 Alunixa X is distributed under the [GNU Affero General Public License v3.0](LICENSE), SPDX `AGPL-3.0-only`. It contains code evolved from CodexPlusPlus and its contributor history; the original copyright and license notices remain in effect. New Alunixa X work is maintained by Alunixa-Code.
 
 Alunixa X is an independent third-party project. It is not affiliated with OpenAI and does not grant rights to OpenAI, ChatGPT, Codex, or other third-party trademarks or assets.
-
-
-  Codex：https://github.com/Wangnov/codex-app-mirror/releases#release-codex-app-26.915.31945
