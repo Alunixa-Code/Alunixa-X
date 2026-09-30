@@ -171,6 +171,10 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
+### v1.0.33: third-party tool_search compatibility
+
+Fallback Claude, Gemini, GLM, DeepSeek and Grok entries no longer inherit GPT-native tool search. Normal tools and cache processing remain unchanged. Relaunch Codex through AX after installation to refresh the managed catalog; external catalogs are preserved. This does not guarantee every gateway supports all parameters. See [release notes](docs/releases/v1.0.33.md).
+
 ### v1.0.32: Codex 26.924 blank-content compatibility fix
 
 This release fixes two host-compatibility paths: DreamSkin no longer hides the full conversation container carrying the `data-app-shell-main-content-top-fade` state, and dispatcher discovery can fall back to already-loaded app bundles when legacy chunk names disappear. The selected provider configuration, preferred model, and packaged-app proxy view are still reapplied before launch without deleting sessions, keys, or all app state喵~

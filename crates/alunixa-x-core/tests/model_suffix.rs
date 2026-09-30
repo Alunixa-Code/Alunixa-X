@@ -102,7 +102,13 @@ fn build_catalog_json_uses_fallback_for_no_suffix_entries() {
 #[test]
 fn fallback_models_do_not_inherit_native_tool_search() {
     let entries = collect_catalog_entries(
-        "claude-opus-4-6\nanthropic/claude-sonnet-4-5\nvendor:CLAUDE-opus-5\ncustom-model",
+        concat!(
+            "claude-opus-4-6\nanthropic/claude-sonnet-4-5\nvendor:CLAUDE-opus-5\n",
+            "gemini-3-pro\ngoogle/gemini-3.8-flash\n",
+            "glm-5\nzhipu/glm-4.7\n",
+            "deepseek-v4-pro\ndeepseek/deepseek-v4.1-flash\n",
+            "grok-4.6\nxai/grok-4\ncustom-model"
+        ),
         &HashMap::new(),
         "",
     );

@@ -1,3 +1,9 @@
+## 1.0.33 - 2026-09-30
+
+- 修复 Claude、Gemini、GLM、DeepSeek、Grok 等自动回退模型误继承 GPT 原生 tool_search 能力；保留普通工具调用、已知模型和显式自定义能力。
+- 缓存创建/读取统计、缓存策略及流式处理不变；增加多模型目录与配置落盘定向回归。
+- 详见 docs/releases/v1.0.33.md，包含生效方式和第三方网关兼容边界。
+
 ## 1.0.32 - 2026-09-29
 
 - 修复 DreamSkin 在 Codex/ChatGPT Desktop 26.924.x 中用裸 `[data-app-shell-main-content-top-fade]` 选择器隐藏整个对话容器的问题，仅保留对真实 top-fade 元素的处理喵~
