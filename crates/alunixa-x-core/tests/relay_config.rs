@@ -3640,6 +3640,14 @@ experimental_bearer_token = "sk-new"
     assert!(catalog.contains(r#""context_window": 1000000"#));
     assert!(catalog.contains(r#""slug": "claude-sonnet-4""#));
     assert!(catalog.contains(r#""context_window": 200000"#));
+    let parsed: serde_json::Value = serde_json::from_str(&catalog).unwrap();
+    let claude = parsed["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|model| model["slug"] == "claude-sonnet-4")
+        .unwrap();
+    assert_eq!(claude["supports_search_tool"], false);
     // 后缀不得进入 catalog 或 config
     assert!(!catalog.contains("[1M]"));
     assert!(!config.contains("[1M]"));

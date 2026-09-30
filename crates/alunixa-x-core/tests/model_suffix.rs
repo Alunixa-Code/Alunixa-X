@@ -100,6 +100,53 @@ fn build_catalog_json_uses_fallback_for_no_suffix_entries() {
 }
 
 #[test]
+fn fallback_models_do_not_inherit_native_tool_search() {
+    let entries = collect_catalog_entries(
+        "claude-opus-4-6\nanthropic/claude-sonnet-4-5\nvendor:CLAUDE-opus-5\ncustom-model",
+        &HashMap::new(),
+        "",
+    );
+    let catalog: serde_json::Value =
+        serde_json::from_str(&build_model_catalog_json(&entries, Some(200_000))).unwrap();
+    let bundled: serde_json::Value =
+        serde_json::from_str(include_str!("../../../assets/codex-models.json")).unwrap();
+    for model in catalog["models"].as_array().unwrap() {
+        assert_eq!(model["supports_search_tool"], false, "{}", model["slug"]);
+        assert_eq!(model["context_window"], 200_000);
+        assert_eq!(model["supported_in_api"], true);
+        // Only discovery capability changes; ordinary tool execution stays enabled.
+        for key in [
+            "supports_parallel_tool_calls",
+            "shell_type",
+            "input_modalities",
+        ] {
+            assert_eq!(model[key], bundled["models"][0][key], "{key}");
+        }
+    }
+}
+
+#[test]
+fn explicit_model_template_retains_tool_search_metadata() {
+    let entries = collect_catalog_entries("custom-model", &HashMap::new(), "");
+    let template = serde_json::json!({
+        "supports_search_tool": true,
+        "supports_parallel_tool_calls": true,
+        "shell_type": "shell_command"
+    });
+    let catalog: serde_json::Value = serde_json::from_str(
+        &alunixa_x_core::model_suffix::build_model_catalog_json_with_template(
+            &entries,
+            None,
+            Some(&template),
+        ),
+    )
+    .unwrap();
+    for (key, value) in template.as_object().unwrap() {
+        assert_eq!(&catalog["models"][0][key], value, "{key}");
+    }
+}
+
+#[test]
 fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
     let entries = collect_catalog_entries(
         "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna",

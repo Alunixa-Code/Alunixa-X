@@ -390,10 +390,12 @@ fn model_template_entry(slug: &str) -> (Value, bool) {
         }
         return (template, true);
     }
-    (
-        first_bundled_template_entry().unwrap_or_else(|| json!({})),
-        false,
-    )
+    let mut template = first_bundled_template_entry().unwrap_or_else(|| json!({}));
+    // A fallback model (including Claude) must not inherit GPT's native
+    // Responses tool_search capability. Codex then exposes tools directly
+    // instead of emitting an unsupported search tool; cache handling is unchanged.
+    template["supports_search_tool"] = json!(false);
+    (template, false)
 }
 
 fn bundled_template_entry(slug: &str) -> Option<Value> {
