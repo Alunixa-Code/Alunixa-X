@@ -122,6 +122,13 @@ test("native model/list metadata enables newly introduced Fast models", () => {
   assert.match(functions("patchAppServerModelResult"), /method !== "model\/list"/);
 });
 
+test("v1.5 Fast allowlist includes the GPT-6 model family", () => {
+  assert.match(
+    renderer,
+    /"gpt-6-astra",\s*"gpt-6-sol",\s*"gpt-6-luna"/,
+  );
+});
+
 test("injected UI mutations do not recursively schedule full scans", () => {
   const api = new Function("isChatContentMutation", "isExtensionUiNode",
     "nodeSelfOrAncestorMatchesScanRelevance", "isScanRelevantNode", `

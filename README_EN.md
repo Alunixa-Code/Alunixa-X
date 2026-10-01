@@ -116,6 +116,10 @@ Providers can be edited, reordered, tested, imported from cc-switch, and preview
 
 See the [protocol fidelity matrix](docs/protocol-fidelity.md) for replay contracts and conversion limits.
 
+### Per-model protocol selection
+
+An ordinary custom configuration provider can now assign a different upstream protocol to each model: Responses, Chat Completions, legacy Completions, Anthropic Messages, or Gemini Generate Content. An empty per-model value inherits the provider default. When any model override requires conversion, Codex points at the local Responses proxy and Alunixa X selects the real upstream endpoint by the requested model. Model renames, reordering, imports, provider switches, and startup config generation keep the mapping aligned; malformed mappings fail closed instead of silently using the wrong transport.
+
 ## Models, context, and image input
 
 Starting with **v1.0.25**, multi-model profiles no longer copy the startup model's context window into root `config.toml`. `model_context_window` and `model_auto_compact_token_limit` are global Codex overrides; leaving them at the root made every later model switch reuse the startup model's limits, so the manager and Codex could report different windows.
@@ -184,6 +188,12 @@ Fallback Claude, Gemini, GLM, DeepSeek and Grok entries no longer inherit GPT-na
 This release fixes two host-compatibility paths: DreamSkin no longer hides the full conversation container carrying the `data-app-shell-main-content-top-fade` state, and dispatcher discovery can fall back to already-loaded app bundles when legacy chunk names disappear. The selected provider configuration, preferred model, and packaged-app proxy view are still reapplied before launch without deleting sessions, keys, or all app state喵~
 
 ### v1.0.30: non-ad upstream sync and startup configuration enforcement
+
+### v1.0.35: Per-model protocols and selected v1.5.0 fixes
+
+Ordinary custom configuration providers can select Responses, Chat Completions, legacy Completions, Anthropic Messages, or Gemini Generate Content independently for every model. Empty rows inherit the provider protocol. The saved map is preserved through imports, provider switches, startup generation, model edits, and the local proxy; the first cross-protocol route requests a restart.
+
+This release also backports selected non-advertising CodexPlusPlus v1.5.0 fixes: polluted model names are rejected before repeated TOML escaping can grow the configuration, native Responses compaction payloads remain opaque and pass through unchanged, and GPT-6 Astra/Sol/Luna are recognized by the Fast service-tier UI. Advertisements, sponsorships, promotional scripts, and promotional assets are excluded. See the [release notes](docs/releases/v1.0.35.md).
 
 This version synchronizes non-advertising fixes and UI changes from CodexPlusPlus v1.2.48 through v1.4.0, including aggregate routes, auto compact, code highlighting, native browser status, modern DreamSkin selectors, model metadata, and manager UI improvements. Alunixa X proxy, wallpaper, Russian, protocol-fidelity, and startup-recovery layers are retained喵~
 

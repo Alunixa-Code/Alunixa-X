@@ -1,3 +1,10 @@
+## 1.0.35 - 2026-10-01
+
+- 普通自定义配置供应商支持按模型分别选择 Responses、Chat Completions、Completions、Anthropic Messages 或 Gemini Generate Content；未设置的模型继续继承供应商默认协议。
+- 保存、导入、切换和启动前生成配置时保留逐模型协议，首次启用跨协议模型会自动使用本地协议代理，不覆盖用户会话、供应商密钥或缓存。
+- 同步 CodexPlusPlus v1.5.0 的部分非广告修复：阻止污染模型名在配置保存中递归膨胀、原生 Responses 压缩请求透传不再被改写为普通摘要，并将 GPT-6 Astra/Sol/Luna 加入 Fast 档位识别。
+- 增加逐模型协议、协议代理保真、配置落盘和 GPT-6 Fast 识别回归测试；不包含上游广告、赞助和推广内容。
+
 ## 1.0.34 - 2026-10-01
 
 - 修复新版Codex的client_metadata被转换器拒绝、助手消息阶段不兼容和Claude推理强度静默丢失。
