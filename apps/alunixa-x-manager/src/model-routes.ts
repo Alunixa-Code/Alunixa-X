@@ -1,3 +1,5 @@
+import { hasModelProtocols } from "./model-protocols.ts";
+
 export type RelayModelRoute = {
   model: string;
   targetRelayId: string;
@@ -13,6 +15,7 @@ export type RelayModelRouteProfile = {
   relayMode: string;
   officialMixApiKey: boolean;
   modelRoutes?: RelayModelRoute[];
+  modelProtocols?: string;
 };
 
 export type RelayModelRouteSettings = {
@@ -83,7 +86,7 @@ export function modelRouteSaveRequiresRestart(
   const active = proposed.relayProfiles.find((profile) => profile.id === proposed.activeRelayId)
     ?? proposed.relayProfiles[0];
   const activeHasRoutes = active
-    ? normalizeRelayModelRoutes(active.modelRoutes).some(
+    ? hasModelProtocols(active.modelProtocols) || normalizeRelayModelRoutes(active.modelRoutes).some(
       (route) => Boolean(route.model.trim() && route.targetRelayId.trim()),
     )
     : false;
@@ -91,7 +94,7 @@ export function modelRouteSaveRequiresRestart(
   const currentActive = current.relayProfiles.find((profile) => profile.id === current.activeRelayId)
     ?? current.relayProfiles[0];
   const currentActiveHasRoutes = currentActive
-    ? normalizeRelayModelRoutes(currentActive.modelRoutes).some(
+    ? hasModelProtocols(currentActive.modelProtocols) || normalizeRelayModelRoutes(currentActive.modelRoutes).some(
       (route) => Boolean(route.model.trim() && route.targetRelayId.trim()),
     )
     : false;

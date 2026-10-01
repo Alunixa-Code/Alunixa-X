@@ -1,3 +1,6 @@
+import type { ModelProtocol as RelayProtocol } from "./model-protocols.ts";
+import { modelProtocolKey, parseModelProtocols } from "./model-protocols.ts";
+
 /// 把 model_windows JSON map 按 model_list 行顺序转成文本（每行一个窗口，空行表示默认）。
 export function modelWindowsMapToText(modelList: string, modelWindows: string): string {
   try {
@@ -31,6 +34,7 @@ export type ModelWindowRow = {
   model: string;
   window: string;
   imageHandling: ImageHandling;
+  protocol: RelayProtocol | "";
 };
 
 export function mergeModelWindowRows(
@@ -43,14 +47,26 @@ export function mergeModelWindowRows(
     const model = row.model.trim();
     if (!model || seen.has(model)) return;
     seen.add(model);
-    rows.push({ model, window: row.window.trim(), imageHandling: row.imageHandling ?? "send-as-is" });
+    rows.push({
+      model,
+      window: row.window.trim(),
+      imageHandling: row.imageHandling ?? "send-as-is",
+      protocol: row.protocol ?? "",
+    });
   };
   currentRows.forEach(append);
   incomingRows.forEach(append);
-  return rows.length ? rows : [{ model: "", window: "", imageHandling: "send-as-is" }];
+  return rows.length
+    ? rows
+    : [{ model: "", window: "", imageHandling: "send-as-is", protocol: "" }];
 }
 
-export function modelWindowRowsFromProfile(modelList: string, modelWindows: string, modelVlm?: string): ModelWindowRow[] {
+export function modelWindowRowsFromProfile(
+  modelList: string,
+  modelWindows: string,
+  modelVlm?: string,
+  modelProtocols?: string,
+): ModelWindowRow[] {
   let map: Record<string, string> = {};
   try {
     map = JSON.parse(modelWindows || "{}") as Record<string, string>;
@@ -72,18 +88,37 @@ export function modelWindowRowsFromProfile(modelList: string, modelWindows: stri
   } catch {
     vlmMap = {};
   }
+  let protocolMap: Record<string, RelayProtocol> = {};
+  try {
+    protocolMap = parseModelProtocols(modelProtocols);
+  } catch {
+    protocolMap = {};
+  }
   const rows = modelList
     .split("\n")
     .map((model) => model.trim())
     .filter(Boolean)
-    .map((model) => ({ model, window: map[model] ?? "", imageHandling: vlmMap[model] ?? "send-as-is" }));
-  return rows.length ? rows : [{ model: "", window: "", imageHandling: "send-as-is" }];
+    .map((model) => ({
+      model,
+      window: map[model] ?? "",
+      imageHandling: vlmMap[model] ?? "send-as-is",
+      protocol: protocolMap[modelProtocolKey(model)] ?? "",
+    }));
+  return rows.length
+    ? rows
+    : [{ model: "", window: "", imageHandling: "send-as-is", protocol: "" }];
 }
 
-export function serializeModelWindowRows(rows: ModelWindowRow[]): { modelList: string; modelWindows: string; modelVlm: string } {
+export function serializeModelWindowRows(rows: ModelWindowRow[]): {
+  modelList: string;
+  modelWindows: string;
+  modelVlm: string;
+  modelProtocols: string;
+} {
   const modelList: string[] = [];
   const modelWindows: Record<string, string> = {};
   const modelVlm: Record<string, string> = {};
+  const modelProtocols: Record<string, RelayProtocol> = Object.create(null);
   mergeModelWindowRows(rows, []).forEach((row) => {
     const model = row.model.trim();
     if (!model) return;
@@ -96,11 +131,15 @@ export function serializeModelWindowRows(rows: ModelWindowRow[]): { modelList: s
     if (row.imageHandling === "vlm" || row.imageHandling === "strip") {
       modelVlm[model] = row.imageHandling;
     }
+    if (row.protocol) {
+      modelProtocols[modelProtocolKey(model)] = row.protocol;
+    }
   });
   return {
     modelList: modelList.join("\n"),
     modelWindows: JSON.stringify(modelWindows),
     modelVlm: JSON.stringify(modelVlm),
+    modelProtocols: JSON.stringify(modelProtocols),
   };
 }
 

@@ -2300,6 +2300,121 @@ async fn claude_adaptive_setting_reaches_the_wire_without_cache_or_tool_loss() {
 }
 
 #[tokio::test]
+async fn ordinary_profile_can_select_protocol_per_model() {
+    for (model, protocol, path, wire) in [
+        (
+            "claude-opus-5-5",
+            "chatCompletions",
+            "/v1/chat/completions",
+            UpstreamWireApi::ChatCompletions,
+        ),
+        (
+            "claude-sonnet-4-6",
+            "anthropicMessages",
+            "/v1/messages",
+            UpstreamWireApi::AnthropicMessages,
+        ),
+        (
+            "gemini-3-pro",
+            "geminiGenerateContent",
+            "/v1/models/gemini-3-pro:generateContent",
+            UpstreamWireApi::GeminiGenerateContent,
+        ),
+        (
+            "legacy",
+            "completions",
+            "/v1/completions",
+            UpstreamWireApi::Completions,
+        ),
+        (
+            "gpt-6-astra",
+            "responses",
+            "/v1/responses",
+            UpstreamWireApi::Responses,
+        ),
+        (
+            "glm-default",
+            "",
+            "/v1/chat/completions",
+            UpstreamWireApi::ChatCompletions,
+        ),
+    ] {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(capture_json_request_once(listener));
+        let mut settings = transparent_proxy_settings(format!("http://{address}/v1"));
+        settings.relay_profiles[0].protocol = RelayProtocol::ChatCompletions;
+        settings.relay_profiles[0].upstream_base_url = format!("http://{address}/v1");
+        settings.relay_profiles[0].config_contents = "model_provider = \"custom\"\n[model_providers.custom]\nbase_url = \"http://127.0.0.1:57321/v1\"\n".into();
+        settings.relay_profiles[0].model_protocols = if protocol.is_empty() {
+            "{}".into()
+        } else {
+            json!({model: protocol}).to_string()
+        };
+        let response = open_responses_proxy_request_with_settings(
+            &json!({"model":model,"input":"hello","stream":false}).to_string(),
+            settings,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.wire_api, wire);
+        let (headers, body) = server.await.unwrap();
+        assert!(headers.starts_with(&format!("POST {path} ")), "{headers}");
+        match wire {
+            UpstreamWireApi::GeminiGenerateContent => {
+                assert!(body["contents"].is_array());
+                assert!(headers.contains("x-goog-api-key:"));
+            }
+            UpstreamWireApi::AnthropicMessages => {
+                assert!(body["messages"].is_array());
+                assert!(headers.contains("x-api-key:"));
+            }
+            UpstreamWireApi::Responses => assert_eq!(body["input"], "hello"),
+            _ => assert_eq!(body["model"], model),
+        }
+    }
+}
+
+#[tokio::test]
+async fn claude_highest_efforts_use_adaptive_on_both_wire_protocols() {
+    for effort in ["xhigh", "ultra"] {
+        for protocol in [
+            RelayProtocol::ChatCompletions,
+            RelayProtocol::AnthropicMessages,
+        ] {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(capture_json_request_once(listener));
+            let mut settings = transparent_proxy_settings(format!("http://{address}/v1"));
+            settings.relay_profiles[0].model_protocols =
+                json!({"anthropic/claude-opus-5-5":protocol}).to_string();
+            let mut request = json!({"model":"anthropic/claude-opus-5-5","input":"hello","reasoning":{"effort":effort},"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]});
+            if protocol == RelayProtocol::ChatCompletions {
+                request["prompt_cache_key"] = json!("unchanged-cache");
+            }
+            let response =
+                open_responses_proxy_request_with_settings(&request.to_string(), settings)
+                    .await
+                    .unwrap();
+            assert_eq!(response.status_code, 200);
+            let (_, body) = server.await.unwrap();
+            assert_eq!(body["thinking"], json!({"type":"adaptive"}));
+            assert!(body.get("reasoning_effort").is_none());
+            assert!(body.get("output_config").is_none());
+            assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+            if protocol == RelayProtocol::ChatCompletions {
+                assert_eq!(body["prompt_cache_key"], "unchanged-cache");
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn adaptive_setting_rejects_other_models_and_unconverted_protocols_before_network() {
     use alunixa_x_core::settings::ReasoningEffort;
     for (model, protocol) in [
@@ -3120,4 +3235,44 @@ fn spawn_chat_server() -> ChatServer {
         ChatRequest { user_agent }
     });
     ChatServer { base_url, handle }
+}
+
+#[tokio::test]
+async fn custom_models_preserve_native_compact_endpoint_and_payload() {
+    use alunixa_x_core::settings::CustomRelayModel;
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(capture_json_request_once(listener));
+    let mut settings = transparent_proxy_settings(String::new());
+    settings.relay_profiles[0].relay_mode = RelayMode::CustomModels;
+    settings.relay_profiles[0].custom_models = vec![CustomRelayModel {
+        id: "native".into(),
+        model: "gpt-6-astra".into(),
+        base_url: format!("http://{address}/v1"),
+        api_key: "fixture".into(),
+        ..Default::default()
+    }];
+    let request = json!({"model":"gpt-6-astra","input":[{"type":"compaction","id":"cmp_fixture","encrypted_content":"opaque-fixture"}],"stream":false});
+    let response = open_responses_proxy_request_with_settings_for_path(
+        &request.to_string(),
+        settings.clone(),
+        "/responses/compact",
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status_code, 200);
+    assert!(!response.is_stream);
+    let (headers, body) = server.await.unwrap();
+    assert!(headers.starts_with("POST /v1/responses/compact "));
+    assert_eq!(body, request);
+    settings.relay_profiles[0].custom_models[0].protocol = RelayProtocol::ChatCompletions;
+    let result = open_responses_proxy_request_with_settings_for_path(
+        r#"{"model":"gpt-6-astra","input":"hello"}"#,
+        settings,
+        "/responses/compact",
+    )
+    .await;
+    assert!(result.is_err());
 }

@@ -566,7 +566,8 @@ fn codex_client_metadata_and_message_phase_do_not_block_conversion() {
     assert!(chat.get("client_metadata").is_none());
     assert_eq!(chat["messages"][0]["content"], "Checking.");
     assert_eq!(chat["messages"][1]["content"], "Done.");
-    assert_eq!(chat["reasoning_effort"], "xhigh");
+    assert_eq!(chat["thinking"]["type"], "adaptive");
+    assert!(chat.get("reasoning_effort").is_none());
     assert_eq!(chat["prompt_cache_key"], "fixture-cache");
     assert_eq!(chat["prompt_cache_retention"], "24h");
     let mut native = request;
@@ -576,7 +577,6 @@ fn codex_client_metadata_and_message_phase_do_not_block_conversion() {
         .unwrap()
         .remove("prompt_cache_retention");
     let anthropic = responses_to_anthropic_messages(native).unwrap();
-    assert_eq!(anthropic["thinking"]["type"], "adaptive");
     assert_eq!(anthropic["thinking"]["type"], "adaptive");
     assert!(anthropic.get("output_config").is_none());
     assert!(anthropic.get("client_metadata").is_none());

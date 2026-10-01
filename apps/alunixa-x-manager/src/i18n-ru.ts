@@ -3,6 +3,9 @@
 // `node tools/i18n-verify.mjs`. No online translation service is used at runtime.
 
 export const RU_PLAIN: Record<string, string> = {
+  "模型协议": "Протокол модели",
+  "模型协议配置无效，请修正后保存。": "Неверная конфигурация протоколов моделей. Исправьте её перед сохранением.",
+  "跟随供应商协议": "Использовать протокол поставщика",
   "自适应思维": "Адаптивное мышление",
   "自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。": "Адаптивное мышление требует Chat Completions или Anthropic Messages. Сохраните настройки и перезапустите Codex.",
   "上传图片、动图或视频；不启动 Wallpaper Engine。": "Импортируйте изображения, анимацию или видео; Wallpaper Engine не запускается.",

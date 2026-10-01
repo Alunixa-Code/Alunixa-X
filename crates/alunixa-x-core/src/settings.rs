@@ -206,6 +206,15 @@ pub struct RelayProfile {
     pub default_custom_model_id: String,
     #[serde(rename = "modelRoutes", default, skip_serializing_if = "Vec::is_empty")]
     pub model_routes: Vec<RelayModelRoute>,
+    /// Optional per-model upstream protocol overrides for ordinary API profiles.
+    /// The JSON object is kept as a string for backwards-compatible settings
+    /// storage, e.g. `{"claude-opus-5-5":"chatCompletions"}`.
+    #[serde(
+        rename = "modelProtocols",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub model_protocols: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -287,6 +296,7 @@ impl Default for RelayProfile {
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
             model_routes: Vec::new(),
+            model_protocols: String::new(),
         }
     }
 }
@@ -830,6 +840,7 @@ impl BackendSettings {
                 custom_models: Vec::new(),
                 default_custom_model_id: String::new(),
                 model_routes: Vec::new(),
+                model_protocols: String::new(),
             };
         }
 
@@ -886,6 +897,7 @@ impl BackendSettings {
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
             model_routes: Vec::new(),
+            model_protocols: String::new(),
         }
     }
 
@@ -921,6 +933,7 @@ impl BackendSettings {
             || profile.relay_mode == RelayMode::CustomModels
             || (profile.relay_mode == RelayMode::Official && profile.official_mix_api_key)
             || profile.has_model_routes()
+            || profile.has_model_protocols()
     }
 }
 
@@ -1171,6 +1184,49 @@ impl RelayProfile {
             .any(|route| !route.model.trim().is_empty() && !route.target_relay_id.trim().is_empty())
     }
 
+    pub fn has_model_protocols(&self) -> bool {
+        self.model_protocol_map()
+            .map(|protocols| !protocols.is_empty())
+            .unwrap_or(true)
+    }
+
+    pub fn model_protocol_map(
+        &self,
+    ) -> anyhow::Result<std::collections::BTreeMap<String, RelayProtocol>> {
+        if self.model_protocols.trim().is_empty() {
+            return Ok(Default::default());
+        }
+        let raw: serde_json::Value = serde_json::from_str(&self.model_protocols)
+            .map_err(|_| anyhow::anyhow!("modelProtocols must be a valid JSON object"))?;
+        let object = raw
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("modelProtocols must be a JSON object"))?;
+        let mut protocols = std::collections::BTreeMap::new();
+        for (name, value) in object {
+            let key = crate::model_suffix::parse_model_suffix(name)
+                .0
+                .to_ascii_lowercase();
+            if key.is_empty() {
+                anyhow::bail!("Empty model protocol key");
+            }
+            let protocol = serde_json::from_value::<RelayProtocol>(value.clone())
+                .map_err(|_| anyhow::anyhow!("Unsupported model protocol"))?;
+            protocols.insert(key, protocol);
+        }
+        Ok(protocols)
+    }
+
+    pub fn protocol_for_model(&self, model: &str) -> anyhow::Result<RelayProtocol> {
+        let requested = crate::model_suffix::parse_model_suffix(model)
+            .0
+            .to_ascii_lowercase();
+        Ok(self
+            .model_protocol_map()?
+            .get(&requested)
+            .copied()
+            .unwrap_or(self.protocol))
+    }
+
     pub fn ordered_model_names(&self) -> Vec<String> {
         let mut models = Vec::new();
         if self.relay_mode == RelayMode::CustomModels {
@@ -1313,7 +1369,10 @@ impl CustomRelayModel {
 }
 
 fn push_unique_model_name(models: &mut Vec<String>, model: &str) {
-    let model = model.trim();
+    let Some(model) = crate::relay_config::sanitize_relay_model_name(model) else {
+        return;
+    };
+    let model = model.as_str();
     if model.is_empty() || models.iter().any(|existing| existing == model) {
         return;
     }

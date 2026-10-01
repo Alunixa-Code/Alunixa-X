@@ -2178,17 +2178,29 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             &request_json,
             is_stream,
             original_user_agent,
+            request_path,
         )
         .await;
     }
+    let request_model_for_protocol = request_json
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let relays = if model_route.is_some() {
-        vec![selected_relay]
+        vec![relay_with_model_protocol(
+            selected_relay,
+            request_model_for_protocol,
+        )?]
     } else {
         let mut relays = vec![selected_relay.clone()];
         relays.extend(crate::relay_rotation::fallback_relays_after(
             &settings,
             &selected_relay.id,
         )?);
+        relays = relays
+            .into_iter()
+            .map(|relay| relay_with_model_protocol(relay, request_model_for_protocol))
+            .collect::<anyhow::Result<Vec<_>>>()?;
         relays
     };
     let relay_count = relays.len();
@@ -2324,6 +2336,19 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         );
     }
     anyhow::bail!("未找到可用的聚合供应商成员")
+}
+
+fn relay_with_model_protocol(
+    mut relay: crate::settings::RelayProfile,
+    model: &str,
+) -> anyhow::Result<crate::settings::RelayProfile> {
+    let protocol = relay.protocol_for_model(model)?;
+    // Resolve the real upstream before changing the default protocol; live TOML
+    // intentionally points at AX whenever model overrides exist.
+    relay.base_url = crate::relay_config::relay_profile_base_url(&relay);
+    relay.api_key = crate::relay_config::relay_profile_api_key(&relay);
+    relay.protocol = protocol;
+    Ok(relay)
 }
 
 fn select_model_route(
@@ -3053,6 +3078,7 @@ async fn open_custom_models_proxy_request(
     request_json: &Value,
     is_stream: bool,
     original_user_agent: Option<&str>,
+    request_path: &str,
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let requested_model = request_json
         .get("model")
@@ -3081,8 +3107,18 @@ async fn open_custom_models_proxy_request(
     synthetic.api_key = model.api_key.clone();
     synthetic.protocol = model.protocol;
     synthetic.model = model.model.clone();
-    let (endpoint, upstream_body, wire_api) =
+    let mut request_json = request_json.clone();
+    request_json["model"] = json!(model.model.trim());
+    let (mut endpoint, upstream_body, wire_api) =
         upstream_request_parts(&synthetic, request_json.clone()).await?;
+    // Native compact state must pass through untouched, not become a normal
+    // generation request (CodexPlusPlus v1.5.0 compaction compatibility).
+    if is_responses_compact_proxy_path(request_path) {
+        if wire_api != UpstreamWireApi::Responses {
+            return fidelity::reject("Responses compaction requires a native Responses provider");
+        }
+        endpoint = responses_compact_url(&synthetic.base_url);
+    }
     let _ = crate::diagnostic_log::append_diagnostic_log(
         "protocol_proxy.custom_model_request",
         json!({
@@ -3142,7 +3178,8 @@ async fn open_custom_models_proxy_request(
         .to_string();
     Ok(UpstreamProxyResponse {
         status_code,
-        is_stream: is_stream || content_type.contains("text/event-stream"),
+        is_stream: content_type.contains("text/event-stream")
+            || (is_stream && !content_type.contains("application/json")),
         content_type,
         wire_api,
         response: upstream,
@@ -7287,15 +7324,11 @@ fn canonical_json_string(value: &Value) -> String {
 }
 
 fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
-    let Some(reasoning_enabled) = reasoning_requested(body) else {
-        return;
-    };
-    let style = infer_chat_reasoning_style(model);
-    if is_claude_model(model)
-        && body
-            .pointer("/reasoning/effort")
-            .and_then(Value::as_str)
-            .is_some_and(|effort| matches!(effort, "adaptive" | "xhigh" | "ultra"))
+    let effort = body
+        .pointer("/reasoning/effort")
+        .or_else(|| body.get("reasoning_effort"))
+        .and_then(Value::as_str);
+    if is_claude_model(model) && effort.is_some_and(|v| matches!(v, "adaptive" | "xhigh" | "ultra"))
     {
         result["thinking"] = json!({"type":"adaptive"});
         if let Some(object) = result.as_object_mut() {
@@ -7304,6 +7337,10 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
         }
         return;
     }
+    let Some(reasoning_enabled) = reasoning_requested(body) else {
+        return;
+    };
+    let style = infer_chat_reasoning_style(model);
 
     match style {
         ChatReasoningStyle::Thinking => {

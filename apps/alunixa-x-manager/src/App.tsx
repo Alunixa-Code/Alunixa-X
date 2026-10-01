@@ -102,6 +102,7 @@ import {
   type ImageHandling,
   type ModelWindowRow,
 } from "./model-windows";
+import { hasModelProtocols, modelProtocolForName, modelProtocolKey, parseModelProtocols } from "./model-protocols";
 import { resolveProviderSyncCompletion } from "./provider-sync-flow";
 import {
   defaultDreamSkinTheme,
@@ -294,6 +295,7 @@ export type RelayProfile = {
   modelList: string;
   modelWindows: string;
   modelVlm: string;
+  modelProtocols: string;
   modelReasoningEfforts: Record<string, ReasoningEffort>;
   lastUsedModel: string;
   vlmApiKey: string;
@@ -361,7 +363,7 @@ type CodexContextEntries = {
   plugins: CodexContextEntry[];
 };
 
-type RelayProtocol =
+export type RelayProtocol =
   | "responses"
   | "chatCompletions"
   | "completions"
@@ -1049,6 +1051,7 @@ const defaultSettings: BackendSettings = {
       modelList: "",
       modelWindows: "",
       modelVlm: "",
+      modelProtocols: "",
       modelReasoningEfforts: {},
       lastUsedModel: "",
       vlmApiKey: "",
@@ -4858,7 +4861,7 @@ function ReasoningEffortScreen({
                               aria-checked={selected === option.value}
                               className={selected === option.value ? "active" : ""}
                               key={option.value}
-                              disabled={option.value === "adaptive" && !supportsClaudeAdaptive(model, profile.protocol, profile.relayMode)}
+                              disabled={option.value === "adaptive" && !supportsClaudeAdaptive(model, modelProtocolForName(profile.modelProtocols, model, profile.protocol), profile.relayMode)}
                               onClick={() => setMaximumEffort(profile.id, model, option.value)}
                               role="radio"
                               title={option.value === "adaptive" ? t("自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。") : option.label}
@@ -6531,7 +6534,12 @@ function RelayProfileDetail({
 }) {
   const [draft, setDraft] = useState<RelayProfile>(profile);
   const [modelWindowRows, setModelWindowRows] = useState<ModelWindowRow[]>(
-    modelWindowRowsFromProfile(profile.modelList, profile.modelWindows || "", profile.modelVlm),
+    modelWindowRowsFromProfile(
+      profile.modelList,
+      profile.modelWindows || "",
+      profile.modelVlm,
+      profile.modelProtocols,
+    ),
   );
   const isActive = !isNew && profile.id === form.activeRelayId;
   const profileUsesLiveFiles = relayProfileUsesLiveFiles(profile);
@@ -6548,14 +6556,20 @@ function RelayProfileDetail({
             : profile,
         );
     setDraft(nextDraft);
-    setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm));
-  }, [profile.id, profile.modelList, profile.modelWindows, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
+    setModelWindowRows(modelWindowRowsFromProfile(
+      nextDraft.modelList,
+      nextDraft.modelWindows || "",
+      nextDraft.modelVlm,
+      nextDraft.modelProtocols,
+    ));
+  }, [profile.id, profile.modelList, profile.modelWindows, profile.modelVlm, profile.modelProtocols, profile.protocol, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
   const validationSettings = relaySettingsWithDraft(form, profile.id, draft, isNew);
   const validationError = relayProfileValidation(draft)
     ?? relayModelRoutesSettingsValidation(validationSettings);
   const draftWithModelRows = () => {
     const serializedRows = serializeModelWindowRows(modelWindowRows);
-    return { ...draft, modelList: serializedRows.modelList, modelWindows: serializedRows.modelWindows, modelVlm: serializedRows.modelVlm };
+    if (isCustomModelsRelayProfile(draft) || isAggregateRelayProfile(draft)) return draft;
+    return applyRelayProfilePatchToFiles(draft, serializedRows);
   };
   const saveDraft = async () => {
     if (validationError) return;
@@ -6759,7 +6773,9 @@ function RelayProfileEditor({
   };
   const removeModelWindowRow = (index: number) => {
     const nextRows = modelWindowRows.filter((_, rowIndex) => rowIndex !== index);
-    setModelWindowRows(nextRows.length ? nextRows : [{ model: "", window: "", imageHandling: "" }]);
+    setModelWindowRows(nextRows.length
+      ? nextRows
+      : [{ model: "", window: "", imageHandling: "", protocol: "" }]);
   };
   const addModelWindowRows = (rows: ModelWindowRow[]) => {
     setModelWindowRows(mergeModelWindowRows(modelWindowRows, rows));
@@ -6774,6 +6790,7 @@ function RelayProfileEditor({
         ...profile,
         modelList: serializedRows.modelList,
         modelWindows: serializedRows.modelWindows,
+        modelProtocols: serializedRows.modelProtocols,
       }),
     );
     setDoctorResult(result);
@@ -6995,7 +7012,10 @@ function RelayProfileEditor({
             </div>
             <div className="relay-model-list-tools">
               <Button
-                onClick={() => setModelWindowRows([...modelWindowRows, { model: "", window: "", imageHandling: "" }])}
+                onClick={() => setModelWindowRows([
+                  ...modelWindowRows,
+                  { model: "", window: "", imageHandling: "", protocol: "" },
+                ])}
                 size="sm"
                 type="button"
                 variant="secondary"
@@ -7010,9 +7030,15 @@ function RelayProfileEditor({
                     ...profile,
                     modelList: serializedRows.modelList,
                     modelWindows: serializedRows.modelWindows,
+        modelProtocols: serializedRows.modelProtocols,
                   });
                   if (models?.length) {
-                    addModelWindowRows(models.map((model) => ({ model, window: "", imageHandling: "" })));
+                    addModelWindowRows(models.map((model) => ({
+                      model,
+                      window: "",
+                      imageHandling: "",
+                      protocol: "",
+                    })));
                   }
                 }}
                 size="sm"
@@ -7134,7 +7160,7 @@ function RelayProfileEditor({
           </Field>
         ) : null}
       </div>
-      {showApiFields && profile.protocol !== "responses" ? (
+      {showApiFields && (profile.protocol !== "responses" || hasModelProtocols(profile.modelProtocols)) ? (
         <div className="hint-line relay-protocol-hint">
           <MessageCircle className="h-4 w-4" />
           <span>{t("此上游会通过本地 127.0.0.1:57321 转成 Responses API，需要从 Alunixa X 启动 Codex。")}</span>
@@ -7214,6 +7240,19 @@ function SortableModelWindowRow({
         </Button>
       </div>
       <div className="relay-model-row-actions">
+        <select
+          aria-label={t("模型协议")}
+          className="field-select text-xs"
+          value={row.protocol}
+          onChange={(event) => onChange(index, { protocol: event.currentTarget.value as RelayProtocol })}
+        >
+          <option value="">{t("跟随供应商协议")}</option>
+          {RELAY_PROTOCOL_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         <select
           className="field-select text-xs"
           value={row.imageHandling}
@@ -9271,6 +9310,7 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
             modelList: "",
             modelWindows: "",
             modelVlm: "",
+            modelProtocols: "",
             modelReasoningEfforts: {},
             lastUsedModel: "",
             vlmApiKey: "",
@@ -9339,6 +9379,18 @@ function normalizeReasoningEffortMap(
   );
 }
 
+function normalizeModelProtocolMap(value: string | undefined, models: string[]): string {
+  if (!value?.trim()) return "";
+  try {
+    const keys = new Set(models.map(modelProtocolKey));
+    const normalized = Object.fromEntries(Object.entries(parseModelProtocols(value)).filter(([name]) => keys.has(name)));
+    return Object.keys(normalized).length ? JSON.stringify(normalized) : "";
+  } catch {
+    // Keep invalid persisted data visible to backend validation; do not erase it.
+    return value;
+  }
+}
+
 function relayProfileModelNames(profile: RelayProfile): string[] {
   const rawModels = isCustomModelsRelayProfile(profile)
     ? profile.customModels.map((model) => model.model)
@@ -9359,6 +9411,9 @@ function syncRelayProfileModelPreference(profile: RelayProfile): RelayProfile {
   const modelReasoningEfforts = Object.fromEntries(
     Object.entries(efforts).filter(([model]) => models.includes(model)),
   ) as Record<string, ReasoningEffort>;
+  const modelProtocols = isCustomModelsRelayProfile(profile)
+    ? ""
+    : normalizeModelProtocolMap(profile.modelProtocols, models);
   const defaultCustomModelId = isCustomModelsRelayProfile(profile)
     ? profile.customModels.find((model) => model.model.trim() === preferredModel)?.id
       || profile.customModels[0]?.id
@@ -9369,6 +9424,7 @@ function syncRelayProfileModelPreference(profile: RelayProfile): RelayProfile {
     model: preferredModel,
     lastUsedModel,
     modelReasoningEfforts,
+    modelProtocols,
     defaultCustomModelId,
   };
 }
@@ -9408,6 +9464,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
         modelList: "",
         modelWindows: "",
         modelVlm: "",
+        modelProtocols: "",
         modelReasoningEfforts: {},
         lastUsedModel: "",
         customModels: [],
@@ -9442,6 +9499,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     modelList: profile.modelList || "",
     modelWindows: profile.modelWindows || "",
     modelVlm: profile.modelVlm || "",
+    modelProtocols: profile.modelProtocols || "",
     modelReasoningEfforts: normalizeReasoningEffortMap(profile.modelReasoningEfforts),
     lastUsedModel: profile.lastUsedModel || "",
     userAgent: profile.userAgent || "",
@@ -9466,6 +9524,7 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
   normalized = migrateLegacyAutoCompact(normalized);
   if (normalized.relayMode === "customModels") {
     normalized.modelRoutes = [];
+    normalized.modelProtocols = "";
     if (!normalized.customModels.length) {
       const model = createEmptyCustomModel();
       normalized.customModels = [model];
@@ -9679,10 +9738,10 @@ function withGeneratedRelayFiles(profile: RelayProfile): RelayProfile {
 }
 
 function buildRelayConfigToml(
-  profile: Pick<RelayProfile, "model" | "baseUrl" | "upstreamBaseUrl" | "apiKey" | "protocol">,
+  profile: Pick<RelayProfile, "model" | "baseUrl" | "upstreamBaseUrl" | "apiKey" | "protocol" | "modelProtocols">,
   options: { includeBearerToken: boolean },
 ): string {
-  const baseUrl = profile.protocol !== "responses" ? PROTOCOL_PROXY_BASE_URL : profile.baseUrl.trim();
+  const baseUrl = profile.protocol !== "responses" || hasModelProtocols(profile.modelProtocols) ? PROTOCOL_PROXY_BASE_URL : profile.baseUrl.trim();
   const apiKey = profile.apiKey.trim();
   const rootLines = [
     profile.model.trim() ? `model = "${tomlString(profile.model.trim())}"` : null,
@@ -9787,8 +9846,8 @@ function applyRelayProfilePatchToFiles(
   if ("upstreamBaseUrl" in patch) {
     next.baseUrl = patch.upstreamBaseUrl || "";
   }
-  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch || "modelRoutes" in patch) {
-    const baseUrlForConfig = next.protocol !== "responses" || normalizeRelayModelRoutes(next.modelRoutes).length > 0
+  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch || "modelRoutes" in patch || "modelProtocols" in patch) {
+    const baseUrlForConfig = next.protocol !== "responses" || normalizeRelayModelRoutes(next.modelRoutes).length > 0 || hasModelProtocols(next.modelProtocols)
       ? PROTOCOL_PROXY_BASE_URL
       : next.upstreamBaseUrl || next.baseUrl;
     next.configContents = setCodexProviderStringKey(next.configContents, "base_url", baseUrlForConfig);
@@ -10103,6 +10162,8 @@ function relaySettingsWithDraft(
 }
 
 function relayProfileValidation(profile: RelayProfile): string | null {
+  try { parseModelProtocols(profile.modelProtocols); }
+  catch { return t("模型协议配置无效，请修正后保存。"); }
   if (isAggregateRelayProfile(profile)) {
     return aggregateRelayProfileValidation(profile);
   }
@@ -10228,6 +10289,7 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     modelList: "",
     modelWindows: "",
     modelVlm: "",
+    modelProtocols: "",
     modelReasoningEfforts: {},
     lastUsedModel: "",
     vlmApiKey: "",
@@ -10268,6 +10330,7 @@ function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
       modelList: "",
       modelWindows: "",
       modelVlm: "",
+      modelProtocols: "",
       modelReasoningEfforts: {},
       lastUsedModel: "",
       vlmApiKey: "",
@@ -10479,6 +10542,7 @@ function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile
     modelList: "",
     modelWindows: "",
     modelVlm: "",
+    modelProtocols: "",
     modelReasoningEfforts: {},
     lastUsedModel: "",
     vlmApiKey: "",

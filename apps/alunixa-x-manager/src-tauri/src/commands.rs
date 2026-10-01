@@ -4086,16 +4086,17 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
         detail: format!(
             "{} / {}",
             alunixa_x_core::relay_config::relay_profile_base_url(&profile),
-            match profile.protocol {
-                alunixa_x_core::settings::RelayProtocol::Responses => "Responses API",
-                alunixa_x_core::settings::RelayProtocol::ChatCompletions => "Chat Completions",
-                alunixa_x_core::settings::RelayProtocol::Completions => "Completions",
-                alunixa_x_core::settings::RelayProtocol::AnthropicMessages => {
+            match profile.protocol_for_model(&test_model) {
+                Ok(alunixa_x_core::settings::RelayProtocol::Responses) => "Responses API",
+                Ok(alunixa_x_core::settings::RelayProtocol::ChatCompletions) => "Chat Completions",
+                Ok(alunixa_x_core::settings::RelayProtocol::Completions) => "Completions",
+                Ok(alunixa_x_core::settings::RelayProtocol::AnthropicMessages) => {
                     "Anthropic Messages"
                 }
-                alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent => {
+                Ok(alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent) => {
                     "Gemini generateContent"
                 }
+                Err(_) => "Invalid model protocol",
             }
         ),
     });

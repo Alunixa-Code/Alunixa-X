@@ -4492,3 +4492,115 @@ experimental_bearer_token = "sk-new"
     );
     assert!(!windows.contains_key("deepseek-v4-pro"));
 }
+
+#[test]
+fn ordinary_model_protocols_round_trip_proxy_files_and_restore_direct_transport() {
+    let home = tempfile::tempdir().unwrap();
+    let mut profile = RelayProfile {
+        id: "mixed-wire".into(), relay_mode: RelayMode::PureApi,
+        model: "gpt-6-astra".into(), model_list: "gpt-6-astra\nclaude-opus-5-5".into(),
+        base_url: "https://fixture.invalid/v1".into(), upstream_base_url: "https://fixture.invalid/v1".into(),
+        api_key: "fixture-key".into(), model_protocols: r#"{"Claude-Opus-5-5[1M]":"chatCompletions"}"#.into(),
+        config_contents: "# preserve me\nmodel_provider = \"custom\"\n[model_providers.custom]\nbase_url = \"https://fixture.invalid/v1\"\n".into(),
+        ..RelayProfile::default()
+    };
+    normalize_relay_profile_for_storage(&mut profile).unwrap();
+    assert_eq!(
+        profile.protocol_for_model("claude-opus-5-5").unwrap(),
+        RelayProtocol::ChatCompletions
+    );
+    assert_eq!(
+        profile.protocol_for_model("gpt-6-astra").unwrap(),
+        RelayProtocol::Responses
+    );
+    let settings = alunixa_x_core::settings::BackendSettings {
+        active_relay_id: profile.id.clone(),
+        relay_profiles: vec![profile.clone()],
+        ..Default::default()
+    };
+    assert!(settings.active_relay_uses_protocol_proxy());
+    apply_relay_profile_to_home_with_switch_rules(home.path(), &profile, "").unwrap();
+    let config = std::fs::read_to_string(home.path().join("config.toml")).unwrap();
+    assert!(config.contains("http://127.0.0.1:57321/v1"));
+    assert!(config.contains("supports_websockets = false"));
+    assert!(config.contains("# preserve me"));
+    let before_auth = std::fs::read(home.path().join("auth.json")).unwrap();
+    backfill_relay_profile_from_home_with_common(home.path(), &mut profile, &mut String::new())
+        .unwrap();
+    assert_eq!(
+        alunixa_x_core::relay_config::relay_profile_base_url(&profile),
+        "https://fixture.invalid/v1"
+    );
+    let restored: RelayProfile =
+        serde_json::from_str(&serde_json::to_string(&profile).unwrap()).unwrap();
+    assert_eq!(restored.model_protocols, profile.model_protocols);
+    // Simulate saving the active live proxy snapshot without prior backfill.
+    profile.config_contents = config;
+    profile.model_protocols.clear();
+    normalize_relay_profile_for_storage(&mut profile).unwrap();
+    apply_relay_profile_to_home_with_switch_rules(home.path(), &profile, "").unwrap();
+    let direct = std::fs::read_to_string(home.path().join("config.toml")).unwrap();
+    assert!(!direct.contains("127.0.0.1:57321"));
+    assert!(direct.contains("https://fixture.invalid/v1"));
+    assert_eq!(
+        std::fs::read(home.path().join("auth.json")).unwrap(),
+        before_auth
+    );
+}
+
+#[test]
+fn invalid_model_protocol_maps_fail_instead_of_silent_fallback() {
+    for value in ["invalid", "[]", r#"{"a":"unknown"}"#, r#"{"":"responses"}"#] {
+        let mut profile = RelayProfile {
+            model_protocols: value.into(),
+            ..Default::default()
+        };
+        assert!(normalize_relay_profile_for_storage(&mut profile).is_err());
+        assert!(profile.protocol_for_model("a").is_err());
+    }
+}
+
+#[test]
+fn polluted_model_snapshots_do_not_amplify_on_repeated_normalization() {
+    for bad in [
+        "bad\\nmodel_provider = custom",
+        "bad\nbase_url = x",
+        "bad\tvalue",
+        &"a".repeat(257),
+    ] {
+        let mut doc = toml_edit::DocumentMut::new();
+        doc["model"] = toml_edit::value(bad);
+        let mut profile = RelayProfile {
+            relay_mode: RelayMode::PureApi,
+            model: bad.into(),
+            config_contents: doc.to_string(),
+            base_url: "https://fixture.invalid/v1".into(),
+            ..Default::default()
+        };
+        normalize_relay_profile_for_storage(&mut profile).unwrap();
+        let first = profile.config_contents.clone();
+        for _ in 0..3 {
+            normalize_relay_profile_for_storage(&mut profile).unwrap();
+        }
+        assert_eq!(profile.config_contents, first);
+        assert!(profile.model.is_empty());
+        assert!(
+            profile
+                .config_contents
+                .parse::<toml_edit::DocumentMut>()
+                .unwrap()
+                .get("model")
+                .is_none()
+        );
+    }
+    for valid in ["openai/gpt-4o", "claude-opus-5-5", "deepseek-v4-pro[1M]"] {
+        let profile = RelayProfile {
+            model: valid.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            alunixa_x_core::relay_config::relay_profile_model(&profile),
+            valid
+        );
+    }
+}

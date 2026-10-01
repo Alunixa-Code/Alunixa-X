@@ -5,6 +5,9 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "模型协议": "Model protocol",
+  "模型协议配置无效，请修正后保存。": "Invalid model protocol configuration. Correct it before saving.",
+  "跟随供应商协议": "Use provider protocol",
   "自适应思维": "Adaptive thinking",
   "自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。": "Adaptive thinking requires Chat Completions or Anthropic Messages. Save and restart Codex to apply.",
   "上传图片、动图或视频；不启动 Wallpaper Engine。": "Import images, animations, or videos; Wallpaper Engine is not launched.",

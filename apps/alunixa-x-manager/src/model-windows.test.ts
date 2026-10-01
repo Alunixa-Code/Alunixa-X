@@ -34,6 +34,7 @@ const _profileTypeCheck: RelayProfile = {
   modelList: "",
   modelWindows: "",
   modelVlm: "",
+  modelProtocols: "",
   modelReasoningEfforts: {},
   lastUsedModel: "",
   vlmApiKey: "",
@@ -173,9 +174,9 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       modelWindowRowsFromProfile("a\nb\nc", '{"a":"1M","c":"200K"}'),
       [
-        { model: "a", window: "1M", imageHandling: "send-as-is" },
-        { model: "b", window: "", imageHandling: "send-as-is" },
-        { model: "c", window: "200K", imageHandling: "send-as-is" },
+        { model: "a", window: "1M", imageHandling: "send-as-is", protocol: "" },
+        { model: "b", window: "", imageHandling: "send-as-is", protocol: "" },
+        { model: "c", window: "200K", imageHandling: "send-as-is", protocol: "" },
       ],
     );
   });
@@ -184,9 +185,9 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       modelWindowRowsFromProfile("a\nb\nc", '{}', '{"a":"vlm","b":"strip"}'),
       [
-        { model: "a", window: "", imageHandling: "vlm" },
-        { model: "b", window: "", imageHandling: "strip" },
-        { model: "c", window: "", imageHandling: "send-as-is" },
+        { model: "a", window: "", imageHandling: "vlm", protocol: "" },
+        { model: "b", window: "", imageHandling: "strip", protocol: "" },
+        { model: "c", window: "", imageHandling: "send-as-is", protocol: "" },
       ],
     );
   });
@@ -194,14 +195,15 @@ describe("model-windows helpers", () => {
   it("serializeModelWindowRows 从行控件生成 modelList、modelWindows 和 modelVlm", () => {
     assert.deepStrictEqual(
       serializeModelWindowRows([
-        { model: "a", window: "1M", imageHandling: "vlm" },
-        { model: "", window: "400K", imageHandling: "send-as-is" },
-        { model: "b", window: "", imageHandling: "send-as-is" },
+        { model: "a", window: "1M", imageHandling: "vlm", protocol: "" },
+        { model: "", window: "400K", imageHandling: "send-as-is", protocol: "" },
+        { model: "b", window: "", imageHandling: "send-as-is", protocol: "chatCompletions" },
       ]),
       {
         modelList: "a\nb",
         modelWindows: '{"a":"1M"}',
         modelVlm: '{"a":"vlm"}',
+        modelProtocols: '{"b":"chatCompletions"}',
       },
     );
   });
@@ -210,18 +212,18 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       mergeModelWindowRows(
         [
-          { model: "deepseek-v4-flash", window: "1M", imageHandling: "vlm" },
-          { model: "  ", window: "", imageHandling: "send-as-is" },
+          { model: "deepseek-v4-flash", window: "1M", imageHandling: "vlm", protocol: "" },
+          { model: "  ", window: "", imageHandling: "send-as-is", protocol: "" },
         ],
         [
-          { model: "deepseek-v4-flash", window: "", imageHandling: "send-as-is" },
-          { model: "deepseek-v4-pro", window: "", imageHandling: "vlm" },
-          { model: " deepseek-v4-pro ", window: "200K", imageHandling: "send-as-is" },
+          { model: "deepseek-v4-flash", window: "", imageHandling: "send-as-is", protocol: "" },
+          { model: "deepseek-v4-pro", window: "", imageHandling: "vlm", protocol: "" },
+          { model: " deepseek-v4-pro ", window: "200K", imageHandling: "send-as-is", protocol: "" },
         ],
       ),
       [
-        { model: "deepseek-v4-flash", window: "1M", imageHandling: "vlm" },
-        { model: "deepseek-v4-pro", window: "", imageHandling: "vlm" },
+        { model: "deepseek-v4-flash", window: "1M", imageHandling: "vlm", protocol: "" },
+        { model: "deepseek-v4-pro", window: "", imageHandling: "vlm", protocol: "" },
       ],
     );
   });

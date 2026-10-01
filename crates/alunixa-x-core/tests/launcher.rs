@@ -1915,6 +1915,7 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             custom_models: Vec::new(),
             default_custom_model_id: String::new(),
             model_routes: Vec::new(),
+            model_protocols: String::new(),
         }],
         active_relay_id: "relay-chat".to_string(),
         ..BackendSettings::default()

@@ -111,6 +111,7 @@ pub fn relay_profile_from_ccs(
         custom_models: Vec::new(),
         default_custom_model_id: String::new(),
         model_routes: Vec::new(),
+        model_protocols: String::new(),
     }
 }
 

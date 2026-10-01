@@ -850,6 +850,7 @@ pub async fn test_relay_profile(
     profile: &RelayProfile,
     model: &str,
 ) -> anyhow::Result<RelayProfileTestResult> {
+    let protocol = profile.protocol_for_model(model)?;
     let base_url = relay_profile_base_url(profile);
     let base_url = base_url.trim().trim_end_matches('/');
     if base_url.is_empty() {
@@ -867,13 +868,13 @@ pub async fn test_relay_profile(
         anyhow::bail!("测试模型不能为空");
     }
 
-    let payload = relay_profile_test_payload(profile.protocol, test_model);
-    let endpoint = relay_profile_test_endpoint(profile.protocol, base_url, test_model);
+    let payload = relay_profile_test_payload(protocol, test_model);
+    let endpoint = relay_profile_test_endpoint(protocol, base_url, test_model);
     let request = client
         .post(&endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(&payload);
-    let request = relay_profile_test_auth(request, profile.protocol, api_key);
+    let request = relay_profile_test_auth(request, protocol, api_key);
     let response = request.send().await?;
     let http_status = response.status().as_u16();
 
@@ -882,12 +883,12 @@ pub async fn test_relay_profile(
     // 用户容易遗漏这个前缀，导致 /responses 或 /chat/completions 404。
     if http_status == 404 && !base_url.ends_with("/v1") {
         let v1_url = format!("{base_url}/v1");
-        let v1_endpoint = relay_profile_test_endpoint(profile.protocol, &v1_url, test_model);
+        let v1_endpoint = relay_profile_test_endpoint(protocol, &v1_url, test_model);
         let v1_request = client
             .post(&v1_endpoint)
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .json(&payload);
-        let v1_response = relay_profile_test_auth(v1_request, profile.protocol, api_key)
+        let v1_response = relay_profile_test_auth(v1_request, protocol, api_key)
             .send()
             .await?;
         let v1_status = v1_response.status().as_u16();
@@ -1055,7 +1056,7 @@ pub fn backfill_relay_profile_from_home(
     let live_config = profile.config_contents.clone();
     sync_context_limits_from_config(profile, &live_config);
     if profile.model.trim().is_empty() {
-        if let Some(model) = root_key_string(&profile.config_contents, "model") {
+        if let Some(model) = sanitized_config_model(&profile.config_contents) {
             profile.model = model;
         }
     }
@@ -1109,7 +1110,7 @@ pub fn backfill_relay_profile_from_home_with_common(
     sync_profile_mode_from_backfilled_live(profile);
     sync_context_limits_from_config(profile, &live_config);
     if profile.model.trim().is_empty() {
-        if let Some(model) = root_key_string(&live_config, "model") {
+        if let Some(model) = sanitized_config_model(&live_config) {
             profile.model = model;
         }
     }
@@ -2758,12 +2759,43 @@ fn codex_auth_api_key(auth_contents: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
+/// Ported from CodexPlusPlus v1.5.0: reject configuration text accidentally
+/// backfilled as a model slug before another save amplifies its escaping.
+pub(crate) fn sanitize_relay_model_name(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty()
+        || trimmed.len() > 256
+        || trimmed.contains(['\\', '\r', '\n'])
+        || trimmed.chars().any(char::is_control)
+        || [
+            "model_provider",
+            "model_providers",
+            "base_url",
+            "wire_api",
+            "requires_openai_auth",
+            "model_catalog_json",
+        ]
+        .iter()
+        .any(|keyword| trimmed.contains(keyword))
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 /// 解析 profile 實際使用的模型：優先取 config.toml 裡的 `model =`，
 /// 否則退回 profile.model 欄位。供應商測試用它做回退，避免串到別家供應商的模型名。
 pub fn relay_profile_model(profile: &RelayProfile) -> String {
-    root_key_string(&profile.config_contents, "model")
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| profile.model.trim().to_string())
+    sanitized_config_model(&profile.config_contents)
+        .or_else(|| sanitize_relay_model_name(&profile.model))
+        .unwrap_or_default()
+}
+
+fn sanitized_config_model(contents: &str) -> Option<String> {
+    // A line-based extractor can mistake a multiline TOML delimiter for a slug.
+    let doc = parse_toml_document(contents)
+        .or_else(|_| parse_toml_document(&normalize_duplicate_toml_text(contents))).ok()?;
+    sanitize_relay_model_name(doc.get("model")?.as_str()?)
 }
 
 pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
@@ -2776,6 +2808,19 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
         return crate::protocol_proxy::local_responses_proxy_base_url(
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         );
+    }
+    if profile.has_model_protocols() {
+        if !profile.upstream_base_url.trim().is_empty() {
+            return profile.upstream_base_url.trim().to_string();
+        }
+        if !profile.base_url.trim().is_empty()
+            && profile.base_url.trim()
+                != crate::protocol_proxy::local_responses_proxy_base_url(
+                    crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+                )
+        {
+            return profile.base_url.trim().to_string();
+        }
     }
     if profile.has_model_routes() {
         if !profile.upstream_base_url.trim().is_empty() {
@@ -2804,13 +2849,19 @@ pub fn relay_profile_base_url(profile: &RelayProfile) -> String {
     let provider_base_url = provider_string_from_config(&profile.config_contents, "base_url")
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_default();
-    if profile.protocol != RelayProtocol::Responses
-        && provider_base_url
-            == crate::protocol_proxy::local_responses_proxy_base_url(
-                crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
-            )
+    if provider_base_url
+        == crate::protocol_proxy::local_responses_proxy_base_url(
+            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        )
     {
-        String::new()
+        // Removing the last per-model override must restore the real upstream,
+        // not persist AX's own local endpoint as an upstream and recurse.
+        [&profile.upstream_base_url, &profile.base_url]
+            .into_iter()
+            .map(|value| value.trim())
+            .find(|value| !value.is_empty() && *value != provider_base_url)
+            .unwrap_or_default()
+            .to_string()
     } else if !provider_base_url.is_empty() {
         provider_base_url
     } else {
@@ -2843,6 +2894,7 @@ pub fn relay_profile_api_key(profile: &RelayProfile) -> String {
 }
 
 fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<String> {
+    profile.model_protocol_map()?;
     let mut doc = parse_toml_document(&profile.config_contents)?;
     let provider_id = active_or_default_provider_id(&doc);
     set_provider_id(&mut doc, &provider_id);
@@ -2858,6 +2910,8 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
     let (model, _) = crate::model_suffix::parse_model_suffix(&model);
     if !model.trim().is_empty() {
         doc["model"] = toml_edit::value(model.trim());
+    } else {
+        doc.as_table_mut().remove("model");
     }
 
     let base_url = relay_profile_base_url(profile);
@@ -2898,9 +2952,10 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
         profile.protocol,
         crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
     );
-    let provider_base_url = if profile.relay_mode == crate::settings::RelayMode::CustomModels
+    let uses_protocol_proxy = profile.relay_mode == crate::settings::RelayMode::CustomModels
         || profile.has_model_routes()
-    {
+        || profile.has_model_protocols();
+    let provider_base_url = if uses_protocol_proxy {
         crate::protocol_proxy::local_responses_proxy_base_url(
             crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
         )
@@ -2909,6 +2964,10 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
     };
     if !provider_base_url.trim().is_empty() {
         provider["base_url"] = toml_edit::value(provider_base_url.trim());
+    }
+    if uses_protocol_proxy {
+        provider["wire_api"] = toml_edit::value("responses");
+        provider["supports_websockets"] = toml_edit::value(false);
     }
     if profile.relay_mode == crate::settings::RelayMode::PureApi {
         provider.remove("experimental_bearer_token");
@@ -2922,6 +2981,12 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
 }
 
 pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow::Result<()> {
+    let model_protocols = profile.model_protocol_map()?;
+    profile.model_protocols = if model_protocols.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string(&model_protocols)?
+    };
     profile.config_contents =
         crate::codex_instructions::strip_managed_model_instructions_file(&profile.config_contents)?;
     let mut seen_models = HashSet::new();
@@ -3006,6 +3071,7 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         profile.upstream_base_url.clear();
         profile.api_key.clear();
         profile.model_routes.clear();
+        profile.model_protocols.clear();
         if auth_contents_looks_like_chatgpt_auth(&profile.auth_contents) {
             profile.auth_contents =
                 remove_openai_api_key_from_auth_contents(&profile.auth_contents)?;
@@ -3213,7 +3279,10 @@ fn api_key_auth_with_mode(auth_contents: &str) -> anyhow::Result<String> {
 fn normalize_model_list_order(model_list: &str) -> String {
     let mut models = Vec::new();
     for item in model_list.split(['\r', '\n', ',']).map(str::trim) {
-        let (model, _) = crate::model_suffix::parse_model_suffix(item);
+        let Some(item) = sanitize_relay_model_name(item) else {
+            continue;
+        };
+        let (model, _) = crate::model_suffix::parse_model_suffix(&item);
         if !model.is_empty() && !models.iter().any(|existing| existing == &model) {
             models.push(model);
         }
