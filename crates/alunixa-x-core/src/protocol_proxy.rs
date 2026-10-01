@@ -7292,9 +7292,16 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
     };
     let style = infer_chat_reasoning_style(model);
     if is_claude_model(model)
-        && body.pointer("/reasoning/effort").and_then(Value::as_str) == Some("adaptive")
+        && body
+            .pointer("/reasoning/effort")
+            .and_then(Value::as_str)
+            .is_some_and(|effort| matches!(effort, "adaptive" | "xhigh" | "ultra"))
     {
         result["thinking"] = json!({"type":"adaptive"});
+        if let Some(object) = result.as_object_mut() {
+            object.remove("reasoning_effort");
+            object.remove("reasoning");
+        }
         return;
     }
 

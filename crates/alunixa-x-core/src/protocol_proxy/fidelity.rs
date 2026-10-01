@@ -432,7 +432,9 @@ pub(super) fn native_reasoning_options(body: &Value, wire: &str) -> anyhow::Resu
         if let Some(effort) = effort {
             match effort {
                 "none" | "disabled" => options["thinking"] = json!({"type":"disabled"}),
-                "adaptive" => {
+                "adaptive" | "xhigh" | "ultra"
+                    if super::is_claude_model(body["model"].as_str().unwrap_or("")) =>
+                {
                     options["thinking"] = json!({"type":"adaptive"});
                 }
                 "low" | "medium" | "high" | "max" | "xhigh" | "ultra" => {
