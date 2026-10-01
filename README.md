@@ -191,6 +191,10 @@ v1.0.23 增加俄语。右上角的语言下拉框可以直接选择 **简体中
 
 ## 更新、备份与回退
 
+### v1.0.34：Claude 请求兼容与自适应思维
+
+修复 client_metadata 转换报错和 Claude 推理强度丢失；在“模型最高思考等级”增加 Claude 专用“自适应思维”。使用 Chat Completions 或 Anthropic Messages，保存后通过 AX 重启 Codex；本次现场服务器请选择 Chat Completions。固定 xhigh 和自适应已通过真实 AX 转换链路合成请求验证，缓存读写统计保留。详见 [发行说明](docs/releases/v1.0.34.md)。
+
 ### v1.0.33：第三方模型 tool_search 兼容修复
 
 修正 Claude、Gemini、GLM、DeepSeek、Grok 等回退模型误继承 GPT 工具搜索能力的问题；保留普通工具和缓存处理。安装后通过 AX 重新启动 Codex 以生成新目录，外部自定义目录不强制覆盖；不代表所有网关支持所有参数。详见 [发行说明](docs/releases/v1.0.33.md)。

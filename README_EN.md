@@ -171,6 +171,10 @@ Large images and videos keep the restricted File/Blob transport. Codex CSP, orig
 
 ## Updating, backup, and recovery
 
+### v1.0.34: Claude compatibility and adaptive thinking
+
+Fixes client_metadata conversion errors and dropped Claude reasoning effort. The reasoning-level page now offers Claude-only Adaptive thinking for Chat Completions / Anthropic Messages. Save and relaunch through AX; use Chat Completions for the investigated gateway. Both modes passed real-server synthetic requests with cache accounting preserved. See [release notes](docs/releases/v1.0.34.md).
+
 ### v1.0.33: third-party tool_search compatibility
 
 Fallback Claude, Gemini, GLM, DeepSeek and Grok entries no longer inherit GPT-native tool search. Normal tools and cache processing remain unchanged. Relaunch Codex through AX after installation to refresh the managed catalog; external catalogs are preserved. This does not guarantee every gateway supports all parameters. See [release notes](docs/releases/v1.0.33.md).

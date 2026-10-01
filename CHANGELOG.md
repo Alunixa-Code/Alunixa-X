@@ -1,3 +1,9 @@
+## 1.0.34 - 2026-10-01
+
+- 修复新版Codex的client_metadata被转换器拒绝、助手消息阶段不兼容和Claude推理强度静默丢失。
+- Claude新增独立自适应思维选择，实际发送thinking.type=adaptive，不写入非法Codex枚举；其他模型和不支持协议不开放此选项。
+- 真实上游xhigh/adaptive合成请求验证通过，缓存创建/读取统计保留；详见docs/releases/v1.0.34.md。
+
 ## 1.0.33 - 2026-09-30
 
 - 修复 Claude、Gemini、GLM、DeepSeek、Grok 等自动回退模型误继承 GPT 原生 tool_search 能力；保留普通工具调用、已知模型和显式自定义能力。
