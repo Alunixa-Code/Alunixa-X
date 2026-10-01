@@ -2253,6 +2253,82 @@ fn transparent_proxy_settings(base_url: String) -> BackendSettings {
 }
 
 #[tokio::test]
+async fn claude_adaptive_setting_reaches_the_wire_without_cache_or_tool_loss() {
+    use alunixa_x_core::settings::ReasoningEffort;
+    for protocol in [
+        RelayProtocol::ChatCompletions,
+        RelayProtocol::AnthropicMessages,
+    ] {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(capture_json_request_once(listener));
+        let mut settings = transparent_proxy_settings(format!("http://{address}/v1"));
+        settings.relay_profiles[0].protocol = protocol;
+        settings.relay_profiles[0]
+            .model_reasoning_efforts
+            .insert("claude-opus-5-5".into(), ReasoningEffort::Adaptive);
+        let mut request = json!({
+            "model":"claude-opus-5-5","input":"hi","stream":true,
+            "client_metadata":{"session_id":"fixture"},
+            "reasoning":{"effort":"xhigh"},"reasoning_effort":"low",
+            "tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
+        });
+        if protocol == RelayProtocol::ChatCompletions {
+            request["prompt_cache_key"] = json!("stable-cache");
+            request["prompt_cache_retention"] = json!("24h");
+        }
+        let response = open_responses_proxy_request_with_settings(&request.to_string(), settings)
+            .await
+            .unwrap();
+        assert_eq!(response.status_code, 200);
+        let (headers, body) = server.await.unwrap();
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("output_config").is_none());
+        assert!(body.get("client_metadata").is_none());
+        assert_eq!(body["tools"].as_array().unwrap().len(), 1);
+        if protocol == RelayProtocol::ChatCompletions {
+            assert!(headers.starts_with("POST /v1/chat/completions "));
+            assert_eq!(body["prompt_cache_key"], "stable-cache");
+            assert_eq!(body["prompt_cache_retention"], "24h");
+        } else {
+            assert!(headers.starts_with("POST /v1/messages "));
+        }
+    }
+}
+
+#[tokio::test]
+async fn adaptive_setting_rejects_other_models_and_unconverted_protocols_before_network() {
+    use alunixa_x_core::settings::ReasoningEffort;
+    for (model, protocol) in [
+        ("gpt-6-astra", RelayProtocol::ChatCompletions),
+        ("gemini-3-pro", RelayProtocol::GeminiGenerateContent),
+        ("claude-opus-5-5", RelayProtocol::Responses),
+    ] {
+        let mut settings = transparent_proxy_settings("http://127.0.0.1:1/v1".into());
+        settings.relay_profiles[0].protocol = protocol;
+        settings.relay_profiles[0]
+            .model_reasoning_efforts
+            .insert(model.into(), ReasoningEffort::Adaptive);
+        let result = open_responses_proxy_request_with_settings(
+            &json!({"model":model,"input":"hi"}).to_string(),
+            settings,
+        )
+        .await;
+        let Err(error) = result else {
+            panic!("invalid adaptive mode accepted");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Claude adaptive thinking requires")
+        );
+    }
+}
+
+#[tokio::test]
 async fn transparent_proxy_preserves_method_query_binary_body_and_end_to_end_headers() {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await

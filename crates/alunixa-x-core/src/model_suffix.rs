@@ -190,6 +190,7 @@ pub fn model_ui_metadata(slug: &str) -> Option<Value> {
 }
 
 pub fn model_ui_metadata_with_maximum(slug: &str, maximum: ReasoningEffort) -> Value {
+    let maximum = maximum.codex_maximum();
     let mut metadata = model_ui_metadata(slug).unwrap_or_else(|| {
         json!({
             "displayName": slug,
@@ -317,7 +318,8 @@ fn build_model_catalog_json_with_template_and_efforts(
             let maximum_effort = reasoning_efforts
                 .get(&entry.slug)
                 .copied()
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .codex_maximum();
             model["supported_reasoning_levels"] = reasoning_levels(maximum_effort);
             let current_default = model
                 .get("default_reasoning_level")
@@ -339,6 +341,7 @@ fn build_model_catalog_json_with_template_and_efforts(
 }
 
 pub fn reasoning_levels(maximum: ReasoningEffort) -> Value {
+    let maximum = maximum.codex_maximum();
     Value::Array(
         ReasoningEffort::ALL
             .into_iter()
@@ -373,6 +376,7 @@ fn reasoning_effort_description(effort: ReasoningEffort) -> &'static str {
         ReasoningEffort::Xhigh => "Extra high reasoning depth for complex problems",
         ReasoningEffort::Max => "Maximum reasoning depth for the hardest problems",
         ReasoningEffort::Ultra => "Maximum reasoning with automatic task delegation",
+        ReasoningEffort::Adaptive => "Adaptive thinking managed by the Claude provider",
     }
 }
 

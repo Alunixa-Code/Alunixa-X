@@ -153,6 +153,43 @@ fn explicit_model_template_retains_tool_search_metadata() {
 }
 
 #[test]
+fn adaptive_provider_mode_never_enters_codex_effort_enum() {
+    use alunixa_x_core::settings::{ReasoningEffort, RelayProfile};
+    let profile: RelayProfile = serde_json::from_value(serde_json::json!({
+        "id":"claude","name":"Claude","modelReasoningEfforts":{"claude-opus-5-5":"adaptive"}
+    }))
+    .unwrap();
+    assert_eq!(
+        profile.reasoning_effort_for_model("claude-opus-5-5"),
+        ReasoningEffort::Adaptive
+    );
+    assert_eq!(
+        serde_json::to_value(&profile).unwrap()["modelReasoningEfforts"]["claude-opus-5-5"],
+        "adaptive"
+    );
+    let entries = collect_catalog_entries("claude-opus-5-5", &HashMap::new(), "");
+    let catalog = alunixa_x_core::model_suffix::build_model_catalog_json_with_efforts(
+        &entries,
+        None,
+        &profile.model_reasoning_efforts,
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&catalog).unwrap();
+    assert_eq!(
+        parsed["models"][0]["supported_reasoning_levels"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert!(!catalog.contains("\"adaptive\""));
+    let metadata = alunixa_x_core::model_suffix::model_ui_metadata_with_maximum(
+        "claude-opus-5-5",
+        ReasoningEffort::Adaptive,
+    );
+    assert!(!metadata.to_string().contains("\"adaptive\""));
+}
+
+#[test]
 fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
     let entries = collect_catalog_entries(
         "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna",

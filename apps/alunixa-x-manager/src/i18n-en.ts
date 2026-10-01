@@ -5,6 +5,8 @@
 
 // Plain strings: t("中文") -> EN_PLAIN["中文"].
 export const EN_PLAIN: Record<string, string> = {
+  "自适应思维": "Adaptive thinking",
+  "自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。": "Adaptive thinking requires Chat Completions or Anthropic Messages. Save and restart Codex to apply.",
   "上传图片、动图或视频；不启动 Wallpaper Engine。": "Import images, animations, or videos; Wallpaper Engine is not launched.",
   "静态预览": "Static preview",
   "壁纸文件路径": "Wallpaper file path",

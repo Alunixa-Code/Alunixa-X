@@ -550,6 +550,65 @@ fn native_reasoning_controls_are_forwarded_or_explicitly_rejected() {
 }
 
 #[test]
+fn codex_client_metadata_and_message_phase_do_not_block_conversion() {
+    let request = json!({
+        "model":"claude-opus-5-5",
+        "client_metadata":{"session_id":"fixture","turn_id":"fixture-turn"},
+        "input":[
+            {"role":"assistant","phase":"commentary","content":"Checking."},
+            {"role":"assistant","phase":"final_answer","content":"Done."},
+            {"role":"user","content":"Continue."}
+        ],
+        "reasoning":{"effort":"xhigh"},
+        "prompt_cache_key":"fixture-cache", "prompt_cache_retention":"24h"
+    });
+    let chat = responses_to_chat_completions(request.clone()).unwrap();
+    assert!(chat.get("client_metadata").is_none());
+    assert_eq!(chat["messages"][0]["content"], "Checking.");
+    assert_eq!(chat["messages"][1]["content"], "Done.");
+    assert_eq!(chat["reasoning_effort"], "xhigh");
+    assert_eq!(chat["prompt_cache_key"], "fixture-cache");
+    assert_eq!(chat["prompt_cache_retention"], "24h");
+    let mut native = request;
+    native.as_object_mut().unwrap().remove("prompt_cache_key");
+    native
+        .as_object_mut()
+        .unwrap()
+        .remove("prompt_cache_retention");
+    let anthropic = responses_to_anthropic_messages(native).unwrap();
+    assert_eq!(anthropic["thinking"]["type"], "adaptive");
+    assert_eq!(anthropic["output_config"]["effort"], "xhigh");
+    assert!(anthropic.get("client_metadata").is_none());
+    assert!(responses_to_chat_completions(json!({"input":"hi","client_metadata":"bad"})).is_err());
+}
+
+#[test]
+fn claude_adaptive_and_explicit_effort_are_distinct() {
+    let request = json!({"model":"claude-opus-5-5","input":"hi","reasoning":{"effort":"adaptive"}});
+    let chat = responses_to_chat_completions(request.clone()).unwrap();
+    assert_eq!(chat["thinking"]["type"], "adaptive");
+    assert!(chat.get("reasoning_effort").is_none());
+    let native = responses_to_anthropic_messages(request).unwrap();
+    assert_eq!(native["thinking"]["type"], "adaptive");
+    assert!(native.get("output_config").is_none());
+    for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+        let chat = responses_to_chat_completions(json!({
+            "model":"anthropic/claude-opus-5-5","input":"hi","reasoning":{"effort":effort}
+        }))
+        .unwrap();
+        assert_eq!(
+            chat["reasoning_effort"],
+            if effort == "ultra" { "max" } else { effort }
+        );
+    }
+    let native = responses_to_anthropic_messages(json!({
+        "model":"claude-sonnet-4-6","input":"hi","reasoning":{"effort":"xhigh"}
+    }))
+    .unwrap();
+    assert_eq!(native["output_config"]["effort"], "high");
+}
+
+#[test]
 fn message_fragments_and_native_multimodal_tool_outputs_keep_their_content() {
     let chat = responses_to_chat_completions(json!({"input":[{"role":"user","content":[{"type":"input_text","text":"hel"},{"type":"input_text","text":"lo"}]}]})).unwrap();
     assert_eq!(chat["messages"][0]["content"], "hello");

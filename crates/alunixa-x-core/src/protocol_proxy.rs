@@ -2593,8 +2593,32 @@ pub async fn open_chat_completions_proxy_request(
 
 async fn upstream_request_parts(
     relay: &crate::settings::RelayProfile,
-    request_json: Value,
+    mut request_json: Value,
 ) -> anyhow::Result<(String, Value, UpstreamWireApi)> {
+    let model = request_json["model"].as_str().unwrap_or("").trim();
+    if relay.reasoning_effort_for_model(model) == crate::settings::ReasoningEffort::Adaptive {
+        if !is_claude_model(model)
+            || !matches!(
+                relay.protocol,
+                RelayProtocol::ChatCompletions | RelayProtocol::AnthropicMessages
+            )
+        {
+            return fidelity::reject(
+                "Claude adaptive thinking requires a Claude model and Chat Completions or Anthropic Messages protocol",
+            );
+        }
+        if !request_json.get("reasoning").is_some_and(Value::is_object) {
+            request_json["reasoning"] = json!({});
+        }
+        request_json["reasoning"]["effort"] = json!("adaptive");
+        // The explicitly selected provider mode takes precedence over stale
+        // per-thread controls, but does not touch tools, history or cache hints.
+        request_json
+            .as_object_mut()
+            .unwrap()
+            .remove("reasoning_effort");
+        request_json["thinking"] = json!({"type":"adaptive"});
+    }
     match relay.protocol {
         RelayProtocol::Responses => {
             let mut body = request_json;
@@ -7267,6 +7291,12 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
         return;
     };
     let style = infer_chat_reasoning_style(model);
+    if is_claude_model(model)
+        && body.pointer("/reasoning/effort").and_then(Value::as_str) == Some("adaptive")
+    {
+        result["thinking"] = json!({"type":"adaptive"});
+        return;
+    }
 
     match style {
         ChatReasoningStyle::Thinking => {
@@ -7295,6 +7325,11 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
     };
     let Some(mapped) = map_chat_reasoning_effort(effort, style) else {
         return;
+    };
+    let mapped = if is_claude_model(model) && mapped == "ultra" {
+        "max"
+    } else {
+        mapped
     };
 
     match style {
@@ -7392,7 +7427,8 @@ fn map_chat_reasoning_effort(effort: &str, style: ChatReasoningStyle) -> Option<
 }
 
 fn supports_reasoning_effort(model: &str) -> bool {
-    is_openai_o_series(model)
+    is_claude_model(model)
+        || is_openai_o_series(model)
         || model
             .to_lowercase()
             .strip_prefix("gpt-")
@@ -7400,6 +7436,13 @@ fn supports_reasoning_effort(model: &str) -> bool {
             .is_some_and(|ch| ch.is_ascii_digit() && ch >= '5')
         || infer_chat_reasoning_style(model) == ChatReasoningStyle::DeepSeek
         || infer_chat_reasoning_style(model) == ChatReasoningStyle::LowHigh
+}
+
+fn is_claude_model(model: &str) -> bool {
+    model
+        .to_ascii_lowercase()
+        .split(['/', ':', '\\'])
+        .any(|part| part.starts_with("claude-"))
 }
 
 fn is_openai_o_series(model: &str) -> bool {

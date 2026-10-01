@@ -1,3 +1,4 @@
+import { isClaudeModel, supportsClaudeAdaptive } from "./claude-thinking";
 import {
   closestCenter,
   DndContext,
@@ -267,7 +268,7 @@ type BackendSettings = {
 type ZedOpenStrategy = "addToFocusedWorkspace" | "reuseWindow" | "newWindow" | "default";
 type LaunchMode = "patch" | "relay";
 type CodexAiShell = "powershell" | "pwsh";
-type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+type ReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "adaptive";
 type ImageOverlayFitMode = "fill" | "fit" | "stretch" | "tile" | "center";
 
 export type RelayProfile = {
@@ -4852,17 +4853,18 @@ function ReasoningEffortScreen({
                           className="reasoning-effort-options"
                           role="radiogroup"
                         >
-                          {REASONING_EFFORT_OPTIONS.map((option) => (
+                          {REASONING_EFFORT_OPTIONS.filter((option) => option.value !== "adaptive" || isClaudeModel(model)).map((option) => (
                             <button
                               aria-checked={selected === option.value}
                               className={selected === option.value ? "active" : ""}
                               key={option.value}
+                              disabled={option.value === "adaptive" && !supportsClaudeAdaptive(model, profile.protocol, profile.relayMode)}
                               onClick={() => setMaximumEffort(profile.id, model, option.value)}
                               role="radio"
-                              title={option.label}
+                              title={option.value === "adaptive" ? t("自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。") : option.label}
                               type="button"
                             >
-                              {option.label}
+                              {option.value === "adaptive" ? t("自适应思维") : option.label}
                             </button>
                           ))}
                         </div>
@@ -9323,6 +9325,7 @@ const REASONING_EFFORT_OPTIONS: Array<{ value: ReasoningEffort; label: string }>
   { value: "xhigh", label: "Extra High" },
   { value: "max", label: "Max" },
   { value: "ultra", label: "Ultra" },
+  { value: "adaptive", label: "Adaptive" },
 ];
 
 function normalizeReasoningEffortMap(

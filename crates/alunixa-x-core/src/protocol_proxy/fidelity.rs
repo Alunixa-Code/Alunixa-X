@@ -47,6 +47,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                         .all(|item| item == "reasoning.encrypted_content")
                 }) => {}
             "n" if value == 1 => {}
+            // Codex transport/session metadata is not model input. Do not forward it
+            // as provider metadata (which has a different schema).
+            "client_metadata" if value.is_object() => {}
             key if EXTRA_CHAT_PASSTHROUGH_FIELDS.contains(&key) && key != "n" => {}
             // Provider-specific thinking controls are explicitly forwarded below.
             "thinking" | "enable_thinking" | "reasoning_effort" | "reasoning_split" => {}
@@ -131,7 +134,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 }
             }
             "message" => {
-                if item.get("phase").is_some_and(|v| !v.is_null())
+                if item
+                    .get("phase")
+                    .is_some_and(|v| !v.is_null() && v != "commentary" && v != "final_answer")
                     || item.get("channel").is_some_and(|v| !v.is_null())
                 {
                     return reject("message phase or channel requires native Responses");
@@ -427,11 +432,23 @@ pub(super) fn native_reasoning_options(body: &Value, wire: &str) -> anyhow::Resu
         if let Some(effort) = effort {
             match effort {
                 "none" | "disabled" => options["thinking"] = json!({"type":"disabled"}),
-                "low" | "medium" | "high" | "max" => {
+                "adaptive" => {
+                    options["thinking"] = json!({"type":"adaptive"});
+                }
+                "low" | "medium" | "high" | "max" | "xhigh" | "ultra" => {
                     if options.get("thinking").is_none() {
                         options["thinking"] = json!({"type":"adaptive"});
                     }
-                    options["output_config"] = json!({"effort":effort});
+                    // Current Opus 5/5.5 support xhigh; older 4.6 models do not.
+                    // Ultra is an AX level, never an Anthropic wire value.
+                    let model = body["model"].as_str().unwrap_or("").to_ascii_lowercase();
+                    let mapped = match effort {
+                        "xhigh" if model.contains("claude-opus-4-6") => "max",
+                        "xhigh" if model.contains("claude-sonnet-4-6") => "high",
+                        "ultra" => "max",
+                        _ => effort,
+                    };
+                    options["output_config"] = json!({"effort":mapped});
                 }
                 _ => return reject("unsupported Anthropic reasoning effort"),
             }

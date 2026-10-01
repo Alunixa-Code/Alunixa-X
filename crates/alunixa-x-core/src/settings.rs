@@ -48,6 +48,7 @@ pub enum ReasoningEffort {
     Xhigh,
     Max,
     Ultra,
+    Adaptive,
 }
 
 impl ReasoningEffort {
@@ -68,6 +69,16 @@ impl ReasoningEffort {
             Self::Xhigh => "xhigh",
             Self::Max => "max",
             Self::Ultra => "ultra",
+            Self::Adaptive => "adaptive",
+        }
+    }
+
+    /// Adaptive is an AX provider mode, not a Codex reasoning-effort enum.
+    pub fn codex_maximum(self) -> Self {
+        if self == Self::Adaptive {
+            Self::High
+        } else {
+            self
         }
     }
 }

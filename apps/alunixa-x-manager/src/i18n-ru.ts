@@ -3,6 +3,8 @@
 // `node tools/i18n-verify.mjs`. No online translation service is used at runtime.
 
 export const RU_PLAIN: Record<string, string> = {
+  "自适应思维": "Адаптивное мышление",
+  "自适应思维需使用 Chat Completions 或 Anthropic Messages；保存后重新启动 Codex 生效。": "Адаптивное мышление требует Chat Completions или Anthropic Messages. Сохраните настройки и перезапустите Codex.",
   "上传图片、动图或视频；不启动 Wallpaper Engine。": "Импортируйте изображения, анимацию или видео; Wallpaper Engine не запускается.",
   "静态预览": "Статичное превью",
   "壁纸文件路径": "Путь к файлу обоев",
