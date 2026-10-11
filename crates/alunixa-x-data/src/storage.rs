@@ -414,12 +414,44 @@ impl SQLiteStorageAdapter {
         self
     }
 
+    /// issue #875：原报错只写「Database not found: <一条路径>」，用户拿不到任何线索。
+    ///
+    /// 现在把「用哪条路径、该路径在不在、还试过哪些候选路径」一并列出来，
+    /// 让用户/我们能立刻分辨是路径解析错了还是库确实不在。
+    fn database_not_found_message(&self) -> String {
+        let mut lines = vec![format!(
+            "Database not found: {} (exists: {})",
+            self.db_path.to_string_lossy(),
+            self.db_path.is_file()
+        )];
+        let others = self
+            .allowed_db_paths
+            .iter()
+            .filter(|path| *path != &self.db_path);
+        let others = others.collect::<Vec<_>>();
+        if !others.is_empty() {
+            lines.push(format!(
+                "候选路径：{}",
+                others
+                    .iter()
+                    .map(|path| format!(
+                        "{} (exists: {})",
+                        path.to_string_lossy(),
+                        path.is_file()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("、")
+            ));
+        }
+        if let Some(home) = self.codex_home.as_deref() {
+            lines.push(format!("Codex home：{}", home.to_string_lossy()));
+        }
+        lines.join("；")
+    }
+
     pub fn delete_local(&self, session: &SessionRef) -> DeleteResult {
         if !self.db_path.exists() {
-            return failed(
-                &session.session_id,
-                format!("Database not found: {}", self.db_path.to_string_lossy()),
-            );
+            return failed(&session.session_id, self.database_not_found_message());
         }
         let result = (|| -> anyhow::Result<DeleteResult> {
             let mut db = Connection::open(&self.db_path)?;
@@ -764,7 +796,7 @@ impl SQLiteStorageAdapter {
             return json!({
                 "status": "failed",
                 "session_id": session.session_id,
-                "message": format!("Database not found: {}", self.db_path.to_string_lossy()),
+                "message": self.database_not_found_message(),
                 "history": []
             });
         }
@@ -821,6 +853,72 @@ impl SQLiteStorageAdapter {
                 "history": []
             })
         })
+    }
+
+    /// 小鲸鱼只接受会话 UUID；路径来自只读数据库或受限会话目录，不接受前端路径。
+    pub(crate) fn whale_rollout_path(&self, thread_id: &str) -> Option<PathBuf> {
+        crate::whale_usage::normalize_session_id(thread_id)?;
+        let home = self
+            .codex_home
+            .as_deref()
+            .or_else(|| self.db_path.parent())?;
+        let roots: Vec<PathBuf> = ["sessions", "archived_sessions"]
+            .iter()
+            .filter_map(|name| fs::canonicalize(home.join(name)).ok())
+            .collect();
+        let allowed = |path: &Path| -> Option<PathBuf> {
+            let path = fs::canonicalize(path).ok()?;
+            (path.is_file()
+                && path.extension().is_some_and(|ext| ext == "jsonl")
+                && roots.iter().any(|root| path.starts_with(root)))
+            .then_some(path)
+        };
+        for db_path in &self.allowed_db_paths {
+            let Ok(db) = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+                continue;
+            };
+            let _ = db.busy_timeout(std::time::Duration::from_millis(50));
+            let path = db.query_row(
+                "SELECT rollout_path FROM threads WHERE id = ?1",
+                [thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            );
+            if let Ok(Some(path)) = path {
+                if let Some(path) = allowed(Path::new(&path)) {
+                    return Some(path);
+                }
+                if let Some(alternative) = wsl_path_alternative(&path) {
+                    if let Some(path) = allowed(Path::new(&alternative)) {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+        // API 模式可能没有 threads 行。只遍历标准目录，限制深度及条目数，不跟随符号链接。
+        let suffix = format!("-{thread_id}.jsonl");
+        let mut pending: Vec<_> = roots.into_iter().rev().map(|root| (root, 0)).collect();
+        let mut budget = 8192usize;
+        while let Some((dir, depth)) = pending.pop() {
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            for entry in entries {
+                if budget == 0 {
+                    return None;
+                }
+                budget -= 1;
+                let Ok(entry) = entry else { continue };
+                let Ok(kind) = entry.file_type() else { continue };
+                if kind.is_dir() && depth < 3 {
+                    pending.push((entry.path(), depth + 1));
+                } else if kind.is_file()
+                    && entry.file_name().to_string_lossy().ends_with(&suffix)
+                {
+                    return fs::canonicalize(entry.path()).ok();
+                }
+            }
+        }
+        None
     }
 
     fn delete_generic_session(
@@ -951,7 +1049,8 @@ impl SQLiteStorageAdapter {
             "assigned_thread_id = ?1",
             &[&thread_id],
         )?;
-        let file_backups = rollout_file_backups(tables.get("threads").and_then(Value::as_array));
+        let (file_backups, unreadable_rollouts) =
+            rollout_file_backups(tables.get("threads").and_then(Value::as_array));
         if !file_backups.is_empty() {
             tables.insert("__files".to_string(), Value::Array(file_backups.clone()));
         }
@@ -992,7 +1091,11 @@ impl SQLiteStorageAdapter {
                 Some(&backup_path),
             ));
         }
-        let mut file_errors = Vec::new();
+        // issue #162：rollout 文件存在但两种视角都读取失败时，不允许静默报删除成功
+        let mut file_errors = unreadable_rollouts
+            .into_iter()
+            .map(|path| format!("{path}: 读取失败，未删除"))
+            .collect::<Vec<_>>();
         for file in file_backups {
             if let Some(path) = file.get("path").and_then(Value::as_str) {
                 if let Err(err) = fs::remove_file(path) {
@@ -1621,7 +1724,15 @@ fn allowed_backup_file_paths(tables: &Map<String, Value>) -> HashSet<String> {
         .flatten()
         .filter_map(|row| row.get("rollout_path").and_then(Value::as_str))
         .filter(|path| !path.trim().is_empty())
-        .map(ToString::to_string)
+        .flat_map(|path| {
+            // issue #162：__files 条目的 path 可能是互转后的可读写视角，
+            // 撤销校验需要同时放行原始写法与互转写法
+            let mut views = vec![path.to_string()];
+            if let Some(alternative) = wsl_path_alternative(path) {
+                views.push(alternative);
+            }
+            views
+        })
         .collect()
 }
 
@@ -1719,19 +1830,87 @@ fn delete_related_rows(
     Ok(())
 }
 
-fn rollout_file_backups(thread_rows: Option<&Vec<Value>>) -> Vec<Value> {
-    thread_rows
-        .into_iter()
-        .flatten()
-        .filter_map(|row| row.get("rollout_path").and_then(Value::as_str))
-        .filter_map(|path| {
-            let bytes = fs::read(path).ok()?;
-            Some(json!({
-                "path": path,
-                "content_b64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
-            }))
-        })
-        .collect()
+/// 为 threads 行里的每个 rollout 文件生成 `__files` 备份条目。
+///
+/// issue #162：WSL 模式下 codex 写入 `threads.rollout_path` 的是 WSL 视角路径
+/// （如 `/mnt/c/Users/.../rollout-xxx.jsonl`），Windows 侧进程按原路径读不到文件。
+/// 这里先按原路径读取，失败再尝试互转后的另一种视角（见 [`wsl_path_alternative`]）；
+/// 两种视角下文件都确实不存在时才跳过（与旧行为一致，视为文件已缺失）。
+/// 文件存在但读取失败时记入 unreadable，交由调用方拒绝静默成功。
+fn rollout_file_backups(thread_rows: Option<&Vec<Value>>) -> (Vec<Value>, Vec<String>) {
+    let mut entries = Vec::new();
+    let mut unreadable = Vec::new();
+    for row in thread_rows.into_iter().flatten() {
+        let Some(path) = row.get("rollout_path").and_then(Value::as_str) else {
+            continue;
+        };
+        if path.trim().is_empty() {
+            continue;
+        }
+        if let Ok(bytes) = fs::read(path) {
+            entries.push(rollout_file_backup_entry(path, path, bytes));
+            continue;
+        }
+        if let Some(alternative) = wsl_path_alternative(path) {
+            if let Ok(bytes) = fs::read(&alternative) {
+                entries.push(rollout_file_backup_entry(&alternative, path, bytes));
+                continue;
+            }
+            if Path::new(&alternative).is_file() {
+                unreadable.push(path.to_string());
+                continue;
+            }
+        }
+        if Path::new(path).is_file() {
+            unreadable.push(path.to_string());
+        }
+    }
+    (entries, unreadable)
+}
+
+/// `path` 用可读写视角（原路径或互转后的路径），`source_path` 保留 DB 里的原始
+/// 写法。删除与撤销都以 `path` 为准；两视角不同时附带 `source_path` 便于追溯。
+fn rollout_file_backup_entry(path: &str, source_path: &str, bytes: Vec<u8>) -> Value {
+    let mut entry = json!({
+        "path": path,
+        "content_b64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes),
+    });
+    if path != source_path {
+        entry["source_path"] = Value::String(source_path.to_string());
+    }
+    entry
+}
+
+/// `/mnt/<盘符>/...` 与 `<盘符>:/...` 两种路径视角互转（issue #162）。
+///
+/// WSL 把 Windows 盘符挂载在 `/mnt/<盘符>` 下：同一文件在 WSL 侧写作
+/// `/mnt/c/Users/a.jsonl`，在 Windows 侧写作 `C:/Users/a.jsonl`（或反斜杠）。
+/// 只做字符串形式转换，不保证目标存在；路径不属于这两种形式时返回 None。
+///
+/// `pub(crate)`：会话修复（provider_sync）也要按同一套视角回退，见 issue #1424。
+pub(crate) fn wsl_path_alternative(path: &str) -> Option<String> {
+    let normalized = path.replace('\\', "/");
+    if let Some(rest) = normalized.strip_prefix("/mnt/") {
+        let rest_bytes = rest.as_bytes();
+        if rest_bytes.len() > 1
+            && rest_bytes[0].is_ascii_alphabetic()
+            && rest_bytes[1] == b'/'
+            && rest.len() > 2
+        {
+            // 前两个字节是 ASCII，切片安全
+            let tail = &rest[2..];
+            let drive = rest_bytes[0].to_ascii_uppercase() as char;
+            return Some(format!("{drive}:/{tail}"));
+        }
+        return None;
+    }
+    let bytes = normalized.as_bytes();
+    if bytes.len() > 3 && bytes[1] == b':' && bytes[2] == b'/' && bytes[0].is_ascii_alphabetic() {
+        let drive = bytes[0].to_ascii_lowercase() as char;
+        let tail = &normalized[3..];
+        return Some(format!("/mnt/{drive}/{tail}"));
+    }
+    None
 }
 
 fn update_rollout_session_meta_cwd(
@@ -1849,5 +2028,124 @@ fn json_to_sql_value(value: &Value) -> SqlValue {
         }
         Value::String(value) => SqlValue::Text(value.clone()),
         other => SqlValue::Text(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod database_not_found_tests {
+    use super::*;
+
+    fn adapter(db_path: PathBuf, allowed: Vec<PathBuf>, home: Option<&Path>) -> SQLiteStorageAdapter {
+        let mut adapter = SQLiteStorageAdapter::new(db_path, BackupStore::new("/tmp/backups"))
+            .with_allowed_db_paths(allowed);
+        if let Some(home) = home {
+            adapter = adapter.with_codex_home(home);
+        }
+        adapter
+    }
+
+    /// issue #875：报错必须带上候选路径与 Codex home，否则用户无从判断是解析错还是库不在。
+    #[test]
+    fn message_lists_missing_path_and_candidate_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        let primary = home.join("state_5.sqlite");
+        let candidate = home.join("sqlite").join("state_5.sqlite");
+
+        let adapter = adapter(primary.clone(), vec![primary.clone(), candidate.clone()], Some(&home));
+        let message = adapter.database_not_found_message();
+
+        assert!(message.contains(&primary.to_string_lossy().to_string()));
+        assert!(message.contains("exists: false"));
+        assert!(
+            message.contains(&candidate.to_string_lossy().to_string()),
+            "候选路径应出现在报错里：{message}"
+        );
+        assert!(
+            message.contains(&home.to_string_lossy().to_string()),
+            "Codex home 应出现在报错里：{message}"
+        );
+    }
+
+    /// 候选路径里已经存在的那个要标 exists: true，用户才能看出真正该用哪条。
+    #[test]
+    fn message_marks_existing_candidate_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        fs::create_dir_all(&home).unwrap();
+        let primary = home.join("state_5.sqlite");
+        let existing = home.join("sqlite").join("state_5.sqlite");
+        fs::create_dir_all(existing.parent().unwrap()).unwrap();
+        fs::write(&existing, b"placeholder").unwrap();
+
+        let adapter = adapter(primary, vec![existing.clone()], None);
+        let message = adapter.database_not_found_message();
+
+        assert!(
+            message.contains(&format!("{} (exists: true)", existing.to_string_lossy())),
+            "已存在的候选路径应标为 true：{message}"
+        );
+    }
+
+    /// 没有 codex_home 时不该硬塞一行空的 home。
+    #[test]
+    fn message_omits_codex_home_when_unknown() {
+        let temp = tempfile::tempdir().unwrap();
+        let primary = temp.path().join("state_5.sqlite");
+
+        let adapter = adapter(primary, vec![], None);
+        let message = adapter.database_not_found_message();
+
+        assert!(!message.contains("Codex home："), "不该出现空 home：{message}");
+    }
+}
+
+#[cfg(test)]
+mod wsl_path_tests {
+    use super::wsl_path_alternative;
+
+    #[test]
+    fn converts_wsl_mount_view_to_windows_drive_view() {
+        assert_eq!(
+            wsl_path_alternative("/mnt/c/Users/tom/.codex/sessions/a.jsonl").as_deref(),
+            Some("C:/Users/tom/.codex/sessions/a.jsonl")
+        );
+        assert_eq!(
+            wsl_path_alternative("/mnt/f/TEMP/rollout.jsonl").as_deref(),
+            Some("F:/TEMP/rollout.jsonl")
+        );
+    }
+
+    #[test]
+    fn converts_windows_drive_view_to_wsl_mount_view() {
+        assert_eq!(
+            wsl_path_alternative("C:\\Users\\tom\\.codex\\sessions\\a.jsonl").as_deref(),
+            Some("/mnt/c/Users/tom/.codex/sessions/a.jsonl")
+        );
+        assert_eq!(
+            wsl_path_alternative("C:/Users/tom/a.jsonl").as_deref(),
+            Some("/mnt/c/Users/tom/a.jsonl")
+        );
+    }
+
+    #[test]
+    fn roundtrip_between_views_is_stable() {
+        let windows = "D:/data/rollout-1.jsonl";
+        let wsl = wsl_path_alternative(windows).unwrap();
+        assert_eq!(wsl, "/mnt/d/data/rollout-1.jsonl");
+        assert_eq!(wsl_path_alternative(&wsl).as_deref(), Some(windows));
+    }
+
+    #[test]
+    fn rejects_paths_outside_both_views() {
+        // 非 /mnt/<盘符> 形式的 POSIX 路径不可互转
+        assert_eq!(wsl_path_alternative("/mnt/external/catalog.json"), None);
+        assert_eq!(wsl_path_alternative("/home/tom/a.jsonl"), None);
+        assert_eq!(wsl_path_alternative("mnt/c/a.jsonl"), None);
+        // 盘符后不是路径分隔符
+        assert_eq!(wsl_path_alternative("C:temp.jsonl"), None);
+        // 只有前缀没有剩余部分
+        assert_eq!(wsl_path_alternative("/mnt/c/"), None);
+        assert_eq!(wsl_path_alternative("C:/"), None);
     }
 }
