@@ -21,10 +21,18 @@ const clientSource = readFileSync(
 
 test("WeChat connection is explicit, searchable, and defaults to restricted access", () => {
   assert.match(appSource, /id: "weixin"/);
-  assert.match(appSource, /list="weixin-session-workdirs"/);
+  const screen = appSource.slice(appSource.indexOf("function WeixinConnectScreen("), appSource.indexOf("function OverviewScreen("));
+  assert.match(screen, /<SearchablePathPicker/);
+  assert.match(screen, /onFormChange\(\{ \.\.\.form, weixinConnectWorkDir:/);
   assert.match(appSource, /find_desktop_codex_cli/);
-  assert.match(commandSource, /find_cached_codex_cli/);
-  assert.match(appSource, /实时回传思考摘要、搜索、命令、工具与输出/);
+  assert.match(commandSource, /find_desktop_managed_codex_cli/);
+  assert.match(commandSource, /find_bundled_codex_cli/);
+  const appServer = readFileSync(
+    path.join(root, "..", "..", "..", "crates", "alunixa-x-core", "src", "connect", "app_server.rs"),
+    "utf8",
+  );
+  assert.match(appServer, /reasoning|Reasoning/);
+  assert.match(appServer, /tool|Tool/);
   assert.match(appSource, /weixinConnectSandbox: "read-only"/);
   assert.match(settingsSource, /default_weixin_connect_sandbox/);
   assert.match(commandSource, /weixin_connect_qr_start/);
@@ -35,6 +43,10 @@ test("WeChat credentials cannot be redirected or rendered by the manager", () =>
   assert.match(clientSource, /host == "ilinkai\.weixin\.qq\.com"/);
   assert.match(clientSource, /host\.ends_with\("\.weixin\.qq\.com"\)/);
   assert.match(clientSource, /url\.scheme\(\) != "https"/);
-  assert.match(appSource, /the connection token is never displayed|不会在页面显示连接 token/);
-  assert.doesNotMatch(appSource, /value=\{form\.weixinConnectToken\}/);
+  const tokenInputs = [...appSource.matchAll(/<Input\b[\s\S]*?\/>/g)]
+    .map(match => match[0]).filter(input => /value=\{form\.weixinConnectToken\}/.test(input));
+  assert.equal(tokenInputs.length, 1, "credentials must have one explicit masked editor");
+  assert.match(tokenInputs[0], /type="password"/);
+  assert.match(tokenInputs[0], /autoComplete="off"/);
+  assert.doesNotMatch(appSource, /<(?:code|span|strong)[^>]*>\s*\{form\.weixinConnectToken\}/);
 });

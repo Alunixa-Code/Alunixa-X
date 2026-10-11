@@ -1,3 +1,4 @@
+import { hasModelProtocols } from "./model-protocols.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -36,7 +37,7 @@ const context = vm.createContext({
   exports: {},
   PROTOCOL_PROXY_BASE_URL: "http://127.0.0.1:57321/v1",
   CHAT_UPSTREAM_BASE_URL_KEY: "alunixa_x_chat_base_url",
-  normalizeRelayModelRoutes, sessionProviderForProtocol, modelSlugFromRowName, suffixWindowString,
+  normalizeRelayModelRoutes, sessionProviderForProtocol, modelSlugFromRowName, suffixWindowString, hasModelProtocols,
 });
 vm.runInContext(code, context);
 

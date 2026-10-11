@@ -75,6 +75,11 @@ jobs:
       - name: Verify local branding
         run: node tools/check-local-branding.mjs
 
+      - name: Setup Node for release metadata
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
   windows:
     name: Windows x64
     needs: verify-version
@@ -97,7 +102,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: ./scripts/installer/windows/install-nsis.ps1
+
+      - name: Installer contract tests
+        run: node --test scripts/installer/contracts.test.mjs
 
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
@@ -123,24 +131,10 @@ jobs:
       - name: Build binaries
         run: cargo build --release --locked
 
-      - name: Stage Windows app files
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist/windows/app | Out-Null
-          Copy-Item target/release/alunixa-x.exe dist/windows/app/
-          Copy-Item target/release/alunixa-x-imagegen-mcp.exe dist/windows/app/
-          Copy-Item target/release/alunixa-x-manager.exe dist/windows/app/
-
       - name: Build Windows assets
         shell: pwsh
         run: |
-          $version = "${{ needs.verify-version.outputs.version }}"
-          Compress-Archive -Path dist/windows/app/* -DestinationPath "dist/windows/Alunixa-X-$version-windows-x64.zip" -Force
-          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) { $makensis = "makensis" }
-          Push-Location scripts/installer/windows
-          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" AlunixaX.nsi
-          Pop-Location
+          ./scripts/installer/windows/package.ps1 -Version "${{ needs.verify-version.outputs.version }}"
 
       - name: Upload Windows workflow artifact
         uses: actions/upload-artifact@v4
@@ -184,6 +178,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
         run: npm ci
@@ -213,11 +212,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ needs.verify-version.outputs.version }}"
           BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
-          mkdir -p dist/macos/app-${{ matrix.arch }}
-          cp "target/${{ matrix.target }}/release/alunixa-x" "dist/macos/app-${{ matrix.arch }}/"
-          cp "target/${{ matrix.target }}/release/alunixa-x-imagegen-mcp" "dist/macos/app-${{ matrix.arch }}/"
-          cp "target/${{ matrix.target }}/release/alunixa-x-manager" "dist/macos/app-${{ matrix.arch }}/"
-          (cd dist/macos && zip -r "Alunixa-X-${VERSION}-macos-${{ matrix.arch }}.zip" "app-${{ matrix.arch }}")
+          python scripts/installer/macos/verify-package.py dist/macos/stage --arch "${{ matrix.arch }}" --version "$VERSION" --zip "dist/macos/Alunixa-X-${VERSION}-macos-${{ matrix.arch }}.zip"
 
       - name: Verify macOS bundle structure
         shell: bash
@@ -225,14 +220,14 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Alunixa X Launch (AX).app" "dist/macos/stage/Alunixa X (AX).app"; do
+          for app in "dist/macos/stage/Alunixa X.app" "dist/macos/stage/Alunixa X 管理工具.app"; do
             test -f "$app/Contents/Info.plist"
             test -f "$app/Contents/PkgInfo"
             test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
             plutil -lint "$app/Contents/Info.plist" >/dev/null
-            codesign -dv "$app" >/dev/null 2>&1
+            codesign --verify --deep --strict "$app"
           done
-          test -x "dist/macos/stage/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
+          test -x "dist/macos/stage/Alunixa X.app/Contents/MacOS/alunixa-x-imagegen-mcp"
 
       - name: Upload macOS workflow artifact
         uses: actions/upload-artifact@v4
@@ -264,6 +259,11 @@ jobs:
           path: dist/release
           merge-multiple: true
 
+      - name: Setup Node for release metadata
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Verify release assets
         shell: bash
         run: |
@@ -276,6 +276,9 @@ jobs:
           test -s "dist/release/Alunixa-X-${VERSION}-macos-x64.zip"
           test -s "dist/release/Alunixa-X-${VERSION}-macos-arm64.dmg"
           test -s "dist/release/Alunixa-X-${VERSION}-macos-arm64.zip"
+
+      - name: Generate and verify static update metadata
+        run: node scripts/installer/release-assets.mjs latest "$RELEASE_TAG"
 
       - name: Prepare detailed versioned release notes
         shell: bash
@@ -313,6 +316,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup Node for release metadata
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Verify source build run
         env:
@@ -358,7 +371,7 @@ jobs:
 
           WINDOWS_BIN_DIR=dist/reused/alunixa-x-windows-binaries
           mkdir -p dist/windows/app
-          for binary in alunixa-x.exe alunixa-x-imagegen-mcp.exe alunixa-x-manager.exe; do
+          for binary in alunixa-x-plus.exe alunixa-x-imagegen-mcp.exe; do
             test -f "$WINDOWS_BIN_DIR/$binary"
             file "$WINDOWS_BIN_DIR/$binary" | grep -F 'PE32+' >/dev/null
             cp "$WINDOWS_BIN_DIR/$binary" "dist/windows/app/$binary"
@@ -366,9 +379,8 @@ jobs:
           (
             cd "$WINDOWS_BIN_DIR"
             zip -9 -j "$GITHUB_WORKSPACE/dist/release/Alunixa-X-${VERSION}-windows-x64.zip" \
-              alunixa-x.exe \
-              alunixa-x-imagegen-mcp.exe \
-              alunixa-x-manager.exe
+              alunixa-x-plus.exe \
+              alunixa-x-imagegen-mcp.exe
           )
 
           REQUIRED_PACKAGES=()
@@ -391,33 +403,14 @@ jobs:
             local expected_file_arch="$2"
             local artifact_dir="dist/reused/alunixa-x-macos-${arch}-dmg"
             local extract_dir="dist/extracted/${arch}"
-            local package_dir="dist/release/app-${arch}"
             local dmg
             mapfile -t DMGS < <(find "$artifact_dir" -maxdepth 1 -type f -name '*.dmg' | sort)
             test "${#DMGS[@]}" -eq 1
             dmg="${DMGS[0]}"
             cp "$dmg" "dist/release/Alunixa-X-${VERSION}-macos-${arch}.dmg"
-            mkdir -p "$extract_dir" "$package_dir"
+            mkdir -p "$extract_dir"
             7z x -y "$dmg" "-o${extract_dir}" >/dev/null
-
-            local launcher="$extract_dir/Alunixa X Launch (AX).app/Contents/MacOS/AlunixaXLauncher"
-            local imagegen="$extract_dir/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
-            local manager="$extract_dir/Alunixa X (AX).app/Contents/MacOS/AlunixaX"
-            test -f "$launcher"
-            test -f "$imagegen"
-            test -f "$manager"
-            file "$launcher" | grep -F "$expected_file_arch" >/dev/null
-            file "$imagegen" | grep -F "$expected_file_arch" >/dev/null
-            file "$manager" | grep -F "$expected_file_arch" >/dev/null
-            cp "$launcher" "$package_dir/alunixa-x"
-            cp "$imagegen" "$package_dir/alunixa-x-imagegen-mcp"
-            cp "$manager" "$package_dir/alunixa-x-manager"
-            chmod +x "$package_dir"/*
-            (
-              cd dist/release
-              zip -9 -r "Alunixa-X-${VERSION}-macos-${arch}.zip" "app-${arch}"
-            )
-            rm -rf "$package_dir"
+            python scripts/installer/macos/verify-package.py "$extract_dir" --arch "$arch" --version "$VERSION" --restore-executable-modes --zip "dist/release/Alunixa-X-${VERSION}-macos-${arch}.zip"
           }
 
           package_macos_zip x64 x86_64
@@ -442,6 +435,9 @@ jobs:
             test -s "dist/release/$asset"
           done
           sha256sum "${EXPECTED[@]/#/dist/release/}"
+
+      - name: Generate and verify static update metadata
+        run: node scripts/installer/release-assets.mjs latest "$RELEASE_TAG"
 
       - name: Prepare detailed versioned release notes
         shell: bash

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import vm from "node:vm";
+import ts from "typescript";
 
 const style = readFileSync(new URL("../../../assets/inject/renderer-inject/10-style.js", import.meta.url), "utf8");
 
@@ -57,4 +58,39 @@ test("a stale backend layout flag cannot reappear during partial updates to reta
   assert.equal(settings.conversationView, true); assert.equal(settings.whaleWidget, true);
   assert.equal(JSON.parse(stored.get("settings")!).conversationView, true);
   assert.equal(JSON.parse(stored.get("settings")!).whaleWidget, true);
+});
+
+test("unified MCP navigation is global to Codex providers and uses the preserving context actions", () => {
+  const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+  assert.match(app, /id: "context", label: (?:t\()?"MCP"/);
+  const start = app.indexOf('{route === "context" ? (');
+  const end = app.indexOf('{route === "skills"', start);
+  assert.ok(start >= 0 && end > start);
+  const route = app.slice(start, end);
+  assert.match(route, /<McpPage/);
+  assert.match(route, /contextEntriesWithLiveEntries\(settingsForm, liveContextEntries\)/);
+  assert.match(route, /actions\.upsertContextEntry\(settingsForm, kind, id, body\)/);
+  assert.match(route, /actions\.deleteContextEntry\(settingsForm, entry\.kind, entry\.id\)/);
+  assert.match(route, /actions\.importMcpServersJson\(settingsForm, json\)/);
+  assert.doesNotMatch(route, /activeRelayId|relayProfiles\s*=/);
+});
+
+function mcpEnabledBody(body: string, enabled: boolean) {
+  const page = readFileSync(new URL("./ManagementPages.tsx", import.meta.url), "utf8");
+  const tree = ts.createSourceFile("ManagementPages.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const node = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "enabledBody");
+  assert.ok(node, "the global MCP editor must keep a preserving enable/disable writer");
+  const compiled = ts.transpileModule(node.getText(tree), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return new Function(`${compiled}; return enabledBody;`)()(body, enabled);
+}
+
+test("global MCP toggles preserve unrelated fields and nested configuration when a root flag exists", () => {
+  const input = 'enabled = false\ncommand = "fixture"\n[env]\nKEEP = "fixture-value"\n[settings]\nenabled = false\n';
+  assert.equal(mcpEnabledBody(input, true),
+    'enabled = true\ncommand = "fixture"\n[env]\nKEEP = "fixture-value"\n[settings]\nenabled = false\n');
+});
+
+test("global MCP toggles add only a root flag and never consume a nested enabled value", () => {
+  const input = 'command = "fixture"\n[env]\nKEEP = "fixture-value"\n[settings]\nenabled = false\n';
+  assert.equal(mcpEnabledBody(input, true), `enabled = true\n${input}`);
 });

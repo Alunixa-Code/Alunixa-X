@@ -19,46 +19,78 @@ function compile(name: string, dependencies: Record<string, unknown> = {}) {
 }
 const functionSource = (value: unknown) => typeof value === "function" ? Function.prototype.toString.call(value) : "";
 
-test("modern shared bundle resolves settings and host RPC by shape, not legacy short names", async () => {
-  const read = async () => "get-setting";
-  const write = async () => "set-setting";
+test("modern shared bundle resolves settings and state RPC by shape, not legacy short names", async () => {
+  const bridge = async (method: string, _request: unknown) => method;
+  const read = async (key: string) => bridge("get-setting", { params: { key } });
+  const write = async (key: string, value: unknown) => bridge("set-setting", { params: { key, value } });
   async function rpc(method: unknown, { params, select, signal, source, ...rest }: Record<string, unknown>) {
-    return { method, params, select, signal, source, ...rest };
+    const endpoint = method === "get-global-state" ? "get-global-state" : "set-global-state";
+    return { method, endpoint, params, select, signal, source, ...rest };
   }
   const wrong = () => { throw new Error("unrelated minified export must not run"); };
   const shared = { n: wrong, s: wrong, changedRead: read, changedWrite: write, changedRpc: rpc };
-  const storageResolver = compile("codexSettingStorageFromModule", { codexModuleFunctionSource: functionSource });
-  const rpcResolver = compile("codexHostRpcFromModule", { codexModuleFunctionSource: functionSource });
+  const storageResolver = compile("codexSettingStorageFromModule");
+  const rpcResolver = compile("codexStateApiFromModule", {
+    codexStateCallByCapability: compile("codexStateCallByCapability"),
+  });
   const load = async (prefix: string) => {
     if (prefix === "app-shared-") return shared;
     if (prefix === "app-initial-") return {};
     throw new Error("old chunk absent");
   };
+  assert.equal(storageResolver(shared, "app-shared-").n, read);
+  assert.equal(storageResolver(shared, "app-shared-").s, write);
+  assert.equal(rpcResolver(shared, "app-shared-"), rpc);
+  const getStateApi = new Function("loadCodexAppModule", "codexStateApiFromModule",
+    `let codexStateApiPromise = null; ${source("codexStateApi")}; return codexStateApi;`)(load, rpcResolver);
+  assert.equal(await getStateApi(), rpc);
+  assert.equal(await getStateApi(), rpc);
   const storage = await compile("codexSettingStorageModule", {
     loadCodexAppModule: load, codexSettingStorageFromModule: storageResolver,
   })();
   assert.equal(storage.n, read);
   assert.equal(storage.s, write);
-  const getStateApi = new Function("loadCodexAppModule", "codexHostRpcFromModule",
-    `let codexStateApiPromise = null; ${source("codexStateApi")}; return codexStateApi;`)(load, rpcResolver);
-  assert.equal(await getStateApi(), rpc);
-  assert.equal(await getStateApi(), rpc);
 });
 
-test("dispatcher and shared terminal discover both split and legacy layouts without invoking exports", async () => {
-  const dispatcher = { dispatchMessage() {}, subscribe() {} };
+test("dispatcher discovery through the actual installer supports split and legacy layouts without invoking unrelated exports", async () => {
+  for (const location of ["app-shared-", "app-initial-"]) {
+    const original = function () {};
+    const dispatcher = { dispatchMessage: original, subscribe() {} };
+    const registrations: Array<[unknown, string]> = [];
+    const context = vm.createContext({
+      window: {},
+      codexServiceTierRequestOverrideVersion: "fixture",
+      serviceTierDispatcherPatchMaxMisses: 8,
+      serviceTierDispatcherPatchMissCount: 0,
+      serviceTierDispatcherPatchDisabled: false,
+      serviceTierDispatcherPatchPromise: null,
+      loadCodexAppModule: async (prefix: string) => prefix === location
+        ? { changedName: dispatcher, unrelated: () => { throw new Error("unrelated export invoked"); } } : {},
+      codexServiceTierDispatcherFromModule: compile("codexServiceTierDispatcherFromModule"),
+      codexServiceTierDispatcherPatchable: compile("codexServiceTierDispatcherPatchable"),
+      registerCodexDispatcher: (value: unknown, prefix: string) => registrations.push([value, prefix]),
+      dispatchCodexPlusMessageWithServiceTier: (_target: unknown, fn: Function, type: string, payload: unknown) => fn(type, payload),
+      sendCodexPlusDiagnostic: () => {},
+    });
+    vm.runInContext(source("installCodexServiceTierDispatcherPatch"), context);
+    context.installCodexServiceTierDispatcherPatch();
+    await context.serviceTierDispatcherPatchPromise;
+    assert.equal(registrations[0]?.[0], dispatcher, location);
+    assert.equal(registrations[0]?.[1], location);
+    assert.notEqual(dispatcher.dispatchMessage, original);
+    const patched = dispatcher.dispatchMessage;
+    context.installCodexServiceTierDispatcherPatch();
+    assert.equal(dispatcher.dispatchMessage, patched, "successful installation must not wrap again");
+  }
+});
+
+test("shared terminal discovery supports split and legacy layouts without invoking exports", async () => {
   const methods = ["create", "attach", "write", "runHeadlessAction", "register", "getSnapshot",
     "getConversationSnapshot", "closeSessionForConversation", "subscribeToSessionSnapshot",
     "addSessionForConversation", "setActiveSessionForConversation", "handleHostEvent"];
   const terminal = Object.fromEntries(methods.map((method) => [method, () => {}]));
   for (const location of ["app-shared-", "app-initial-"]) {
-    const load = async (prefix: string) => prefix === location ? { changedName: dispatcher, terminal } : {};
-    const result = await compile("loadCodexDispatcher", {
-      loadCodexAppModule: load,
-      codexServiceTierDispatcherFromModule: compile("codexServiceTierDispatcherFromModule"),
-    })();
-    assert.equal(result.dispatcher, dispatcher);
-    assert.equal(result.assetPrefix, location);
+    const load = async (prefix: string) => prefix === location ? { terminal } : {};
     const actualTerminal = await compile("loadCodexTerminalManager", {
       loadCodexAppModule: load, codexTerminalManagerFromModule: compile("codexTerminalManagerFromModule"),
     })();
@@ -174,23 +206,30 @@ test("request candidates prioritize shared services without discarding legacy bu
   assert.deepEqual(new Set(result), new Set(urls));
 });
 
-test("fast startup preserves native initialization failures and has reversible idempotent fetch ownership", async () => {
+function retiredStartupBoot(win: Record<string, any>) {
+  const prelude = readFileSync(new URL("../../../assets/inject/renderer-inject/00-prelude.js", import.meta.url), "utf8");
+  const end = prelude.indexOf("  const helperBase =");
+  assert.ok(end > 0);
+  vm.runInNewContext(`${prelude.slice(0, end)}\n})();`, {
+    window: win, navigator: { userAgent: "fixture" }, process: { versions: { node: "fixture" } },
+  });
+}
+
+test("retired fast startup flags leave native initialization and fetch ownership unchanged", async () => {
   const calls: unknown[][] = [];
   const statsig = { loadingStatus: "Loading", initializeAsync: () => Promise.reject(new Error("native failure")) };
   const originalInitialize = statsig.initializeAsync;
   const originalFetch = async (...args: unknown[]) => { calls.push(args); return { ok: true }; };
+  const unexpected: unknown[] = [];
   const win: Record<string, any> = {
-    __ALUNIXA_X_FAST_STARTUP__: { enabled: true },
-    __STATSIG__: { firstInstance: statsig },
-    fetch: originalFetch,
-    location: { href: "app://-/index.html" },
-    setTimeout, clearTimeout,
+    __ALUNIXA_X_FAST_STARTUP__: { enabled: true, statsigTimeoutMs: 100 },
+    __STATSIG__: { firstInstance: statsig }, fetch: originalFetch,
+    setTimeout: (...args: unknown[]) => unexpected.push(args),
+    setInterval: (...args: unknown[]) => unexpected.push(args),
   };
-  const install = compile("installAlunixaXFastStartup", { window: win });
-  install();
-  const first = win.fetch;
-  install();
-  assert.equal(win.fetch, first);
+  retiredStartupBoot(win);
+  retiredStartupBoot(win);
+  assert.equal(win.fetch, originalFetch);
   assert.equal(statsig.loadingStatus, "Loading");
   assert.equal(statsig.initializeAsync, originalInitialize);
   await assert.rejects(statsig.initializeAsync(), /native failure/);
@@ -198,23 +237,28 @@ test("fast startup preserves native initialization failures and has reversible i
   await win.fetch(request);
   assert.equal(calls[0][0], request);
   assert.equal(calls[0][1], undefined);
-  const controller = new AbortController();
-  controller.abort();
-  await win.fetch(new Request("https://ab.chatgpt.com/config", { signal: controller.signal }));
-  assert.equal((calls[1][1] as { signal: AbortSignal }).signal.aborted, true);
-  win.__ALUNIXA_X_FAST_STARTUP__.enabled = false;
-  install();
-  assert.equal(win.fetch, originalFetch);
+  const controller = new AbortController(); controller.abort();
+  const aborted = new Request("https://ab.chatgpt.com/config", { signal: controller.signal });
+  await win.fetch(aborted);
+  assert.equal(calls[1][0], aborted);
+  assert.equal((calls[1][0] as Request).signal.aborted, true);
+  assert.deepEqual(unexpected, [], "retired startup cannot create new polling or timeout work");
+  assert.doesNotMatch(renderer, /function install(?:AlunixaX|CodexPlus)FastStartup\(|__alunixaXFastStartup|statsigTimeoutMs/);
 });
 
-test("fast startup deadline aborts telemetry instead of marking initialization successful", async () => {
+test("retired startup never turns a native timeout into synthetic initialization success", async () => {
+  const failure = new Error("native timeout");
+  const nativeFetch = (_input?: unknown) => Promise.reject(failure);
+  const initializeAsync = () => Promise.reject(failure);
+  const client = Object.freeze({ initializeAsync, loadingStatus: "Loading" });
   const win: Record<string, any> = {
-    __ALUNIXA_X_FAST_STARTUP__: { enabled: true, statsigTimeoutMs: 100 },
-    fetch: (_input: unknown, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
-      init.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    }),
-    location: { href: "app://-/index.html" }, setTimeout, clearTimeout,
+    __ALUNIXA_X_FAST_STARTUP__: { enabled: true, statsigTimeoutMs: 1 },
+    __STATSIG__: Object.freeze({ firstInstance: client }), fetch: nativeFetch,
   };
-  compile("installAlunixaXFastStartup", { window: win })();
-  await assert.rejects(win.fetch("https://ab.chatgpt.com/config"), /aborted/);
+  retiredStartupBoot(win);
+  assert.equal(win.fetch, nativeFetch);
+  assert.equal(client.initializeAsync, initializeAsync);
+  assert.equal(client.loadingStatus, "Loading");
+  await assert.rejects(win.fetch("https://ab.chatgpt.com/config"), (error: unknown) => error === failure);
+  await assert.rejects(client.initializeAsync(), (error: unknown) => error === failure);
 });

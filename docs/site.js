@@ -1,5 +1,5 @@
-const repository = "BigPizzaV3/CodexPlusPlus";
-const fallbackVersion = "1.2.46";
+const repository = "Alunixa-Code/Alunixa-X";
+const releasesUrl = `https://github.com/${repository}/releases/latest`;
 
 const translations = {
   "跳到主要内容": "Skip to main content",
@@ -15,14 +15,16 @@ const translations = {
   "语言选择": "Language",
   "Alunixa X 图标": "Alunixa X icon",
   "开源 · Windows / macOS": "Open source · Windows / macOS",
-  "让 Codex 按你的方式工作。": "Make Codex work your way.",
-  "一处管理供应商、模型、会话、插件、脚本和界面增强。保留 Codex 原始安装，随时开关，随时恢复。": "Manage providers, models, sessions, plugins, scripts, and interface enhancements in one place. Keep the original Codex installation intact, turn features on or off, and restore defaults at any time.",
+  "让 Codex 更顺手。": "Make Codex easier to use.",
+  "给 Codex 桌面应用加一点「++」。统一管理供应商与模型，让会话更好用，也让工作区更像你。": "Add a little ++ to the Codex desktop app. Manage providers and models in one place, make conversations easier to use, and shape your workspace around you.",
   "下载最新版": "Download latest",
   "下载 Windows 版": "Download for Windows",
   "下载 macOS 版": "Download for macOS",
   "查看源码": "View source",
   "项目状态": "Project status",
   "最新版": "Latest",
+  "GitHub 最新发布": "Latest GitHub release",
+  "查看": "View",
   "继续查看": "Continue",
   "继续了解": "Explore more",
   "产品概览": "Product overview",
@@ -31,74 +33,98 @@ const translations = {
   "按模型": "Per model",
   "上下文与压缩阈值": "Context and compaction limits",
   "可插拔": "Pluggable",
-  "插件、脚本与皮肤": "Plugins, scripts, and themes",
+  "拓展与个性化": "Extensions and personalization",
   "零补丁": "Zero patches",
   "不修改 app.asar": "Leaves app.asar untouched",
   "一个管理工具，覆盖完整工作流": "One manager for the complete workflow",
-  "不只是换个 API 地址": "More than switching an API endpoint",
-  "Alunixa X 把分散在配置文件、数据库和启动参数里的操作收拢成可视化流程，同时保留每项增强的独立开关。": "Alunixa X turns operations scattered across config files, databases, and launch arguments into a visual workflow, while keeping every enhancement independently controllable.",
-  "供应商与模型": "Providers and models",
-  "在官方登录、混入 API、纯 API 与聚合路由之间切换，配置协议、模型、上下文窗口和自动压缩阈值。": "Switch between official sign-in, mixed API, API-only, and aggregated routing modes. Configure protocols, models, context windows, and automatic compaction thresholds.",
+  "从模型配置到日常体验": "From model settings to everyday work",
+  "Alunixa X 通过 CDP 与本地辅助服务提供供应商切换、协议转换、会话管理和界面增强，每项增强都可以按需开关。": "Alunixa X uses CDP and a local helper to provide provider switching, protocol conversion, session management, and interface enhancements. Turn each enhancement on or off as needed.",
+  "供应商自由切换": "Switch providers freely",
+  "官方登录、官方登录 + API、纯 API 与聚合供应商，选择适合自己的模型请求方式。": "Choose how to route model requests: official sign-in, official sign-in + API, API-only, or aggregate providers.",
   "模型测试与 Provider Doctor": "Model tests and Provider Doctor",
-  "会话管理": "Session management",
-  "扫描本地会话，查看 Token 历史，批量整理、导出或迁移项目，不再手动翻找 SQLite 和会话目录。": "Scan local sessions, inspect token history, and organize, export, or migrate projects in batches without digging through SQLite databases and session folders.",
-  "Markdown 导出与批量操作": "Markdown export and batch operations",
-  "滚动位置与线程信息恢复": "Scroll position and thread recovery",
-  "插件与脚本": "Plugins and scripts",
-  "管理 Codex 插件、Skill、MCP Server 和用户脚本，并按供应商保存不同的工具组合。": "Manage Codex plugins, skills, MCP servers, and user scripts, with a different tool set for each provider.",
-  "脚本市场与启停管理": "Script marketplace and activation controls",
-  "插件入口与模型兼容处理": "Plugin entry points and model compatibility",
-  "DreamSkin 主题": "DreamSkin themes",
-  "浏览社区主题，在线预览、安装和更新，也可以导入本地 ZIP 包或通过链接一键换肤。": "Browse community themes, preview, install, and update them online, or import a local ZIP package and install from a link.",
-  "社区主题市场": "Community theme marketplace",
-  "包校验与 Safe CSS": "Package validation and Safe CSS",
-  "界面增强": "Interface enhancements",
-  "中文界面、会话宽度、服务层级、Goals、粘贴修复等增强按需开启，不想用的功能可以完全关闭。": "Enable localization, session width, service tiers, Goals, paste fixes, and other enhancements as needed. Anything you do not want can be fully disabled.",
-  "单项开关与总开关": "Individual controls and a master switch",
-  "随启动器加载，无安装目录补丁": "Loaded by the launcher without installation patches",
-  "开发与诊断": "Development and diagnostics",
-  "处理 Upstream worktree、Zed Remote、应用检测、环境冲突、Watcher、更新与诊断日志。": "Handle upstream worktrees, Zed Remote, app detection, environment conflicts, watchers, updates, and diagnostic logs.",
-  "Windows / macOS 原生安装包": "Native Windows and macOS installers",
-  "健康检查与 Release 更新": "Health checks and release updates",
+  "每个模型，各有空间": "Give every model its own space",
+  "按模型设置上下文窗口与自动压缩阈值，支持模型元数据导入，未指定后缀时沿用供应商级配置。": "Set context windows and automatic compaction limits per model, and import model metadata. Models without a suffix keep the provider-level settings.",
+  "模型窗口后缀，例如 1M / 200K": "Model window suffixes, such as 1M / 200K",
+  "按供应商选择 MCP、Skill 和 Plugin": "Select MCP servers, skills, and plugins per provider",
+  "会话管理更省心": "Simpler session management",
+  "本地会话扫描、删除与撤销、批量管理、Markdown 导出和 Token 历史，整理会话更方便。": "Organize conversations with local session scanning, deletion and undo, batch management, Markdown export, and token history.",
+  "项目移动与线程 ID": "Project moves and thread IDs",
+  "会话宽度与滚动位置恢复": "Conversation width and scroll position recovery",
+  "拓展你的工作区": "Extend your workspace",
+  "浏览与管理社区用户脚本，按需添加模型选择、用量统计等能力，也可以编写自己的脚本。": "Browse and manage community user scripts to add model selectors, usage statistics, and more. You can also write your own scripts.",
+  "拓展市场与启停管理": "Extension marketplace and activation controls",
+  "MCP、Skill 与 Codex 插件管理": "Manage MCP servers, skills, and Codex plugins",
+  "输入与阅读，都顺手": "Smoother writing and reading",
+  "语音输入、粘贴修复、下一步建议与回答大纲，让输入和阅读更流畅。": "Dictation, paste fixes, next-step suggestions, and answer outlines make writing and reading easier.",
+  "彩虹粒子、烟花与星光打字特效": "Rainbow particles, fireworks, and starlight typing effects",
+  "单项开关与增强总开关": "Individual controls and a master enhancement switch",
+  "用量可见，也有陪伴": "Track usage with a desktop companion",
+  "用量挂件、可更换的桌宠角色、任务状态和预算提醒，搭配皮肤与自定义图片。": "Usage widgets, interchangeable desktop pets, task status, and budget alerts, paired with themes and custom images.",
+  "开发预览 · 默认关闭": "Development preview · Off by default",
+  "拖动、缩放与更换角色图片": "Drag, resize, and change character images",
+  "微信连接支持扫码连接本机 Codex，每个联系人映射到独立会话，并可配置允许访问的微信用户。": "Connect WeChat to local Codex by scanning a QR code. Each contact gets a separate session, with a configurable list of allowed WeChat users.",
   "Alunixa X 管理工具真实界面": "The real Alunixa X manager interface",
-  "控制中心，才是 Alunixa X 的主场": "The control center is where Alunixa X shines",
-  "供应商、增强开关、脚本和主题都在独立管理工具中完成，日常使用不用再手工修改配置文件。": "Providers, enhancement controls, scripts, and themes all live in a dedicated manager, so daily use no longer requires editing config files by hand.",
-  "Alunixa X 管理工具中的 DreamSkin 社区主题市场": "DreamSkin community marketplace in the Alunixa X manager",
-  "DreamSkin 社区主题市场": "DreamSkin community marketplace",
-  "搜索、预览、安装和管理社区主题": "Search, preview, install, and manage community themes",
-  "Alunixa X 管理工具中的供应商配置页面": "Provider configuration in the Alunixa X manager",
-  "供应商配置": "Provider configuration",
-  "模式、协议与切换状态集中管理": "Manage modes, protocols, and active state in one place",
-  "Alunixa X 管理工具中的增强设置页面": "Enhancement settings in the Alunixa X manager",
-  "Codex 增强": "Codex enhancements",
-  "按模式选择，并精确控制每项能力": "Choose a mode and control every capability precisely",
-  "Alunixa X 管理工具中的脚本市场页面": "Script marketplace in the Alunixa X manager",
-  "脚本市场": "Script marketplace",
-  "搜索、排版和本地脚本统一管理": "Search, layouts, and local script management",
+  "把常用增强放到手边": "Keep everyday enhancements within reach",
+  "在管理工具中集中配置，在 Codex 内直接使用。模型列表、会话操作、输入行为和阅读布局，都可以按自己的习惯开关。": "Configure everything in the manager and use it directly in Codex. Adjust model lists, session actions, input behavior, and reading layouts to your habits.",
+  "Alunixa X 管理工具：集中管理模型、会话、输入体验和挂件设置": "Alunixa X Manager: manage models, sessions, input behavior, and widget settings in one place",
+  "Alunixa X 管理工具": "Alunixa X Manager",
+  "从供应商配置到界面增强，一个管理工具就够了": "One manager for provider settings and interface enhancements",
+  "Codex 内的增强设置：后端状态、模型列表、Fast 按钮与会话操作": "Enhancement settings in Codex: backend status, model list, Fast button, and session actions",
+  "Codex 内的增强设置": "Enhancement settings in Codex",
+  "常用设置就在工作区里": "Everyday settings right in your workspace",
+  "Alunixa X 拓展市场：浏览社区脚本和工作流工具": "Alunixa X extension marketplace: browse community scripts and workflow tools",
+  "社区拓展市场": "Community extension marketplace",
+  "发现、安装和管理工作流工具": "Discover, install, and manage workflow tools",
+  "这里的「拓展」是 Alunixa X 用户脚本，与 Codex 官方插件市场是两个入口。社区脚本的服务配置和使用要求以各自说明为准。": "Extensions here are Alunixa X user scripts, accessed separately from the official Codex plugin marketplace. Follow each community script's documentation for service setup and usage requirements.",
+  "用户脚本开发说明 ↗": "User script development guide ↗",
+  "角色用量挂件：气泡显示 Token 统计和运行状态": "Character usage widget: bubbles show token statistics and task status",
+  "用量挂件与桌宠 · 开发预览": "Usage widgets and desktop pets · Development preview",
+  "查看本地会话 Token 与任务状态": "View local session tokens and task status",
+  "Codex 输入框中的彩虹粒子打字特效": "Rainbow particle typing effects in the Codex input box",
+  "光标打字特效": "Cursor typing effects",
+  "可随时关闭，系统减少动态效果时暂停": "Turn them off anytime; paused when reduced motion is enabled",
+  "挂件与桌宠截图来自开发版本，正式发布后的开启方式与统计口径以版本说明为准。": "Widget and desktop pet screenshots are from a development build. See the release notes for activation instructions and how usage is measured in the released version.",
+  "用量挂件说明 ↗": "Usage widget guide ↗",
+  "原始功能、鲸鱼角色及内置素材来自": "Original features, whale character, and bundled assets come from",
+  "。": ".",
   "第一次使用": "Getting started",
   "三步进入你的 Codex": "Start using Codex in three steps",
   "安装": "Install",
-  "选择 Windows 安装程序或对应芯片的 macOS DMG。": "Choose the Windows installer or the macOS DMG for your chip.",
+  "先安装官方 Codex / ChatGPT 桌面应用，再下载 Windows 安装程序或 macOS 通用 DMG。": "Install the official Codex / ChatGPT desktop app first, then download the Windows installer or universal macOS DMG.",
   "配置": "Configure",
   "打开管理工具，确认 Codex 路径，再设置供应商和需要的增强。": "Open the manager, confirm the Codex path, then configure your provider and desired enhancements.",
   "启动": "Launch",
-  "以后从 Alunixa X 入口启动，已保存的配置会自动加载。": "Launch from the Alunixa X entry point from then on and your saved configuration will load automatically.",
+  "以后从 Alunixa X 入口启动，已保存的配置会自动加载。依赖注入脚本的设置通常需要保存后重启。": "Launch from the Alunixa X entry point to load your saved configuration. Settings that depend on injected scripts usually require saving and restarting.",
+  "供应商与模型": "Providers and models",
+  "选一种适合你的使用方式": "Choose the setup that suits you",
+  "官方登录": "Official sign-in",
+  "使用 ChatGPT / Codex 官方账号。": "Use your official ChatGPT / Codex account.",
+  "官方登录 + API": "Official sign-in + API",
+  "保留官方登录状态与插件入口，模型请求始终走配置的兼容 API，不消耗官方额度。": "Keep official sign-in and plugin access while routing all model requests through your configured compatible API, without using your official quota.",
+  "纯 API": "API-only",
+  "使用自定义 Base URL / Key，无需官方账号。": "Use a custom Base URL and key without an official account.",
+  "聚合供应商": "Aggregate providers",
+  "在多个 API 供应商之间故障转移，或按会话、请求、权重轮转。": "Route across multiple API providers with failover or conversation, request, or weighted round-robin.",
+  "官方登录 + API 不会先用官方额度再切 API。Chat Completions 供应商可通过本地代理转换为 Codex 使用的 Responses 协议。": "Official sign-in + API does not use official quota before switching to the API. A local proxy can convert Chat Completions providers to the Responses protocol used by Codex.",
+  "给每个模型设置自己的上下文窗口": "Set a context window for each model",
+  "在模型列表中使用窗口后缀，支持 1M、200K 或纯数字。请按实际供应商能力填写；未指定后缀的模型继续使用供应商级上下文配置。": "Use window suffixes in the model list, such as 1M, 200K, or plain integers. Match your provider's actual capabilities; models without a suffix keep the provider-level context settings.",
+  "模型列表窗口后缀示例": "Example model list with context window suffixes",
   "下载 Alunixa X": "Download Alunixa X",
   "选择你的平台": "Choose your platform",
   "当前稳定版": "Current stable release",
   "。安装包由 GitHub Actions 从公开源码自动构建。": ". Installers are built automatically from public source by GitHub Actions.",
   "选择操作系统": "Choose an operating system",
-  "Mac Apple 芯片": "Mac Apple silicon",
   "Windows 安装程序": "Windows installer",
   "包含 Alunixa X 启动器和管理工具，并创建桌面与开始菜单入口。": "Includes the Alunixa X launcher and manager, with desktop and Start menu shortcuts.",
-  "正在读取文件信息": "Loading file details",
+  "EXE · 正在读取文件信息": "EXE · Loading file details",
+  "DMG · 正在读取文件信息": "DMG · Loading file details",
   "下载安装程序": "Download installer",
-  "Mac Apple 芯片版": "Mac Apple silicon",
-  "适用于 M1、M2、M3、M4 及后续 Apple 芯片 Mac，安装到 Applications 即可。": "For Macs with M1, M2, M3, M4, and later Apple chips. Install it in Applications.",
-  "下载 Apple 芯片版": "Download Apple silicon build",
-  "Mac Intel 版": "Mac Intel build",
-  "适用于 Intel 处理器 Mac。若“关于本机”显示 Apple 芯片，请选择上一个版本。": "For Intel-based Macs. If About This Mac shows Apple silicon, choose the previous option.",
-  "下载 Intel 版": "Download Intel build",
+  "macOS 通用安装包": "Universal macOS installer",
+  "一个 DMG 同时支持 Apple Silicon 与 Intel Mac，安装到 Applications 即可。": "One DMG supports both Apple Silicon and Intel Macs. Install it in Applications.",
+  "下载 macOS 通用版": "Download universal macOS build",
+  "通用安装包": "Universal installer",
+  "前往 Releases 查看安装包": "View installers on Releases",
+  "前往 Releases 选择对应架构": "Choose your architecture on Releases",
   "查看 Release Notes": "View release notes",
   "历史版本": "Previous releases",
   "透明边界": "Clear boundaries",
@@ -119,26 +145,39 @@ const translations = {
   "“Alunixa X”用于日常静默启动并加载配置；“Alunixa X 管理工具”用于管理供应商、增强、脚本、更新和诊断。": "Alunixa X launches silently for everyday use and loads your configuration. Alunixa X Manager configures providers, enhancements, scripts, updates, and diagnostics.",
   "不使用第三方 API 可以吗？": "Can I use it without a third-party API?",
   "可以。选择官方登录模式即可只使用 ChatGPT / Codex 官方账号，Alunixa X 也能仅作为启动和增强管理工具。": "Yes. Select official sign-in to use only your ChatGPT / Codex account. Alunixa X can also serve solely as a launcher and enhancement manager.",
-  "macOS 提示应用已损坏怎么办？": "What if macOS says the app is damaged?",
-  "当前社区构建使用 ad-hoc 签名。请按项目 README 中的 macOS 安装说明处理 Gatekeeper 提示，并只从本项目 Release 下载。": "Community builds currently use ad-hoc signing. Follow the macOS installation instructions in the README for Gatekeeper prompts, and download only from this project's releases.",
-  "把 Codex 调整成适合你的工具": "Shape Codex into the tool you need",
-  "开源、可配置、可退出。先从管理工具开始。": "Open source, configurable, and reversible. Start with the manager.",
+  "启动后，为什么没有 Alunixa X 菜单？": "Why is the Alunixa X menu missing after launch?",
+  "确认从 Alunixa X 入口启动。在管理工具的「安装维护」与「关于」页面检查应用路径、启动状态和诊断日志。": "Launch from the Alunixa X entry point. Check the app path, launch status, and diagnostic logs in the manager's Maintenance and About pages.",
+  "切换供应商后，请求为什么失败？": "Why do requests fail after switching providers?",
+  "先在供应商详情中运行模型测试或 Provider Doctor，确认协议、Base URL、Key 与模型匹配。提交反馈前请隐藏密钥与认证信息。": "Run a model test or Provider Doctor in the provider details, and verify that the protocol, Base URL, key, and model match. Hide keys and authentication details before submitting feedback.",
+  "增强功能可以关闭吗？官方应用更新后还能用吗？": "Can I disable enhancements? Will they work after official app updates?",
+  "可以分别关闭，也可以关闭增强总开关。Alunixa X 依赖官方应用的页面结构、CDP 和本地数据格式；官方更新后，部分功能可能需要跟随适配。修改供应商配置或会话数据前，请保留备份。": "Disable enhancements individually or with the master switch. Alunixa X depends on the official app's page structure, CDP, and local data formats, so some features may need updates after an official release. Keep backups before changing provider settings or session data.",
+  "交流与支持": "Community and support",
+  "一起把「++」做得更好": "Make ++ better together",
+  "欢迎反馈问题、分享拓展、主题和使用经验。提交 Issue 时，请附上系统、Alunixa X 版本、复现步骤与已脱敏的日志。": "Report issues and share extensions, themes, and tips. Include your operating system, Alunixa X version, steps to reproduce, and redacted logs when opening an issue.",
+  "QQ 交流 4 群 · 1127858981 ↗": "QQ community group 4 · 1127858981 ↗",
+  "重新加载": "Retry",
+  "联系维护者 ↗": "Contact the maintainer ↗",
+  "给 Codex 桌面应用加一点「++」": "Add a little ++ to the Codex desktop app",
+  "从供应商配置到界面增强，先从管理工具开始。": "From provider settings to interface enhancements, start with the manager.",
   "反馈问题": "Report an issue",
-  "社区维护的 Codex 桌面增强与管理工具。": "A community-maintained desktop enhancement and management tool for Codex."
+  "社区维护的 Codex 桌面增强与管理工具。": "A community-maintained desktop enhancement and management tool for Codex.",
+  "版本列表": "Release list",
+  "Alunixa X 历史 Releases": "Previous Alunixa X releases",
+  "v1.2.50 及更早": "v1.2.50 and earlier"
 };
 
 const pageMetadata = {
   zh: {
     title: "Alunixa X - Codex 桌面增强与管理工具",
-    description: "Alunixa X 是面向 OpenAI Codex / ChatGPT 桌面应用的开源启动器与管理工具，提供供应商切换、会话管理、插件与脚本市场、界面增强等能力。",
-    ogTitle: "Alunixa X - 让 Codex 按你的方式工作",
-    ogDescription: "管理供应商、模型、会话、插件、脚本和界面增强。适用于 Windows 与 macOS。",
+    description: "Alunixa X 是面向 OpenAI Codex / ChatGPT 桌面应用的开源启动器与管理工具，统一管理供应商与模型，提供会话管理、社区拓展、语音输入与界面个性化。",
+    ogTitle: "Alunixa X - 让 Codex 更顺手",
+    ogDescription: "给 Codex 桌面应用加一点 ++。供应商与模型、工作流增强、拓展与个性化，适用于 Windows 与 macOS。",
   },
   en: {
     title: "Alunixa X - Desktop enhancements and management for Codex",
-    description: "Alunixa X is an open-source launcher and manager for the OpenAI Codex / ChatGPT desktop app, with provider switching, session management, plugins, scripts, themes, and interface enhancements.",
-    ogTitle: "Alunixa X - Make Codex work your way",
-    ogDescription: "Manage providers, models, sessions, plugins, scripts, themes, and interface enhancements on Windows and macOS.",
+    description: "Alunixa X is an open-source launcher and manager for the OpenAI Codex / ChatGPT desktop app. Manage providers and models, organize sessions, explore community extensions, and personalize input and interface behavior.",
+    ogTitle: "Alunixa X - Make Codex easier to use",
+    ogDescription: "Add a little ++ to the Codex desktop app. Providers and models, workflow enhancements, extensions, and personalization for Windows and macOS.",
   },
   changelog: {
     zh: {
@@ -161,6 +200,7 @@ const translatedAttributes = new Map();
 let currentLanguage = document.documentElement.dataset.language === "en" ? "en" : "zh";
 let detectedPlatform = "windows";
 let releaseAssets = new Map();
+let releaseVersion = null;
 let repositoryStars = null;
 
 const translate = (text) => currentLanguage === "en" ? (translations[text] || text) : text;
@@ -227,7 +267,10 @@ const updateDynamicLabels = () => {
     heroLabel.textContent = translate(detectedPlatform === "windows" ? "下载 Windows 版" : "下载 macOS 版");
   }
 
-  releaseAssets.forEach(({ asset, version }, platform) => setPlatformAsset(platform, asset, version));
+  document.querySelectorAll("[data-version]").forEach((element) => {
+    element.textContent = releaseVersion || translate("GitHub 最新发布");
+  });
+  releaseAssets.forEach(({ asset, legacyMacBuilds }, platform) => setPlatformAsset(platform, asset, legacyMacBuilds));
 
   if (Number.isFinite(repositoryStars)) {
     const compact = new Intl.NumberFormat(currentLanguage === "zh" ? "zh-CN" : "en-US", {
@@ -243,17 +286,10 @@ const updateDynamicLabels = () => {
 const platformConfig = {
   windows: {
     assetPattern: /windows-x64-setup\.exe$/i,
-    fallbackName: `AlunixaX-${fallbackVersion}-windows-x64-setup.exe`,
     type: "EXE",
   },
-  "mac-arm": {
-    assetPattern: /macos-arm64\.dmg$/i,
-    fallbackName: `AlunixaX-${fallbackVersion}-macos-arm64.dmg`,
-    type: "DMG",
-  },
-  "mac-intel": {
-    assetPattern: /macos-x64\.dmg$/i,
-    fallbackName: `AlunixaX-${fallbackVersion}-macos-x64.dmg`,
+  macos: {
+    assetPattern: /macos-universal\.dmg$/i,
     type: "DMG",
   },
 };
@@ -264,10 +300,7 @@ const formatBytes = (bytes) => {
   return `${megabytes.toFixed(megabytes >= 100 ? 0 : 1)} MB`;
 };
 
-const directAssetUrl = (version, fileName) =>
-  `https://github.com/${repository}/releases/download/v${version}/${fileName}`;
-
-const setPlatformAsset = (platform, asset, version) => {
+const setPlatformAsset = (platform, asset, legacyMacBuilds = false) => {
   const config = platformConfig[platform];
   const link = document.querySelector(`[data-download="${platform}"]`);
   const meta = document.querySelector(`[data-asset-meta="${platform}"]`);
@@ -276,13 +309,13 @@ const setPlatformAsset = (platform, asset, version) => {
   if (asset) {
     link.href = asset.browser_download_url;
     const size = formatBytes(asset.size);
-    meta.textContent = `${config.type}${size ? ` · ${size}` : ""} · GitHub Release`;
+    const architecture = platform === "macos" ? ` · ${translate("通用安装包")}` : "";
+    meta.textContent = `${config.type}${architecture}${size ? ` · ${size}` : ""} · GitHub Release`;
     return;
   }
 
-  const fallbackName = config.fallbackName.replace(fallbackVersion, version);
-  link.href = directAssetUrl(version, fallbackName);
-  meta.textContent = `${config.type} · GitHub Release`;
+  link.href = releasesUrl;
+  meta.textContent = translate(legacyMacBuilds ? "前往 Releases 选择对应架构" : "前往 Releases 查看安装包");
 };
 
 const updateRelease = async () => {
@@ -293,19 +326,30 @@ const updateRelease = async () => {
     if (!response.ok) throw new Error(`GitHub release API returned ${response.status}`);
 
     const release = await response.json();
-    const version = String(release.tag_name || `v${fallbackVersion}`).replace(/^v/i, "");
-    document.querySelectorAll("[data-version]").forEach((element) => {
-      element.textContent = `v${version}`;
+    releaseVersion = typeof release.tag_name === "string" ? release.tag_name.trim() || null : null;
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const downloadableAssets = assets.filter((asset) => {
+      if (typeof asset.name !== "string" || typeof asset.browser_download_url !== "string") return false;
+      try {
+        const url = new URL(asset.browser_download_url);
+        return url.protocol === "https:" && url.hostname === "github.com" &&
+          url.pathname.startsWith(`/${repository}/releases/download/`);
+      } catch {
+        return false;
+      }
     });
+    const legacyMacBuilds = downloadableAssets.some((asset) => /macos-(arm64|x64)\.dmg$/i.test(asset.name));
 
     Object.entries(platformConfig).forEach(([platform, config]) => {
-      const asset = (release.assets || []).find((item) => config.assetPattern.test(item.name));
-      releaseAssets.set(platform, { asset, version });
-      setPlatformAsset(platform, asset, version);
+      const asset = downloadableAssets.find((item) => config.assetPattern.test(item.name));
+      releaseAssets.set(platform, { asset, legacyMacBuilds: platform === "macos" && legacyMacBuilds });
     });
+    updateDynamicLabels();
   } catch (error) {
-    Object.keys(platformConfig).forEach((platform) => setPlatformAsset(platform, null, fallbackVersion));
-    console.info("Using bundled release links", error);
+    releaseVersion = null;
+    Object.keys(platformConfig).forEach((platform) => releaseAssets.set(platform, { asset: null }));
+    updateDynamicLabels();
+    console.info("Release details unavailable; using GitHub Releases", error);
   }
 };
 
@@ -326,9 +370,10 @@ const updateRepositoryStats = async () => {
   }
 };
 
+// 与管理工具共用远端清单，不保留需要单独维护的品牌名单或图片映射。
 const platformFromDevice = () => {
   const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
-  if (/mac/i.test(platform)) return "mac-arm";
+  if (/mac/i.test(platform)) return "macos";
   return "windows";
 };
 

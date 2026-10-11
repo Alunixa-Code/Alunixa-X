@@ -1,3 +1,4 @@
+import { hasModelProtocols } from "./model-protocols.ts";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
@@ -55,7 +56,7 @@ test("experimental search history compatibility is per-provider and starts the h
 
 test("checkbox draft and generated config route to proxy and restore the real upstream on disable", () => {
   const context = vm.createContext({
-    PROTOCOL_PROXY_BASE_URL, webSearchHistoryCompatEnabled, normalizeRelayModelRoutes,
+    PROTOCOL_PROXY_BASE_URL, webSearchHistoryCompatEnabled, normalizeRelayModelRoutes, hasModelProtocols,
     relaySessionProvider: () => "custom",
     sessionProviderForProtocol: (provider: string) => provider,
     isAggregateRelayProfile: () => false,

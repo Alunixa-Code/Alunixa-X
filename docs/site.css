@@ -541,6 +541,24 @@ button {
   vertical-align: 1px;
 }
 
+.section-note {
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.section-note a {
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.section-note a + span,
+.section-note span + a {
+  margin-left: 4px;
+}
+
 .showcase {
   padding: 116px 0;
   background: var(--ink);
@@ -576,8 +594,12 @@ button {
   object-fit: cover;
 }
 
-.showcase-main img {
-  aspect-ratio: 1.62 / 1;
+.showcase .section-note {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.showcase .section-note a {
+  color: #aab5ff;
 }
 
 .showcase figcaption {
@@ -602,13 +624,100 @@ button {
 
 .showcase-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 14px;
   margin-top: 14px;
 }
 
-.showcase-grid img {
-  aspect-ratio: 1.68 / 1;
+.showcase-personal {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
+  gap: 24px;
+  margin-top: 48px;
+}
+
+.showcase-grid figcaption,
+.showcase-personal figcaption {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.showcase-grid figcaption span,
+.showcase-personal figcaption span {
+  text-align: left;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.provider-grid article {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.provider-grid h3,
+.model-example h3 {
+  margin: 0 0 12px;
+  font-size: 19px;
+  line-height: 1.4;
+}
+
+.provider-grid p,
+.model-example p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.model-example {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);
+  align-items: center;
+  gap: 48px;
+  margin-top: 40px;
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.model-example pre {
+  min-width: 0;
+  margin: 0;
+  padding: 24px;
+  overflow-x: auto;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 14px;
+  line-height: 1.9;
+}
+
+.community-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.community-links a {
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--white);
+  font-size: 14px;
+}
+
+.community-links a:hover {
+  border-color: var(--blue);
+  color: var(--blue);
 }
 
 .workflow {
@@ -691,7 +800,7 @@ button {
 
 .platform-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   padding: 4px;
   background: #d8dbe1;
@@ -1353,6 +1462,14 @@ html[data-language="en"] .changelog-page .lang-en {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sponsor-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .downloads-shell,
   .trust-layout,
   .faq-layout {
@@ -1485,6 +1602,16 @@ html[data-language="en"] .changelog-page .lang-en {
     display: none;
   }
 
+  .showcase-personal,
+  .model-example {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .model-example {
+    padding: 24px;
+  }
+
   .changelog-main {
     padding-top: calc(var(--nav-height) + 52px);
   }
@@ -1587,15 +1714,6 @@ html[data-language="en"] .changelog-page .lang-en {
     min-height: 330px;
   }
 
-  .showcase-main img,
-  .showcase-grid img {
-    aspect-ratio: 1.35 / 1;
-  }
-
-  .showcase-main img {
-    object-position: left center;
-  }
-
   .showcase figcaption {
     align-items: flex-start;
     flex-direction: column;
@@ -1655,6 +1773,10 @@ html[data-language="en"] .changelog-page .lang-en {
 }
 
 @media (max-width: 460px) {
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+
   .hero-product {
     align-items: flex-start;
     flex-direction: column;

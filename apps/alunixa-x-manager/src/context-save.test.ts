@@ -15,9 +15,9 @@ const preview = new Function("isCustomModelsRelayProfile", `${compiled};return a
 );
 function profile(patch = {}) {
   return { relayMode: "customModels", contextWindow: "272000", autoCompactEnabled: true, autoCompactLimit: "271000",
-    lastUsedModel: "large", customModels: [
-      { model: "small", contextWindow: "272000", autoCompactEnabled: true, autoCompactLimit: "271000" },
-      { model: "large", contextWindow: "1.05M", autoCompactEnabled: true, autoCompactLimit: "1000000" },
+    defaultCustomModelId: "large", customModels: [
+      { id: "small", model: "small", contextWindow: "272000", autoCompactEnabled: true, autoCompactLimit: "271000" },
+      { id: "large", model: "large", contextWindow: "1M", autoCompactEnabled: true, autoCompactLimit: "900000" },
     ], ...patch };
 }
 
@@ -28,7 +28,7 @@ test("custom config preview removes global limits so the model catalog remains a
 
 test("custom preview clears old root values for an empty window and disabled compaction", () => {
   const p = profile();
-  p.customModels[1] = { model: "large", contextWindow: "", autoCompactEnabled: false, autoCompactLimit: "1000000" };
+  p.customModels[1] = { id: "large", model: "large", contextWindow: "", autoCompactEnabled: false, autoCompactLimit: "1000000" };
   const text = preview("model_context_window = 272000\nmodel_auto_compact_token_limit = 271000\n", p);
   assert.doesNotMatch(text, /model_context_window|model_auto_compact_token_limit/);
 });
@@ -40,16 +40,27 @@ test("custom preview removes only root limits and preserves nested profile limit
   assert.match(text, /\[profiles.other\] # user profile\nmodel_context_window = 123000\nmodel_auto_compact_token_limit = 100000/);
 });
 
-test("regular preview preserves inherited window but removes disabled compaction", () => {
+test("regular preview preserves inherited window and compaction when neither is explicitly overridden", () => {
   const text = preview("model_context_window = 800000\nmodel_auto_compact_token_limit = 700000\n",
-    { relayMode: "pureApi", contextWindow: "", autoCompactEnabled: false, autoCompactLimit: "700000" });
+    { relayMode: "pureApi", contextWindow: "", autoCompactLimit: "" });
   assert.match(text, /model_context_window = 800000/);
-  assert.doesNotMatch(text, /model_auto_compact_token_limit/);
+  assert.match(text, /model_auto_compact_token_limit = 700000/);
 });
 
 test("custom startup selection is explicit and distinct from editing another model", () => {
-  const start = app.indexOf("function CustomModelsRelayProfileEditor");
-  const end = app.indexOf("function SortableCustomModelBlock", start);
-  const editor = app.slice(start, end);
-  assert.match(editor, /onChange=\{\(event\) => applyModels\(models, \{ lastUsedModel: event\.currentTarget\.value \}\)\}/);
+  const editor = fs.readFileSync(new URL("./components/CustomModelsEditor.tsx", import.meta.url), "utf8");
+  assert.match(app, /defaultId=\{profile\.defaultCustomModelId/);
+  assert.match(app, /updateDraft\(\{customModels,defaultCustomModelId\}\)/);
+  assert.match(editor, /type="radio" checked=\{defaultId === model\.id\} onChange=\{\(\) => onChange\(models,model\.id\)\}/);
+  assert.match(editor, /onChange\(models\.map[\s\S]*?, defaultId\)/);
+});
+
+test("an explicit global preview update never overwrites a nested profile's limits", () => {
+  const original = "[profiles.other] # user profile\nmodel_context_window = 123000\nmodel_auto_compact_token_limit = 100000\n";
+  const text = preview(original, { relayMode: "pureApi", contextWindow: "800000", autoCompactLimit: "700000" });
+  const [root, nested] = text.split("[profiles.other]");
+  assert.match(root, /model_context_window = 800000/);
+  assert.match(root, /model_auto_compact_token_limit = 700000/);
+  assert.match(nested, /model_context_window = 123000/);
+  assert.match(nested, /model_auto_compact_token_limit = 100000/);
 });

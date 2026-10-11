@@ -8,6 +8,9 @@ import { test } from "node:test";
 const source = await readFile(new URL("../../../scripts/installer/macos/package-dmg.sh", import.meta.url), "utf8");
 const start = source.indexOf('DMG_WORK_DIR="$(mktemp');
 assert.ok(start >= 0, "the real DMG lifecycle must be exercised");
+const wrappedMainEnd = source.search(/\n}\r?\n\s*if \[ "\$\{BASH_SOURCE\[0\]\}" = "\$0" \]/);
+assert.ok(wrappedMainEnd > start, "packaging lifecycle must end at the guarded main entrypoint");
+const lifecycle = source.slice(start, wrappedMainEnd);
 const bash = process.platform === "win32"
   ? spawnSync("where.exe", ["bash.exe"], { encoding: "utf8" }).stdout
       .split(/\r?\n/)
@@ -92,7 +95,7 @@ async function runScenario(scenario: string) {
     await mkdir(join(dir, "out"));
     const result = spawnSync(bash, ["--noprofile", "--norc"], {
       cwd: dir,
-      input: `${fixture}\n${source.slice(start)}`,
+      input: `${fixture}\nrun_dmg_fixture() {\n${lifecycle}\n}\nrun_dmg_fixture\n`,
       encoding: "utf8",
       timeout: 15_000,
       env: { ...process.env, BASH_ENV: "", SCENARIO: scenario },

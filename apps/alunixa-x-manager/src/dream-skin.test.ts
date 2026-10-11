@@ -356,6 +356,9 @@ describe("dream skin theme helpers", () => {
     const assetProtocol = config.app?.security?.assetProtocol;
 
     assert.equal(assetProtocol?.enable, true);
-    assert.deepEqual(assetProtocol?.scope, ["$HOME/.codex-session-delete/dream-skin/**"]);
+    assert.deepEqual([...new Set(assetProtocol?.scope)].sort(), [
+      "$HOME/.codex-session-delete/dream-skin/**",
+      "$HOME/.codex-session-delete/wallpapers/**",
+    ]);
   });
 });

@@ -11,6 +11,13 @@ function functions(...names: string[]) {
     return match[0];
   }).join("\n");
 }
+function declarations(...names: string[]) {
+  return names.map(name => {
+    const match = renderer.match(new RegExp(`^  const ${name}\\s*=\\s*[\\s\\S]*?;$`, "m"));
+    assert.ok(match, name);
+    return match[0];
+  }).join("\n");
+}
 
 test("missing module discovery is coalesced, bounded, and resumes for new assets", async () => {
   let now = 100;
@@ -21,7 +28,7 @@ test("missing module discovery is coalesced, bounded, and resumes for new assets
     const codexAppModuleFailures = new Map();
     const codexAppModuleRetryCooldownMs = 30000;
     const codexAppModuleMaxAttempts = 8;
-    ${functions("loadCodexAppModule")}
+    ${functions("codexAppAssetMissingError", "loadCodexAppModule")}
     return loadCodexAppModule;
   `)({ now: () => now }, () => [signature], () => "", async () => { searches++; return ""; });
   await Promise.all(Array.from({ length: 20 }, () => api("missing-").catch(() => null)));
@@ -40,7 +47,9 @@ test("asset lookup accepts template literals and shares source requests", async 
   let requests = 0;
   const api = new Function("fetch", "document", "codexAppAssetCandidateUrls", `
     const codexAppAssetTextPromises = new Map();
-    ${functions("codexAppAssetUrlFromScriptText")}
+    const codexAppAssetUrlLookups = new Map();
+    const codexAppModuleRetryCooldownMs = 30000;
+    ${functions("scanCodexAppAssetUrlFromScriptText", "codexAppAssetUrlFromScriptText")}
     return codexAppAssetUrlFromScriptText;
   `)(async () => {
     requests++;
@@ -54,13 +63,16 @@ test("asset lookup accepts template literals and shares source requests", async 
 test("plugin filters survive renamed minifier variables without replaying callbacks", () => {
   const result = vm.runInNewContext(`
     const window = {};
+    const alunixaXBackendSettingsLoaded = true;
     const codexPluginMarketplaceUnlockVersion = "16";
     const codexPluginFilterSourceCache = new WeakMap();
+    ${declarations("codexPluginBuildFlavorFilterSourcePattern", "codexPluginFeaturedFilterSourcePattern", "codexPluginHiddenFilterSourcePattern")}
     const pluginPatchDisabledInRelayMode = () => false;
     const alunixaXSettings = () => ({ pluginMarketplaceUnlock: true });
     const sendAlunixaXDiagnostic = () => {};
-    ${functions("restorePluginMarketplaceName", "codexPluginOfficialMarketplaceName",
-      "codexPluginFilterCallbackSource", "isCodexPluginBuildFlavorFilter",
+    const sendCodexPlusDiagnostic = sendAlunixaXDiagnostic;
+    ${functions("codexPluginMarketplacePatchEnabled", "restorePluginMarketplaceName", "codexPluginOfficialMarketplaceName",
+      "codexPluginFilterCallbackSource", "isCodexPluginBuildFlavorFilter", "isCodexPluginFeaturedFilter",
       "isCodexPluginMarketplaceHiddenFilter", "installPluginBuildFlavorFilterPatch")}
     installPluginBuildFlavorFilterPatch();
     let calls = 0;
@@ -79,12 +91,15 @@ test("plugin filters survive renamed minifier variables without replaying callba
 });
 
 test("pure API resume corrects inherited official providers but preserves explicit providers", () => {
-  const api = new Function("alunixaXBackendSettings", "codexModelCatalog", "sendAlunixaXDiagnostic", `
-    ${functions("codexRemoteSessionProviderNormalizationEnabled", "codexRemoteSessionPureApiEnabled",
-      "codexRemoteSessionTargetProvider", "codexRemoteSessionThreadStartMethod", "applyCodexRemoteSessionProviderOverride")}
+  const api = new Function("alunixaXBackendSettings", "codexModelCatalog", "sendCodexPlusDiagnostic", `
+    ${functions("codexRemoteSessionActiveProfile", "codexRemoteSessionProviderPatchEnabled",
+      "codexRemoteSessionProviderNormalizationEnabled", "codexRemoteSessionProviderOverrideEnabled",
+      "codexRelayConfigModelProvider", "codexRemoteSessionTargetProvider",
+      "codexRemoteSessionProviderRequestMethod", "applyCodexRemoteSessionProviderOverride")}
     return applyCodexRemoteSessionProviderOverride;
-  `)({ relayProfilesEnabled: true, activeRelayId: "api", relayProfiles: [{ id: "api", relayMode: "pureApi" }] },
-  { codex_model_provider: "my-provider" }, () => {});
+  `)({ relayProfilesEnabled: true, activeRelayId: "api", relayProfiles: [{
+    id: "api", relayMode: "pureApi", configContents: 'model_provider = "my-provider"',
+  }] }, { codex_model_provider: "stale-provider" }, () => {});
   assert.deepEqual(api("thread/resume", { modelProvider: "openai", threadId: "t" }),
     { modelProvider: "my-provider", threadId: "t" });
   assert.deepEqual(api("thread/resume", { modelProvider: "other" }), { modelProvider: "other" });
@@ -104,6 +119,11 @@ test("Fast availability agrees with explicit current model tier metadata", () =>
 });
 
 test("native model/list metadata enables newly introduced Fast models", () => {
+  const resultPatch = new Function(`${functions("patchAppServerModelResult")}; return patchAppServerModelResult;`)();
+  const unrelated = { data: [{ model: "keep", serviceTiers: [{ id: "priority" }] }] };
+  const before = structuredClone(unrelated);
+  assert.equal(resultPatch("turn/start", unrelated), unrelated, "non-model RPC results must keep their identity");
+  assert.deepEqual(unrelated, before);
   const api = new Function(`
     const codexServiceTierSupportedFastModels = new Set();
     const codexNativeModelServiceTiers = new Map();
@@ -119,7 +139,7 @@ test("native model/list metadata enables newly introduced Fast models", () => {
   ] });
   assert.equal(api.codexServiceTierFastSupportedForModel("new-model"), true);
   assert.equal(api.codexServiceTierFastSupportedForModel("standard-model"), false);
-  assert.match(functions("patchAppServerModelResult"), /method !== "model\/list"/);
+  assert.match(functions("patchAppServerModelResult"), /"model\/list"/);
 });
 
 test("v1.5 Fast allowlist includes the GPT-6 model family", () => {

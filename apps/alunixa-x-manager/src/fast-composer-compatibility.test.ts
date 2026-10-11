@@ -32,6 +32,7 @@ class Element {
   }
   get isConnected(): boolean { return this.root || !!this.parentElement?.isConnected; }
   get childNodes() { return this.children; }
+  get firstChild() { return this.children[0] ?? null; }
   get nextSibling(): Element | null {
     return this.parentElement?.children[this.parentElement.children.indexOf(this) + 1] ?? null;
   }
@@ -69,6 +70,10 @@ class Element {
   getBoundingClientRect() { return this.rect; }
   addEventListener(type: string, callback: (event: any) => void) { this.listeners[type] = callback; }
   insertBefore(child: Element, before: Element | null) {
+    assert.notEqual(child, this, "must not insert a badge into itself");
+    for (let parent: Element | null = this.parentElement; parent; parent = parent.parentElement) {
+      assert.notEqual(parent, child, "insertion must not create an ancestor cycle");
+    }
     assert.notEqual(child, before, "must not repeatedly insert a badge before itself");
     if (before) assert.equal(before.parentElement, this);
     child.remove();
@@ -95,7 +100,7 @@ function harness() {
   const tier = { status: "ok" };
   const badgeState = { label: "standard", tier: "standard", disabled: false, title: "服务模式" };
   let toggles = 0;
-  const declarations = ["codexComposerFooterSelector", "codexServiceTierBadgeClass", "codexServiceTierBadgeVersion"].map((name) => {
+  const declarations = ["codexServiceTierComposerFooterSelector", "codexServiceTierBadgeClass", "codexServiceTierBadgeVersion"].map((name) => {
     const match = renderer.match(new RegExp(`^  const ${name} = [\\s\\S]*?;$`, "m"));
     assert.ok(match, name);
     return match[0];
@@ -106,6 +111,7 @@ function harness() {
     const codexModelCatalog = {};
     const uniqueValues = (values) => [...new Set(values.filter(Boolean))];
     const conversationViewFindComposerEl = () => null;
+    const conversationViewPaneBoundarySelector = "[data-review-pane], [data-alunixa-x-ext]";
     ${functions("codexServiceTierBadgeVisibleElement", "codexServiceTierBadgeText", "codexServiceTierKnownProviderNames",
       "codexServiceTierLooksLikeProviderButton", "codexServiceTierBadgeButtonCandidates", "codexServiceTierVisibleComposerFooters",
       "codexServiceTierComposerScore", "codexServiceTierComposerCandidates", "codexServiceTierBestComposerFooter",
@@ -207,6 +213,6 @@ test("explicitly disabling Fast controls still removes injected buttons", () => 
 });
 
 test("modern footer insertion participates in the existing bounded mutation scan", () => {
-  assert.match(functions("scanRelevantSelector"), /codexComposerFooterSelector/);
+  assert.match(functions("scanRelevantSelector"), /codexServiceTierComposerFooterSelector/);
   assert.match(functions("shouldScheduleScan"), /isExtensionUiNode/);
 });

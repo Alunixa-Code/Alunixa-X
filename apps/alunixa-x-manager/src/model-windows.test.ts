@@ -35,6 +35,7 @@ const _profileTypeCheck: RelayProfile = {
   modelList: "",
   modelWindows: "",
   modelAutoCompact: "",
+        modelProtocols: "{}",
   modelMetadata: "",
   modelVlm: "",
   vlmApiKey: "",
@@ -54,6 +55,26 @@ const _profileTypeCheck: RelayProfile = {
 };
 
 void _profileTypeCheck;
+
+describe("统一模型表格协议与数据保留", () => {
+    it("拖动和删行同步处理五协议映射，不丢窗口、压缩或图片处理", () => {
+      const rows = modelWindowRowsFromProfile("a\nb", '{"a":"1M","b":"200K"}',
+        '{"a":"vlm","b":"strip"}', '{"a":"90%","b":"80%"}',
+        '{"a":"anthropicMessages","b":"chatCompletions"}');
+      const original = structuredClone(rows);
+      const reordered = reorderModelWindowRows(rows, 0, 1);
+      assert.deepStrictEqual(rows, original, "拖动不能改写原始行");
+      const saved = serializeModelWindowRows(reordered);
+      assert.strictEqual(saved.modelList, "b\na");
+      assert.deepStrictEqual(modelWindowRowsFromProfile(saved.modelList, saved.modelWindows,
+        saved.modelVlm, saved.modelAutoCompact, saved.modelProtocols), reordered);
+      const deleted = serializeModelWindowRows(reordered.filter(row => row.model !== "a"));
+      assert.deepStrictEqual(JSON.parse(deleted.modelProtocols), { b: "chatCompletions" });
+      assert.deepStrictEqual(JSON.parse(deleted.modelWindows), { b: "200K" });
+      assert.deepStrictEqual(JSON.parse(deleted.modelVlm), { b: "strip" });
+      assert.deepStrictEqual(JSON.parse(deleted.modelAutoCompact), { b: "80%" });
+    });
+});
 
 describe("model-windows helpers", () => {
   it("modelWindowsMapToText 按 modelList 行顺序输出窗口文本", () => {
@@ -102,9 +123,9 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       modelWindowRowsFromProfile("a\nb\nc", '{"a":"1M","c":"200K"}'),
       [
-        { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" },
-        { model: "b", window: "", autoCompact: "90%", imageHandling: "send-as-is" },
-        { model: "c", window: "200K", autoCompact: "90%", imageHandling: "send-as-is" },
+        { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
+        { model: "b", window: "", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
+        { model: "c", window: "200K", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
       ],
     );
   });
@@ -113,9 +134,9 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       modelWindowRowsFromProfile("a\nb\nc", '{}', '{"a":"vlm","b":"strip"}'),
       [
-        { model: "a", window: "", autoCompact: "90%", imageHandling: "vlm" },
-        { model: "b", window: "", autoCompact: "90%", imageHandling: "strip" },
-        { model: "c", window: "", autoCompact: "90%", imageHandling: "send-as-is" },
+        { model: "a", window: "", autoCompact: "90%", imageHandling: "vlm", protocol: "" as const },
+        { model: "b", window: "", autoCompact: "90%", imageHandling: "strip", protocol: "" as const },
+        { model: "c", window: "", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
       ],
     );
   });
@@ -129,8 +150,8 @@ describe("model-windows helpers", () => {
         '{"a":90,"b":"80%"}',
       ),
       [
-        { model: "a", window: "", autoCompact: "90%", imageHandling: "send-as-is" },
-        { model: "b", window: "512K", autoCompact: "80%", imageHandling: "strip" },
+        { model: "a", window: "", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
+        { model: "b", window: "512K", autoCompact: "80%", imageHandling: "strip", protocol: "" as const },
       ],
     );
   });
@@ -139,8 +160,8 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       modelWindowRowsFromProfile("a\nb", "null", "{}", "null"),
       [
-        { model: "a", window: "", autoCompact: "90%", imageHandling: "send-as-is" },
-        { model: "b", window: "", autoCompact: "90%", imageHandling: "send-as-is" },
+        { model: "a", window: "", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
+        { model: "b", window: "", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
       ],
     );
   });
@@ -148,23 +169,24 @@ describe("model-windows helpers", () => {
   it("serializeModelWindowRows 从行控件生成 modelList、modelWindows 和 modelVlm", () => {
     assert.deepStrictEqual(
       serializeModelWindowRows([
-        { model: "a", window: "1M", autoCompact: "", imageHandling: "vlm" },
-        { model: "", window: "400K", autoCompact: "", imageHandling: "send-as-is" },
-        { model: "b", window: "", autoCompact: "", imageHandling: "send-as-is" },
+        { model: "a", window: "1M", autoCompact: "", imageHandling: "vlm", protocol: "" as const },
+        { model: "", window: "400K", autoCompact: "", imageHandling: "send-as-is", protocol: "" as const },
+        { model: "b", window: "", autoCompact: "", imageHandling: "send-as-is", protocol: "" as const },
       ]),
       {
         modelList: "a\nb",
         modelWindows: '{"a":"1M"}',
         modelVlm: '{"a":"vlm"}',
         modelAutoCompact: '{"a":"90%","b":"90%"}',
+        modelProtocols: "{}",
       },
     );
   });
 
   it("删除模型后序列化保存载荷不会保留已删除模型", () => {
     const rows = [
-      { model: "keep", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" as const },
-      { model: "remove", window: "200K", autoCompact: "80%", imageHandling: "vlm" as const },
+      { model: "keep", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" as const, protocol: "" as const },
+      { model: "remove", window: "200K", autoCompact: "80%", imageHandling: "vlm" as const, protocol: "" as const },
     ];
     const saved = serializeModelWindowRows(rows.filter((row) => row.model !== "remove"));
     assert.deepStrictEqual(saved, {
@@ -172,6 +194,7 @@ describe("model-windows helpers", () => {
       modelWindows: '{"keep":"1M"}',
       modelVlm: "{}",
       modelAutoCompact: '{"keep":"90%"}',
+        modelProtocols: "{}",
     });
   });
 
@@ -179,35 +202,35 @@ describe("model-windows helpers", () => {
     assert.deepStrictEqual(
       mergeModelWindowRows(
         [
-          { model: "deepseek-v4-flash", window: "1M", autoCompact: "90%", imageHandling: "vlm" },
-          { model: "  ", window: "", autoCompact: "", imageHandling: "send-as-is" },
+          { model: "deepseek-v4-flash", window: "1M", autoCompact: "90%", imageHandling: "vlm", protocol: "" as const },
+          { model: "  ", window: "", autoCompact: "", imageHandling: "send-as-is", protocol: "" as const },
         ],
         [
-          { model: "deepseek-v4-flash", window: "", autoCompact: "", imageHandling: "send-as-is" },
-          { model: "deepseek-v4-pro", window: "", autoCompact: "", imageHandling: "vlm" },
-          { model: " deepseek-v4-pro ", window: "200K", autoCompact: "", imageHandling: "send-as-is" },
+          { model: "deepseek-v4-flash", window: "", autoCompact: "", imageHandling: "send-as-is", protocol: "" as const },
+          { model: "deepseek-v4-pro", window: "", autoCompact: "", imageHandling: "vlm", protocol: "" as const },
+          { model: " deepseek-v4-pro ", window: "200K", autoCompact: "", imageHandling: "send-as-is", protocol: "" as const },
         ],
       ),
       [
-        { model: "deepseek-v4-flash", window: "1M", autoCompact: "90%", imageHandling: "vlm" },
-        { model: "deepseek-v4-pro", window: "", autoCompact: "", imageHandling: "vlm" },
+        { model: "deepseek-v4-flash", window: "1M", autoCompact: "90%", imageHandling: "vlm", protocol: "" as const },
+        { model: "deepseek-v4-pro", window: "", autoCompact: "", imageHandling: "vlm", protocol: "" as const },
       ],
     );
   });
 
   it("reorderModelWindowRows 移动模型时保留整行配置且不修改原数组", () => {
     const rows = [
-      { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" as const },
-      { model: "b", window: "200K", autoCompact: "80%", imageHandling: "strip" as const },
-      { model: "c", window: "", autoCompact: "70%", imageHandling: "vlm" as const },
+      { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" as const, protocol: "" as const },
+      { model: "b", window: "200K", autoCompact: "80%", imageHandling: "strip" as const, protocol: "" as const },
+      { model: "c", window: "", autoCompact: "70%", imageHandling: "vlm" as const, protocol: "" as const },
     ];
 
     assert.deepStrictEqual(reorderModelWindowRows(rows, 0, 2), [rows[1], rows[2], rows[0]]);
     assert.strictEqual(serializeModelWindowRows(reorderModelWindowRows(rows, 0, 2)).modelList, "b\nc\na");
     assert.deepStrictEqual(rows, [
-      { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is" },
-      { model: "b", window: "200K", autoCompact: "80%", imageHandling: "strip" },
-      { model: "c", window: "", autoCompact: "70%", imageHandling: "vlm" },
+      { model: "a", window: "1M", autoCompact: "90%", imageHandling: "send-as-is", protocol: "" as const },
+      { model: "b", window: "200K", autoCompact: "80%", imageHandling: "strip", protocol: "" as const },
+      { model: "c", window: "", autoCompact: "70%", imageHandling: "vlm", protocol: "" as const },
     ]);
   });
 });
@@ -218,7 +241,7 @@ describe("model-windows helpers", () => {
 describe("model-windows 模型 key 归一化（issue #2345）", () => {
   it("带后缀的行名序列化后 map key 用规范 slug，选中的图片处理读回不丢", () => {
     const rows = [
-      { model: "deepseek-v4-pro[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm" as const },
+      { model: "deepseek-v4-pro[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm" as const, protocol: "" as const },
     ];
     const saved = serializeModelWindowRows(rows);
     assert.deepStrictEqual(saved, {
@@ -227,11 +250,12 @@ describe("model-windows 模型 key 归一化（issue #2345）", () => {
       modelWindows: '{"deepseek-v4-pro":"200K"}',
       modelVlm: '{"deepseek-v4-pro":"vlm"}',
       modelAutoCompact: '{"deepseek-v4-pro":"80%"}',
+        modelProtocols: "{}",
     });
     // 保存后 App.tsx 的 effect 会把这份载荷重新读回成行，必须还原成 vlm
     assert.deepStrictEqual(
       modelWindowRowsFromProfile(saved.modelList, saved.modelWindows, saved.modelVlm, saved.modelAutoCompact),
-      [{ model: "deepseek-v4-pro[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm" }],
+      [{ model: "deepseek-v4-pro[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm", protocol: "" as const }],
     );
   });
 
@@ -264,7 +288,7 @@ describe("model-windows 模型 key 归一化（issue #2345）", () => {
     // 归一化只做「去后缀」，不能顺手 toLowerCase：上游请求仍发 GLM-5.3，
     // 写成 glm-5.3 会让 vision.rs 的 image_handling_mode 查表落空。
     const saved = serializeModelWindowRows([
-      { model: "GLM-5.3[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm" },
+      { model: "GLM-5.3[1M]", window: "200K", autoCompact: "80%", imageHandling: "vlm", protocol: "" as const },
     ]);
     assert.deepStrictEqual(JSON.parse(saved.modelVlm), { "GLM-5.3": "vlm" });
     assert.deepStrictEqual(JSON.parse(saved.modelWindows), { "GLM-5.3": "200K" });
@@ -273,7 +297,7 @@ describe("model-windows 模型 key 归一化（issue #2345）", () => {
 
   it("三张配置 map 的 key 都按规范 slug 落盘", () => {
     const saved = serializeModelWindowRows([
-      { model: "a[1M]", window: "300K", autoCompact: "70%", imageHandling: "strip" },
+      { model: "a[1M]", window: "300K", autoCompact: "70%", imageHandling: "strip", protocol: "" as const },
     ]);
     assert.deepStrictEqual(JSON.parse(saved.modelWindows), { a: "300K" });
     assert.deepStrictEqual(JSON.parse(saved.modelVlm), { a: "strip" });
@@ -282,8 +306,8 @@ describe("model-windows 模型 key 归一化（issue #2345）", () => {
 
   it("同一模型的带后缀与不带后缀两种写法判重", () => {
     const rows = [
-      { model: "deepseek-v4-pro[1M]", window: "", autoCompact: "90%", imageHandling: "send-as-is" as const },
-      { model: "deepseek-v4-pro", window: "", autoCompact: "90%", imageHandling: "send-as-is" as const },
+      { model: "deepseek-v4-pro[1M]", window: "", autoCompact: "90%", imageHandling: "send-as-is" as const, protocol: "" as const },
+      { model: "deepseek-v4-pro", window: "", autoCompact: "90%", imageHandling: "send-as-is" as const, protocol: "" as const },
     ];
     assert.deepStrictEqual(modelWindowRowsValidationError(rows), {
       code: "duplicateModel",

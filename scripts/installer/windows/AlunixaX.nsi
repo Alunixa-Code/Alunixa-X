@@ -124,10 +124,10 @@ Section "Install"
 
   ; Keep the prior uninstaller as a rollback artifact before replacing it.
   IfFileExists "$INSTDIR\uninstall.exe" 0 write_uninstaller
-  IfFileExists "$INSTDIR\legacy-migrations\uninstall-before-${VERSION}.exe" write_uninstaller 0
-  CreateDirectory "$INSTDIR\legacy-migrations"
+  IfFileExists "$INSTDIR\legacy-migrations\before-${VERSION}\uninstall.exe" write_uninstaller 0
+  CreateDirectory "$INSTDIR\legacy-migrations\before-${VERSION}"
   ClearErrors
-  CopyFiles /SILENT "$INSTDIR\uninstall.exe" "$INSTDIR\legacy-migrations\uninstall-before-${VERSION}.exe"
+  CopyFiles /SILENT "$INSTDIR\uninstall.exe" "$INSTDIR\legacy-migrations\before-${VERSION}"
   IfErrors 0 write_uninstaller
     MessageBox MB_OK|MB_ICONSTOP "无法保存旧版卸载程序。原安装未被删除，请检查目录权限后重试。"
     Abort

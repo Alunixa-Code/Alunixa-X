@@ -78,7 +78,8 @@ test("Russian translates every current UI/backend key without silently using Eng
 test("Russian interpolation preserves all arguments, literal dollars, paths, zero and missing values", () => {
   const r = runtime("ru");
   const file = "C:\\проект\\файл $&.png";
-  assert.equal(r.api.tf("模型「{0}」：{1}", [file, 0]), `Модель «${file}»: 0`);
+  const template = "日志大小 {0}，仅显示末尾 {1} 行";
+  assert.equal(r.api.tf(template, [file, 0]), ru.RU_TEMPLATE[template].replace("{0}", () => file).replace("{1}", "0"));
   assert.equal(r.api.tf("未知 {0}/{1}", [file]), `未知 ${file}/{1}`);
   for (const [key, value] of Object.entries(ru.RU_TEMPLATE)) {
     assert.equal(r.api.tf(key, []), value);
@@ -128,7 +129,8 @@ test("manager language is separate from native Codex locale and updates tray for
   assert.match(app, /aria-label=\{t\("界面语言"\)\}/);
   assert.match(app, /showLabel: t\("显示窗口"\)/);
   assert.match(app, /quitLabel: t\("退出"\)/);
-  assert.match(app, /const changeLanguage = async[\s\S]*?setConfirmDialog[\s\S]*?confirmed && !setLanguage/);
+  assert.match(app, /isLanguage\(language\) && window\.confirm\([\s\S]*?\) setLanguage\(language\)/);
+  assert.match(app, /切换语言会重新加载管理器，未保存的编辑将丢失。已保存的配置和 Codex 语言不受影响。/);
   assert.match(main, /document\.documentElement\.lang = getLocale\(\)/);
   assert.doesNotMatch(source, /codexAppForceChineseLocale|update_settings|config\.toml/);
   assert.doesNotMatch(app, /toLocaleString\("zh-CN"\)|toggleLanguage/);

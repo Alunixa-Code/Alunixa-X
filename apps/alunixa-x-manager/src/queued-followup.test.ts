@@ -15,10 +15,21 @@ function harness() {
   let now = 0;
   const settings = { enhancementsEnabled: true };
   const events: unknown[] = [];
-  const api = new Function("alunixaXBackendSettings", "sendAlunixaXDiagnostic", "Date", `
-    ${functions("codexModuleFunctionSource", "patchCodexQueuedFollowUpQueue", "patchCodexQueuedFollowUpCoordinator")}
-    return { patch: patchCodexQueuedFollowUpQueue, coordinator: patchCodexQueuedFollowUpCoordinator };
-  `)(settings, (...args: unknown[]) => events.push(args), { now: () => now });
+  let compiled: { patch: Function; coordinator: Function } | undefined;
+  function productionApi() {
+    if (!compiled) compiled = new Function("alunixaXBackendSettings", "sendAlunixaXDiagnostic", "Date", `
+      const sendCodexPlusDiagnostic = sendAlunixaXDiagnostic;
+      const codexModuleFunctionSource = value => typeof value === "function" ? Function.prototype.toString.call(value) : "";
+      ${functions("patchCodexQueuedFollowUpQueue", "patchCodexQueuedFollowUpCoordinator")}
+      return { patch: patchCodexQueuedFollowUpQueue, coordinator: patchCodexQueuedFollowUpCoordinator };
+    `)(settings, (...args: unknown[]) => events.push(args), { now: () => now });
+    return compiled!;
+  }
+  // A baseline native queue must remain testable even if the production compatibility patch is absent.
+  const api = {
+    patch: (...args: unknown[]) => productionApi().patch(...args),
+    coordinator: (...args: unknown[]) => productionApi().coordinator(...args),
+  };
   const rows = new Map<string, any[]>([["t", [{ id: "old", context: { prompt: "before" } }, { id: "next" }]]]);
   const writes: any[] = [];
   let failure: Error | null = null;

@@ -14,11 +14,16 @@ struct BundleSpec {
 
 const BUNDLES: [BundleSpec; 1] = [BundleSpec {
     name: "Alunixa X.app",
-    id: "com.bigpizzav3.codexplusplus",
+    id: crate::install::APP_BUNDLE_ID,
     executable: "AlunixaX",
 }];
 
-const LEGACY_MIGRATION_MESSAGE: &str = "旧双应用布局需手动迁移：下载新版安装包，将完整 Alunixa X.app 安装到 Applications 后打开；旧版自动更新器不支持单应用安装包，旧入口请确认后自行移除。";
+const LEGACY_MANAGER_BUNDLE: BundleSpec = BundleSpec {
+    name: "Alunixa X 管理工具.app",
+    id: crate::install::MANAGER_BUNDLE_ID,
+    executable: "AlunixaXManager",
+};
+const LEGACY_MIGRATION_MESSAGE: &str = "旧双应用布局（含 AX v1.0.35）需手动迁移：下载新版安装包，将完整 Alunixa X.app 安装到 Applications 后打开；旧版自动更新器不支持单应用安装包，旧应用与用户数据保持原样，旧入口请确认后自行移除。";
 
 fn installed_root_from_executable(executable: &Path) -> anyhow::Result<PathBuf> {
     let root = executable
@@ -45,7 +50,15 @@ fn installed_root_from_executable(executable: &Path) -> anyhow::Result<PathBuf> 
             .and_then(Path::parent)
             .and_then(Path::file_name)
             .and_then(|name| name.to_str());
-        if app_name.is_some_and(|name| name.eq_ignore_ascii_case("Alunixa X 管理工具.app")) {
+        if app_name.is_some_and(|name| {
+            [
+                LEGACY_MANAGER_BUNDLE.name,
+                "Alunixa X (AX).app",
+                "Alunixa X Launch (AX).app",
+            ]
+            .iter()
+            .any(|legacy| name.eq_ignore_ascii_case(legacy))
+        }) {
             bail!("{LEGACY_MIGRATION_MESSAGE}");
         }
         bail!(
@@ -742,7 +755,11 @@ mod runtime {
             let detached = checked("/usr/bin/hdiutil", &["detach".as_ref(), mount.as_os_str()]);
             prepared?;
             detached?;
-            write_state(&plan, "ready", "Alunixa X.app 已校验并完整复制，等待程序退出")?;
+            write_state(
+                &plan,
+                "ready",
+                "Alunixa X.app 已校验并完整复制，等待程序退出",
+            )?;
             wait_approval(&plan)?;
             approved = true;
             wait_manager(&plan)?;
@@ -1277,15 +1294,11 @@ mod tests {
             .unwrap(),
             PathBuf::from("/Applications")
         );
-        assert_eq!(
-            installed_root_from_executable(Path::new(
-                "/Applications/codex++.app/Contents/MacOS/AlunixaX"
-            ))
-            .unwrap(),
-            PathBuf::from("/Applications")
-        );
-        for executable in ["/Applications/Alunixa X 管理工具.app/Contents/MacOS/AlunixaXManager"]
-        {
+        for executable in [
+            "/Applications/Alunixa X 管理工具.app/Contents/MacOS/AlunixaXManager",
+            "/Applications/Alunixa X (AX).app/Contents/MacOS/AlunixaX",
+            "/Applications/Alunixa X Launch (AX).app/Contents/MacOS/AlunixaXLauncher",
+        ] {
             let error = installed_root_from_executable(Path::new(executable)).unwrap_err();
             assert!(error.to_string().contains("手动迁移"));
             assert!(
@@ -1293,6 +1306,13 @@ mod tests {
                     .to_string()
                     .contains("旧版自动更新器不支持单应用安装包")
             );
+            assert!(error.to_string().contains("用户数据保持原样"));
+        }
+        for executable in [
+            "/Applications/codex++.app/Contents/MacOS/AlunixaX",
+            "/Applications/CodexPlusPlus.app/Contents/MacOS/CodexPlusPlus",
+        ] {
+            assert!(installed_root_from_executable(Path::new(executable)).is_err());
         }
         let renamed = installed_root_from_executable(Path::new(
             "/Applications/Alunixa X 2.app/Contents/MacOS/AlunixaX",
@@ -1322,11 +1342,7 @@ mod tests {
     #[test]
     fn macos_update_leaves_legacy_manager_bundle_in_place() {
         let (_temp, plan, payload) = fixture(true);
-        let legacy = BundleSpec {
-            name: "Alunixa X 管理工具.app",
-            id: "com.bigpizzav3.codexplusplus.manager",
-            executable: "AlunixaXManager",
-        };
+        let legacy = LEGACY_MANAGER_BUNDLE;
         bundle(&plan.install_root, legacy, "1.0.0");
         let ops = FixtureOps::default();
         prepare_bundles(&ops, &plan, &payload).unwrap();
@@ -1361,6 +1377,72 @@ mod tests {
             fs::write(path, serde_json::to_vec(&info).unwrap()).unwrap();
             assert!(prepare_bundles(&ops, &plan, &payload).is_err());
             assert_old_apps(&ops, &plan);
+        }
+    }
+
+    #[test]
+    fn macos_update_rejects_upstream_identity_without_replacing_ax() {
+        let (_temp, plan, payload) = fixture(true);
+        let ops = FixtureOps::default();
+        let path = payload.join(BUNDLES[0].name).join("Contents/Info.plist");
+        let mut info = ops.inspect(&payload.join(BUNDLES[0].name)).unwrap();
+        info.id = "com.bigpizzav3.codexplusplus".into();
+        fs::write(path, serde_json::to_vec(&info).unwrap()).unwrap();
+        assert!(prepare_bundles(&ops, &plan, &payload).is_err());
+        assert_eq!(ops.renames.get(), 0);
+        assert_old_apps(&ops, &plan);
+    }
+
+    #[test]
+    fn macos_update_preserves_v1035_bundles_during_success_and_rollback() {
+        for failure in [None, Some(2)] {
+            let (_temp, plan, payload) = fixture(true);
+            let specs = [
+                BundleSpec {
+                    name: "Alunixa X (AX).app",
+                    id: crate::install::APP_BUNDLE_ID,
+                    executable: "AlunixaX",
+                },
+                BundleSpec {
+                    name: "Alunixa X Launch (AX).app",
+                    id: "io.github.alunixacode.alunixax.launcher",
+                    executable: "AlunixaXLauncher",
+                },
+            ];
+            let mut preserved = Vec::new();
+            for spec in specs {
+                let mut info = bundle(&plan.install_root, spec, "1.0.35");
+                info.unified = false;
+                let contents = plan.install_root.join(spec.name).join("Contents");
+                fs::write(
+                    contents.join("Info.plist"),
+                    serde_json::to_vec(&info).unwrap(),
+                )
+                .unwrap();
+                for relative in [
+                    "Info.plist",
+                    "Resources/nested/resource.dat",
+                    "_CodeSignature/CodeResources",
+                ] {
+                    let path = contents.join(relative);
+                    preserved.push((path.clone(), fs::read(path).unwrap()));
+                }
+                let executable = contents.join("MacOS").join(spec.executable);
+                preserved.push((executable.clone(), fs::read(executable).unwrap()));
+            }
+            let ops = FixtureOps {
+                fail_rename: failure,
+                ..FixtureOps::default()
+            };
+            prepare_bundles(&ops, &plan, &payload).unwrap();
+            let result = replace_bundles(&ops, &plan);
+            assert_eq!(result.is_err(), failure.is_some());
+            if failure.is_some() {
+                assert_old_apps(&ops, &plan);
+            }
+            for (path, bytes) in preserved {
+                assert_eq!(fs::read(path).unwrap(), bytes);
+            }
         }
     }
 

@@ -1,14 +1,28 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
+import { modelWindowRowsFromProfile, serializeModelWindowRows } from "./model-windows.ts";
+import { serializeModelMetadataDocument } from "./model-metadata.ts";
 
 describe("custom model compaction configuration", () => {
-  it("shows the selected model's effective context and token threshold", async () => {
+  it("edits per-model context, protocol and auto-compaction without the retired selected-model summary", async () => {
     const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
 
-    assert.match(app, /const selectedModelName = profile\.lastUsedModel\.trim\(\)/);
-    assert.match(app, /className="custom-model-effective-config"/);
-    assert.match(app, /selectedModel\?\.contextWindow/);
-    assert.match(app, /selectedModel\?\.autoCompactEnabled \? selectedModel\.autoCompactLimit/);
+    assert.match(app, /className="relay-model-row-editor"/);
+    assert.match(app, /value=\{row\.window\}/);
+    assert.match(app, /value=\{row\.autoCompact\}/);
+    assert.match(app, /value=\{row\.protocol \|\| ""\}/);
+    assert.doesNotMatch(app, /className="custom-model-effective-config"/);
+  });
+
+  it("round-trips distinct model windows and computes each model's compaction threshold", () => {
+    const rows = modelWindowRowsFromProfile("small\nlarge", '{"small":"200K","large":"1M"}',
+      "{}", '{"small":"80%","large":"90%"}', '{"large":"anthropicMessages"}');
+    const saved = serializeModelWindowRows(rows);
+    assert.deepEqual(modelWindowRowsFromProfile(saved.modelList, saved.modelWindows, saved.modelVlm,
+      saved.modelAutoCompact, saved.modelProtocols), rows);
+    const limits = rows.map(row => JSON.parse(serializeModelMetadataDocument(row.model, {}, row.window, row.autoCompact)).models[0]);
+    assert.deepEqual(limits.map(model => [model.context_window, model.auto_compact_token_limit]),
+      [[200000, 160000], [1000000, 900000]]);
   });
 });

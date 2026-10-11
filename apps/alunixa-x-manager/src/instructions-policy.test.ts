@@ -2,22 +2,25 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("advanced instructions are checked after all config writers and before starting Codex", () => {
+test("advanced instructions apply before launch and subsequent config writers preserve their path", () => {
   const launcher = readFileSync(
     new URL("../../../crates/alunixa-x-core/src/launcher.rs", import.meta.url), "utf8",
   );
-  const repair = launcher.indexOf("codex_instructions::ensure_model_instructions_before_launch(");
+  const repair = launcher.indexOf("codex_instructions::apply_model_instructions_policy(");
+  assert.ok(repair >= 0);
   assert.ok(repair > launcher.indexOf(".apply_active_relay_profile(&settings)"));
-  assert.ok(repair > launcher.indexOf(".ensure_imagegen_mcp_config(&settings, helper_port)"));
-  assert.ok(repair > launcher.indexOf("retired_context::remove_from_home("));
   assert.ok(repair < launcher.indexOf(".launch_codex(&app_dir, debug_port, &settings"));
-  assert.equal(launcher.includes("codex_instructions::apply_model_instructions_policy("), false);
+  const relay = readFileSync(new URL("../../../crates/alunixa-x-core/src/relay_config.rs", import.meta.url), "utf8");
+  assert.match(relay, /preserve_model_instructions_file/);
   const entrypoint = readFileSync(
     new URL("../../../apps/alunixa-x-launcher/src/main.rs", import.meta.url), "utf8",
   );
   const start = entrypoint.indexOf("async fn activate_existing_codex_app(");
   const reactivation = entrypoint.slice(start, entrypoint.indexOf("fn log_launcher_already_running(", start));
-  assert.doesNotMatch(reactivation, /ensure_model_instructions_before_launch|\.launch_codex\(|\.start_helper\(/);
+  // The unified launcher uses the native activation path to focus an existing app,
+  // but must not replay the managed configuration/injection pipeline or create a helper.
+  assert.doesNotMatch(reactivation, /ensure_model_instructions_before_launch|apply_model_instructions_policy|\.apply_active_relay_profile\(|\.start_helper\(|\.terminate_codex\(|launch_and_inject/);
+  assert.match(reactivation, /\.launch_codex\([\s\S]*?options\.debug_port/);
   assert.match(reactivation, /windows_activate_process_window/);
 });
 
@@ -31,10 +34,10 @@ test("saving unrelated Agent capabilities uses a preserving instructions policy"
   assert.doesNotMatch(save, /and_then\(\|_\| apply_codex_instructions_policy/);
 });
 
-test("Fast mode is a separate Agent capability backed by config.toml", () => {
+test("Fast request controls are separate from the retained native config.toml capability", () => {
   const manager = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
-  assert.match(manager, /codexAppFastMode: boolean/);
-  assert.match(manager, /title=\{t\("Fast 模式"\)\}/);
+  assert.match(manager, /codexAppServiceTierControls: boolean/);
+  assert.match(manager, /title=\{t\("Fast 按钮"\)\}/);
   const settings = readFileSync(
     new URL("../../../crates/alunixa-x-core/src/settings.rs", import.meta.url), "utf8",
   );

@@ -194,6 +194,137 @@ fn asset_selection_prefers_universal_over_single_arch_dmg() {
     }
 }
 
+fn ax_six_assets() -> Vec<String> {
+    [
+        "windows-x64-setup.exe",
+        "windows-x64.zip",
+        "macos-x64.dmg",
+        "macos-x64.zip",
+        "macos-arm64.dmg",
+        "macos-arm64.zip",
+    ]
+    .iter()
+    .map(|suffix| format!("Alunixa-X-1.0.36-{suffix}"))
+    .collect()
+}
+
+fn assert_ax_platform_installer(release: &Release) {
+    let expected = if cfg!(windows) {
+        Some("Alunixa-X-1.0.36-windows-x64-setup.exe")
+    } else if cfg!(target_os = "macos") {
+        match std::env::consts::ARCH {
+            "x86_64" => Some("Alunixa-X-1.0.36-macos-x64.dmg"),
+            "aarch64" => Some("Alunixa-X-1.0.36-macos-arm64.dmg"),
+            arch => panic!("unexpected Mac architecture: {arch}"),
+        }
+    } else {
+        None
+    };
+    assert_eq!(release.asset_name.as_deref(), expected);
+    if let Some(name) = expected {
+        assert_eq!(
+            release.asset_url.as_deref(),
+            Some(
+                format!(
+                    "https://github.com/Alunixa-Code/Alunixa-X/releases/download/v1.0.36/{name}"
+                )
+                .as_str()
+            )
+        );
+    }
+}
+
+#[test]
+fn ax_github_six_asset_payload_selects_installer_not_portable_zip() {
+    let assets: Vec<_> = ax_six_assets()
+        .iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "browser_download_url": format!(
+                    "https://github.com/Alunixa-Code/Alunixa-X/releases/download/v1.0.36/{name}"
+                )
+            })
+        })
+        .collect();
+    let release = release_from_github_payload(&json!({
+        "tag_name": "v1.0.36",
+        "assets": assets,
+    }))
+    .unwrap();
+    assert_ax_platform_installer(&release);
+}
+
+#[test]
+fn ax_latest_metadata_schema_with_seventh_asset_matches_release_generator() {
+    let mut assets: Vec<_> = ax_six_assets()
+        .iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "url": format!(
+                    "https://github.com/Alunixa-Code/Alunixa-X/releases/download/v1.0.36/{name}"
+                ),
+                "size": 1024,
+                "sha256": "a".repeat(64),
+            })
+        })
+        .collect();
+    assets.insert(0, json!({
+        "name": "latest.json",
+        "url": "https://github.com/Alunixa-Code/Alunixa-X/releases/download/v1.0.36/latest.json",
+    }));
+    let release = release_from_latest_json_payload(&json!({
+        "version": "v1.0.36",
+        "url": "https://github.com/Alunixa-Code/Alunixa-X/releases/tag/v1.0.36",
+        "body": "AX release notes",
+        "assets": assets,
+    }))
+    .unwrap();
+    assert_eq!(release.body, "AX release notes");
+    assert_ax_platform_installer(&release);
+}
+
+#[test]
+fn ax_latest_metadata_uses_download_url_in_legacy_github_asset_shape() {
+    let assets: Vec<_> = ax_six_assets()
+        .iter()
+        .map(|name| {
+            json!({
+                "name": name,
+                "url": "https://api.github.com/repos/Alunixa-Code/Alunixa-X/releases/assets/123",
+                "browser_download_url": format!(
+                    "https://github.com/Alunixa-Code/Alunixa-X/releases/download/v1.0.36/{name}"
+                ),
+            })
+        })
+        .collect();
+    let release = release_from_latest_json_payload(&json!({
+        "tag_name": "v1.0.36",
+        "assets": assets,
+    }))
+    .unwrap();
+    assert_ax_platform_installer(&release);
+}
+
+#[test]
+fn asset_selection_rejects_upstream_and_metadata_artifacts() {
+    for name in [
+        "CodexPlusPlus-1.7.6-windows-x64-setup.exe",
+        "CodexPlusPlus-1.7.6-macos-x64.dmg",
+        "CodexPlusPlus-Alunixa-X-1.0.36-windows-x64-setup.exe",
+        "NotAlunixaX_1.0.36_x64.dmg",
+        "latest.json",
+        "Alunixa-X-1.0.36-windows-x64.zip",
+        "Alunixa-X-1.0.36-macos-arm64.zip",
+    ] {
+        assert!(
+            select_update_asset(&[(name.into(), "https://example.test/artifact".into())]).is_none(),
+            "must not select foreign, portable or metadata artifact: {name}"
+        );
+    }
+}
+
 #[test]
 fn safe_asset_name_rejects_path_traversal() {
     assert_eq!(safe_asset_name("pkg.zip").unwrap(), "pkg.zip");

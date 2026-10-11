@@ -732,6 +732,7 @@ fn chat_completion_to_response_with_context(
         tool_context,
     ));
 
+    let invalid_search = output.iter().any(invalid_web_search_output_item);
     let mut response = json!({
         "id": response_id,
         "object": "response",
@@ -749,6 +750,10 @@ fn chat_completion_to_response_with_context(
                 item["status"] = json!("incomplete");
             }
         }
+    }
+    if invalid_search {
+        response["status"] = json!("failed");
+        response["error"] = json!({"type":"invalid_upstream_tool_call","message":"Native server-side search was not executed by the Chat upstream; use a client search tool or native Responses provider"});
     }
     copy_response_request_fields(&mut response, original_request);
     if message.get("reasoning_details").is_some() || message["tool_calls"].as_array().is_some_and(|calls| calls.iter().any(|call| tool_call_extra_content(call).is_some())) {
@@ -6926,7 +6931,7 @@ fn response_tool_call_item(
         return json!({
             "id": web_search_item_id(call_id),
             "type": "web_search_call",
-            "status": "completed",
+            "status": "failed",
             "action": web_search_action_from_arguments(arguments)
         });
     }
@@ -7981,6 +7986,7 @@ fn input_has_encrypted_agent_content(input: &Value) -> bool {
 }
 
 pub fn responses_to_chat_completions_with_options(mut body: Value, standard: bool) -> anyhow::Result<Value> {
+    remove_unsupported_native_search(&mut body)?;
     expand_local_compaction_history(&mut body);
     if input_has_native_compaction(&body) {
         return Err(NativeCompactionUnsupported::history().into());
@@ -9522,10 +9528,6 @@ fn web_search_action_has_target(action: &Value) -> bool {
 
 fn invalid_web_search_output_item(item: &Value) -> bool {
     item.get("type").and_then(Value::as_str) == Some("web_search_call")
-        && item.get("status").and_then(Value::as_str) == Some("completed")
-        && !item
-            .get("action")
-            .is_some_and(web_search_action_has_target)
 }
 
 fn tool_call_item_id(call_id: &str, name: &str, tool_context: &CodexToolContext) -> String {
@@ -10248,3 +10250,43 @@ pub fn ensure_web_search_tool_for_history(request_json: &mut Value) -> bool {
     }
     true
 }
+
+#[derive(Debug)]
+pub(crate) struct UnsupportedNativeWebSearch;
+
+impl std::fmt::Display for UnsupportedNativeWebSearch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "unsupported_native_web_search: Chat 路由不执行服务端原生搜索，请使用客户端搜索工具或支持原生搜索的 Responses 上游")
+    }
+}
+
+impl std::error::Error for UnsupportedNativeWebSearch {}
+
+impl UnsupportedNativeWebSearch {
+    pub(crate) fn response_body(&self) -> Value {
+        json!({"error": {
+            "type": "invalid_request_error", "code": "unsupported_native_web_search",
+            "param": "tool_choice", "message": self.to_string()
+        }})
+    }
+}
+
+fn remove_unsupported_native_search(body: &mut Value) -> anyhow::Result<()> {
+    let choice = body.get("tool_choice");
+    if choice.and_then(|choice| choice.get("type")).and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "web_search" | "web_search_preview")) {
+        return Err(UnsupportedNativeWebSearch.into());
+    }
+    let required = choice.and_then(Value::as_str) == Some("required");
+    if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
+        let before = tools.len();
+        // 同名 function/custom 和命名空间工具由客户端执行，必须保留。
+        tools.retain(|tool| !matches!(tool.get("type").and_then(Value::as_str),
+            Some("web_search" | "web_search_preview")));
+        if before != tools.len() && required && tools.is_empty() {
+            return Err(UnsupportedNativeWebSearch.into());
+        }
+    }
+    Ok(())
+}
+

@@ -29,7 +29,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install NSIS
-        run: choco install nsis -y
+        run: ./scripts/installer/windows/install-nsis.ps1
+
+      - name: Installer contract tests
+        run: node --test scripts/installer/contracts.test.mjs
 
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
@@ -53,29 +56,11 @@ jobs:
       - name: Build release binaries
         run: cargo build --release --locked
 
-      - name: Stage Windows app files
+      - name: Package unified Windows app
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/windows/app | Out-Null
-          Copy-Item target/release/alunixa-x.exe dist/windows/app/
-          Copy-Item target/release/alunixa-x-imagegen-mcp.exe dist/windows/app/
-          Copy-Item target/release/alunixa-x-manager.exe dist/windows/app/
-
-      - name: Build Windows installer
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}".TrimStart("v", "V")
-          $version = $version -replace '[\\/]', '-'
-          if (-not $version -or $version -eq "main") {
-            $version = "0.0.0-${{ github.run_number }}"
-          }
-          $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
-          if (-not (Test-Path $makensis)) {
-            $makensis = "makensis"
-          }
-          Push-Location scripts/installer/windows
-          & $makensis "/INPUTCHARSET" "UTF8" "/DVERSION=$version" AlunixaX.nsi
-          Pop-Location
+          $version = (Get-Content apps/alunixa-x-manager/package.json -Raw | ConvertFrom-Json).version
+          ./scripts/installer/windows/package.ps1 -Version $version
 
       - name: Upload Windows binaries
         uses: actions/upload-artifact@v4
@@ -118,6 +103,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install frontend dependencies
         working-directory: apps/alunixa-x-manager
         run: npm ci
@@ -142,12 +132,8 @@ jobs:
 
       - name: Build macOS DMG
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          VERSION="${VERSION#V}"
-          VERSION="${VERSION//\//-}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ]; then
-            VERSION="0.0.0-${GITHUB_RUN_NUMBER}"
-          fi
+          set -euo pipefail
+          VERSION="$(node -p "require('./apps/alunixa-x-manager/package.json').version")"
           BINARY_DIR="$PWD/target/${{ matrix.target }}/release" bash scripts/installer/macos/package-dmg.sh "$VERSION" "${{ matrix.arch }}"
 
       - name: Verify macOS bundle structure
@@ -155,12 +141,11 @@ jobs:
           set -euo pipefail
           test -L "dist/macos/stage/Applications"
           test "$(readlink "dist/macos/stage/Applications")" = "/Applications"
-          for app in "dist/macos/stage/Alunixa X Launch (AX).app" "dist/macos/stage/Alunixa X (AX).app"; do
-            test -f "$app/Contents/Info.plist"
-            test -f "$app/Contents/PkgInfo"
-            test -x "$app/Contents/MacOS/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          VERSION="$(node -p "require('./apps/alunixa-x-manager/package.json').version")"
+          python scripts/installer/macos/verify-package.py dist/macos/stage --arch "${{ matrix.arch }}" --version "$VERSION" --require-applications
+          for app in "dist/macos/stage/Alunixa X.app" "dist/macos/stage/Alunixa X 管理工具.app"; do
             plutil -lint "$app/Contents/Info.plist" >/dev/null
-            codesign -dv "$app" >/dev/null 2>&1
+            codesign --verify --deep --strict "$app"
             echo "verified: $app"
           done
 

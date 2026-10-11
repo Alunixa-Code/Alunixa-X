@@ -9,7 +9,7 @@ export const repository = "Alunixa-Code/Alunixa-X";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 export function releaseVersion(tag) {
-  assert.match(tag, /^v\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/, "Invalid release tag");
+  assert.match(tag, /^[vV]\d+\.\d+\.\d+(?:[.-][0-9A-Za-z.-]+)?$/, "Invalid release tag");
   return tag.slice(1);
 }
 
@@ -27,7 +27,10 @@ export function installationAssets(tag) {
 
 function checkedNotes(tag, notesFile) {
   const notes = readFileSync(notesFile, "utf8").replace(/\r\n/g, "\n");
-  assert(notes.startsWith(`# Alunixa X ${tag}`), "Release notes must describe the exact AX tag");
+  const heading = notes.split("\n", 1)[0];
+  const prefix = `# Alunixa X ${tag}`;
+  assert(heading === prefix || heading.startsWith(`${prefix} `) || heading.startsWith(`${prefix}\t`),
+    "Release notes must describe the exact AX tag");
   return notes;
 }
 

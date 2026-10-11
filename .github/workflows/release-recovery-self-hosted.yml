@@ -42,6 +42,16 @@ jobs:
         with:
           ref: ${{ inputs.tag }}
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Verify tag, versions, branding, and source build
         shell: pwsh
         env:
@@ -123,10 +133,11 @@ jobs:
               "Alunixa-X-$version-macos-arm64.dmg",
               "Alunixa-X-$version-macos-arm64.zip"
             ) | Sort-Object
-            $actualNames = @($sourceRelease.assets | ForEach-Object name | Sort-Object)
+            $actualNames = @($sourceRelease.assets | Where-Object name -ne 'latest.json' | ForEach-Object name | Sort-Object)
             if ($sourceRelease.draft -or
                 $sourceRelease.prerelease -or
                 $actualNames.Count -ne 6 -or
+                $sourceRelease.assets.Count -notin @(6, 7) -or
                 (Compare-Object $expectedNames $actualNames) -or
                 @($sourceRelease.assets | Where-Object { $_.state -ne 'uploaded' -or $_.digest -notmatch '^sha256:' }).Count -ne 0) {
               throw "Source release is incomplete or not authoritative"
@@ -134,6 +145,8 @@ jobs:
             "RECOVERY_SOURCE_MODE=release" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
             "RECOVERY_SOURCE_REPOSITORY=$env:SOURCE_REPOSITORY" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
             "RECOVERY_SOURCE_TAG=$env:SOURCE_TAG" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+            $digests = $sourceRelease.assets | Where-Object name -ne 'latest.json' | Select-Object name, digest
+            "RECOVERY_SOURCE_DIGESTS=$($digests | ConvertTo-Json -Compress)" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           }
 
           "VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
@@ -163,163 +176,44 @@ jobs:
             }
           }
 
+      - name: Ensure NSIS compiler
+        if: ${{ inputs.reuse_run_id != '' }}
+        run: ./scripts/installer/windows/install-nsis.ps1
+
       - name: Repackage six versioned release assets
         if: ${{ inputs.reuse_run_id != '' }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          New-Item -ItemType Directory -Force dist/release, dist/windows/app, dist/extracted | Out-Null
-
-          $sourceInstallers = @(Get-ChildItem -LiteralPath dist/reused/alunixa-x-windows-installer -Filter '*.exe' -File)
-          if ($sourceInstallers.Count -ne 1) {
-            throw "Expected exactly one successful source installer artifact"
-          }
-
-          $windowsBin = Resolve-Path dist/reused/alunixa-x-windows-binaries
-          $windowsNames = @('alunixa-x.exe', 'alunixa-x-imagegen-mcp.exe', 'alunixa-x-manager.exe')
-          foreach ($name in $windowsNames) {
-            $source = Join-Path $windowsBin $name
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-              throw "Windows binary missing: $name"
-            }
-            $header = [IO.File]::ReadAllBytes($source)
-            if ($header.Length -lt 2 -or $header[0] -ne 0x4d -or $header[1] -ne 0x5a) {
-              throw "Windows binary is not PE/MZ: $name"
-            }
-            Copy-Item -LiteralPath $source -Destination (Join-Path dist/windows/app $name)
-          }
-
-          $windowsZip = "dist/release/Alunixa-X-$env:VERSION-windows-x64.zip"
-          Compress-Archive -Path 'dist/windows/app/*' -DestinationPath $windowsZip -CompressionLevel Optimal
-
-          $makensis = @(
-            'C:\Program Files (x86)\NSIS\makensis.exe',
-            'C:\Program Files\NSIS\makensis.exe'
-          ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-          if (-not $makensis) {
-            $makensisCommand = Get-Command makensis.exe -ErrorAction SilentlyContinue
-            if ($makensisCommand) {
-              $makensis = $makensisCommand.Source
-            }
-          }
-          if (-not $makensis) {
-            throw "NSIS makensis.exe is required on the release recovery runner"
-          }
-          Push-Location scripts/installer/windows
-          try {
-            & $makensis '/INPUTCHARSET' 'UTF8' "/DVERSION=$env:VERSION" AlunixaX.nsi
-            if ($LASTEXITCODE -ne 0) {
-              throw "NSIS packaging failed"
-            }
-          } finally {
-            Pop-Location
-          }
-          $setup = "dist/windows/Alunixa-X-$env:VERSION-windows-x64-setup.exe"
-          if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) {
-            throw "Versioned Windows installer was not created"
-          }
-          Copy-Item -LiteralPath $setup -Destination dist/release/
+          New-Item -ItemType Directory -Force dist/release, dist/extracted | Out-Null
+          ./scripts/installer/windows/package.ps1 -Version $env:VERSION -BinaryDir dist/reused/alunixa-x-windows-binaries
+          Copy-Item -Path "dist/windows/Alunixa-X-$env:VERSION-windows-x64*" -Destination dist/release/
 
           $sevenZip = @(
             'C:\Program Files\7-Zip\7z.exe',
             'C:\Program Files (x86)\7-Zip\7z.exe'
           ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if (-not $sevenZip) {
-            $sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
-            if ($sevenZipCommand) {
-              $sevenZip = $sevenZipCommand.Source
-            }
+            $command = Get-Command 7z.exe -ErrorAction SilentlyContinue
+            if ($command) { $sevenZip = $command.Source }
           }
-          if (-not $sevenZip) {
-            throw "7z.exe is required on the release recovery runner"
-          }
-
-          function Assert-MachOArchitecture {
-            param(
-              [Parameter(Mandatory = $true)][string]$Path,
-              [Parameter(Mandatory = $true)][uint32]$ExpectedCpu
-            )
-            $bytes = [IO.File]::ReadAllBytes($Path)
-            if ($bytes.Length -lt 8) {
-              throw "Mach-O binary is truncated: $Path"
-            }
-            $magic = [BitConverter]::ToUInt32($bytes, 0)
-            $cpu = [BitConverter]::ToUInt32($bytes, 4)
-            $machO64Magic = [Convert]::ToUInt32('FEEDFACF', 16)
-            if ($magic -ne $machO64Magic -or $cpu -ne $ExpectedCpu) {
-              throw "Mach-O architecture mismatch: $Path"
-            }
-          }
-
-          $python = (Get-Command python.exe -ErrorAction Stop).Source
-          $zipScript = @'
-          import os
-          import time
-          import zipfile
-          from pathlib import Path
-
-          source = Path(os.environ["ALUNIXA_ZIP_SOURCE"])
-          destination = Path(os.environ["ALUNIXA_ZIP_DESTINATION"])
-          root = os.environ["ALUNIXA_ZIP_ROOT"]
-          names = ["alunixa-x", "alunixa-x-imagegen-mcp", "alunixa-x-manager"]
-          with zipfile.ZipFile(destination, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-              for name in names:
-                  path = source / name
-                  stamp = time.localtime(max(path.stat().st_mtime, 315532800))[:6]
-                  info = zipfile.ZipInfo(f"{root}/{name}", stamp)
-                  info.create_system = 3
-                  info.external_attr = 0o100755 << 16
-                  info.compress_type = zipfile.ZIP_DEFLATED
-                  archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
-          '@
-
-          function Package-MacAssets {
-            param(
-              [Parameter(Mandatory = $true)][string]$Arch,
-              [Parameter(Mandatory = $true)][uint32]$ExpectedCpu
-            )
-            $artifactDir = "dist/reused/alunixa-x-macos-$Arch-dmg"
+          if (-not $sevenZip) { throw "7z.exe is required to recover verified macOS DMGs" }
+          foreach ($arch in @('x64', 'arm64')) {
+            $artifactDir = "dist/reused/alunixa-x-macos-$arch-dmg"
             $dmgs = @(Get-ChildItem -LiteralPath $artifactDir -Filter '*.dmg' -File)
-            if ($dmgs.Count -ne 1) {
-              throw "Expected exactly one $Arch DMG"
+            if ($dmgs.Count -ne 1) { throw "Expected one $arch DMG" }
+            $dmg = "dist/release/Alunixa-X-$env:VERSION-macos-$arch.dmg"
+            Copy-Item -LiteralPath $dmgs[0].FullName -Destination $dmg
+            if ((Get-FileHash -Algorithm SHA256 $dmgs[0].FullName).Hash -ne (Get-FileHash -Algorithm SHA256 $dmg).Hash) {
+              throw "DMG bytes changed while staging $arch"
             }
-            $releaseDmg = "dist/release/Alunixa-X-$env:VERSION-macos-$Arch.dmg"
-            Copy-Item -LiteralPath $dmgs[0].FullName -Destination $releaseDmg
-            if ((Get-FileHash -Algorithm SHA256 $dmgs[0].FullName).Hash -ne
-                (Get-FileHash -Algorithm SHA256 $releaseDmg).Hash) {
-              throw "DMG bytes changed while staging $Arch"
-            }
-
-            $extractDir = Join-Path (Resolve-Path dist/extracted) $Arch
+            $extractDir = Join-Path (Resolve-Path dist/extracted).Path $arch
             New-Item -ItemType Directory -Force $extractDir | Out-Null
             & $sevenZip x -y $dmgs[0].FullName "-o$extractDir" | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "DMG extraction failed for $Arch"
-            }
-
-            $launcher = Join-Path $extractDir 'Alunixa X Launch (AX).app\Contents\MacOS\AlunixaXLauncher'
-            $imagegen = Join-Path $extractDir 'Alunixa X Launch (AX).app\Contents\MacOS\alunixa-x-imagegen-mcp'
-            $manager = Join-Path $extractDir 'Alunixa X (AX).app\Contents\MacOS\AlunixaX'
-            Assert-MachOArchitecture -Path $launcher -ExpectedCpu $ExpectedCpu
-            Assert-MachOArchitecture -Path $imagegen -ExpectedCpu $ExpectedCpu
-            Assert-MachOArchitecture -Path $manager -ExpectedCpu $ExpectedCpu
-
-            $packageDir = "dist/release/app-$Arch"
-            New-Item -ItemType Directory -Force $packageDir | Out-Null
-            Copy-Item -LiteralPath $launcher -Destination (Join-Path $packageDir 'alunixa-x')
-            Copy-Item -LiteralPath $imagegen -Destination (Join-Path $packageDir 'alunixa-x-imagegen-mcp')
-            Copy-Item -LiteralPath $manager -Destination (Join-Path $packageDir 'alunixa-x-manager')
-            $env:ALUNIXA_ZIP_SOURCE = (Resolve-Path $packageDir).Path
-            $env:ALUNIXA_ZIP_DESTINATION = Join-Path $env:GITHUB_WORKSPACE "dist/release/Alunixa-X-$env:VERSION-macos-$Arch.zip"
-            $env:ALUNIXA_ZIP_ROOT = "app-$Arch"
-            $zipScript | & $python -
-            if ($LASTEXITCODE -ne 0) {
-              throw "macOS ZIP packaging failed for $Arch"
-            }
+            if ($LASTEXITCODE -ne 0) { throw "DMG extraction failed for $arch" }
+            python scripts/installer/macos/verify-package.py $extractDir --arch $arch --version $env:VERSION --restore-executable-modes --zip "dist/release/Alunixa-X-$env:VERSION-macos-$arch.zip"
+            if ($LASTEXITCODE -ne 0) { throw "AX bundle or ZIP validation failed for $arch" }
           }
-
-          Package-MacAssets -Arch x64 -ExpectedCpu ([uint32]0x01000007)
-          Package-MacAssets -Arch arm64 -ExpectedCpu ([uint32]0x0100000C)
 
       - name: Download verified public-fork release assets
         if: ${{ inputs.source_repository != '' }}
@@ -331,50 +225,40 @@ jobs:
           New-Item -ItemType Directory -Force dist/release | Out-Null
           gh release download $env:RECOVERY_SOURCE_TAG `
             --repo $env:RECOVERY_SOURCE_REPOSITORY `
-            --dir dist/release
+            --dir dist/release `
+            --pattern "Alunixa-X-$env:VERSION-*"
           if ($LASTEXITCODE -ne 0) {
             throw "Source release asset download failed"
           }
 
-      - name: Verify and publish GitHub Release
+      - name: Verify metadata, prepare notes, and publish GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
         run: |
           $ErrorActionPreference = "Stop"
-          $expected = @(
-            "Alunixa-X-$env:VERSION-windows-x64-setup.exe",
-            "Alunixa-X-$env:VERSION-windows-x64.zip",
-            "Alunixa-X-$env:VERSION-macos-x64.dmg",
-            "Alunixa-X-$env:VERSION-macos-x64.zip",
-            "Alunixa-X-$env:VERSION-macos-arm64.dmg",
-            "Alunixa-X-$env:VERSION-macos-arm64.zip"
-          )
-          $actual = @(Get-ChildItem -LiteralPath dist/release -File)
-          if ($actual.Count -ne 6) {
-            throw "Expected exactly six release assets, found $($actual.Count)"
-          }
-          foreach ($name in $expected) {
-            $path = Join-Path dist/release $name
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -eq 0) {
-              throw "Release asset missing or empty: $name"
+          if ($env:RECOVERY_SOURCE_DIGESTS) {
+            foreach ($asset in ($env:RECOVERY_SOURCE_DIGESTS | ConvertFrom-Json)) {
+              $actual = (Get-FileHash -Algorithm SHA256 (Join-Path dist/release $asset.name)).Hash.ToLowerInvariant()
+              if ("sha256:$actual" -ne $asset.digest) { throw "Source asset digest mismatch: $($asset.name)" }
             }
           }
-          Get-FileHash -Algorithm SHA256 ($expected | ForEach-Object { Join-Path dist/release $_ }) |
-            Sort-Object Path |
-            Format-Table -AutoSize
-
+          node scripts/installer/release-assets.mjs latest $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "Release assets or metadata are invalid" }
+          node scripts/installer/release-assets.mjs notes $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { throw "Versioned release notes are invalid" }
+          $notes = Join-Path $env:RUNNER_TEMP 'alunixa-x-release-notes.md'
+          $title = (Get-Content -LiteralPath $notes -TotalCount 1) -replace '^# ', ''
+          $files = @(Get-ChildItem -LiteralPath dist/release -File | ForEach-Object FullName)
+          if ($files.Count -ne 7) { throw "Expected six installation files plus latest.json" }
           gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:RELEASE_TAG ($expected | ForEach-Object { Join-Path dist/release $_ }) --clobber --repo $env:GITHUB_REPOSITORY
+            gh release upload $env:RELEASE_TAG $files --clobber --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { throw "GitHub Release upload failed" }
+            gh release edit $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --title $title --notes-file $notes --latest
           } else {
-            gh release create $env:RELEASE_TAG ($expected | ForEach-Object { Join-Path dist/release $_ }) `
-              --repo $env:GITHUB_REPOSITORY `
-              --verify-tag `
-              --title "Alunixa X $env:VERSION" `
-              --generate-notes
+            gh release create $env:RELEASE_TAG $files --repo $env:GITHUB_REPOSITORY --verify-tag --title $title --notes-file $notes --latest
           }
-          if ($LASTEXITCODE -ne 0) {
-            throw "GitHub Release publish failed"
-          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release publish failed" }

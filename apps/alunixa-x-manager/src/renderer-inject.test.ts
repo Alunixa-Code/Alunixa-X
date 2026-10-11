@@ -30,7 +30,24 @@ async function readStepwiseSource() {
   return `(() => {\n${fragments.join("\n")}\n})();\n`;
 }
 
-it("only reveals floating-panel content after the shell has settled open", async () => {
+it("VM fixtures exercise the canonical modular renderer artifact without source drift", async () => {
+  const root = new URL("../../../assets/inject/renderer-inject/", import.meta.url);
+  const manifest = JSON.parse(await readFile(new URL("manifest.json", root), "utf8"));
+  assert.ok(Array.isArray(manifest.fragments) && manifest.fragments.length > 0);
+  const names = manifest.fragments.map((fragment: { name: string }) => fragment.name);
+  assert.equal(new Set(names).size, names.length);
+  for (const name of names) assert.match(name, /^[\w-]+\.js$/, "fragment paths must stay in the renderer directory");
+  const parts = await Promise.all(names.map((name: string) => readFile(new URL(name, root), "utf8")));
+  for (const [index, body] of parts.entries()) assert.ok(body.endsWith("\n"), names[index]);
+  const assembled = parts.join("");
+  assert.ok(assembled.startsWith("(() => {\n"));
+  assert.ok(assembled.includes("\n})();\n"));
+  assert.doesNotThrow(() => new Function(assembled), "fragment boundaries must remain valid JavaScript");
+  const artifact = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+  assert.equal(artifact, assembled, "production and VM tests must exercise the same assembled module code");
+});
+
+it("floating-panel content is hidden while closed and noninteractive while morphing", async () => {
   const source = await readFile(
     new URL("../../../assets/inject/floating-panel/core/appearance.js", import.meta.url),
     "utf8",
@@ -43,15 +60,21 @@ it("only reveals floating-panel content after the shell has settled open", async
   assert.ok(hidden, "panel needs a hidden default for collapsed and interrupted states");
   assert.match(hidden.declarations, /opacity:\s*0\s*;/);
   assert.match(hidden.declarations, /visibility:\s*hidden\s*;/);
-  assert.match(hidden.declarations, /transition:\s*none\s*!important\s*;/);
+  assert.match(hidden.declarations, /pointer-events:\s*none\s*;/);
+  assert.match(hidden.declarations, /will-change:\s*clip-path\s*;/);
 
   const visible = panelRules.filter((rule) =>
     /opacity:\s*1\s*;|visibility:\s*visible\s*;/.test(rule.declarations),
   );
   assert.ok(visible.length > 0, "settled content must remain visible");
   for (const rule of visible) {
-    assert.ok(rule.selector.includes('[data-open="true"]'), rule.selector);
-    assert.ok(rule.selector.includes('[data-morphing="false"]'), rule.selector);
+    if (rule.selector.includes('[data-morphing="true"]')) {
+      assert.match(rule.declarations, /pointer-events:\s*none\s*;/, "morphing content cannot receive clicks");
+    } else {
+      assert.ok(rule.selector.includes('[data-open="true"]'), rule.selector);
+      assert.ok(rule.selector.includes('[data-morphing="false"]'), rule.selector);
+      assert.match(rule.declarations, /pointer-events:\s*auto\s*;/);
+    }
   }
 });
 
@@ -190,8 +213,8 @@ describe("renderer injection header compatibility", () => {
   it("adds the session copy shortcut through the native fork action", async () => {
     const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
 
-    assert.match(renderer, /原地复制会话 - Codex\+\+/);
-    assert.match(renderer, /createSessionMoreMenuItem\("原地复制会话 - Codex\+\+"/);
+    assert.match(renderer, /原地复制会话 - Alunixa X/);
+    assert.match(renderer, /createSessionMoreMenuItem\("原地复制会话 - Alunixa X"/);
     assert.match(renderer, /getAttribute\("aria-label"\)[\s\S]*聊天操作/);
     assert.match(renderer, /从这里创建聊天分支/);
     assert.match(renderer, /data-app-action-sidebar-thread-selected/);
@@ -328,17 +351,15 @@ describe("renderer injection header compatibility", () => {
     assert.match(renderer, /selectCodexPlusTab\(pageNav\.getAttribute\("data-alunixa-x-page-nav"\)\)/);
   });
 
-  it("把三个 rail 入口都接成独立页面，并跟随 Codex 的界面缩放", async () => {
+  it("保留非广告 rail 页面与缩放契约，不再创建推荐入口", async () => {
     const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
 
-    // 推荐内容从弹窗二级 tab 提成图标栏上的一级入口。
-    assert.match(renderer, /const alunixaXRailSponsorId = "alunixa-x-rail-sponsor"/);
-    assert.match(renderer, /const alunixaXSponsorTab = "sponsor"/);
-    assert.match(renderer, /function openCodexPlusSponsor\(\)/);
-    assert.match(renderer, /id: alunixaXRailSponsorId, label: "推荐内容"/);
-    // 三个入口都要参与选中态映射，否则「推荐内容」亮不起来。
-    assert.match(renderer, /\[alunixaXRailSponsorId, "sponsor"\],/);
-    assert.match(renderer, /if \(tab === alunixaXSponsorTab\) return "sponsor";/);
+    // Sponsor identifiers may remain only for compatibility cleanup, never as entries.
+    assert.match(renderer, /const alunixaXRailNavId = "alunixa-x-rail-nav"/);
+    assert.match(renderer, /const alunixaXRailExtensionsId = "alunixa-x-rail-extensions"/);
+    assert.match(renderer, /\[alunixaXRailExtensionsId, "extensions"\]/);
+    assert.doesNotMatch(renderer, /id: alunixaXRailSponsorId, label: "推荐内容"/);
+    assert.doesNotMatch(renderer, /function openCodexPlusSponsor\(/);
 
     // 弹窗里的 tab 条已随入口外移删除，不该再有残留。
     assert.doesNotMatch(renderer, /alunixa-x-tab-button/);
@@ -760,7 +781,7 @@ return (loaded) => { alunixaXBackendSettingsLoaded = loaded; renderCodexPlusMenu
     assert.match(dreamSkinRenderer, /MainContentSurface/);
     assert.match(dreamSkinRenderer, /data-ds-part/);
     assert.match(cidalaRenderer, /MainContentSurface/);
-    assert.match(cidalaRenderer, /data-alunixa-x-dream-surface/);
+    assert.match(cidalaRenderer, /data-codex-plus-dream-surface/);
     assert.match(cidalaRenderer, /ensureShellMain/);
   });
 });
@@ -813,7 +834,7 @@ let alunixaXUserScripts = { scripts: [] }, alunixaXUserScriptsLoaded = false;
 let alunixaXScriptMarket = { scripts: [], loaded: false, loading: false, message: "" };
 let alunixaXExtensionsQuery = "", alunixaXExtensionsFilter = "market", alunixaXExtensionsSelected = null;
 ${segment(renderer, "  function userScriptStatusLabel(", "  async function uninstallUserScript(")}
-${segment(renderer, "  function alunixaXExtensionsEntries()", "  const alunixaXAdsUrl =")}
+${segment(renderer, "  function alunixaXExtensionsEntries()", "  function selectCodexPlusTab(tab)")}
 return {
   nav: renderCodexPlusExtensionsNav, overview: renderCodexPlusExtensionsOverview, detail: renderCodexPlusExtensionsDetail,
   configure(scripts, market, options = {}) {
@@ -932,32 +953,16 @@ return { refresh: refreshCodexPlusExtensionsView, selection: () => alunixaXExten
     assert.deepEqual(requested, ["[data-alunixa-x-page-nav-body]", "[data-alunixa-x-extensions-detail]"]);
   });
 
-  it("preserves sponsor logos, destinations and highlights in the native recommendation list", async () => {
+  it("retired recommendations cannot fetch or render advertisements", async () => {
     const renderer = await readFile(rendererPath, "utf8");
-    const logo = await readFile(new URL("../../../docs/images/sponsor-volcengine.png", import.meta.url));
-    const image = `data:image/png;base64,${logo.toString("base64")}`;
-    const runtime = new Function(`${escapeSource(renderer)}\n${segment(renderer, "  const alunixaXAdsUrl =", "  function cacheBustCodexPlusAdUrl(")}
-return {
-  render: renderCodexPlusAds,
-  set(payload, loaded = true) { alunixaXAds = normalizeCodexPlusAds(payload); alunixaXAdsLoaded = loaded; return alunixaXAds; }
-};`)() as { render: () => string; set: (payload: unknown, loaded?: boolean) => Array<Record<string, unknown>> };
-    const ad = { id: "volcengine", type: "sponsor", title: "火山方舟｜套餐", description: "原始 <描述>", url: "https://example.test/partner?plan=pro&source=codex", image, highlights: ['原始 "优惠" & 说明', "保留第二条亮点"] };
-    const normalized = runtime.set({ ads: [ad, { ...ad, id: "normal", type: "normal" }, { ...ad, id: "expired", expires_at: "2000-01-01" }] });
-    assert.equal(normalized.length, 1);
-    assert.equal(normalized[0].image, image);
-    assert.equal(normalized[0].url, ad.url);
-    assert.deepEqual(normalized[0].highlights, ad.highlights);
-    const html = runtime.render();
-    assert.ok(html.includes(`src="${image}"`));
-    assert.ok(html.includes('data-alunixa-x-ad-url="https://example.test/partner?plan=pro&amp;source=codex"'));
-    assert.ok(html.includes('href="https://example.test/partner?plan=pro&amp;source=codex"'));
-    assert.ok(html.includes("原始 &lt;描述&gt;"));
-    assert.ok(html.includes("原始 &quot;优惠&quot; &amp; 说明"));
-    assert.doesNotMatch(html, /alunixa-x-ad-icon-fallback|<描述>/);
-    runtime.set({ ads: [ad] }, false);
-    assert.match(runtime.render(), /推荐内容加载中…/);
-    runtime.set({ ads: [] });
-    assert.match(runtime.render(), /暂无推荐内容。/);
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    assert.doesNotMatch(renderer, /const alunixaXAdsUrl|function renderCodexPlusAds\(|function normalizeCodexPlusAds\(/);
+    assert.doesNotMatch(renderer, /Ad-List/);
+    assert.doesNotMatch(renderer, /<[^>]+data-(?:alunixa-x|codex-plus)-ad-url=/);
+    assert.doesNotMatch(app, /function RecommendationsScreen|<RecommendationsScreen|<OverviewSponsorCard/);
+    // Replacing the recommendation page must not remove unrelated extension discovery.
+    assert.match(renderer, /function renderCodexPlusExtensionsOverview\(/);
+    assert.match(renderer, /function refreshCodexPlusExtensionsView\(/);
   });
 });
 

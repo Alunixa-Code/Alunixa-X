@@ -109,8 +109,30 @@ def main():
     parser.add_argument("--arch", choices=(*CPUS, "universal"), required=True)
     parser.add_argument("--version")
     parser.add_argument("--require-applications", action="store_true")
+    parser.add_argument("--restore-executable-modes", action="store_true")
     parser.add_argument("--zip", type=Path)
     args = parser.parse_args()
+    if not (args.stage / SPECS[0][0]).is_dir():
+        # DMG extractors differ on whether they include the volume-name folder.
+        candidates = [
+            app.parent for app in args.stage.rglob(SPECS[0][0])
+            if app.is_dir() and (app.parent / SPECS[1][0]).is_dir()
+            and (app.parent / ".hidden").is_file()
+        ]
+        if len(candidates) != 1:
+            raise ValueError("Extracted DMG must contain one complete AX bundle pair")
+        args.stage = candidates[0]
+    if args.restore_executable_modes:
+        # 7-Zip extraction on recovery runners can lose Unix mode bits.
+        # Restore only the three known executables in the private extracted tree.
+        for name, _, executable, silent in SPECS:
+            paths = [args.stage / name / "Contents/MacOS" / executable]
+            if not silent:
+                paths.append(args.stage / name / "Contents/MacOS/alunixa-x-imagegen-mcp")
+            for path in paths:
+                if path.is_symlink() or not path.resolve().is_relative_to(args.stage.resolve()):
+                    raise ValueError(f"Extracted executable escapes staging: {path}")
+                path.chmod(path.stat().st_mode | 0o111)
     verify(args.stage, args.arch, args.version, args.require_applications)
     if args.zip:
         if not args.version:

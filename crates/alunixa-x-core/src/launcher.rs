@@ -1948,8 +1948,9 @@ async fn handle_protocol_proxy_connection(
         Ok(upstream) => upstream,
         Err(error) => {
             let unsupported = error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
-            let status = if unsupported.is_some() { "400 Bad Request" } else { "502 Bad Gateway" };
-            let body = serde_json::to_vec(&unsupported.map(|error| error.response_body()).unwrap_or_else(|| {
+            let search = error.downcast_ref::<crate::protocol_proxy::UnsupportedNativeWebSearch>();
+            let status = if unsupported.is_some() || search.is_some() { "400 Bad Request" } else { "502 Bad Gateway" };
+            let body = serde_json::to_vec(&unsupported.map(|error| error.response_body()).or_else(|| search.map(|error| error.response_body())).unwrap_or_else(|| {
                 serde_json::json!({"status":"failed","message":error.to_string()})
             }))?;
             write_http_response(

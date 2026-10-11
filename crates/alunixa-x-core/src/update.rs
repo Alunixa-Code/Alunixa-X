@@ -10,6 +10,8 @@ pub mod macos;
 pub const DEFAULT_REPOSITORY: &str = "Alunixa-Code/Alunixa-X";
 pub const DEFAULT_LATEST_JSON_URL: &str =
     "https://github.com/Alunixa-Code/Alunixa-X/releases/latest/download/latest.json";
+const LEGACY_LATEST_RELEASE_API_URL: &str =
+    "https://api.github.com/repos/Alunixa-Code/Alunixa-X/releases/latest";
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
@@ -124,8 +126,8 @@ pub fn release_from_latest_json_payload(payload: &Value) -> anyhow::Result<Relea
         .filter_map(|asset| {
             let name = asset.get("name")?.as_str()?.to_string();
             let url = asset
-                .get("url")
-                .or_else(|| asset.get("browser_download_url"))?
+                .get("browser_download_url")
+                .or_else(|| asset.get("url"))?
                 .as_str()?
                 .to_string();
             Some((name, url))
@@ -174,14 +176,27 @@ pub fn select_update_asset(assets: &[(String, String)]) -> Option<ReleaseAsset> 
 
 pub async fn fetch_latest_release(latest_json_url: &str) -> anyhow::Result<Release> {
     let client = update_http_client()?;
-    let payload = client
+    let response = client
         .get(latest_json_url)
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
-        .await?
-        .error_for_status()?
-        .json::<Value>()
         .await?;
+    // AX releases through v1.0.35 shipped six installers without latest.json.
+    // Only our fixed endpoint may fall back, never an arbitrary upstream URL.
+    if latest_json_url == DEFAULT_LATEST_JSON_URL
+        && response.status() == reqwest::StatusCode::NOT_FOUND
+    {
+        let payload = client
+            .get(LEGACY_LATEST_RELEASE_API_URL)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await?;
+        return release_from_github_payload(&payload);
+    }
+    let payload = response.error_for_status()?.json::<Value>().await?;
     release_from_latest_json_payload(&payload)
 }
 
@@ -405,8 +420,7 @@ fn is_macos_native_arch_asset(name: &str) -> bool {
 }
 
 fn is_windows_installer_asset(name: &str) -> bool {
-    name.contains("codex")
-        && name.contains("plus")
+    is_alunixa_x_asset(name)
         && (name.ends_with(".msi")
             || name.ends_with("-setup.exe")
             || name.ends_with("_setup.exe")
@@ -417,7 +431,16 @@ fn is_windows_installer_asset(name: &str) -> bool {
 fn is_macos_installer_asset(name: &str) -> bool {
     // Loose shape check; arch preference is handled by platform_asset_rank
     // via is_macos_native_arch_asset.
-    name.contains("codex") && name.contains("plus") && name.ends_with(".dmg")
+    is_alunixa_x_asset(name) && name.ends_with(".dmg")
+}
+
+fn is_alunixa_x_asset(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    // Current six-asset names and historical AX hyphen/underscore names.
+    // A substring match would also accept an upstream asset containing AX.
+    ["alunixa-x-", "alunixa-x_", "alunixax-", "alunixax_"]
+        .iter()
+        .any(|prefix| lower.starts_with(*prefix))
 }
 
 pub fn launch_installer(path: &Path) -> anyhow::Result<()> {
