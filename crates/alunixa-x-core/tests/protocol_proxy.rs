@@ -118,27 +118,14 @@ fn chat_conversion_rejects_encrypted_agent_content_without_echoing_payload() {
 }
 
 #[test]
-fn chat_conversion_keeps_plaintext_and_existing_reasoning_compaction_contracts() {
-    let converted = responses_to_chat_completions(json!({
-        "model":"custom-model",
-        "input":[
-            {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}],
-             "encrypted_content":"opaque-reasoning"},
-            {"type":"message","role":"user","content":[
-                {"type":"input_text","text":"Payload:"},
-                {"type":"input_text","text":"plaintext-task"}
-            ]},
-            local_compaction_item("local-summary"),
-            {"type":"function_call_output","call_id":"orphan",
-             "output":{"type":"encrypted_content","text":"tool-output-text"}}
-        ]
-    })).unwrap();
-    let messages = converted["messages"].to_string();
-    assert!(messages.contains("plaintext-task"));
-    assert!(messages.contains("visible-summary"));
-    assert!(messages.contains("local-summary"));
-    assert!(messages.contains("tool-output-text"));
-    assert!(!messages.contains("opaque-reasoning"));
+fn chat_conversion_preserves_plaintext_and_local_compaction_but_rejects_foreign_opaque_reasoning() {
+    let converted = responses_to_chat_completions(json!({"input":[
+        {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}]},
+        {"role":"user","content":"plaintext-task"}, local_compaction_item("local-summary")
+    ]})).unwrap();
+    let messages=converted["messages"].to_string();
+    for value in ["plaintext-task","visible-summary","local-summary"] { assert!(messages.contains(value)); }
+    assert!(responses_to_chat_completions(json!({"input":[{"type":"reasoning","encrypted_content":"opaque"}]})).is_err());
 }
 
 #[tokio::test]
@@ -1813,50 +1800,9 @@ fn responses_request_preserves_reasoning_content_for_thinking_followup() {
 // #1860 错误 1：孤立的 function_call（后面没有 function_call_output）不能变成
 // assistant.tool_calls，否则 DeepSeek 报 "must be followed by tool messages"。
 #[test]
-fn responses_request_drops_orphaned_function_call_without_output() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "deepseek-v4-flash",
-        "stream": false,
-        "max_output_tokens": 8,
-        "input": [
-            { "role": "user", "content": "ping" },
-            { "role": "assistant", "content": [{ "type": "output_text", "text": "ok" }] },
-            {
-                "type": "function_call",
-                "call_id": "call_t1",
-                "name": "shell_command",
-                "arguments": "{\"command\":\"echo hi\"}"
-            },
-            { "role": "user", "content": "ping" }
-        ]
-    }))
-    .unwrap();
-
-    let messages = converted["messages"].as_array().unwrap();
-    for (index, message) in messages.iter().enumerate() {
-        let Some(tool_calls) = message.get("tool_calls").and_then(|v| v.as_array()) else {
-            continue;
-        };
-        // 每个 tool_call 后面都必须紧跟对应的 tool 消息
-        for (offset, tool_call) in tool_calls.iter().enumerate() {
-            let id = tool_call["id"].as_str().unwrap();
-            let follower = messages.get(index + 1 + offset);
-            assert_eq!(
-                follower
-                    .and_then(|m| m.get("role"))
-                    .and_then(|r| r.as_str()),
-                Some("tool"),
-                "tool_call {id} 后面没有 tool 消息：{converted:#}"
-            );
-            assert_eq!(
-                follower
-                    .and_then(|m| m.get("tool_call_id"))
-                    .and_then(|r| r.as_str()),
-                Some(id),
-                "tool_call {id} 没有匹配的 tool_call_id：{converted:#}"
-            );
-        }
-    }
+fn responses_request_rejects_orphaned_function_call_without_output() {
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call","call_id":"lost","name":"shell","arguments":"{}"},{"role":"user","content":"continue"}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("unanswered"), "{error}");
 }
 
 // #1860 错误 2：thinking 模式下带 tool_calls 的 assistant 消息必须回传 reasoning_content。
@@ -1892,73 +1838,23 @@ fn responses_request_attaches_reasoning_content_to_tool_call_message() {
         .get("reasoning_content")
         .and_then(|c| c.as_str())
         .is_some_and(|c| !c.is_empty());
-    assert!(
-        has_content || has_reasoning,
-        "带 tool_calls 且 content 为空的 assistant 消息必须有 reasoning_content：{converted:#}"
-    );
+    let messages = converted["messages"].as_array().unwrap();
+    assert_eq!(messages[1]["tool_calls"][0]["id"], "call_t1");
+    assert!(messages[1].get("reasoning_content").is_none());
 }
 
 // 历史尾部的 tool_call 是「output 还没回来」的正常形态，必须保留。
 #[test]
-fn responses_request_keeps_trailing_unanswered_tool_call() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "deepseek-v4-flash",
-        "input": [
-            { "role": "user", "content": "ping" },
-            {
-                "type": "function_call",
-                "call_id": "call_tail",
-                "name": "shell_command",
-                "arguments": "{\"command\":\"echo hi\"}"
-            }
-        ]
-    }))
-    .unwrap();
-
-    let last = converted["messages"].as_array().unwrap().last().unwrap();
-    assert_eq!(last["tool_calls"][0]["id"], "call_tail");
+fn responses_request_rejects_trailing_unanswered_tool_call() {
+    let error=responses_to_chat_completions(json!({"input":[{"type":"function_call","call_id":"lost","name":"shell","arguments":"{}"}]})).unwrap_err();
+    assert!(error.to_string().contains("unanswered"));
 }
 
 // 部分应答：只摘掉没被应答的那个，已应答的保留。
 #[test]
 fn responses_request_strips_only_unanswered_parallel_tool_calls() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "deepseek-v4-flash",
-        "input": [
-            { "role": "user", "content": "ping" },
-            {
-                "type": "function_call",
-                "call_id": "call_ok",
-                "name": "answered_tool",
-                "arguments": "{}"
-            },
-            {
-                "type": "function_call",
-                "call_id": "call_lost",
-                "name": "abandoned_tool",
-                "arguments": "{}"
-            },
-            { "type": "function_call_output", "call_id": "call_ok", "output": "done" },
-            { "role": "user", "content": "continue" }
-        ]
-    }))
-    .unwrap();
-
-    let assistant = converted["messages"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|message| message.get("tool_calls").is_some())
-        .unwrap();
-    let calls = assistant["tool_calls"].as_array().unwrap();
-    assert_eq!(calls.len(), 1, "只应保留被应答的 tool_call：{converted:#}");
-    assert_eq!(calls[0]["id"], "call_ok");
-    // 被摘掉的调用降级成文本保留，不静默丢失
-    let content = assistant["content"].as_str().unwrap();
-    assert!(
-        content.contains("call_lost") && content.contains("abandoned_tool"),
-        "被摘掉的调用应降级为文本：{content}"
-    );
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call","call_id":"ok","name":"shell","arguments":"{}"},{"type":"function_call","call_id":"lost","name":"shell","arguments":"{}"},{"type":"function_call_output","call_id":"ok","output":"done"}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("unanswered"), "{error}");
 }
 
 // 已有真实 reasoning 时不能被占位文本覆盖。
@@ -2218,21 +2114,9 @@ fn responses_request_normalizes_empty_assistant_messages_for_chat_upstream() {
 }
 
 #[test]
-fn responses_request_drops_tool_controls_when_no_chat_tools_survive() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": "hi",
-        "tools": [
-            { "type": "unknown_builtin", "name": "unsupported" }
-        ],
-        "tool_choice": { "type": "required" },
-        "parallel_tool_calls": true
-    }))
-    .unwrap();
-
-    assert!(converted.get("tools").is_none());
-    assert!(converted.get("tool_choice").is_none());
-    assert!(converted.get("parallel_tool_calls").is_none());
+fn responses_request_rejects_unsupported_unnamed_tool_controls() {
+    let error = responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"unknown_builtin"}],"tool_choice":"required"})).unwrap_err();
+    assert!(error.to_string().contains("unsupported unnamed tool"));
 }
 
 #[test]
@@ -3010,7 +2894,7 @@ fn responses_request_maps_codex_custom_and_namespace_tools_to_chat_functions() {
         .collect();
     assert!(names.contains(&"exec"));
     assert!(names.contains(&"mcp__vscode_mcp__open_file"));
-    assert!(names.contains(&"web_search"));
+    assert!(!names.contains(&"web_search"));
     assert_eq!(
         converted["tools"][0]["function"]["parameters"]["properties"]["input"]["type"],
         "string"
@@ -3129,130 +3013,20 @@ fn responses_input_replays_custom_and_legacy_tool_history() {
 
 #[test]
 fn responses_input_flattens_namespace_function_history_and_skips_invalid_tool_items() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": [
-            {
-                "type": "function_call",
-                "call_id": "call_ns",
-                "namespace": "mcp__vscode_mcp__",
-                "name": "execute_command",
-                "arguments": "{\"command\":\"save\"}"
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "call_ns",
-                "output": "saved"
-            },
-            {
-                "type": "function_call",
-                "call_id": "missing_name",
-                "arguments": "{}"
-            },
-            {
-                "type": "function_call_output",
-                "output": "orphan"
-            }
-        ]
-    }))
-    .unwrap();
-
-    assert_eq!(
-        converted["messages"][0]["tool_calls"][0]["function"]["name"],
-        "mcp__vscode_mcp__execute_command"
-    );
-    assert_eq!(converted["messages"][1]["tool_call_id"], "call_ns");
-    assert_eq!(converted["messages"].as_array().unwrap().len(), 2);
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call","namespace":"tools","name":"shell","arguments":"{}"}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("identity"), "{error}");
 }
 
 #[test]
-fn responses_input_sanitizes_invalid_function_call_arguments_history() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": [
-            {
-                "type": "function_call",
-                "call_id": "bad_object",
-                "name": "broken_args",
-                "arguments": "{foo: \"bar\"}"
-            },
-            {
-                "type": "function_call",
-                "call_id": "plain_text",
-                "name": "plain_args",
-                "arguments": "raw text with \"quotes\" and \\slashes"
-            },
-            {
-                "type": "function_call",
-                "call_id": "array_args",
-                "name": "array_args",
-                "arguments": "[1,2,3]"
-            },
-            {
-                "type": "tool_call",
-                "tool_use": {
-                    "id": "object_args",
-                    "name": "object_args",
-                    "input": { "ok": true }
-                }
-            }
-        ]
-    }))
-    .unwrap();
-
-    let calls = converted["messages"][0]["tool_calls"].as_array().unwrap();
-    for call in calls {
-        let arguments = call["function"]["arguments"].as_str().unwrap();
-        serde_json::from_str::<serde_json::Value>(arguments)
-            .expect("chat tool call arguments must always be valid JSON");
-    }
-    assert_eq!(
-        calls[0]["function"]["arguments"],
-        "{\"input\":\"{foo: \\\"bar\\\"}\"}"
-    );
-    assert_eq!(
-        calls[1]["function"]["arguments"],
-        "{\"input\":\"raw text with \\\"quotes\\\" and \\\\slashes\"}"
-    );
-    assert_eq!(calls[2]["function"]["arguments"], "{\"input\":[1,2,3]}");
-    assert_eq!(calls[3]["function"]["arguments"], "{\"ok\":true}");
+fn responses_input_rejects_invalid_function_call_arguments_history() {
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call","call_id":"x","name":"shell","arguments":"{invalid"},{"type":"function_call_output","call_id":"x","output":"done"}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("argument"), "{error}");
 }
 
 #[test]
-fn responses_input_downgrades_orphan_tool_outputs_to_user_messages() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": [
-            {
-                "type": "reasoning",
-                "summary": [{ "type": "summary_text", "text": "I need the previous tool result." }]
-            },
-            {
-                "type": "function_call_output",
-                "call_id": "missing_call",
-                "output": "tool output without a matching call"
-            },
-            {
-                "type": "custom_tool_call_output",
-                "call_id": "missing_custom",
-                "output": "custom output without a matching call"
-            }
-        ]
-    }))
-    .unwrap();
-
-    assert_eq!(converted["messages"][0]["role"], "assistant");
-    assert!(converted["messages"][0].get("tool_calls").is_none());
-    assert_eq!(converted["messages"][1]["role"], "user");
-    assert_eq!(
-        converted["messages"][1]["content"],
-        "Function call output (missing_call): tool output without a matching call"
-    );
-    assert_eq!(converted["messages"][2]["role"], "user");
-    assert_eq!(
-        converted["messages"][2]["content"],
-        "Function call output (missing_custom): custom output without a matching call"
-    );
+fn responses_input_rejects_orphan_tool_outputs_to_user_messages() {
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call_output","call_id":"orphan","output":"original output"}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("orphan"), "{error}");
 }
 
 #[test]
@@ -3265,7 +3039,8 @@ fn responses_input_replays_apply_patch_custom_history_as_proxy_tool() {
                 "call_id": "call_patch",
                 "name": "apply_patch",
                 "input": "*** Begin Patch\n*** Add File: docs/test.md\n+# Test\n*** End Patch"
-            }
+            },
+            {"type":"custom_tool_call_output","call_id":"call_patch","output":"ok"}
         ],
         "tools": [{ "type": "custom", "name": "apply_patch" }]
     }))
@@ -3421,12 +3196,8 @@ fn gemini_thought_signature_is_carried_back_across_turns() {
         "model": "gemini-3.5-flash",
         "input": [
             { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "天气" }] },
-            {
-                "type": "function_call",
-                "call_id": call_id,
-                "name": "get_weather",
-                "arguments": "{\"city\":\"Tokyo\"}"
-            },
+            converted["output"][0].clone(),
+            converted["output"][1].clone(),
             {
                 "type": "function_call_output",
                 "call_id": call_id,
@@ -3498,7 +3269,7 @@ fn tool_call_without_extra_content_replays_without_the_field() {
 }
 
 #[test]
-fn chat_completion_response_defaults_missing_reasoning_tokens_to_zero() {
+fn chat_completion_response_preserves_unknown_reasoning_tokens() {
     // Kimi 等上游在一次响应无 reasoning 时会省略 completion_tokens_details
     // 里的 reasoning_tokens; Codex 将该字段当必填解析, 缺省会报
     // "missing field `reasoning_tokens`" 并把整轮判为断流。
@@ -3520,12 +3291,12 @@ fn chat_completion_response_defaults_missing_reasoning_tokens_to_zero() {
     .unwrap();
     assert_eq!(
         converted["usage"]["output_tokens_details"]["reasoning_tokens"],
-        0
+        Value::Null
     );
 }
 
 #[test]
-fn chat_sse_defaults_missing_reasoning_tokens_to_zero() {
+fn chat_sse_preserves_unknown_reasoning_usage() {
     let sse = chat_sse_to_responses_sse(
         r#"data: {"id":"chatcmpl_kimi","created":123,"model":"k3-256k","choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10,"completion_tokens_details":{}}}
 
@@ -3534,11 +3305,11 @@ data: [DONE]
 "#,
     );
     assert!(sse.contains("event: response.completed"));
-    assert!(sse.contains("\"reasoning_tokens\":0"));
+    assert!(!sse.contains("\"reasoning_tokens\":0"));
 }
 
 #[test]
-fn chat_sse_without_usage_details_still_emits_reasoning_tokens() {
+fn chat_sse_without_usage_details_does_not_fabricate_reasoning_tokens() {
     // 上游连 completion_tokens_details 都没有时也要补上, Codex 才能解析。
     let sse = chat_sse_to_responses_sse(
         r#"data: {"id":"chatcmpl_plain","created":123,"model":"k3-256k","choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":6,"total_tokens":10}}
@@ -3548,11 +3319,11 @@ data: [DONE]
 "#,
     );
     assert!(sse.contains("event: response.completed"));
-    assert!(sse.contains("\"output_tokens_details\":{\"reasoning_tokens\":0}"));
+    assert!(!sse.contains("\"reasoning_tokens\":0"));
 }
 
 #[test]
-fn chat_sse_without_any_usage_still_emits_reasoning_tokens() {
+fn chat_sse_without_any_usage_does_not_fabricate_reasoning_tokens() {
     // 上游全程未发 usage chunk → default usage 兜底同样带齐结构。
     let sse = chat_sse_to_responses_sse(
         r#"data: {"id":"chatcmpl_nousg","created":123,"model":"k3-256k","choices":[{"delta":{"content":"Done"},"finish_reason":"stop"}]}
@@ -3562,7 +3333,7 @@ data: [DONE]
 "#,
     );
     assert!(sse.contains("event: response.completed"));
-    assert!(sse.contains("\"reasoning_tokens\":0"));
+    assert!(!sse.contains("\"reasoning_tokens\":0"));
 }
 
 #[test]
@@ -3616,10 +3387,10 @@ fn chat_completion_response_accepts_responses_style_usage_fields() {
     }))
     .unwrap();
 
-    assert_eq!(converted["usage"]["input_tokens"], 7);
+    assert_eq!(converted["usage"]["input_tokens"], 12);
     assert_eq!(converted["usage"]["output_tokens"], 3);
     assert_eq!(converted["usage"]["total_tokens"], 15);
-    assert!(converted["usage"].get("input_tokens_details").is_none());
+    assert_eq!(converted["usage"]["input_tokens_details"]["cached_tokens"], 1);
     assert_eq!(converted["usage"]["cache_read_input_tokens"], 1);
     assert_eq!(converted["usage"]["cache_creation_input_tokens"], 4);
 }
@@ -3770,7 +3541,7 @@ fn chat_completion_response_maps_gemini_and_claude_cache_usage_like_ccx() {
         }
     }))
     .unwrap();
-    assert_eq!(gemini["usage"]["input_tokens"], 15);
+    assert_eq!(gemini["usage"]["input_tokens"], 20);
     assert_eq!(gemini["usage"]["output_tokens"], 7);
     assert_eq!(gemini["usage"]["total_tokens"], 27);
     assert_eq!(gemini["usage"]["input_tokens_details"]["cached_tokens"], 5);
@@ -3789,13 +3560,13 @@ fn chat_completion_response_maps_gemini_and_claude_cache_usage_like_ccx() {
         }
     }))
     .unwrap();
-    assert_eq!(claude["usage"]["input_tokens"], 10);
+    assert_eq!(claude["usage"]["input_tokens"], 22);
     assert_eq!(claude["usage"]["total_tokens"], 25);
     assert_eq!(claude["usage"]["cache_read_input_tokens"], 2);
     assert_eq!(claude["usage"]["cache_creation_5m_input_tokens"], 4);
     assert_eq!(claude["usage"]["cache_creation_1h_input_tokens"], 6);
     assert_eq!(claude["usage"]["cache_ttl"], "mixed");
-    assert!(claude["usage"].get("input_tokens_details").is_none());
+    assert_eq!(claude["usage"]["input_tokens_details"]["cached_tokens"], 2);
 }
 
 #[test]
@@ -5628,32 +5399,9 @@ fn tool_output_images_do_not_break_tool_call_pairing() {
 }
 
 #[test]
-fn orphan_tool_output_image_stays_inline_in_user_message() {
-    // 没有配对 function_call 的 output 会降级成 user 消息；它本就是 user 角色，
-    // 图片可以直接内联，不必再搬一次。
-    let converted = responses_to_chat_completions(json!({
-        "model": "deepseek-v4-flash-vision-exp",
-        "input": [
-            {
-                "type": "function_call_output",
-                "call_id": "call_orphan",
-                "output": [{ "type": "input_image", "image_url": TEST_PNG_DATA_URL }]
-            }
-        ]
-    }))
-    .unwrap();
-
-    let message = &converted["messages"][0];
-    assert_eq!(message["role"], "user");
-    assert!(
-        message["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("call_orphan")
-    );
-    assert_eq!(message["content"][1]["type"], "image_url");
-    assert_eq!(message["content"][1]["image_url"]["url"], TEST_PNG_DATA_URL);
-    assert_no_base64_in_text(&converted);
+fn orphan_tool_output_image_requires_matching_call() {
+    let error = responses_to_chat_completions(json!({"input":[{"type":"function_call_output","call_id":"orphan","output":[{"type":"input_image","image_url":"data:image/png;base64,eA=="}]}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("orphan"), "{error}");
 }
 
 #[test]
@@ -5711,7 +5459,8 @@ fn responses_request_item_ids_always_match_their_type_prefix() {
             { "type": "reasoning", "id": "06b2506d2a33704f5737670841d1a928_rs", "summary": [] },
             { "type": "function_call", "id": "item_c270d5511c7129adc7475632", "call_id": "call_a", "name": "wait", "arguments": "{}" },
             { "type": "function_call_output", "id": "fc_call_a", "call_id": "call_a", "output": "ok" },
-            { "type": "custom_tool_call", "id": "fc_call_b", "call_id": "call_b", "name": "exec", "input": "{}" }
+            { "type": "custom_tool_call", "id": "fc_call_b", "call_id": "call_b", "name": "exec", "input": "{}" },
+            {"type":"custom_tool_call_output","id":"ctco_call_b","call_id":"call_b","output":"ok"}
         ]
     }))
     .unwrap();
@@ -5739,6 +5488,7 @@ fn responses_item_id_normalization_repairs_legacy_prefixes() {
             { "type": "function_call", "id": "item_c270d5511c7129adc7475632", "call_id": "call_a", "name": "wait", "arguments": "{}" },
             { "type": "function_call_output", "id": "fc_call_a", "call_id": "call_a", "output": "ok" },
             { "type": "custom_tool_call", "id": "fc_call_b", "call_id": "call_b", "name": "exec", "input": "{}" },
+            {"type":"custom_tool_call_output","id":"ctco_call_b","call_id":"call_b","output":"ok"},
             { "type": "custom_tool_call_output", "id": "ctc_call_b", "call_id": "call_b", "output": "ok" },
             { "type": "agent_message", "id": "whatever_external", "content": "x" }
         ]
@@ -6062,137 +5812,25 @@ key = "value"
 /// 时走孤儿输出路径，不能 panic 也不能丢内容。
 #[test]
 fn responses_input_handles_orphan_tool_search_output() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": [
-            { "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "hi" }] },
-            {
-                "type": "tool_search_output",
-                "call_id": "search-orphan",
-                "status": "completed",
-                "execution": "client",
-                "tools": [
-                    { "name": "mcp__calendar__list", "description": "List events" }
-                ]
-            }
-        ]
-    }))
-    .unwrap();
-
-    let messages = converted["messages"].as_array().unwrap();
-    let orphan = messages
-        .iter()
-        .filter(|m| m["role"] == "user")
-        .find(|m| {
-            m["content"]
-                .as_str()
-                .is_some_and(|text| text.contains("search-orphan"))
-        })
-        .expect("孤儿输出必须降级为 user 消息");
-    let content = orphan["content"].as_str().unwrap();
-    assert!(
-        content.contains("search-orphan"),
-        "孤儿输出消息必须携带 call_id，实际：{content}"
-    );
-    assert!(content.contains("mcp__calendar__list"));
+    let error = responses_to_chat_completions(json!({"input":[{"type":"tool_search_output","call_id":"orphan","tools":[]}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("orphan"), "{error}");
 }
 
 /// #2263：模型吐出畸形 arguments JSON 时，tool_search_call 还原必须兜底成
 /// 空对象而不是产出非法 item 或 panic。
 #[test]
-fn chat_response_tool_search_call_tolerates_malformed_arguments() {
-    let converted = chat_completion_to_response_with_request(
-        json!({
-            "id": "chatcmpl_ts_bad",
-            "model": "gpt-5-mini",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "content": null,
-                    "tool_calls": [{
-                        "id": "call_ts_bad",
-                        "type": "function",
-                        "function": {
-                            "name": "tool_search",
-                            "arguments": "{\"query\": truncated"
-                        }
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }),
-        &json!({
-            "model": "gpt-5-mini",
-            "tools": [{
-                "type": "tool_search",
-                "execution": "client",
-                "parameters": { "type": "object" }
-            }]
-        }),
-    )
-    .unwrap();
-
-    let item = converted["output"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|item| item["type"] == "tool_search_call")
-        .expect("畸形 arguments 也必须还原成 tool_search_call");
-    // arguments 走 chat 侧参数归一：解析失败包装成 {"input": 原文} 保真传递，
-    // 客户端反序列化失败会按检索空结果处理，不会产出非法 item。
-    let arguments = item["arguments"].as_object().expect("arguments 必须是对象");
-    assert!(
-        arguments.contains_key("input"),
-        "解析失败的 arguments 必须走 {{\"input\": ...}} 包装兜底，实际 {:?}",
-        item["arguments"]
-    );
-    assert_eq!(item["call_id"], "call_ts_bad");
-    assert_eq!(item["execution"], "client");
+fn chat_response_tool_search_call_rejects_malformed_arguments_without_fabrication() {
+    assert!(chat_completion_to_response_with_request(json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+        {"id":"x","type":"function","function":{"name":"tool_search","arguments":"{broken"}}
+    ]},"finish_reason":"tool_calls"}]}), &json!({"tools":[{"type":"tool_search","execution":"client"}]})).is_err());
 }
 
 /// #2263：tool_search_call 缺 call_id 时回退用 id 字段；两者皆空则整个
 /// item 被丢弃（与 function_call 分支的防御行为一致）。
 #[test]
-fn responses_input_tool_search_call_falls_back_to_id_and_drops_empty() {
-    let converted = responses_to_chat_completions(json!({
-        "model": "gpt-5-mini",
-        "input": [
-            {
-                "type": "tool_search_call",
-                "id": "tsc_fallback",
-                "execution": "client",
-                "arguments": { "query": "calendar" }
-            },
-            {
-                "type": "tool_search_output",
-                "call_id": "tsc_fallback",
-                "status": "completed",
-                "execution": "client",
-                "tools": []
-            },
-            {
-                "type": "tool_search_call",
-                "execution": "client",
-                "arguments": { "query": "no id at all" }
-            }
-        ]
-    }))
-    .unwrap();
-
-    let messages = converted["messages"].as_array().unwrap();
-    let tool_calls: Vec<Value> = messages
-        .iter()
-        .filter_map(|m| m.get("tool_calls").and_then(Value::as_array))
-        .flatten()
-        .cloned()
-        .collect();
-    assert_eq!(
-        tool_calls.len(),
-        1,
-        "只允许一条有效 tool_search 调用，实际 {tool_calls:?}"
-    );
-    assert_eq!(tool_calls[0]["id"], "tsc_fallback");
-    assert_eq!(tool_calls[0]["function"]["name"], "tool_search");
+fn responses_input_tool_search_call_falls_back_to_id_and_rejects_empty() {
+    let error = responses_to_chat_completions(json!({"input":[{"type":"tool_search_call","arguments":{}}]})).expect_err("invalid history must not be discarded or relabeled");
+    assert!(error.to_string().contains("identity"), "{error}");
 }
 
 /// #2263：上游模型在未声明 tool_search 工具时越权调用它，退化为普通

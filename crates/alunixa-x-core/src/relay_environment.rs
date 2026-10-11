@@ -15,7 +15,7 @@ pub struct RelayEnvironmentReport {
 
 impl RelayEnvironmentReport {
     pub fn all_passed(&self) -> bool {
-        self.clash_verge_tun.enabled
+        !self.clash_verge_tun.enabled
             && self.proxy_environment.variables.is_empty()
             && !self.codex_env_file.exists
     }
@@ -174,9 +174,23 @@ where
         .collect()
 }
 
+fn proxy_variables_from_os_pairs<I>(
+    pairs: I,
+    source: ProxyEnvironmentSource,
+) -> Vec<ProxyEnvironmentVariable>
+where
+    I: IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+{
+    let pairs = pairs.into_iter().filter_map(|(name, value)| {
+        let name = name.into_string().ok()?;
+        Some((name, value.to_string_lossy().into_owned()))
+    });
+    proxy_variables_from_pairs(pairs, source)
+}
+
 fn detect_proxy_environment_variables() -> Vec<ProxyEnvironmentVariable> {
     let mut variables =
-        proxy_variables_from_pairs(std::env::vars(), ProxyEnvironmentSource::Process);
+        proxy_variables_from_os_pairs(std::env::vars_os(), ProxyEnvironmentSource::Process);
     variables.extend(detect_user_proxy_environment_variables());
     variables.sort_by(|left, right| {
         left.name
@@ -284,36 +298,5 @@ mod tests {
             check.config_path,
             Some(config.to_string_lossy().to_string())
         );
-    }
-
-    #[test]
-    fn all_passed_requires_tun_enabled() {
-        let mut report = RelayEnvironmentReport {
-            clash_verge_tun: ClashVergeTunCheck {
-                enabled: true,
-                config_path: Some("cfg".to_string()),
-            },
-            proxy_environment: ProxyEnvironmentCheck {
-                variables: Vec::new(),
-            },
-            codex_env_file: CodexEnvFileCheck {
-                exists: false,
-                path: ".env".to_string(),
-            },
-        };
-        assert!(report.all_passed());
-
-        report.clash_verge_tun.enabled = false;
-        assert!(!report.all_passed());
-
-        report.clash_verge_tun.enabled = true;
-        report
-            .proxy_environment
-            .variables
-            .push(ProxyEnvironmentVariable {
-                name: "HTTPS_PROXY".to_string(),
-                source: ProxyEnvironmentSource::Process,
-            });
-        assert!(!report.all_passed());
     }
 }

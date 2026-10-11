@@ -19,7 +19,7 @@ const expectedImages = new Map([
 
 const requiredMarkers = new Map([
   ["Cargo.toml", ['repository = "https://github.com/Alunixa-Code/Alunixa-X"']],
-  ["README.md", ["# Alunixa X", "assets/brand/alunixa-x-icon.png", "docs/images/alunixa-x-dashboard.png", "https://github.com/Alunixa-Code/Alunixa-X/releases/latest"]],
+  ["README.md", ['<h1 align="center">Alunixa X</h1>', "assets/brand/alunixa-x-icon.png", "docs/images/alunixa-x-dashboard.png", "https://github.com/Alunixa-Code/Alunixa-X/releases/latest"]],
   ["README_EN.md", ["<h1 align=\"center\">Alunixa X</h1>", "assets/brand/alunixa-x-social.png", "https://github.com/Alunixa-Code/Alunixa-X/issues"]],
   ["CONTRIBUTING.md", ["https://github.com/Alunixa-Code/Alunixa-X.git"]],
   ["apps/alunixa-x-manager/src/App.tsx", ["ALUNIXA X", "AGENT CONTROL SYSTEM", "ApplicationRail", "https://github.com/Alunixa-Code/Alunixa-X"]],

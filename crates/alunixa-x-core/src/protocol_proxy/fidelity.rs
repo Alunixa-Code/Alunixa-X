@@ -150,7 +150,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 }
                 validate_content(item.get("content").unwrap_or(&Value::Null), wire)?;
             }
-            "function_call" | "custom_tool_call" | "tool_call" => {
+            "function_call" | "custom_tool_call" | "tool_call" | "tool_search_call" => {
                 if kind == "tool_call" && item.get("tool_use").is_none() {
                     return reject("legacy tool_call requires tool_use");
                 }
@@ -163,7 +163,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .or_else(|| call.get("id"))
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let name = call.get("name").and_then(Value::as_str).unwrap_or("");
+                let name = if kind == "tool_search_call" { "tool_search" } else {
+                    call.get("name").and_then(Value::as_str).unwrap_or("")
+                };
                 if id.is_empty() || name.is_empty() || !calls.insert(id.to_string()) {
                     return reject("missing or duplicate tool call identity");
                 }
@@ -174,6 +176,23 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                             .unwrap_or(&json!({})),
                     )?;
                 }
+            }
+            "tool_search_output" => {
+                let id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
+                if !calls.contains(id) || !outputs.insert(id.to_string()) {
+                    return reject("orphan or duplicate tool search output");
+                }
+                let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                    return reject("tool search output tools must be an array");
+                };
+                validate_tools(tools)?;
+            }
+            "additional_tools" => {
+                let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+                    return reject("additional tools must be an array");
+                };
+                validate_tools(tools)?;
+                if let Some(content) = item.get("content") { validate_content(content, wire)?; }
             }
             "function_call_output" | "custom_tool_call_output" | "tool_result" => {
                 let id = item
@@ -194,7 +213,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .unwrap_or(&Value::Null);
                 if content.is_array() {
                     validate_content(content, wire)?;
-                    if matches!(wire, "chat" | "gemini")
+                    if wire == "gemini"
                         && content.as_array().unwrap().iter().any(|part| {
                             !matches!(
                                 part["type"].as_str(),
@@ -222,6 +241,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
             _ => return reject(&format!("unsupported input item type {kind}")),
         }
     }
+    if calls != outputs {
+        return reject("unanswered tool calls require their original results; history was not discarded");
+    }
     Ok(())
 }
 
@@ -236,7 +258,7 @@ fn validate_content(content: &Value, wire: &str) -> anyhow::Result<()> {
         match part["type"].as_str() {
             Some("text" | "input_text" | "output_text") => {}
             Some("refusal") if wire == "chat" => {}
-            Some("input_image") if wire != "completions" => {
+            Some("input_image" | "image_url") if wire != "completions" => {
                 if part.get("image_url").is_none() {
                     return reject("image file_id has no cross-provider representation");
                 }
@@ -266,6 +288,11 @@ fn validate_tools(tools: &[Value]) -> anyhow::Result<()> {
                     return reject("namespace tools must be an array");
                 };
                 validate_tools(children)?;
+            }
+            "tool_search" => {
+                if tool.get("execution").and_then(Value::as_str) != Some("client") {
+                    return reject("server-side tool search has no cross-protocol executor");
+                }
             }
             "function" | "custom" => {
                 if response_tool_name(tool).is_none() {

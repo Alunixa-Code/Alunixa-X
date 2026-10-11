@@ -24,6 +24,29 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.36: complete non-advertising upstream integration
+
+This update integrates the upstream tree through `BigPizzaV3/CodexPlusPlus@e53549ca8c2b2b1edf4199084460af0919f2ded4`, covering April 11–October 12, 2026 (1,456 commits in the six-month range and 656 upstream files). It is a full-tree integration, not another small selection of v1.5.0 patches. Advertising pages, sponsor carousels, remote ad requests, theme promotion links and promotional images are excluded. See the [file-level synchronization report](docs/reports/2026-10-12-upstream-sync.md) and [release notes](docs/releases/v1.0.36.md).
+
+### New architecture and workflow
+
+- The manager and launcher now run in one GUI executable, with a separate image-generation MCP helper. Windows preserves AX Start-menu discovery; macOS has one visible application bundle. Old entry points remain migration-compatible.
+- The application rail selects an Agent or global page; the second navigation column holds that Agent's workspace. MCP, Skills, tasks, Weixin, enhancements, themes, extensions, plugin marketplace and maintenance are separate pages. Health labels distinguish actual checks from unverified UI or model readiness.
+- Provider configuration includes official login, mixed login/API, pure API, no-auth local endpoints and aggregates. Channel queues, RPM limits, error cooldown, session headers and custom headers follow one configuration path.
+- Model rows support sorting, renaming, metadata import, context windows, compaction percentages, image policy and Fast capability. Both ordinary providers and legacy custom-model providers keep AX's five per-model protocols: Responses, Chat Completions, Completions, Anthropic Messages and Gemini Generate Content.
+- Claude `xhigh` and `ultra` map to adaptive thinking. Unsupported combinations are disabled instead of being silently advertised as effective. Cache creation/read/TTL, native signatures and tool identities remain preserved.
+- Runtime changes include modular renderer injection, native-browser compatibility/recovery, on-demand plugin packages, official usage lifecycle, compaction v2, session-index repair, queued follow-ups, multi-protocol next-step suggestions and answer outlines.
+- New feature families include dictation, typing effects, Whale balance widgets, classified cache cleanup, CC Switch import, Grok/Zed integration, isolated Codex multi-launch and managed Windows Claude localization copies.
+- AX-specific Russian localization, image-model defaults, picture/GIF/video backgrounds, package-context proxy diagnosis and transactional settings protection remain available.
+
+### Upgrade and compatibility
+
+Exit the old AX application and install the new package without deleting Codex configuration or tasks. Windows ZIP deployments need both `alunixa-x-plus.exe` and `alunixa-x-imagegen-mcp.exe`; macOS legacy dual-bundle installs use a guarded manual migration rather than an unsafe automatic replacement. Global pages and the Chinese/English/Russian selector are now at the bottom of the application rail.
+
+Package proxy diagnostics inspect the actual Codex package context, make backups and verify the result. Disabled proxies with residual addresses are not reported as enabled, and legitimate proxies are not blindly disabled. A failed initialization exposes its stage and recovery action rather than indefinite loading or a false healthy status.
+
+Desktop white-screen reproduction, real audio hardware, Claude MSIX, isolated multi-launch and every third-party gateway parameter require their respective runtime environments. Automated/fixture coverage is not a claim that these live scenarios all passed. Unsupported server search, foreign opaque state and malformed/incomplete tool history fail explicitly rather than silently losing data.
+
 ## What is Alunixa X
 
 Alunixa X is a cross-platform control system for desktop AI agents. The current release focuses on OpenAI Codex / ChatGPT Desktop and adds a unified external launcher, CDP bridge, local helper, protocol proxy, and management interface without replacing the official renderer or patching `app.asar`.

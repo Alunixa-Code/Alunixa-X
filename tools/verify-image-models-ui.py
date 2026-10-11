@@ -30,6 +30,8 @@ INIT = r"""
       if(cmd==="load_settings")return ok({settings:{codexAppPath:"",relayProfiles:[],enhancementsEnabled:true},user_scripts:{enabled:true,scripts:[]}});
       if(cmd==="load_overview")return ok({current_version:"1.0.19",codex_app:{status:"not_checked"},
         silent_shortcut:{status:"not_checked"},management_shortcut:{status:"not_checked"}});
+      if(cmd==="read_latest_logs")return ok({logs:[]});
+      if(cmd==="copy_diagnostics")return ok({text:"fixture"});
       if(cmd==="read_relay_files")return ok({configContents:"",authContents:"{}",configPath:"fixture/config.toml",authPath:"fixture/auth.json"});
       if(cmd==="relay_status")return ok({configured:false,authenticated:false});
       if(cmd==="list_codex_context_entries")return ok({mcpServers:[],skills:[],plugins:[]});
@@ -42,6 +44,8 @@ INIT = r"""
       if(cmd==="load_pending_provider_import")return ok({pending:null});
       if(cmd==="load_pending_dream_skin_community")return ok({versionId:""});
       if(cmd==="remote_plugin_marketplace_status")return ok({codexHome:"fixture",configRegistered:true,needsRepair:false,pluginCount:0,skillCount:0});
+      if(cmd==="list_tools")return ok({tools:[],activeTool:"codex"});
+      if(cmd==="consume_pending_manager_navigation")return null;
       if(cmd==="plugin:event|listen")return 1;
       if(cmd==="update_tray_labels")return;
       if(cmd==="write_diagnostic_event"||cmd==="plugin:event|unlisten")return ok();
@@ -187,12 +191,12 @@ def main():
             # Guard unsaved edits when changing pages and when refreshing.
             rows.first.get_by_role("button", name="编辑", exact=True).click()
             page.get_by_label("名称（可选）", exact=True).fill("未保存编辑")
-            page.get_by_role("button", name="供应商配置", exact=True).click()
-            expect(page.get_by_role("dialog")).to_be_visible()
-            page.get_by_role("button", name="继续编辑", exact=True).click()
+            page.once("dialog", lambda dialog: dialog.dismiss())
+            page.get_by_role("button", name="关于", exact=True).click()
             expect(page.get_by_label("名称（可选）", exact=True)).to_have_value("未保存编辑")
-            page.get_by_role("button", name="刷新当前页面", exact=True).click()
-            page.get_by_role("button", name="放弃编辑", exact=True).click()
+            page.once("dialog", lambda dialog: dialog.accept())
+            page.get_by_role("button", name="关于", exact=True).click()
+            page.get_by_role("button", name="生图模型", exact=True).click()
             expect(page.get_by_role("form", name="生图模型编辑")).to_have_count(0)
             expect(rows).to_have_count(3)
             expect(rows.first.get_by_text("默认", exact=True)).to_be_visible()
@@ -214,7 +218,7 @@ def main():
                     expect(rows.first.get_by_text("默认", exact=True)).to_be_visible()
             expect(page.get_by_text("还没有独立的生图模型", exact=True)).to_be_visible()
             assert page.evaluate("window.__otherSaves") == 0
-            assert page.evaluate("window.__unsupportedCommands") == []
+            assert page.evaluate("window.__unsupportedCommands") == [], page.evaluate("window.__unsupportedCommands")
             assert not errors, errors
             print(json.dumps({"status": "PASS", "checks": [
                 "pointer drag", "keyboard drag", "persisted default", "masked keys",
@@ -227,3 +231,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

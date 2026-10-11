@@ -145,11 +145,16 @@ pub fn local_responses_proxy_base_url(port: u16) -> String {
 }
 
 pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
-    let body = fidelity::prepare_history(body, "chat")?;
-    responses_to_chat_completions_for_wire(body, "chat")
+    responses_to_chat_completions_with_options(body, false)
 }
 
-fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Result<Value> {
+fn responses_to_chat_completions_for_wire(mut body: Value, wire: &str, standard: bool) -> anyhow::Result<Value> {
+    let additional: Vec<Value> = body["input"].as_array().into_iter().flatten()
+        .filter(|i| i["type"] == "additional_tools").flat_map(|i| i["tools"].as_array().into_iter().flatten().cloned()).collect();
+    if !additional.is_empty() {
+        if !body["tools"].is_array() { body["tools"] = json!([]); }
+        body["tools"].as_array_mut().unwrap().extend(additional);
+    }
     fidelity::validate_request(&body, wire)?;
     let mut result = json!({});
 
@@ -202,7 +207,7 @@ fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Re
         result["stream_options"] = stream_options;
     }
 
-    apply_chat_reasoning_options(&mut result, &body, model);
+    apply_chat_reasoning_options(&mut result, &body, model, standard);
     fidelity::map_text_format(&mut result, &body)?;
     for key in [
         "thinking",
@@ -215,14 +220,21 @@ fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Re
         }
     }
 
-    let tool_context = build_codex_tool_context(body.get("tools"));
+    let mut tool_context = build_codex_tool_context(body.get("tools"));
+    let namespaces = collect_tool_search_output_namespaces(&body);
+    for namespace in &namespaces {
+        add_namespace_tools_to_context(&mut tool_context, namespace);
+    }
     let mut has_chat_tools = false;
-    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
-        let converted = responses_tools_to_chat_tools(tools, &tool_context);
-        if !converted.is_empty() {
-            has_chat_tools = true;
-            result["tools"] = json!(converted);
-        }
+    let mut converted = body.get("tools").and_then(Value::as_array)
+        .map(|tools| responses_tools_to_chat_tools(tools, &tool_context)).unwrap_or_default();
+    for namespace in &namespaces {
+        converted.extend(namespace_tool_to_chat_tools(namespace, &tool_context));
+    }
+    dedup_chat_tools_by_name(&mut converted);
+    if !converted.is_empty() {
+        has_chat_tools = true;
+        result["tools"] = json!(converted);
     }
 
     if has_chat_tools {
@@ -262,7 +274,7 @@ pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
     {
         return fidelity::reject("legacy Completions cannot represent reasoning controls");
     }
-    let chat = responses_to_chat_completions_for_wire(body, "completions")?;
+    let chat = responses_to_chat_completions_for_wire(body, "completions", false)?;
     if chat.get("response_format").is_some() || chat.get("verbosity").is_some() {
         return fidelity::reject("legacy Completions cannot represent structured text options");
     }
@@ -312,7 +324,7 @@ pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
 pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
     let native_options = fidelity::native_reasoning_options(&body, "anthropic")?;
     let body = fidelity::prepare_history(body, "anthropic")?;
-    let chat = responses_to_chat_completions_for_wire(body, "anthropic")?;
+    let chat = responses_to_chat_completions_for_wire(body, "anthropic", false)?;
     if chat
         .get("response_format")
         .is_some_and(|v| v["type"] != "text")
@@ -455,7 +467,7 @@ pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
 pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value> {
     let thinking_config = fidelity::native_reasoning_options(&body, "gemini")?;
     let body = fidelity::prepare_history(body, "gemini")?;
-    let chat = responses_to_chat_completions_for_wire(body, "gemini")?;
+    let chat = responses_to_chat_completions_for_wire(body, "gemini", false)?;
     let mut system_parts = Vec::new();
     let mut contents = Vec::new();
     let mut tool_names = BTreeMap::<String, String>::new();
@@ -1901,7 +1913,7 @@ pub async fn open_transparent_proxy_request_with_settings(
         RelayProtocol::GeminiGenerateContent => {
             request.header("x-goog-api-key", relay.api_key.trim())
         }
-        _ => request.bearer_auth(relay.api_key.trim()),
+        _ => with_relay_auth(request, &relay),
     };
     if let Some(body_len) = body_len {
         request = request.header(reqwest::header::CONTENT_LENGTH, body_len);
@@ -2196,6 +2208,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let mut request_json: Value = serde_json::from_str(body)?;
     expand_local_compaction_history(&mut request_json);
+    normalize_legacy_custom_item_ids(&mut request_json);
     let is_stream = request_json
         .get("stream")
         .and_then(Value::as_bool)
@@ -2472,6 +2485,9 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                         _channel_permit: None,
                     });
                 }
+                if input_has_native_compaction(&request_json) {
+                    return native_compaction_unsupported_result(NativeCompactionUnsupported::history().into());
+                }
 
                 let _ = crate::diagnostic_log::append_diagnostic_log(
                     "protocol_proxy.compaction_fallback",
@@ -2726,7 +2742,7 @@ pub async fn open_models_proxy_request(
         RelayProtocol::GeminiGenerateContent => {
             request.header("x-goog-api-key", relay.api_key.trim())
         }
-        _ => request.bearer_auth(relay.api_key.trim()),
+        _ => with_relay_auth(request, &relay),
     };
     let upstream = match send_upstream_request(request).await {
         Ok(upstream) => upstream,
@@ -2796,12 +2812,11 @@ pub async fn open_audio_transcriptions_proxy_request(
         }),
     );
     let upstream = match send_upstream_request(
-        crate::http_client::proxied_client(&effective_user_agent(
+        with_relay_auth(crate::http_client::proxied_client(&effective_user_agent(
             &relay.user_agent,
             original_user_agent,
         ))?
-        .post(&endpoint)
-        .bearer_auth(relay.api_key.trim())
+        .post(&endpoint), &relay)
         .header(reqwest::header::CONTENT_TYPE, content_type)
         .body(body.to_vec()),
     )
@@ -2864,7 +2879,7 @@ pub async fn open_chat_completions_proxy_request(
     if relay.base_url.trim().is_empty() {
         anyhow::bail!("Chat Completions 上游 Base URL 不能为空");
     }
-    if relay.api_key.trim().is_empty() {
+    if relay.api_key.trim().is_empty() && !relay.uses_no_auth() {
         anyhow::bail!("Chat Completions 上游 Key 不能为空");
     }
 
@@ -2881,7 +2896,7 @@ pub async fn open_chat_completions_proxy_request(
     let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
         client,
         &endpoint,
-        relay.api_key.trim(),
+        &relay,
         is_stream,
         &request_json,
         UpstreamWireApi::ChatCompletions,
@@ -2970,7 +2985,7 @@ async fn upstream_request_parts(
             if relay.web_search_history_compat_enabled() && compact && !is_responses_compact_proxy_path(request_path) { ensure_web_search_tool_for_history(&mut body); }
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
-                responses_url(&relay.base_url),
+                if is_responses_compact_proxy_path(request_path) { responses_compact_url(&relay.base_url) } else { responses_url(&relay.base_url) },
                 body,
                 UpstreamWireApi::Responses,
                 synthetic_compaction,
@@ -3214,20 +3229,13 @@ fn sanitized_upstream_error(error: &anyhow::Error) -> Value {
 async fn send_json_upstream_with_connect_retry(
     client: reqwest::Client,
     endpoint: &str,
-    api_key: &str,
+    relay: &crate::settings::RelayProfile,
     is_stream: bool,
     upstream_body: &Value,
-    wire_api: UpstreamWireApi,
+    _wire_api: UpstreamWireApi,
 ) -> (anyhow::Result<reqwest::Response>, bool) {
     let first = send_upstream_request_for_responses(
-        upstream_request_builder_for_wire(
-            client.clone(),
-            endpoint,
-            api_key,
-            is_stream,
-            upstream_body,
-            wire_api,
-        ),
+        upstream_request_builder(client.clone(), endpoint, relay, is_stream, upstream_body),
         is_stream,
     )
     .await;
@@ -3236,14 +3244,7 @@ async fn send_json_upstream_with_connect_retry(
             tokio::time::sleep(UPSTREAM_CONNECT_RETRY_DELAY).await;
             (
                 send_upstream_request_for_responses(
-                    upstream_request_builder_for_wire(
-                        client,
-                        endpoint,
-                        api_key,
-                        is_stream,
-                        upstream_body,
-                        wire_api,
-                    ),
+                    upstream_request_builder(client, endpoint, relay, is_stream, upstream_body),
                     is_stream,
                 )
                 .await,
@@ -3315,9 +3316,13 @@ fn upstream_request_builder(
     builder = match relay.protocol {
         RelayProtocol::AnthropicMessages => builder.header("x-api-key", relay.api_key.trim()).header("anthropic-version", "2023-06-01"),
         RelayProtocol::GeminiGenerateContent => builder.header("x-goog-api-key", relay.api_key.trim()),
-        _ => with_relay_auth(builder, relay),
+        _ => return finish_upstream_builder(with_relay_auth(builder, relay), is_stream, upstream_body),
     };
     builder = crate::relay_headers::apply_headers(builder, &relay.custom_headers);
+    finish_upstream_builder(builder, is_stream, upstream_body)
+}
+
+fn finish_upstream_builder(mut builder: reqwest::RequestBuilder, is_stream: bool, upstream_body: &Value) -> reqwest::RequestBuilder {
     if is_stream {
         builder = builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -3467,7 +3472,7 @@ async fn open_custom_models_proxy_request(
     let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
         client,
         &endpoint,
-        model.api_key.trim(),
+        &synthetic,
         is_stream,
         &upstream_body,
         wire_api,
@@ -3752,6 +3757,8 @@ pub fn responses_url(base_url: &str) -> String {
 }
 
 pub fn responses_compact_url(base_url: &str) -> String {
+    let base = base_url.trim().trim_end_matches('#').trim_end_matches('/');
+    if base.to_ascii_lowercase().ends_with("/responses/compact") { return base.to_string(); }
     let responses = responses_url(base_url);
     if responses
         .to_ascii_lowercase()
@@ -4462,7 +4469,7 @@ impl ChatSseState {
         self.text.refusal = refusal;
         if !self.text.added {
             let output_index = self.next_output_index();
-            let item_id = format!("{}_msg_{}", self.response_id, output_index);
+            let item_id = format!("msg_{}_{}", response_id_body(&self.response_id), output_index);
             self.text.output_index = Some(output_index);
             self.text.item_id = item_id.clone();
             self.text.added = true;
@@ -4592,7 +4599,7 @@ impl ChatSseState {
                 state.name = "unknown_tool".to_string();
             }
             state.output_index = Some(assigned);
-            state.item_id = format!("fc_{}", state.call_id);
+            state.item_id = tool_call_item_id(&state.call_id, &state.name, &self.tool_context);
             let added_item = tool_call_added_item(state, assigned, &self.tool_context);
             push_sse(output, "response.output_item.added", added_item);
             if !pending_arguments.is_empty() {
@@ -4833,7 +4840,7 @@ impl ChatSseState {
                     state.name = "unknown_tool".to_string();
                 }
                 state.output_index = Some(assigned);
-                state.item_id = format!("fc_{}", state.call_id);
+                state.item_id = tool_call_item_id(&state.call_id, &state.name, &self.tool_context);
                 let added_item = tool_call_added_item(state, assigned, &self.tool_context);
                 push_sse(output, "response.output_item.added", added_item);
             }
@@ -5611,6 +5618,23 @@ fn append_responses_item(
                 }
             }));
         }
+        Some("tool_search_call") => {
+            let call_id = item.get("call_id").or_else(|| item.get("id")).and_then(Value::as_str).unwrap_or("");
+            seen_tool_call_ids.insert(call_id.to_string());
+            pending_tool_calls.push(json!({"id":call_id,"type":"function","function":{
+                "name":"tool_search","arguments":responses_arguments_to_chat(item.get("arguments").unwrap_or(&json!({})))
+            }}));
+        }
+        Some("tool_search_output") => {
+            let call_id = item["call_id"].as_str().unwrap_or("");
+            flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
+            messages.push(json!({"role":"tool","tool_call_id":call_id,"content":response_output_text(&item["tools"])}));
+        }
+        Some("additional_tools") => {
+            if let Some(content) = item.get("content") {
+                messages.push(json!({"role":"system","content":responses_content_to_chat_content("system", content)}));
+            }
+        }
         Some("custom_tool_call_output") => {
             let call_id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
             if call_id.is_empty() {
@@ -5891,7 +5915,7 @@ fn responses_content_to_chat_content(_role: &str, content: &Value) -> Value {
                     }
                 }
             }
-            "input_image" => {
+            "input_image" | "image_url" => {
                 if let Some(image_url) = part.get("image_url") {
                     let mut image_url = if image_url.is_object() {
                         image_url.clone()
@@ -5982,7 +6006,14 @@ fn build_codex_tool_context(tools: Option<&Value>) -> CodexToolContext {
             context.has_custom_tools = true;
             continue;
         }
-        if response_tool_type(tool) == "namespace" {
+        if response_tool_type(tool) == "tool_search" {
+            let name = response_tool_name(tool).unwrap_or("tool_search");
+            context.custom_tools.insert(name.to_string(), CodexCustomToolSpec {
+                openai_name: "tool_search".into(), namespace: String::new(),
+                kind: CodexCustomToolKind::Raw, proxy_action: None,
+            });
+            context.has_custom_tools = true;
+        } else if response_tool_type(tool) == "namespace" {
             add_namespace_tools_to_context(&mut context, tool);
         } else if response_tool_is_structured_function(tool) {
             if let Some(name) = response_tool_name(tool) {
@@ -6056,7 +6087,10 @@ fn responses_tools_to_chat_tools(tools: &[Value], context: &CodexToolContext) ->
             converted.push(generic_custom_proxy_tool(name, ""));
             continue;
         }
-        if response_tool_type(tool) == "namespace" {
+        if response_tool_type(tool) == "tool_search" {
+            converted.push(function_tool(response_tool_name(tool).unwrap_or("tool_search"),
+                response_tool_description(tool), normalize_chat_tool_parameters(&tool.get("parameters").cloned().unwrap_or_else(|| json!({})))));
+        } else if response_tool_type(tool) == "namespace" {
             converted.extend(namespace_tool_to_chat_tools(tool, context));
         } else if response_tool_is_structured_function(tool) {
             if let Some(tool) = responses_function_tool_to_chat_tool(tool) {
@@ -6284,21 +6318,14 @@ fn namespace_tool_to_chat_tools(namespace_tool: &Value, context: &CodexToolConte
 }
 
 fn normalize_chat_tool_parameters(parameters: &Value) -> Value {
-    let mut normalized = if parameters.is_object() {
-        flatten_top_level_combinators(inline_ref_siblings(parameters))
-    } else {
-        json!({})
-    };
-    if normalized.get("type").is_none() {
-        normalized["type"] = json!("object");
+    let mut normalized = if parameters.is_object() { parameters.clone() } else { json!({}) };
+    let bare_ref = normalized.as_object().is_some_and(|o| o.len() == 1 && o.contains_key("$ref"));
+    if !bare_ref {
+        if normalized.get("type").is_none_or(Value::is_null) { normalized["type"] = json!("object"); }
+        if normalized.get("properties").is_none() { normalized["properties"] = json!({}); }
+        if normalized.get("required").is_none() { normalized["required"] = json!([]); }
     }
-    if normalized.get("properties").is_none() {
-        normalized["properties"] = json!({});
-    }
-    if normalized.get("required").is_none() {
-        normalized["required"] = json!([]);
-    }
-    normalized
+    flatten_top_level_combinators(inline_ref_siblings(&normalized))
 }
 
 fn generic_custom_proxy_tool(name: &str, description: &str) -> Value {
@@ -6738,7 +6765,7 @@ fn chat_message_to_response_output_item(message: &Value, response_id: &str) -> O
     }
 
     Some(json!({
-        "id": format!("{response_id}_msg"),
+        "id": format!("msg_{}", response_id_body(response_id)),
         "type": "message",
         "status": "completed",
         "role": "assistant",
@@ -6809,6 +6836,11 @@ fn tool_call_added_item(
     output_index: u32,
     tool_context: &CodexToolContext,
 ) -> Value {
+    if tool_context.is_tool_search_proxy(&state.name) {
+        return json!({"type":"response.output_item.added","output_index":output_index,
+            "item":{"id":state.item_id,"type":"tool_search_call","status":"in_progress",
+                "call_id":state.call_id,"execution":"client","arguments":{}}});
+    }
     if tool_context.is_custom_tool_proxy(&state.name) {
         let (display_name, namespace) = tool_context.openai_name_for_custom_tool(&state.name);
         let mut item = json!({
@@ -6854,7 +6886,7 @@ fn push_tool_call_delta_sse(
     delta: &str,
     tool_context: &CodexToolContext,
 ) {
-    if tool_context.is_custom_tool_proxy(&state.name) {
+    if tool_context.is_custom_tool_proxy(&state.name) && !tool_context.is_tool_search_proxy(&state.name) {
         let _ = delta;
     } else {
         push_sse(
@@ -6876,7 +6908,7 @@ fn push_tool_call_done_sse(
     output_index: u32,
     tool_context: &CodexToolContext,
 ) {
-    if tool_context.is_custom_tool_proxy(&state.name) {
+    if tool_context.is_custom_tool_proxy(&state.name) && !tool_context.is_tool_search_proxy(&state.name) {
         let input = reconstruct_custom_tool_call_input_with_context(
             tool_context,
             &state.name,
@@ -6937,7 +6969,7 @@ fn response_tool_call_item(
     }
     if tool_context.is_tool_search_proxy(name) {
         return json!({
-            "id": format!("ts_{call_id}"),
+            "id": format!("tsc_{call_id}"),
             "type": "tool_search_call",
             "status": "completed",
             "call_id": call_id,
@@ -7264,12 +7296,13 @@ fn response_output_text(value: &Value) -> String {
 }
 
 fn tool_output_content(value: &Value) -> Value {
-    if value.is_array() {
+    if value.as_array().is_some_and(|parts| parts.iter().any(is_image_part)) {
         responses_content_to_chat_content("tool", value)
     } else {
         json!(response_output_text(value))
     }
 }
+
 fn build_custom_tool_call_history(name: &str, input: &Value) -> (String, String) {
     let input = response_output_text(input);
     if name == "apply_patch" || input.starts_with("*** Begin Patch") {
@@ -7679,7 +7712,7 @@ fn canonical_json_string(value: &Value) -> String {
     }
 }
 
-fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
+fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str, standard: bool) {
     let effort = body
         .pointer("/reasoning/effort")
         .or_else(|| body.get("reasoning_effort"))
@@ -7696,12 +7729,12 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
     let Some(reasoning_enabled) = reasoning_requested(body) else {
         return;
     };
-    let style = infer_chat_reasoning_style(model);
+    let style = if standard { ChatReasoningStyle::Default } else { infer_chat_reasoning_style(model) };
 
     match style {
         ChatReasoningStyle::Thinking => {
             result["thinking"] = json!({
-                "type": if reasoning_enabled { "enabled" } else { "disabled" }
+                "type": if reasoning_enabled { if is_kimi_coding_model(model) { "adaptive" } else { "enabled" } } else { "disabled" }
             });
         }
         ChatReasoningStyle::EnableThinking => {
@@ -7743,9 +7776,11 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str) {
         {
             result["reasoning_effort"] = json!(mapped);
         }
+        ChatReasoningStyle::Thinking if is_kimi_coding_model(model) => { result["reasoning_effort"] = json!(mapped); }
         _ => {}
     }
 }
+
 
 fn reasoning_requested(body: &Value) -> Option<bool> {
     if let Some(effort) = body.pointer("/reasoning/effort").and_then(Value::as_str) {
@@ -7769,7 +7804,7 @@ fn infer_chat_reasoning_style(model: &str) -> ChatReasoningStyle {
     if model.contains("qwen") || model.contains("dashscope") || model.contains("bailian") {
         return ChatReasoningStyle::EnableThinking;
     }
-    if model.contains("kimi")
+    if is_kimi_coding_model(&model) || model.contains("kimi")
         || model.contains("moonshot")
         || model.contains("glm")
         || model.contains("zhipu")
@@ -7811,6 +7846,12 @@ fn map_chat_reasoning_effort(effort: &str, style: ChatReasoningStyle) -> Option<
             "medium" => Some("medium"),
             "low" => Some("low"),
             "minimal" => Some("minimal"),
+            _ => None,
+        },
+        ChatReasoningStyle::Thinking => match effort.as_str() {
+            "minimal" | "low" => Some("low"),
+            "medium" | "high" => Some("high"),
+            "ultra" | "xhigh" | "max" => Some("max"),
             _ => None,
         },
         _ => match effort.as_str() {
@@ -7994,27 +8035,12 @@ pub fn responses_to_chat_completions_with_options(mut body: Value, standard: boo
     if body.get("input").is_some_and(input_has_encrypted_agent_content) {
         return Err(UnsupportedEncryptedAgentContent.into());
     }
-    let mut result = responses_to_chat_completions(body.clone())?;
+    let body = fidelity::prepare_history(body, "chat")?;
+    let mut result = responses_to_chat_completions_for_wire(body.clone(), "chat", standard)?;
     let model = body.get("model").and_then(Value::as_str).unwrap_or_default();
     if let Some(messages) = result["messages"].as_array_mut() {
-        relocate_interleaved_non_tool_messages(messages);
         relocate_tool_output_images(messages);
-        ensure_tool_call_reasoning_content(messages);
         normalize_image_data_urls_for_model(messages, model);
-    }
-    let mut context = build_codex_tool_context(body.get("tools"));
-    let namespaces = collect_tool_search_output_namespaces(&body);
-    for namespace in &namespaces { add_namespace_tools_to_context(&mut context, namespace); }
-    let mut tools = body.get("tools").and_then(Value::as_array)
-        .map(|tools| responses_tools_to_chat_tools(tools, &context)).unwrap_or_default();
-    for namespace in &namespaces { tools.extend(namespace_tool_to_chat_tools(namespace, &context)); }
-    dedup_chat_tools_by_name(&mut tools);
-    if !tools.is_empty() { result["tools"] = json!(tools); }
-    if standard && !is_claude_model(model) {
-        if let Some(effort) = body.pointer("/reasoning/effort") { result["reasoning_effort"] = effort.clone(); }
-        if let Some(object) = result.as_object_mut() {
-            object.remove("thinking"); object.remove("enable_thinking"); object.remove("reasoning_split");
-        }
     }
     Ok(result)
 }
@@ -8758,6 +8784,21 @@ fn response_id_body(response_id: &str) -> &str {
 
 pub fn normalize_responses_item_ids_for_test(body: &mut Value) {
     normalize_responses_item_ids(body);
+}
+
+fn normalize_legacy_custom_item_ids(body: &mut Value) {
+    if let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) {
+        for item in items {
+            let prefix = match item["type"].as_str() {
+                Some("custom_tool_call") => "ctc_",
+                Some("custom_tool_call_output") => "ctco_",
+                _ => continue,
+            };
+            if let Some(id) = item["id"].as_str().and_then(|id| id.strip_prefix("fc_")) {
+                item["id"] = json!(format!("{prefix}{id}"));
+            }
+        }
+    }
 }
 
 fn normalize_responses_item_ids(body: &mut Value) {

@@ -106,24 +106,14 @@ pub fn default_relay_status() -> RelayStatus {
 }
 
 pub fn set_codex_goals_feature_in_home(home: &Path, enabled: bool) -> anyhow::Result<()> {
-    std::fs::create_dir_all(home)?;
+    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
-    let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-    let updated = match parse_toml_document(&existing) {
-        Ok(mut doc) => {
-            if enabled {
-                let features = table_mut_or_insert(&mut doc, "features")?;
-                features["goals"] = toml_edit::value(true);
-            } else if let Some(features) = table_mut_if_exists(&mut doc, "features") {
-                features.remove("goals");
-                if features.is_empty() {
-                    doc.as_table_mut().remove("features");
-                }
-            }
-            ensure_trailing_newline(doc.to_string())
-        }
-        Err(_) => set_codex_goals_feature_text_fallback(&existing, enabled),
-    };
+    let existing = read_optional_text(&config_path)?;
+    let mut doc = existing
+        .parse::<DocumentMut>()
+        .map_err(|_| anyhow::anyhow!("config.toml 无法解析，未修改 Goals"))?;
+    table_like_mut_or_insert(&mut doc, "features")?.insert("goals", toml_edit::value(enabled));
+    let updated = ensure_trailing_newline(doc.to_string());
     crate::settings::atomic_write(&config_path, updated.as_bytes())
 }
 
@@ -773,6 +763,7 @@ pub fn apply_relay_profile_config_to_home_with_context(
             apply_model_catalog_to_config(home, profile, &config_with_limits)?;
         let compatible_config =
             apply_deepseek_responses_compatibility(profile, &config_with_catalog)?;
+        let compatible_config = preserve_live_native_capabilities(home, &compatible_config)?;
         apply_relay_config_file_to_home(home, &compatible_config)
     })
 }
@@ -1788,7 +1779,7 @@ pub fn prepare_common_config_for_apply(common_config: &str) -> anyhow::Result<St
     let sanitized_common =
         strip_legacy_skill_tables(&sanitize_common_config_contents(common_config));
     let mut filtered = parse_toml_document(&sanitized_common)?;
-    remove_disabled_context_tables(filtered.as_table_mut());
+    normalize_context_enabled_flags(filtered.as_table_mut());
     Ok(normalize_optional_toml(filtered))
 }
 
@@ -1805,7 +1796,7 @@ pub fn sync_live_config_context_entries(
     let managed_doc = parse_toml_document(&normalized_context)?;
     remove_managed_context_entries(live_doc.as_table_mut(), managed_doc.as_table());
     let mut context_doc = managed_doc;
-    remove_disabled_context_tables(context_doc.as_table_mut());
+    normalize_context_enabled_flags(context_doc.as_table_mut());
     merge_managed_context_tables(live_doc.as_table_mut(), context_doc.as_table());
     Ok(normalize_optional_toml(live_doc))
 }
@@ -2277,9 +2268,11 @@ pub fn normalize_config_text(contents: &str) -> String {
 /// 任何一块解析失败就说明输入本身已经坏到不是逐块可解析的程度，退回历史的逐行
 /// 丢弃策略，不让这次修复反而让原本能跑的输入报错。
 fn normalize_duplicate_toml_text(contents: &str) -> String {
+    // Valid TOML, including multiline strings and arrays of tables, is never split.
+    if contents.parse::<DocumentMut>().is_ok() { return normalize_text_toml(contents.to_owned()); }
     match merge_duplicate_toml_blocks(contents) {
         Some(merged) => normalize_optional_toml(merged),
-        None => normalize_duplicate_toml_text_line_fallback(contents),
+        None => contents.to_owned(),
     }
 }
 
@@ -6379,7 +6372,7 @@ fn normalize_context_enabled_flags(table: &mut toml_edit::Table) {
         let Some(item) = table.get_mut(table_name) else {
             continue;
         };
-        let Some(context_table) = item.as_table_mut() else {
+        let Some(context_table) = item.as_table_like_mut() else {
             continue;
         };
         let disabled_ids: Vec<String> = context_table
