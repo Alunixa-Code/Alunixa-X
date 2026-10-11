@@ -14,11 +14,14 @@ export type RelayModelRouteProfile = {
   protocol: string;
   relayMode: string;
   officialMixApiKey: boolean;
+  noAuth?: boolean;
+  webSearchHistoryCompat?: boolean;
   modelRoutes?: RelayModelRoute[];
   modelProtocols?: string;
 };
 
 export type RelayModelRouteSettings = {
+  enhancementsEnabled?: boolean;
   relayProfilesEnabled: boolean;
   activeRelayId: string;
   relayProfiles: RelayModelRouteProfile[];
@@ -75,6 +78,31 @@ export function findRelayModelRouteIssue(
     }
   }
   return null;
+}
+
+export function webSearchHistoryCompatEnabled(
+  profile: Pick<RelayModelRouteProfile, "protocol" | "relayMode" | "officialMixApiKey" | "webSearchHistoryCompat">,
+): boolean {
+  return profile.webSearchHistoryCompat === true
+    && profile.protocol === "responses"
+    && profile.relayMode !== "aggregate"
+    && (profile.relayMode !== "official" || profile.officialMixApiKey);
+}
+
+export function settingsRequireLocalHelper(settings: RelayModelRouteSettings): boolean {
+  if (settings.enhancementsEnabled) return true;
+  const active = settings.relayProfiles.find((profile) => profile.id === settings.activeRelayId)
+    ?? settings.relayProfiles[0];
+  if (!active) return false;
+  return active.relayMode === "aggregate"
+    || active.protocol !== "responses"
+    || hasModelProtocols(active.modelProtocols)
+    || (active.relayMode === "pureApi" && active.noAuth === true)
+    || (active.relayMode === "official" && active.officialMixApiKey)
+    || webSearchHistoryCompatEnabled(active)
+    || normalizeRelayModelRoutes(active.modelRoutes).some(
+      (route) => Boolean(route.model.trim() && route.targetRelayId.trim()),
+    );
 }
 
 export function modelRouteSaveRequiresRestart(

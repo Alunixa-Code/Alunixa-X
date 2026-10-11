@@ -6,21 +6,46 @@ use toml_edit::{DocumentMut, Item, Table};
 
 const OPENAI_CURATED_MARKETPLACE: &str = "openai-curated";
 const OPENAI_API_CURATED_MARKETPLACE: &str = "openai-api-curated";
-const OPENAI_CURATED_REMOTE_MARKETPLACE: &str = "openai-curated-remote";
+/// 内置插件包在 zip 里自带的名字。这是 codex 的保留名，注册在它下面会被静默忽略，
+/// 所以落盘时会被改写成 `ALUNIXA_X_MARKETPLACE`；这里只用于识别和清理历史遗留配置。
+const LEGACY_REMOTE_MARKETPLACE: &str = "openai-curated-remote";
+/// 内置插件包实际注册用的 marketplace 名。
+///
+/// **不能用 `openai-*` 开头的名字。** codex 把这些当保留名，注册在它们下面的本地
+/// marketplace 会被完全忽略——`codex plugin marketplace list` 直接不列出，用户在
+/// 插件市场里就看不到、装不了任何插件（issue #1974 / #1968）。
+///
+/// 实测（同一目录、同一份 marketplace.json，只改 name）：
+///
+/// | name | 结果 |
+/// |---|---|
+/// | `openai-curated` / `openai-curated-remote` | 被忽略 |
+/// | `openai-bundled` / `openai-bundled-alpha` | 被忽略 |
+/// | `openai-primary-runtime` / `openai-api-curated` | 被忽略 |
+/// | `alunixa-x-curated` | 可用 |
 const ALUNIXA_X_MARKETPLACE: &str = "alunixa-x-curated";
 const ROLE_SPECIFIC_PLUGINS_MARKETPLACE: &str = "role-specific-plugins";
 const OPENAI_PLUGINS_ZIP_URL: &str =
     "https://codeload.github.com/openai/plugins/zip/refs/heads/main";
 const OPENAI_PLUGINS_DOWNLOAD_LIMIT_BYTES: usize = 128 * 1024 * 1024;
-const OPENAI_CURATED_REMOTE_MARKETPLACE_ZIP: &[u8] =
+const ALUNIXA_X_MARKETPLACE_ZIP: &[u8] =
     include_bytes!("../../../assets/plugin-marketplaces/openai-curated-remote.zip");
 
 pub fn ensure_openai_curated_marketplace_config(home: &Path) -> anyhow::Result<bool> {
     let mut changed = cleanup_managed_reserved_marketplace_configs(home)?;
     if let Some(remote_marketplace_root) = local_openai_curated_remote_marketplace_root(home)? {
-        changed |= rewrite_remote_marketplace_name(&remote_marketplace_root)?;
-        changed |=
-            ensure_marketplace_configs(home, &[ALUNIXA_X_MARKETPLACE], &remote_marketplace_root)?;
+        // 必须和写 config 一起做：老用户目录早就解压好了、不会再走安装分支，
+        // 里面的 marketplace.json 还是旧的保留名。只改 config 不改磁盘，两边名字
+        // 对不上，codex 照样整个市场不认 —— 表现和改名前一样，插件一个都列不出来。
+        rewrite_marketplace_name(&remote_marketplace_root)?;
+        // 注册名以磁盘快照的真实 name 为准（#2138），而不是写死的常量：两边逐字一致
+        // 是 codex 认这个市场的唯一条件。
+        let marketplace_name = managed_marketplace_name_for_root(&remote_marketplace_root)?;
+        changed |= ensure_marketplace_configs(
+            home,
+            &[marketplace_name.as_str()],
+            &remote_marketplace_root,
+        )?;
     }
     Ok(changed)
 }
@@ -29,10 +54,12 @@ pub fn ensure_openai_curated_remote_marketplace_config(home: &Path) -> anyhow::R
     let Some(marketplace_root) = local_openai_curated_remote_marketplace_root(home)? else {
         return Ok(false);
     };
-    let mut changed = cleanup_managed_reserved_marketplace_configs(home)?;
-    changed |= rewrite_remote_marketplace_name(&marketplace_root)?;
-    changed |= ensure_marketplace_configs(home, &[ALUNIXA_X_MARKETPLACE], &marketplace_root)?;
-    Ok(changed)
+    // 老用户的目录早就解压好了，不会再走安装分支，但里面的 marketplace.json 还是
+    // 旧的保留名。config 注册的是新名，两边对不上 codex 一样不认，所以这里无条件
+    // 规范化一次。
+    rewrite_marketplace_name(&marketplace_root)?;
+    let marketplace_name = managed_marketplace_name_for_root(&marketplace_root)?;
+    ensure_marketplace_configs(home, &[marketplace_name.as_str()], &marketplace_root)
 }
 
 pub fn ensure_role_specific_plugins_marketplace_config(home: &Path) -> anyhow::Result<bool> {
@@ -52,55 +79,12 @@ pub fn ensure_role_specific_plugins_marketplace_config(home: &Path) -> anyhow::R
     )
 }
 
-/// Remove only marketplace entries owned by Alunixa X.  User-selected
-/// `openai-curated` and other third-party marketplace entries are preserved.
-pub fn remove_alunixa_x_marketplace_config(home: &Path) -> anyhow::Result<bool> {
-    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
-    let path = home.join("config.toml");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    let mut doc = parse_toml_document(&text)?;
-    let mut changed = false;
-    if let Some(marketplaces) = doc.get_mut("marketplaces").and_then(Item::as_table_mut) {
-        for name in [ALUNIXA_X_MARKETPLACE, ROLE_SPECIFIC_PLUGINS_MARKETPLACE] {
-            changed |= marketplaces.remove(name).is_some();
-        }
-        if marketplaces.is_empty() {
-            doc.as_table_mut().remove("marketplaces");
-        }
-    }
-    if let Some(plugins) = doc.get_mut("plugins").and_then(Item::as_table_mut) {
-        let owned_ids = plugins
-            .iter()
-            .filter_map(|(id, _)| {
-                (id.ends_with(&format!("@{ALUNIXA_X_MARKETPLACE}"))
-                    || id.ends_with(&format!("@{ROLE_SPECIFIC_PLUGINS_MARKETPLACE}")))
-                .then_some(id.to_string())
-            })
-            .collect::<Vec<_>>();
-        for id in owned_ids {
-            changed |= plugins.remove(&id).is_some();
-        }
-        if plugins.is_empty() {
-            doc.as_table_mut().remove("plugins");
-        }
-    }
-    if changed {
-        crate::settings::atomic_write(&path, ensure_trailing_newline(doc.to_string()).as_bytes())?;
-    }
-    let reserved_changed = cleanup_managed_reserved_marketplace_configs(home)?;
-    Ok(changed || reserved_changed)
-}
-
 pub fn ensure_openai_curated_remote_marketplace_available(
     home: &Path,
 ) -> anyhow::Result<MarketplaceEnsureResult> {
     let mut initialized = false;
     if local_openai_curated_remote_marketplace_root(home)?.is_none() {
-        install_openai_curated_remote_marketplace_zip(home, OPENAI_CURATED_REMOTE_MARKETPLACE_ZIP)?;
+        install_openai_curated_remote_marketplace_zip(home, ALUNIXA_X_MARKETPLACE_ZIP)?;
         initialized = true;
     }
     let configured = ensure_openai_curated_remote_marketplace_config(home)?;
@@ -117,7 +101,13 @@ pub fn preserve_openai_curated_remote_marketplace_config(
     let Some(marketplace_root) = local_openai_curated_remote_marketplace_root(home)? else {
         return Ok(config_text.to_string());
     };
-    merge_marketplace_configs_into_text(config_text, &[ALUNIXA_X_MARKETPLACE], &marketplace_root)
+    // 写回用磁盘快照的真实 name（#2138），否则会把一份对不上的注册表写回模板。
+    let marketplace_name = managed_marketplace_name_for_root(&marketplace_root)?;
+    merge_marketplace_configs_into_text(
+        config_text,
+        &[marketplace_name.as_str()],
+        &marketplace_root,
+    )
 }
 
 pub fn openai_curated_marketplace_status(home: &Path) -> MarketplaceStatus {
@@ -125,14 +115,22 @@ pub fn openai_curated_marketplace_status(home: &Path) -> MarketplaceStatus {
     let remote_marketplace_root = local_openai_curated_remote_marketplace_root(home)
         .ok()
         .flatten();
+    // 判定「已注册」同样以磁盘快照的真实 name 为准（#2138）：写回侧已经改成读快照，
+    // 状态侧若还按写死的常量比对，就会把自己刚写好的配置判成未注册，进而反复触发
+    // 修复写入。
+    let registered_name = remote_marketplace_root
+        .as_deref()
+        .and_then(|root| managed_marketplace_name_for_root(root).ok());
     let config_registered = !managed_reserved_marketplace_config_present(home)
-        && remote_marketplace_root
-            .as_deref()
-            .map(|root| {
-                remote_marketplace_manifest_is_current(root)
-                    && marketplace_config_points_to_root(home, ALUNIXA_X_MARKETPLACE, root)
-            })
-            .unwrap_or(true);
+        && match (
+            registered_name.as_deref(),
+            remote_marketplace_root.as_deref(),
+        ) {
+            (Some(name), Some(remote_root)) => {
+                marketplace_config_points_to_root(home, name, remote_root)
+            }
+            _ => true,
+        };
     MarketplaceStatus {
         marketplace_root,
         config_registered,
@@ -143,11 +141,14 @@ pub fn openai_curated_remote_marketplace_status(home: &Path) -> MarketplaceStatu
     let marketplace_root = local_openai_curated_remote_marketplace_root(home)
         .ok()
         .flatten();
+    // 与写回侧同一个名字（#2138）：写的是快照真实 name，这里也按它比对，
+    // 否则刚写好的配置会被判成未注册、每次启动都触发无谓的修复写入。
     let config_registered = marketplace_root
         .as_deref()
-        .map(|root| {
-            remote_marketplace_manifest_is_current(root)
-                && marketplace_config_points_to_root(home, ALUNIXA_X_MARKETPLACE, root)
+        .and_then(|root| {
+            managed_marketplace_name_for_root(root)
+                .ok()
+                .map(|name| marketplace_config_points_to_root(home, &name, root))
         })
         .unwrap_or(false);
     MarketplaceStatus {
@@ -267,7 +268,14 @@ fn local_marketplace_plugin_names(
         .with_context(|| format!("failed to read {}", marketplace_path.display()))?;
     let marketplace: serde_json::Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}", marketplace_path.display()))?;
-    if marketplace.get("name").and_then(serde_json::Value::as_str) != Some(marketplace_name) {
+    let name = marketplace.get("name").and_then(serde_json::Value::as_str);
+    // 内置市场的名字要认两档：磁盘上可能还是旧的保留名。
+    // 清理路径（cleanup_managed_reserved_marketplace_configs）在改写磁盘之前
+    // 就需要读这份插件清单，只认新名会在升级的第一次启动上拿到空表，
+    // 迁移就被整段跳过了（#2072）。
+    let name_matches = name == Some(marketplace_name)
+        || (marketplace_name == ALUNIXA_X_MARKETPLACE && is_alunixa_x_marketplace_name(name));
+    if !name_matches {
         return Ok(Vec::new());
     }
     Ok(marketplace
@@ -299,7 +307,18 @@ fn local_openai_curated_remote_marketplace_root(home: &Path) -> anyhow::Result<O
         .with_context(|| format!("failed to read {}", marketplace_path.display()))?;
     let marketplace: serde_json::Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}", marketplace_path.display()))?;
-    if !is_remote_marketplace_name(marketplace.get("name").and_then(serde_json::Value::as_str)) {
+    // 认新旧两种名（zip 里自带旧名、历史目录也是旧名），也认任何**非保留名**：
+    // 快照里完全可能是第三方工具或用户自己写进去的名字，而 config 注册名必须以
+    // 它为准（#2138）。旧的「只认 ALUNIXA_X_MARKETPLACE / LEGACY_REMOTE」白名单
+    // 会把这类目录整个判成「不存在」，于是永远走不到注册那一步——市场在 Alunixa X
+    // 里看着有、在 codex CLI 里完全没有。
+    // 保留名（`openai-*`）仍然拒绝：注册在它下面会被 codex 静默忽略
+    // （#1974 / #1968）。
+    if !marketplace
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| !is_reserved_marketplace_name(name))
+    {
         return Ok(None);
     }
     let has_plugins = marketplace
@@ -369,34 +388,110 @@ fn install_openai_plugins_zip(home: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     result
 }
 
-fn is_remote_marketplace_name(name: Option<&str>) -> bool {
+/// 内置插件包的 marketplace.json 认新旧两种 name：zip 里自带旧名，
+/// 历史版本解压出来的目录也是旧名。
+fn is_alunixa_x_marketplace_name(name: Option<&str>) -> bool {
     matches!(
         name,
-        Some(OPENAI_CURATED_REMOTE_MARKETPLACE) | Some(ALUNIXA_X_MARKETPLACE)
+        Some(ALUNIXA_X_MARKETPLACE) | Some(LEGACY_REMOTE_MARKETPLACE)
     )
 }
 
-fn remote_marketplace_manifest_is_current(root: &Path) -> bool {
-    std::fs::read(root.join(".agents/plugins/marketplace.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-        .is_some_and(|manifest| manifest["name"] == ALUNIXA_X_MARKETPLACE)
+/// 一个 marketplace 名字是不是 codex 的保留名（注册在它下面会被静默忽略）。
+///
+/// `openai-curated-remote` 是历史遗留的例外：它是 zip 自带的旧名，我们自己的
+/// 托管快照会以它落盘（随后由 `rewrite_marketplace_name` 改写），所以它不算
+/// 「别人的保留名」，要正常认。
+fn is_reserved_marketplace_name(name: &str) -> bool {
+    let name = name.trim().to_ascii_lowercase();
+    name.starts_with("openai-") && name != LEGACY_REMOTE_MARKETPLACE
 }
 
-fn rewrite_remote_marketplace_name(root: &Path) -> anyhow::Result<bool> {
-    let path = root.join(".agents/plugins/marketplace.json");
-    let mut manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-    let name = manifest.get("name").and_then(serde_json::Value::as_str);
-    anyhow::ensure!(
-        is_remote_marketplace_name(name),
-        "unexpected managed marketplace name"
-    );
-    if name == Some(ALUNIXA_X_MARKETPLACE) {
-        return Ok(false);
+/// 从磁盘快照的 `marketplace.json` 里读出**真实**的 marketplace name（#2138）。
+///
+/// codex 认的是插件目录里那份清单的 `name`，config.toml 的 `[marketplaces.<name>]`
+/// 必须和它逐字相同，否则市场整个不认。过去两边各写各的：config 侧一律用写死的
+/// `ALUNIXA_X_MARKETPLACE`，磁盘侧只保证被 `rewrite_marketplace_name` 改写过的
+/// 目录是新名——快照里出现第三种名字（历史版本、用户手工改过、别的工具投影过来的）
+/// 时，两边对不上，而且**没有任何地方会报错**，用户只看到「插件列表是空的」。
+/// 所以写回一律以磁盘快照的实际 name 为准。
+fn marketplace_name_from_root(root: &Path) -> anyhow::Result<Option<String>> {
+    let path = root
+        .join(".agents")
+        .join("plugins")
+        .join("marketplace.json");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let marketplace: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(marketplace
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string))
+}
+
+/// 写 config 时要用的 marketplace name：以磁盘快照的真实 name 为准（#2138），
+/// 例外情况映射回 `ALUNIXA_X_MARKETPLACE`：
+///
+/// - 快照里是 `openai-*` **保留名**（我们不允许注册的名字，codex 会静默忽略）；
+/// - 快照里是我们自己的**旧名** `openai-curated-remote`，它是保留名的历史例外
+///   （见 `is_reserved_marketplace_name`），等价于改名后的 `ALUNIXA_X_MARKETPLACE`。
+///   这一条保证「磁盘已改名」与「磁盘还是旧名」两条时序走到同一个注册名——写模板
+///   的路径不一定先经过 `rewrite_marketplace_name`。
+///
+/// 其余非保留名原样采用。
+fn managed_marketplace_name_for_root(root: &Path) -> anyhow::Result<String> {
+    let Some(name) = marketplace_name_from_root(root)? else {
+        return Ok(ALUNIXA_X_MARKETPLACE.to_string());
+    };
+    if is_reserved_marketplace_name(&name) || name == LEGACY_REMOTE_MARKETPLACE {
+        return Ok(ALUNIXA_X_MARKETPLACE.to_string());
     }
-    manifest["name"] = serde_json::Value::String(ALUNIXA_X_MARKETPLACE.to_string());
-    crate::settings::atomic_write(&path, &serde_json::to_vec_pretty(&manifest)?)?;
-    Ok(true)
+    Ok(name)
+}
+
+/// 把解压出来的 marketplace.json 的 name 改写成非保留名。
+///
+/// zip 里自带的是 `openai-curated-remote`——codex 的保留名，注册在它下面会被
+/// 静默忽略。改名后 codex 才会真正加载这些插件（#1974 / #1968）。
+///
+/// 这是**磁盘规范化**：托管目录统一收敛到 `ALUNIXA_X_MARKETPLACE`（历史目录与
+/// zip 自带的旧名都在这里被拉到同一条线上），后续 `local_*_marketplace_root` 的
+/// 可用性判定才有单一判据。config 注册名则一律读改写后的快照（#2138），两边永远
+/// 一致。
+fn rewrite_marketplace_name(root: &Path) -> anyhow::Result<()> {
+    let path = root
+        .join(".agents")
+        .join("plugins")
+        .join("marketplace.json");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut marketplace: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if marketplace.get("name").and_then(serde_json::Value::as_str) == Some(ALUNIXA_X_MARKETPLACE) {
+        return Ok(());
+    }
+    // 已经是**用户/第三方写入的非保留名**（且不是我们自己的旧名）就保持原样：
+    // config 注册名会跟着它走（#2138）。需要改写的只有两类——codex 保留名
+    // （别的 `openai-*`，注册在它下面会被静默忽略，#1974 / #1968）和我们自己的
+    // 旧名 `openai-curated-remote`（zip 自带，必须收敛到当前常量）。
+    if marketplace
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| {
+            !is_reserved_marketplace_name(name) && name != LEGACY_REMOTE_MARKETPLACE
+        })
+    {
+        return Ok(());
+    }
+    marketplace["name"] = serde_json::Value::String(ALUNIXA_X_MARKETPLACE.to_string());
+    let encoded = serde_json::to_string_pretty(&marketplace)
+        .with_context(|| format!("failed to encode {}", path.display()))?;
+    std::fs::write(&path, encoded)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
 }
 
 fn install_openai_curated_remote_marketplace_zip(home: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -419,7 +514,7 @@ fn install_openai_curated_remote_marketplace_zip(home: &Path, bytes: &[u8]) -> a
         .with_context(|| format!("failed to create {}", staging.display()))?;
 
     let result = extract_zip_exact(bytes, &staging)
-        .and_then(|_| rewrite_remote_marketplace_name(&staging).map(|_| ()))
+        .and_then(|_| rewrite_marketplace_name(&staging))
         .and_then(|_| validate_openai_curated_remote_marketplace_root(&staging))
         .and_then(|_| {
             replace_directory_with_backup_name(
@@ -506,7 +601,7 @@ fn safe_zip_path(name: &str) -> anyhow::Result<PathBuf> {
     Ok(relative)
 }
 
-fn zip_entry_relative_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn zip_entry_relative_path(name: &str) -> Option<PathBuf> {
     let path = Path::new(name);
     let mut components = path.components();
     match components.next()? {
@@ -584,7 +679,14 @@ fn local_openai_curated_remote_marketplace_root_from_root(
         .with_context(|| format!("failed to read {}", marketplace_path.display()))?;
     let marketplace: serde_json::Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}", marketplace_path.display()))?;
-    if !is_remote_marketplace_name(marketplace.get("name").and_then(serde_json::Value::as_str)) {
+    // 与 local_openai_curated_remote_marketplace_root 同一条判据：认非保留名；
+    // 保留名（zip 自带的 `openai-curated-remote`、或别的 `openai-*`）一律不算
+    // 可用市场（#2138）。
+    if !marketplace
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|name| !is_reserved_marketplace_name(name))
+    {
         return Ok(None);
     }
     let has_plugins = marketplace
@@ -657,23 +759,6 @@ fn ensure_marketplace_configs_with_plugins(
     marketplace_root: &Path,
     plugin_ids: &[String],
 ) -> anyhow::Result<bool> {
-    crate::config_transaction::run_in_home(home, || {
-        ensure_marketplace_configs_with_plugins_inner(
-            home,
-            marketplace_names,
-            marketplace_root,
-            plugin_ids,
-        )
-    })
-}
-
-fn ensure_marketplace_configs_with_plugins_inner(
-    home: &Path,
-    marketplace_names: &[&str],
-    marketplace_root: &Path,
-    plugin_ids: &[String],
-) -> anyhow::Result<bool> {
-    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let existing = match std::fs::read(&config_path) {
         Ok(bytes) => String::from_utf8(bytes)
@@ -697,88 +782,152 @@ fn ensure_marketplace_configs_with_plugins_inner(
     Ok(true)
 }
 
-fn managed_reserved_marketplaces(home: &Path) -> [(&'static str, PathBuf); 3] {
-    [
-        (OPENAI_CURATED_MARKETPLACE, home.join(".tmp/plugins")),
-        (OPENAI_API_CURATED_MARKETPLACE, home.join(".tmp/plugins")),
-        (
-            OPENAI_CURATED_REMOTE_MARKETPLACE,
-            home.join(".tmp/plugins-remote"),
-        ),
-    ]
+pub fn cleanup_managed_reserved_marketplace_configs(home: &Path) -> anyhow::Result<bool> {
+    let config_path = home.join("config.toml");
+    let existing = match std::fs::read_to_string(&config_path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", config_path.display()));
+        }
+    };
+    let mut doc = parse_toml_document(&existing)?;
+    let managed_root = home.join(".tmp").join("plugins");
+    let remote_root = home.join(".tmp").join("plugins-remote");
+    // 全是 codex 的保留名，注册在它们下面会被静默忽略。只清我们自己写进去的
+    // （source 指向我们托管的目录），用户手工加的同名条目不动。
+    let managed_entries = [
+        (OPENAI_CURATED_MARKETPLACE, managed_root.as_path()),
+        (OPENAI_API_CURATED_MARKETPLACE, managed_root.as_path()),
+        (LEGACY_REMOTE_MARKETPLACE, remote_root.as_path()),
+    ];
+    let mut changed = false;
+    let mut remove_marketplaces_table = false;
+    if let Some(marketplaces) = doc.get_mut("marketplaces").and_then(Item::as_table_mut) {
+        for (marketplace_name, root) in managed_entries {
+            let managed = marketplaces
+                .get(marketplace_name)
+                .and_then(Item::as_table)
+                .is_some_and(|table| marketplace_table_points_to_root(table, root));
+            if managed {
+                marketplaces.remove(marketplace_name);
+                changed = true;
+            }
+        }
+        remove_marketplaces_table = marketplaces.is_empty();
+    }
+    if remove_marketplaces_table {
+        doc.as_table_mut().remove("marketplaces");
+    }
+    // 市场条目和它下面的插件条目是一对：只删市场不改插件，`x@openai-curated`
+    // 就成了悬空条目，codex 直接不列出，用户表现为「插件装了但列表和会话工具里都没有」
+    // （#2072）。改名（02a23e14 / 6b65c094）只处理了市场侧，这里补上插件侧迁移。
+    changed |= migrate_orphaned_reserved_marketplace_plugins(&mut doc, home)?;
+    if !changed {
+        return Ok(false);
+    }
+    crate::settings::atomic_write(
+        &config_path,
+        ensure_trailing_newline(doc.to_string()).as_bytes(),
+    )?;
+    Ok(true)
 }
 
-fn managed_marketplace_table_matches(item: Option<&Item>, root: &Path) -> bool {
-    item.and_then(Item::as_table).is_some_and(|table| {
-        table.get("source_type").and_then(Item::as_str) == Some("local")
-            && table
-                .get("source")
-                .and_then(Item::as_str)
-                .is_some_and(|source| {
-                    normalize_windows_extended_path(source)
-                        == normalize_windows_extended_path(&root.to_string_lossy())
-                })
-    })
+/// 把仍挂在保留市场名下的插件条目迁移到 `ALUNIXA_X_MARKETPLACE`。
+///
+/// 只处理「插件 ID 的 `@` 后半段是旧市场名」的条目：改名前落盘的都是这种形状
+/// （`github@openai-curated`）。`@` 前是同名插件时保留原条目（含 `enabled`），
+/// 否则改写 ID；新市场里已经没有这个插件时整个删除——留着它 codex 依然不认。
+///
+/// 迁移目标只认当前托管目录里真实存在的插件，避免把用户自建的同名市场条目
+/// 误当成我们的历史遗留改掉。
+fn migrate_orphaned_reserved_marketplace_plugins(
+    doc: &mut DocumentMut,
+    home: &Path,
+) -> anyhow::Result<bool> {
+    let legacy_names = [
+        OPENAI_CURATED_MARKETPLACE,
+        OPENAI_API_CURATED_MARKETPLACE,
+        LEGACY_REMOTE_MARKETPLACE,
+    ];
+    // 新市场里实际提供的插件名。取不到就整段跳过：没有清单我们无法判断
+    // 哪个插件还存在，此时宁可不动配置。
+    let Some(marketplace_root) = local_openai_curated_remote_marketplace_root(home)? else {
+        return Ok(false);
+    };
+    let available = local_marketplace_plugin_names(&marketplace_root, ALUNIXA_X_MARKETPLACE)?;
+    if available.is_empty() {
+        return Ok(false);
+    }
+
+    let Some(plugins) = doc.get_mut("plugins").and_then(Item::as_table_mut) else {
+        return Ok(false);
+    };
+    let orphaned = plugins
+        .iter()
+        .filter_map(|(key, _)| {
+            let (name, marketplace) = key.split_once('@')?;
+            legacy_names
+                .contains(&marketplace)
+                .then(|| name.to_string())
+        })
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    for name in orphaned {
+        for legacy in legacy_names {
+            let legacy_id = format!("{name}@{legacy}");
+            let Some(entry) = plugins.remove(&legacy_id) else {
+                continue;
+            };
+            changed = true;
+            if !available.contains(&name) {
+                // 新市场里没有这个插件了，条目留着也是悬空。
+                continue;
+            }
+            let migrated_id = format!("{name}@{ALUNIXA_X_MARKETPLACE}");
+            // 新 ID 已经存在时不覆盖：用户在新市场里重新装过一次，以它为准。
+            if plugins.get(&migrated_id).is_none() {
+                plugins.insert(&migrated_id, entry);
+            }
+        }
+    }
+    if plugins.is_empty() {
+        doc.as_table_mut().remove("plugins");
+    }
+    Ok(changed)
 }
 
 fn managed_reserved_marketplace_config_present(home: &Path) -> bool {
-    std::fs::read_to_string(home.join("config.toml"))
-        .ok()
-        .and_then(|text| parse_toml_document(&text).ok())
-        .is_some_and(|doc| {
-            managed_reserved_marketplaces(home)
-                .iter()
-                .any(|(name, root)| {
-                    managed_marketplace_table_matches(
-                        doc.get("marketplaces")
-                            .and_then(Item::as_table)
-                            .and_then(|table| table.get(name)),
-                        root,
-                    )
-                })
+    let Ok(text) = std::fs::read_to_string(home.join("config.toml")) else {
+        return false;
+    };
+    let Ok(doc) = parse_toml_document(&text) else {
+        return false;
+    };
+    let Some(marketplaces) = doc.get("marketplaces").and_then(Item::as_table) else {
+        return false;
+    };
+    let managed_root = home.join(".tmp").join("plugins");
+    [OPENAI_CURATED_MARKETPLACE, OPENAI_API_CURATED_MARKETPLACE]
+        .into_iter()
+        .any(|marketplace_name| {
+            marketplaces
+                .get(marketplace_name)
+                .and_then(Item::as_table)
+                .is_some_and(|table| marketplace_table_points_to_root(table, &managed_root))
         })
 }
 
-fn cleanup_managed_reserved_marketplace_configs(home: &Path) -> anyhow::Result<bool> {
-    let _lock = crate::config_transaction::ConfigLock::acquire(home)?;
-    let path = home.join("config.toml");
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    let mut doc = parse_toml_document(&text)?;
-    let mut changed = false;
-    let mut migrate_remote_plugins = false;
-    if let Some(table) = doc.get_mut("marketplaces").and_then(Item::as_table_mut) {
-        for (name, root) in managed_reserved_marketplaces(home) {
-            if managed_marketplace_table_matches(table.get(name), &root) {
-                table.remove(name);
-                changed = true;
-                migrate_remote_plugins |= name == OPENAI_CURATED_REMOTE_MARKETPLACE;
-            }
-        }
-    }
-    if migrate_remote_plugins
-        && let Some(plugins) = doc.get_mut("plugins").and_then(Item::as_table_mut)
-    {
-        let entries = plugins
-            .iter()
-            .filter_map(|(id, value)| {
-                id.strip_suffix("@openai-curated-remote")
-                    .map(|name| (format!("{name}@{ALUNIXA_X_MARKETPLACE}"), value.clone()))
-            })
-            .collect::<Vec<_>>();
-        for (id, value) in entries {
-            if !plugins.contains_key(&id) {
-                plugins.insert(&id, value);
-            }
-        }
-    }
-    if changed {
-        crate::settings::atomic_write(&path, ensure_trailing_newline(doc.to_string()).as_bytes())?;
-    }
-    Ok(changed)
+fn marketplace_table_points_to_root(table: &Table, root: &Path) -> bool {
+    let source_type = table
+        .get("source_type")
+        .and_then(Item::as_str)
+        .unwrap_or_default();
+    let source = table
+        .get("source")
+        .and_then(Item::as_str)
+        .unwrap_or_default();
+    source_type == "local" && managed_marketplace_path_matches(source, root)
 }
 
 fn merge_marketplace_configs_into_text(
@@ -812,25 +961,21 @@ fn merge_marketplace_configs_and_plugins_into_text(
         }
         marketplaces[marketplace_name]["source_type"] = toml_edit::value("local");
         marketplaces[marketplace_name]["source"] =
-            toml_edit::value(windows_extended_path(marketplace_root));
+            toml_edit::value(marketplace_config_path(marketplace_root));
     }
     if !plugin_ids.is_empty() {
         let plugins = table_mut_or_insert(&mut doc, "plugins")?;
         for plugin_id in plugin_ids {
-            if !plugins.contains_key(plugin_id) {
+            let existing_enabled = plugins
+                .get(plugin_id)
+                .and_then(Item::as_table)
+                .and_then(|table| table.get("enabled"))
+                .and_then(Item::as_bool);
+            if plugins.get(plugin_id).and_then(Item::as_table).is_none() {
                 plugins[plugin_id] = toml_edit::table();
             }
-            let entry = plugins
-                .get_mut(plugin_id)
-                .and_then(Item::as_table_like_mut)
-                .context("插件配置必须是 TOML table，未覆盖已有设置")?;
-            if let Some(enabled) = entry.get("enabled") {
-                anyhow::ensure!(
-                    enabled.as_bool().is_some(),
-                    "插件 enabled 必须为布尔值，未覆盖已有设置"
-                );
-            } else {
-                entry.insert("enabled", toml_edit::value(true));
+            if existing_enabled.is_none() {
+                plugins[plugin_id]["enabled"] = toml_edit::value(true);
             }
         }
     }
@@ -860,31 +1005,22 @@ fn marketplace_config_points_to_root(home: &Path, marketplace_name: &str, root: 
         .get("source")
         .and_then(Item::as_str)
         .unwrap_or_default();
-    source_type == "local" && source == windows_extended_path(root)
+    source_type == "local" && marketplace_config_path_matches(source, root)
 }
 
-fn normalize_windows_extended_path(value: &str) -> String {
-    let value = value
-        .strip_prefix(r"\\?\UNC\")
-        .map(|rest| format!(r"\\{rest}"))
-        .unwrap_or_else(|| value.strip_prefix(r"\\?\").unwrap_or(value).to_string());
-    if cfg!(windows) {
-        value.replace('/', "\\").to_lowercase()
-    } else {
-        value
-    }
+fn marketplace_config_path_matches(value: &str, path: &Path) -> bool {
+    value == marketplace_config_path(path)
 }
 
-fn windows_extended_path(path: &Path) -> String {
-    let value = path.to_string_lossy().into_owned();
-    if !cfg!(windows) {
-        return value;
-    }
-    let value = value.replace('/', "\\");
-    if value.starts_with(r"\\?\") {
-        value
-    } else if let Some(unc) = value.strip_prefix(r"\\") {
-        format!(r"\\?\UNC\{unc}")
+fn managed_marketplace_path_matches(value: &str, path: &Path) -> bool {
+    let native = path.to_string_lossy();
+    value == native || value.strip_prefix(r"\\?\") == Some(native.as_ref())
+}
+
+fn marketplace_config_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    if !cfg!(windows) || value.starts_with(r"\\?\") {
+        value.into_owned()
     } else {
         format!(r"\\?\{value}")
     }
@@ -895,12 +1031,9 @@ fn parse_toml_document(contents: &str) -> anyhow::Result<DocumentMut> {
     if contents.trim().is_empty() {
         Ok(DocumentMut::new())
     } else {
-        contents.parse::<DocumentMut>().map_err(|error| {
-            anyhow::anyhow!(
-                "config.toml TOML parse failed at byte {}; configuration contents omitted",
-                error.span().map(|span| span.start).unwrap_or(0)
-            )
-        })
+        contents
+            .parse::<DocumentMut>()
+            .map_err(|error| anyhow::anyhow!("config.toml TOML parse failed: {error}"))
     }
 }
 
@@ -908,8 +1041,8 @@ fn table_mut_or_insert<'a>(doc: &'a mut DocumentMut, key: &str) -> anyhow::Resul
     if !doc.as_table().contains_key(key) {
         doc[key] = toml_edit::table();
     }
-    if let Some(inline) = doc.get(key).and_then(Item::as_inline_table).cloned() {
-        doc[key] = Item::Table(inline.into_table());
+    if doc.get(key).and_then(Item::as_table).is_none() {
+        doc[key] = toml_edit::table();
     }
     doc.get_mut(key)
         .and_then(Item::as_table_mut)
@@ -927,69 +1060,12 @@ fn ensure_trailing_newline(mut contents: String) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn startup_migrates_only_owned_reserved_marketplace_and_preserves_plugin_choice() {
-        let temp = tempfile::tempdir().unwrap();
-        let home = temp.path();
-        write_remote_marketplace(home);
-        let root = home.join(".tmp").join("plugins-remote");
-        std::fs::write(
-            home.join("config.toml"),
-            format!(
-                "[marketplaces.openai-curated-remote]\nsource_type='local'\nsource={}\n\
-             [marketplaces.openai-curated]\nsource_type='local'\nsource='/user/custom'\n\
-             [plugins.'product-design@openai-curated-remote']\nenabled=false\n",
-                toml_edit::value(root.to_string_lossy().to_string())
-            ),
-        )
-        .unwrap();
-        assert!(ensure_openai_curated_marketplace_config(home).unwrap());
-        let text = std::fs::read_to_string(home.join("config.toml")).unwrap();
-        let doc = parse_toml_document(&text).unwrap();
-        assert!(
-            doc["marketplaces"]
-                .get(OPENAI_CURATED_REMOTE_MARKETPLACE)
-                .is_none()
-        );
-        assert_eq!(
-            doc["marketplaces"][OPENAI_CURATED_MARKETPLACE]["source"].as_str(),
-            Some("/user/custom")
-        );
-        assert_eq!(
-            doc["plugins"]["product-design@alunixa-x-curated"]["enabled"].as_bool(),
-            Some(false)
-        );
-        assert!(remote_marketplace_manifest_is_current(&root));
-        assert!(openai_curated_remote_marketplace_status(home).config_registered);
-        assert!(!ensure_openai_curated_marketplace_config(home).unwrap());
-    }
-
-    #[test]
-    fn stale_manifest_requires_repair_even_when_config_already_uses_new_name() {
-        let temp = tempfile::tempdir().unwrap();
-        write_remote_marketplace(temp.path());
-        let root = temp.path().join(".tmp").join("plugins-remote");
-        ensure_marketplace_configs(temp.path(), &[ALUNIXA_X_MARKETPLACE], &root).unwrap();
-        assert!(openai_curated_remote_marketplace_status(temp.path()).needs_repair());
-        assert!(ensure_openai_curated_remote_marketplace_config(temp.path()).unwrap());
-        assert!(!openai_curated_remote_marketplace_status(temp.path()).needs_repair());
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn marketplace_windows_paths_handle_unc_and_mixed_separators() {
-        assert_eq!(
-            windows_extended_path(Path::new("C:/codex/.tmp/plugins")),
-            r"\\?\C:\codex\.tmp\plugins"
-        );
-        assert_eq!(
-            windows_extended_path(Path::new(r"\\server\share\plugins")),
-            r"\\?\UNC\server\share\plugins"
-        );
-        assert_eq!(
-            normalize_windows_extended_path(r"\\?\UNC\SERVER\Share\plugins"),
-            normalize_windows_extended_path(r"\\server\share\plugins")
-        );
+    fn expected_marketplace_path(path: &Path) -> String {
+        if cfg!(windows) {
+            format!(r"\\?\{}", path.display())
+        } else {
+            path.to_string_lossy().into_owned()
+        }
     }
 
     fn write_marketplace(home: &Path) {
@@ -1043,11 +1119,29 @@ mod tests {
     }
 
     #[test]
-    fn ensure_openai_curated_marketplace_config_registers_local_marketplace() {
+    fn ensure_openai_curated_marketplace_config_removes_managed_reserved_entries() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path();
         write_marketplace(home);
         write_remote_marketplace(home);
+        let plugins_source = home.join(".tmp").join("plugins").display().to_string();
+        let extended_plugins_source = expected_marketplace_path(&home.join(".tmp").join("plugins"));
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"[marketplaces.openai-curated]
+source_type = "local"
+source = {}
+
+[marketplaces.openai-api-curated]
+source_type = "local"
+source = {}
+"#,
+                toml_edit::value(plugins_source),
+                toml_edit::value(extended_plugins_source),
+            ),
+        )
+        .unwrap();
 
         let changed = ensure_openai_curated_marketplace_config(home).unwrap();
 
@@ -1057,13 +1151,124 @@ mod tests {
         assert!(parsed["marketplaces"].get("openai-curated").is_none());
         assert!(parsed["marketplaces"].get("openai-api-curated").is_none());
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source_type"].as_str(),
+            parsed["marketplaces"]["alunixa-x-curated"]["source_type"].as_str(),
             Some("local")
         );
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source"].as_str(),
-            Some(windows_extended_path(&home.join(".tmp/plugins-remote")).as_str())
+            parsed["marketplaces"]["alunixa-x-curated"]["source"].as_str(),
+            Some(expected_marketplace_path(&home.join(".tmp").join("plugins-remote")).as_str())
         );
+    }
+
+    /// #2072：市场改名后，`x@openai-curated` 这类旧插件条目会悬空，
+    /// codex 既不列在插件列表也不挂到会话工具上。清理市场条目时要一并迁移。
+    #[test]
+    fn cleanup_migrates_orphaned_reserved_marketplace_plugin_entries() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_marketplace(home);
+        write_remote_marketplace(home);
+        let plugins_source = home.join(".tmp").join("plugins").display().to_string();
+        std::fs::write(
+            home.join("config.toml"),
+            format!(
+                r#"[marketplaces.openai-curated]
+source_type = "local"
+source = {}
+
+[plugins."product-design@openai-curated-remote"]
+enabled = false
+
+[plugins."ghost@openai-curated"]
+enabled = true
+"#,
+                toml_edit::value(plugins_source),
+            ),
+        )
+        .unwrap();
+
+        let changed = cleanup_managed_reserved_marketplace_configs(home).unwrap();
+
+        assert!(changed);
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let parsed = config.parse::<DocumentMut>().unwrap();
+        // product-design 在新市场清单里，迁移到新市场名并保留用户关掉的开关。
+        assert_eq!(
+            parsed["plugins"][format!("product-design@{ALUNIXA_X_MARKETPLACE}")]["enabled"]
+                .as_bool(),
+            Some(false)
+        );
+        assert!(
+            parsed["plugins"]
+                .get("product-design@openai-curated-remote")
+                .is_none(),
+            "旧市场名下的条目不应残留"
+        );
+        // ghost 不在任何托管市场清单里，悬空条目直接清掉。
+        assert!(parsed["plugins"].get("ghost@openai-curated").is_none());
+    }
+
+    /// 磁盘上仍是旧的保留名时（升级后第一次启动），清理路径也必须能读到插件清单，
+    /// 否则迁移会被 `available.is_empty()` 整段跳过（#2072）。
+    #[test]
+    fn cleanup_migrates_plugins_while_disk_still_has_the_legacy_marketplace_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_remote_marketplace(home);
+        std::fs::write(
+            home.join("config.toml"),
+            "[plugins.\"product-design@openai-curated-remote\"]\nenabled = true\n",
+        )
+        .unwrap();
+
+        let changed = cleanup_managed_reserved_marketplace_configs(home).unwrap();
+
+        assert!(changed);
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let parsed = config.parse::<DocumentMut>().unwrap();
+        assert_eq!(
+            parsed["plugins"][format!("product-design@{ALUNIXA_X_MARKETPLACE}")]["enabled"]
+                .as_bool(),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn cleanup_keeps_plugin_entries_when_no_managed_marketplace_is_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        // 没有托管市场目录：无法判断插件是否存在，配置必须原样不动。
+        std::fs::write(
+            home.join("config.toml"),
+            "[plugins.\"github@openai-curated\"]\nenabled = true\n",
+        )
+        .unwrap();
+
+        let changed = cleanup_managed_reserved_marketplace_configs(home).unwrap();
+
+        assert!(!changed);
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(config.contains("[plugins.\"github@openai-curated\"]"));
+    }
+
+    #[test]
+    fn ensure_openai_curated_marketplace_config_preserves_user_reserved_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        std::fs::write(
+            home.join("config.toml"),
+            r#"[marketplaces.openai-curated]
+source_type = "local"
+source = "/opt/user-marketplace"
+"#,
+        )
+        .unwrap();
+
+        let changed = ensure_openai_curated_marketplace_config(home).unwrap();
+
+        assert!(!changed);
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(config.contains(r#"source = "/opt/user-marketplace""#));
     }
 
     #[test]
@@ -1074,27 +1279,6 @@ mod tests {
 
         assert!(!changed);
         assert!(!temp.path().join("config.toml").exists());
-    }
-
-    #[test]
-    fn disabled_marketplace_cleanup_removes_only_alunixa_owned_entries() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            temp.path().join("config.toml"),
-            "[marketplaces.alunixa-x-curated]\nsource_type='local'\nsource='owned'\n\
-             [marketplaces.user]\nsource_type='remote'\nsource='keep'\n\
-             [plugins.'sales@role-specific-plugins']\nenabled=true\n\
-             [plugins.'user@custom']\nenabled=true\n",
-        )
-        .unwrap();
-
-        assert!(remove_alunixa_x_marketplace_config(temp.path()).unwrap());
-        let text = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-        assert!(!text.contains("alunixa-x-curated"));
-        assert!(!text.contains("role-specific-plugins"));
-        assert!(text.contains("[marketplaces.user]"));
-        assert!(text.contains("user@custom"));
-        assert!(!remove_alunixa_x_marketplace_config(temp.path()).unwrap());
     }
 
     #[test]
@@ -1120,13 +1304,13 @@ mod tests {
         assert_eq!(
             parsed["marketplaces"]["role-specific-plugins"]["source"].as_str(),
             Some(
-                windows_extended_path(
+                expected_marketplace_path(
                     &home
                         .join(".tmp")
                         .join("marketplaces")
-                        .join("role-specific-plugins")
+                        .join("role-specific-plugins"),
                 )
-                .as_str()
+                .as_str(),
             )
         );
         for plugin in [
@@ -1170,73 +1354,52 @@ mod tests {
         );
     }
 
+    #[cfg(not(windows))]
     #[test]
-    fn disabled_plugin_survives_tools_sync_and_repeated_startup_registration() {
+    fn ensure_marketplace_configs_migrate_legacy_windows_paths_on_unix() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path();
+        write_remote_marketplace(home);
         write_role_specific_marketplace(home);
-        ensure_role_specific_plugins_marketplace_config(home).unwrap();
-        let config = home.join("config.toml");
-        let current = std::fs::read_to_string(&config).unwrap();
-        let disabled = crate::relay_config::sync_live_config_context_entries(
-            &current,
-            "[plugins.'sales@role-specific-plugins']\nenabled=false\n",
-        )
-        .unwrap();
-        std::fs::write(&config, disabled).unwrap();
-        for _ in 0..2 {
-            ensure_role_specific_plugins_marketplace_config(home).unwrap();
-            let doc: DocumentMut = std::fs::read_to_string(&config).unwrap().parse().unwrap();
-            assert_eq!(
-                doc["plugins"]["sales@role-specific-plugins"]["enabled"].as_bool(),
-                Some(false)
-            );
-            assert_eq!(
-                doc["plugins"]["customer-support@role-specific-plugins"]["enabled"].as_bool(),
-                Some(true)
-            );
-        }
-    }
-
-    #[test]
-    fn startup_registration_preserves_inline_plugin_disable_and_custom_values() {
-        let dir = tempfile::tempdir().unwrap();
-        write_role_specific_marketplace(dir.path());
+        let remote_root = home.join(".tmp").join("plugins-remote");
+        let role_root = home
+            .join(".tmp")
+            .join("marketplaces")
+            .join("role-specific-plugins");
         std::fs::write(
-            dir.path().join("config.toml"),
-            "[plugins]\n'sales@role-specific-plugins'={enabled=false, custom='retained'}\n",
+            home.join("config.toml"),
+            format!(
+                r#"[marketplaces.openai-curated-remote]
+source_type = "local"
+source = '\\?\{}'
+
+[marketplaces.role-specific-plugins]
+source_type = "local"
+source = '\\?\{}'
+"#,
+                remote_root.display(),
+                role_root.display(),
+            ),
         )
         .unwrap();
-        ensure_role_specific_plugins_marketplace_config(dir.path()).unwrap();
-        let doc: DocumentMut = std::fs::read_to_string(dir.path().join("config.toml"))
-            .unwrap()
-            .parse()
-            .unwrap();
+
+        assert!(ensure_openai_curated_remote_marketplace_config(home).unwrap());
+        assert!(ensure_role_specific_plugins_marketplace_config(home).unwrap());
+
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let parsed = config.parse::<DocumentMut>().unwrap();
         assert_eq!(
-            doc["plugins"]["sales@role-specific-plugins"]["enabled"].as_bool(),
-            Some(false)
+            parsed["marketplaces"]["alunixa-x-curated"]["source"].as_str(),
+            Some(remote_root.to_string_lossy().as_ref())
         );
         assert_eq!(
-            doc["plugins"]["sales@role-specific-plugins"]["custom"].as_str(),
-            Some("retained")
+            parsed["marketplaces"]["role-specific-plugins"]["source"].as_str(),
+            Some(role_root.to_string_lossy().as_ref())
         );
     }
 
     #[test]
-    fn startup_registration_does_not_replace_invalid_plugin_configuration() {
-        let dir = tempfile::tempdir().unwrap();
-        write_role_specific_marketplace(dir.path());
-        let original = "[plugins.'sales@role-specific-plugins']\nenabled='not-a-boolean'\n";
-        std::fs::write(dir.path().join("config.toml"), original).unwrap();
-        assert!(ensure_role_specific_plugins_marketplace_config(dir.path()).is_err());
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
-            original
-        );
-    }
-
-    #[test]
-    fn official_marketplace_does_not_need_reserved_local_registration() {
+    fn openai_curated_marketplace_status_accepts_absent_reserved_config() {
         let temp = tempfile::tempdir().unwrap();
         write_marketplace(temp.path());
 
@@ -1248,12 +1411,11 @@ mod tests {
     }
 
     #[test]
-    fn openai_curated_marketplace_status_requires_api_marketplace_config() {
+    fn openai_curated_marketplace_status_detects_managed_reserved_config() {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path();
         let root = home.join(".tmp").join("plugins");
         write_marketplace(home);
-        write_remote_marketplace(home);
         ensure_marketplace_configs(home, &[OPENAI_CURATED_MARKETPLACE], &root).unwrap();
 
         let status = openai_curated_marketplace_status(home);
@@ -1279,6 +1441,102 @@ mod tests {
         assert!(status.needs_repair());
     }
 
+    /// #2138：快照名不是写死常量时，config 注册名必须以快照真实 `name` 为准。
+    /// 两边逐字不一致的话 codex 整个市场都不认，而且没有任何地方会报错。
+    #[test]
+    fn ensure_openai_curated_remote_marketplace_config_registers_snapshot_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_remote_marketplace(home);
+        // 模拟快照里不是默认名的形态（历史版本/用户手工改过）。
+        let marketplace_json = home
+            .join(".tmp")
+            .join("plugins-remote")
+            .join(".agents")
+            .join("plugins")
+            .join("marketplace.json");
+        std::fs::write(
+            &marketplace_json,
+            r#"{"name":"alunixa-x-remote-test","plugins":[{"name":"product-design","path":"./plugins/product-design"}]}"#,
+        )
+        .unwrap();
+
+        assert!(ensure_openai_curated_remote_marketplace_config(home).unwrap());
+
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        let parsed = config.parse::<DocumentMut>().unwrap();
+        assert_eq!(
+            parsed["marketplaces"]["alunixa-x-remote-test"]["source_type"].as_str(),
+            Some("local"),
+            "注册名应取自磁盘快照：{config}"
+        );
+        assert!(
+            parsed["marketplaces"].get("alunixa-x-curated").is_none(),
+            "写死常量不得再出现在注册表里：{config}"
+        );
+        // 幂等：第二次调用不应再判定为需要修复。
+        assert!(!ensure_openai_curated_remote_marketplace_config(home).unwrap());
+    }
+
+    /// 快照仍是 codex 保留名时不能照抄进 config——注册在保留名下会被静默忽略
+    /// （#1974 / #1968）。
+    #[test]
+    fn managed_marketplace_name_falls_back_for_reserved_snapshot_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("plugins-remote");
+        std::fs::create_dir_all(root.join(".agents").join("plugins")).unwrap();
+        std::fs::write(
+            root.join(".agents")
+                .join("plugins")
+                .join("marketplace.json"),
+            r#"{"name":"openai-api-curated","plugins":[{"name":"x"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            managed_marketplace_name_for_root(&root).unwrap(),
+            ALUNIXA_X_MARKETPLACE
+        );
+    }
+
+    /// 状态判定与写回必须用同一个名字，否则会把刚写好的配置判成未注册、
+    /// 每次启动都触发一次无谓的修复写入。
+    #[test]
+    fn openai_curated_remote_marketplace_status_uses_snapshot_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_remote_marketplace(home);
+        let marketplace_json = home
+            .join(".tmp")
+            .join("plugins-remote")
+            .join(".agents")
+            .join("plugins")
+            .join("marketplace.json");
+        std::fs::write(
+            &marketplace_json,
+            r#"{"name":"alunixa-x-remote-test","plugins":[{"name":"product-design","path":"./plugins/product-design"}]}"#,
+        )
+        .unwrap();
+
+        assert!(ensure_openai_curated_remote_marketplace_config(home).unwrap());
+
+        let registered =
+            managed_marketplace_name_for_root(&home.join(".tmp").join("plugins-remote")).unwrap();
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(
+            config.contains(&format!("[marketplaces.{registered}]")),
+            "注册名必须与快照名逐字一致：{config}"
+        );
+
+        let status = openai_curated_remote_marketplace_status(home);
+
+        assert!(
+            status.config_registered,
+            "写入后状态判定必须为已注册（以快照真实 name 比对）"
+        );
+        assert!(!status.needs_repair());
+    }
+
     #[test]
     fn ensure_openai_curated_remote_marketplace_config_registers_remote_only() {
         let temp = tempfile::tempdir().unwrap();
@@ -1298,12 +1556,12 @@ mod tests {
                 .is_none()
         );
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source_type"].as_str(),
+            parsed["marketplaces"]["alunixa-x-curated"]["source_type"].as_str(),
             Some("local")
         );
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source"].as_str(),
-            Some(windows_extended_path(&home.join(".tmp/plugins-remote")).as_str())
+            parsed["marketplaces"]["alunixa-x-curated"]["source"].as_str(),
+            Some(expected_marketplace_path(&home.join(".tmp").join("plugins-remote")).as_str())
         );
     }
 
@@ -1333,13 +1591,103 @@ mod tests {
         let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
         let parsed = config.parse::<DocumentMut>().unwrap();
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source_type"].as_str(),
+            parsed["marketplaces"]["alunixa-x-curated"]["source_type"].as_str(),
             Some("local")
         );
         assert_eq!(
-            parsed["marketplaces"][ALUNIXA_X_MARKETPLACE]["source"].as_str(),
-            Some(windows_extended_path(&home.join(".tmp/plugins-remote")).as_str())
+            parsed["marketplaces"]["alunixa-x-curated"]["source"].as_str(),
+            Some(expected_marketplace_path(&home.join(".tmp").join("plugins-remote")).as_str())
         );
+    }
+
+    /// codex 会静默忽略注册在保留名下的本地 marketplace——`codex plugin marketplace
+    /// list` 直接不列出，用户在插件市场里看不到也装不了任何插件（#1974 / #1968）。
+    ///
+    /// 实测确认被忽略的名字：openai-curated、openai-curated-remote、openai-bundled、
+    /// openai-bundled-alpha、openai-primary-runtime、openai-api-curated。
+    /// 所以我们注册用的名字绝不能落在这个集合里。
+    #[test]
+    fn alunixa_x_marketplace_name_is_not_a_codex_reserved_name() {
+        const CODEX_RESERVED: [&str; 6] = [
+            "openai-curated",
+            "openai-curated-remote",
+            "openai-bundled",
+            "openai-bundled-alpha",
+            "openai-primary-runtime",
+            "openai-api-curated",
+        ];
+        assert!(
+            !CODEX_RESERVED.contains(&ALUNIXA_X_MARKETPLACE),
+            "{ALUNIXA_X_MARKETPLACE} 是 codex 的保留名，注册后会被静默忽略"
+        );
+        // codex 保留的是整个 openai-* 前缀，别再踩进去
+        assert!(
+            !ALUNIXA_X_MARKETPLACE.starts_with("openai-"),
+            "不要用 openai- 前缀的 marketplace 名"
+        );
+        // 旧名当年就是踩了这个坑，保留它只为清理历史配置
+        assert!(CODEX_RESERVED.contains(&LEGACY_REMOTE_MARKETPLACE));
+    }
+
+    /// 内置 zip 里自带的是保留名，解压后必须被改写，否则 codex 加载不到。
+    /// 启动路径也必须改写磁盘上的 name，不能只写 config。
+    ///
+    /// 02a23e1 只在 repair_remote_plugin_marketplace（用户手动点「修复」才会调）
+    /// 里做了迁移，正常启动走的 ensure_openai_curated_marketplace_config 没做，
+    /// 于是老用户升级后 config 是新名、磁盘还是旧名，两边对不上 codex 整个市场
+    /// 不认——表现和改名前完全一样，插件一个都装不了（#1993）。
+    #[test]
+    fn startup_path_rewrites_a_legacy_marketplace_name_on_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+        write_remote_marketplace(home);
+        // 还原成老用户的状态：磁盘上是旧的保留名
+        let manifest = home
+            .join(".tmp")
+            .join("plugins-remote")
+            .join(".agents")
+            .join("plugins")
+            .join("marketplace.json");
+        let raw = std::fs::read_to_string(&manifest).unwrap();
+        assert!(
+            raw.contains(LEGACY_REMOTE_MARKETPLACE),
+            "前置条件：磁盘应为旧名"
+        );
+
+        ensure_openai_curated_marketplace_config(home).unwrap();
+
+        let rewritten: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            rewritten["name"].as_str(),
+            Some(ALUNIXA_X_MARKETPLACE),
+            "启动路径没有改写磁盘上的 marketplace 名"
+        );
+        // config 与磁盘必须一致，否则 codex 不认
+        let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+        assert!(config.contains(&format!("[marketplaces.{ALUNIXA_X_MARKETPLACE}]")));
+    }
+
+    #[test]
+    fn extracted_marketplace_name_is_rewritten_off_the_reserved_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let dir = root.join(".agents").join("plugins");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("marketplace.json"),
+            r#"{"name":"openai-curated-remote","plugins":[{"name":"a","path":"./plugins/a"}]}"#,
+        )
+        .unwrap();
+
+        rewrite_marketplace_name(root).unwrap();
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("marketplace.json")).unwrap())
+                .unwrap();
+        assert_eq!(parsed["name"].as_str(), Some(ALUNIXA_X_MARKETPLACE));
+        // 插件清单不能在改名过程中丢掉
+        assert_eq!(parsed["plugins"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]

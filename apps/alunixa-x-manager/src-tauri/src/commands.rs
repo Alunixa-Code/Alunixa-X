@@ -1,24 +1,117 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alunixa_x_core::config_backup::ConfigBackupPaths;
-use alunixa_x_core::install::SILENT_BINARY;
 use alunixa_x_core::models::{DeleteResult, SessionRef};
 use alunixa_x_core::relay_environment::RelayEnvironmentReport;
 use alunixa_x_core::script_market::{self, MarketScript, ScriptMarketManifest};
-use alunixa_x_core::settings::{BackendSettings, RelayProfile, SettingsStore};
+use alunixa_x_core::settings::{
+    BackendSettings, RelayProfile, RelaySessionProvider, SettingsStore,
+};
 use alunixa_x_core::status::{LaunchStatus, StatusStore};
 use alunixa_x_core::user_scripts::UserScriptManager;
-use alunixa_x_core::zed_remote::{ZedOpenStrategy, ZedRemoteProject};
 use serde::Serialize;
 use serde_json::{Value, json};
-use tauri::Manager;
+use tauri::Emitter;
 
 use crate::install::{self, InstallActionResult, InstallOptions};
+
+// 扫描快照仅驻留后端内存，不接受前端指定磁盘路径，不开放给扩展路由。
+static AGENT_CACHE_PLAN: OnceLock<Mutex<Option<alunixa_x_core::agent_cache::CachePlan>>> =
+    OnceLock::new();
+
+#[tauri::command]
+pub fn dictation_local_model_status() -> Value {
+    alunixa_x_core::dictation::local_model_status()
+}
+
+/// 只注册为管理器命令，不开放给用户脚本或公开 HTTP 路由。
+#[tauri::command]
+pub async fn download_dictation_local_model() -> CommandResult<Value> {
+    match alunixa_x_core::dictation::prepare_local_model().await {
+        Ok(state) => ok("本地 SenseVoice 模型下载并校验完成。", state),
+        Err(error) => failed(&error.message, json!({})),
+    }
+}
+
+#[tauri::command]
+pub fn claude_localization_status()
+-> CommandResult<alunixa_x_core::claude_localization::ClaudeLocalizationStatus> {
+    ok(
+        "Claude 汉化状态已读取。",
+        alunixa_x_core::claude_localization::status(),
+    )
+}
+
+#[tauri::command]
+pub async fn claude_localization_action(action: String) -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_core::claude_localization::perform(&action)
+    })
+    .await;
+    match result {
+        Ok(Ok(payload)) => ok(
+            &payload.message,
+            serde_json::to_value(payload.status).unwrap_or_else(|_| json!({})),
+        ),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("Claude 汉化操作失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn scan_agent_cache() -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(|| -> anyhow::Result<Value> {
+        let mut slot = AGENT_CACHE_PLAN
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| anyhow::anyhow!("缓存扫描状态不可用"))?;
+        *slot = None;
+        let plan = alunixa_x_core::agent_cache::scan_default()?;
+        let report = serde_json::to_value(&plan.report)?;
+        *slot = Some(plan);
+        Ok(json!({ "report": report }))
+    })
+    .await;
+    match result {
+        Ok(Ok(payload)) => ok("缓存扫描完成。", payload),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("缓存扫描失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn clean_agent_cache(
+    scan_id: String,
+    group_ids: Vec<String>,
+    confirmed: bool,
+) -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Value> {
+        anyhow::ensure!(confirmed, "尚未确认清理。");
+        let mut slot = AGENT_CACHE_PLAN
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| anyhow::anyhow!("缓存扫描状态不可用"))?;
+        let plan = slot
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("请先扫描缓存。"))?;
+        plan.validate_selection(&scan_id, &group_ids, SystemTime::now())?;
+        // 持锁消费快照，阻止并行扫描/清理和重复执行。
+        let plan = slot.take().unwrap();
+        let result = plan.clean(&scan_id, &group_ids, confirmed)?;
+        Ok(json!({ "result": result }))
+    })
+    .await;
+    match result {
+        Ok(Ok(payload)) => ok("缓存清理完成。", payload),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("缓存清理失败：{error}"), json!({})),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult<T>
@@ -49,6 +142,7 @@ pub struct OverviewPayload {
     pub silent_shortcut: PathState,
     pub management_shortcut: PathState,
     pub latest_launch: Option<LaunchStatus>,
+    pub runtime_health: crate::runtime_health::RuntimeHealth,
     pub current_version: String,
     pub update_status: String,
     pub settings_path: String,
@@ -57,47 +151,9 @@ pub struct OverviewPayload {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SettingsPayload {
-    pub revision: Option<String>,
-    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub settings_path: String,
     pub user_scripts: Value,
-}
-
-fn serialize_manager_settings<S: serde::Serializer>(
-    settings: &BackendSettings,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    manager_settings_value(settings)
-        .map_err(serde::ser::Error::custom)?
-        .serialize(serializer)
-}
-
-fn manager_settings_value(settings: &BackendSettings) -> serde_json::Result<Value> {
-    let mut value = serde_json::to_value(settings)?;
-    // This independently managed section is only exposed through its redacted snapshot.
-    if let Some(object) = value.as_object_mut() {
-        object.remove("imageModels");
-    }
-    Ok(value)
-}
-
-#[tauri::command]
-pub fn load_image_models() -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
-    SettingsStore::default()
-        .load()
-        .map(|settings| alunixa_x_core::image_models::snapshot(&settings.image_models))
-        .map_err(|_| "读取生图模型配置失败，原有配置未被替换".to_string())
-}
-
-#[tauri::command]
-pub fn save_image_models(
-    revision: String,
-    models: Vec<alunixa_x_core::image_models::ImageModelEdit>,
-) -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
-    SettingsStore::default()
-        .save_image_models(&revision, models)
-        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,7 +177,57 @@ struct WeixinQrSession {
 
 struct WeixinRuntime {
     stop: Arc<AtomicBool>,
+    codex_path: alunixa_x_core::connect::WeixinCodexPath,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinImagePayload {
+    pub path: String,
+    pub content_type: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinRuntimeRequest {
+    pub debug_port: u16,
+    #[serde(default = "default_dream_skin_helper_port")]
+    pub helper_port: u16,
+    #[serde(default)]
+    pub screenshot_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinThemeActivationRequest {
+    pub draft: alunixa_x_core::dream_skin_library::DreamSkinThemeDraft,
+    pub debug_port: u16,
+    #[serde(default = "default_dream_skin_helper_port")]
+    pub helper_port: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinThemeActivationPayload {
+    pub library: alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary,
+    pub runtime: alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus,
+    pub saved_for_next_launch: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DreamSkinMarketPayload {
+    pub schema_version: u8,
+    pub updated_at: String,
+    pub repository_url: String,
+    pub cached: bool,
+    pub warning: String,
+    pub themes: Vec<alunixa_x_core::dream_skin_market::DreamSkinMarketTheme>,
+}
+
+pub type DreamSkinCommunityPayload =
+    alunixa_x_core::dream_skin_community::DreamSkinCommunityCatalog;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,40 +235,17 @@ pub struct PendingDreamSkinCommunityPayload {
     pub version_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginMarketplaceRepairPayload {
-    pub codex_home: String,
-    pub marketplace_root: Option<String>,
-    pub initialized: bool,
-    pub configured: bool,
-    pub needs_repair: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginMarketplaceStatusPayload {
-    pub codex_home: String,
-    pub marketplace_root: Option<String>,
-    pub config_registered: bool,
-    pub needs_repair: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemotePluginMarketplacePayload {
-    pub codex_home: String,
-    pub marketplace_root: Option<String>,
-    pub config_registered: bool,
-    pub needs_repair: bool,
-    pub plugin_count: usize,
-    pub skill_count: usize,
+struct ManagedDreamSkinImageBackup {
+    path: PathBuf,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CcsProvidersPayload {
     pub db_path: String,
+    pub configured_db_path: String,
+    pub fallback_reason: Option<String>,
     pub providers: Vec<alunixa_x_core::ccs_import::CcsProviderImport>,
 }
 
@@ -181,6 +264,7 @@ pub struct LocalSessionsPayload {
     pub offset: usize,
     pub limit: usize,
     pub has_more: bool,
+    pub total_count: usize,
 }
 
 const DEFAULT_LOCAL_SESSIONS_PAGE_SIZE: usize = 50;
@@ -197,19 +281,6 @@ pub struct ListLocalSessionsRequest {
     pub offset: usize,
     #[serde(default = "default_local_sessions_page_size")]
     pub limit: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ZedRemoteProjectsPayload {
-    pub projects: Vec<ZedRemoteProject>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ZedRemoteOpenPayload {
-    pub url: String,
-    pub strategy: ZedOpenStrategy,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -238,7 +309,6 @@ pub struct RelayPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelayFilesPayload {
-    pub revision: String,
     pub config_path: String,
     pub auth_path: String,
     pub config_contents: String,
@@ -248,7 +318,6 @@ pub struct RelayFilesPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelaySwitchPayload {
-    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub relay: RelayPayload,
     pub settings_path: String,
@@ -257,21 +326,13 @@ pub struct RelaySwitchPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RemotePairingStatusPayload {
-    pub claimed: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SettingsBackfillPayload {
-    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextEntriesPayload {
-    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub entries: alunixa_x_core::relay_config::CodexContextEntries,
 }
@@ -279,7 +340,6 @@ pub struct ContextEntriesPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveContextEntriesPayload {
-    pub revision: Option<String>,
     pub entries: alunixa_x_core::relay_config::CodexContextEntries,
 }
 
@@ -300,13 +360,6 @@ pub struct RelayProfileTestPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RelayLatencyPayload {
-    pub latency_ms: Option<u64>,
-    pub http_status: Option<u16>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StepwiseTestPayload {
     pub item_count: usize,
     pub error: String,
@@ -317,6 +370,20 @@ pub struct StepwiseTestPayload {
 pub struct RelayProfileModelsPayload {
     pub models: Vec<String>,
     pub endpoint: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Sub2ApiBillingPayload {
+    pub endpoint: String,
+    pub group_rate_multiplier: f64,
+    pub user_rate_multiplier: Option<f64>,
+    pub resolved_rate_multiplier: f64,
+    pub peak_rate_enabled: bool,
+    pub peak_rate_multiplier: Option<f64>,
+    pub applied_peak_multiplier: Option<f64>,
+    pub effective_rate_multiplier: f64,
+    pub observed_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -363,7 +430,6 @@ pub struct RemoveEnvConflictsPayload {
 pub struct SaveRelayFileRequest {
     pub kind: String,
     pub contents: String,
-    pub expected_revision: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -371,6 +437,8 @@ pub struct SaveRelayFileRequest {
 pub struct BackfillRelayProfileRequest {
     pub settings: BackendSettings,
     pub profile_id: String,
+    #[serde(default)]
+    pub adopt_provider_identity: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -411,6 +479,8 @@ pub struct LaunchRequest {
     pub debug_port: u16,
     #[serde(default = "default_helper_port")]
     pub helper_port: u16,
+    #[serde(default)]
+    pub sync_active_relay: bool,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -425,6 +495,8 @@ pub struct LogsPayload {
     pub path: String,
     pub text: String,
     pub lines: usize,
+    pub truncated: bool,
+    pub file_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -442,6 +514,12 @@ pub struct WatcherPayload {
 pub struct AdsPayload {
     pub version: u64,
     pub ads: Vec<Value>,
+    /// 单条兼容字段，保留给仍使用旧格式的管理端消费者。
+    #[serde(rename = "topAd", skip_serializing_if = "Option::is_none")]
+    pub top_ad: Option<Value>,
+    /// 独立于推荐池的置顶赞助位，支持概览横幅轮播。
+    #[serde(rename = "topAds", skip_serializing_if = "Vec::is_empty")]
+    pub top_ads: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -452,8 +530,233 @@ pub struct ScriptMarketPayload {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SkillsPayload {
+    pub skills: Vec<alunixa_x_core::skills::SkillEntry>,
+    pub repos: Vec<alunixa_x_core::skills::SkillRepo>,
+    pub backups: Vec<alunixa_x_core::skills::SkillBackup>,
+    /// 单个仓库拉取失败不该让整块面板空掉，把错误单独带回前端提示。
+    pub repo_errors: Vec<String>,
+    pub skills_dir: String,
+    pub codex_skills_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StartupPayload {
     pub show_update: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GrokProvidersPayload {
+    /// Grok 分区里已保存的供应商（存在 settings.json 的 tools.grok）。
+    pub profiles: Vec<RelayProfile>,
+    pub active_relay_id: String,
+    /// 磁盘上 Grok config.toml 的现状，用来展示「Grok 现在连的是谁」。
+    pub live: alunixa_x_core::grok_config::GrokConfigPayload,
+    /// 把磁盘现状按供应商语义反推出来的 profile，供 UI 比对。
+    pub live_profile: RelayProfile,
+}
+
+/// 读取 Grok 侧的供应商列表 + 磁盘现状。
+#[tauri::command]
+pub fn load_grok_providers() -> CommandResult<GrokProvidersPayload> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let shard = settings.tool_config(&alunixa_x_core::tools::ToolId::Grok);
+
+    match alunixa_x_core::tools::grok::load_grok_state() {
+        Ok(live) => {
+            let live_profile = alunixa_x_core::tools::grok::read_grok_profile_from_config(&live);
+            ok(
+                "Grok 供应商配置已加载。",
+                GrokProvidersPayload {
+                    profiles: shard.relay_profiles,
+                    active_relay_id: shard.active_relay_id,
+                    live,
+                    live_profile,
+                },
+            )
+        }
+        Err(error) => failed(
+            &format!("读取 Grok 配置失败：{error}"),
+            GrokProvidersPayload {
+                profiles: shard.relay_profiles,
+                active_relay_id: shard.active_relay_id,
+                live: empty_grok_config_payload(),
+                live_profile: RelayProfile::default(),
+            },
+        ),
+    }
+}
+
+/// 把 Grok 分区里当前选中的供应商写进 `~/.grok/config.toml`。
+///
+/// 这是**破坏性**操作：Grok 里所有受管的 `[model.*]` 表会被这个供应商的模型
+/// 列表整体替换（`[ui]` / `[models].web_search` 等未管理字段保留）。前端必须先
+/// 让用户确认，所以这里不做隐式调用。
+#[tauri::command]
+pub fn apply_grok_relay_profile(settings: BackendSettings) -> CommandResult<GrokProvidersPayload> {
+    let store = SettingsStore::default();
+    let mut next = settings;
+    let shard = next.tool_config(&alunixa_x_core::tools::ToolId::Grok);
+    let Some(profile) = alunixa_x_core::tools::grok::active_grok_profile(&shard) else {
+        return failed(
+            "Grok 还没有配置任何供应商。",
+            GrokProvidersPayload {
+                profiles: shard.relay_profiles,
+                active_relay_id: shard.active_relay_id,
+                live: empty_grok_config_payload(),
+                live_profile: RelayProfile::default(),
+            },
+        );
+    };
+
+    let backup_root = alunixa_x_core::paths::default_app_state_dir().join("backups");
+    let live = match alunixa_x_core::tools::grok::apply_profile_to_grok(&profile, &backup_root) {
+        Ok(live) => live,
+        Err(error) => {
+            return failed(
+                &format!("应用 Grok 供应商失败：{error}"),
+                GrokProvidersPayload {
+                    profiles: shard.relay_profiles,
+                    active_relay_id: shard.active_relay_id,
+                    live: alunixa_x_core::tools::grok::load_grok_state()
+                        .unwrap_or_else(|_| empty_grok_config_payload()),
+                    live_profile: RelayProfile::default(),
+                },
+            );
+        }
+    };
+
+    // 先写盘再保存设置：写 config.toml 失败时不该留下「设置里说切了、磁盘上没切」
+    // 的不一致状态。
+    let mut saved_shard = shard.clone();
+    saved_shard.active_relay_id = profile.id.clone();
+    next.set_tool_config(&alunixa_x_core::tools::ToolId::Grok, saved_shard);
+    if let Err(error) = store.save(&next) {
+        return failed(
+            &format!("Grok 配置已写入，但保存供应商设置失败：{error}"),
+            GrokProvidersPayload {
+                profiles: shard.relay_profiles,
+                active_relay_id: shard.active_relay_id,
+                live: live.clone(),
+                live_profile: alunixa_x_core::tools::grok::read_grok_profile_from_config(&live),
+            },
+        );
+    }
+
+    let live_profile = alunixa_x_core::tools::grok::read_grok_profile_from_config(&live);
+    ok(
+        &format!("已把供应商「{}」应用到 Grok。", profile.name),
+        GrokProvidersPayload {
+            profiles: shard.relay_profiles,
+            active_relay_id: profile.id,
+            live,
+            live_profile,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn load_grok_config() -> CommandResult<alunixa_x_core::grok_config::GrokConfigPayload> {
+    match alunixa_x_core::grok_config::load_grok_config() {
+        Ok(payload) => ok("Grok 配置已加载。", payload),
+        Err(error) => failed(
+            &format!("读取 Grok 配置失败：{error}"),
+            empty_grok_config_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn save_grok_config(
+    request: alunixa_x_core::grok_config::SaveGrokConfigRequest,
+) -> CommandResult<alunixa_x_core::grok_config::SaveGrokConfigResult> {
+    let backup_root = alunixa_x_core::paths::default_app_state_dir().join("backups");
+    match alunixa_x_core::grok_config::save_grok_config(&request, &backup_root) {
+        Ok(payload) => ok("Grok 配置已保存。", payload),
+        Err(error) => failed(
+            &format!("保存 Grok 配置失败：{error}"),
+            alunixa_x_core::grok_config::SaveGrokConfigResult {
+                config: empty_grok_config_payload(),
+                backup_path: None,
+            },
+        ),
+    }
+}
+
+fn empty_grok_config_payload() -> alunixa_x_core::grok_config::GrokConfigPayload {
+    let home = alunixa_x_core::grok_config::default_grok_home_dir();
+    alunixa_x_core::grok_config::GrokConfigPayload {
+        grok_home: home.to_string_lossy().to_string(),
+        config_path: home.join("config.toml").to_string_lossy().to_string(),
+        config_exists: false,
+        cli_path: None,
+        cli_installed: false,
+        revision: String::new(),
+        default_model: String::new(),
+        models_base_url: String::new(),
+        models: Vec::new(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolEntry {
+    /// 工具的稳定标识，如 `codex` / `grok`。
+    pub id: String,
+    pub name: String,
+    /// 该工具的配置根目录，UI 上作为副标题展示。
+    pub home_dir: String,
+    /// 供应商 profile 的写盘能力是否已接好；未接好的工具在 UI 上显示为不可切。
+    pub switchable: bool,
+    pub active: bool,
+    /// 该工具当前选中的供应商名，没配置时为 None。
+    pub active_relay_name: Option<String>,
+    /// 该工具名下已保存的供应商数量。
+    pub relay_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolsPayload {
+    pub tools: Vec<ToolEntry>,
+    pub active_tool: String,
+}
+
+/// 列出所有已注册的工具及其当前状态，供顶栏切换条渲染。
+///
+/// 注意：这里只读，不写盘。切换「当前聚焦的工具」由 save_settings 负责，
+/// 因为那只是 UI 状态，不该触发任何配置文件写入。
+#[tauri::command]
+pub fn list_tools() -> CommandResult<ToolsPayload> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let tools = alunixa_x_core::tools::tool_specs()
+        .into_iter()
+        .map(|spec| {
+            let config = settings.tool_config(&spec.id);
+            let active_relay_name = config
+                .relay_profiles
+                .iter()
+                .find(|profile| profile.id == config.active_relay_id)
+                .map(|profile| profile.name.clone());
+            ToolEntry {
+                id: spec.id.as_str().to_string(),
+                name: spec.name,
+                home_dir: spec.home_dir,
+                switchable: spec.switchable,
+                active: settings.active_tool == spec.id,
+                active_relay_name,
+                relay_count: config.relay_profiles.len(),
+            }
+        })
+        .collect();
+
+    let payload = ToolsPayload {
+        tools,
+        active_tool: settings.active_tool.as_str().to_string(),
+    };
+    ok("工具列表已加载。", payload)
 }
 
 #[tauri::command]
@@ -476,6 +779,13 @@ pub fn startup_options() -> CommandResult<StartupPayload> {
     )
 }
 
+#[tauri::command]
+pub fn consume_pending_manager_navigation()
+-> Result<Option<alunixa_x_core::manager_navigation::ManagerNavigationIntent>, String> {
+    alunixa_x_core::manager_navigation::consume_pending_manager_navigation()
+        .map_err(|error| error.to_string())
+}
+
 pub fn startup_should_show_update() -> bool {
     should_show_update(
         std::env::args(),
@@ -494,7 +804,7 @@ where
 #[tauri::command]
 pub async fn load_overview() -> CommandResult<OverviewPayload> {
     let payload = tauri::async_runtime::spawn_blocking(load_overview_payload).await;
-    let Ok((codex_app_path, entrypoints, latest_launch)) = payload else {
+    let Ok((codex_app_path, entrypoints, latest_launch, runtime_health)) = payload else {
         return failed(
             "概览后台任务失败。",
             OverviewPayload {
@@ -503,6 +813,7 @@ pub async fn load_overview() -> CommandResult<OverviewPayload> {
                 silent_shortcut: path_state(None),
                 management_shortcut: path_state(None),
                 latest_launch: None,
+                runtime_health: crate::runtime_health::RuntimeHealth::unavailable(),
                 current_version: alunixa_x_core::version::VERSION.to_string(),
                 update_status: "not_checked".to_string(),
                 settings_path: alunixa_x_core::paths::default_settings_path()
@@ -524,6 +835,7 @@ pub async fn load_overview() -> CommandResult<OverviewPayload> {
             silent_shortcut: shortcut_state(entrypoints.silent_shortcut),
             management_shortcut: shortcut_state(entrypoints.management_shortcut),
             latest_launch,
+            runtime_health,
             current_version: alunixa_x_core::version::VERSION.to_string(),
             update_status: "not_checked".to_string(),
             settings_path: alunixa_x_core::paths::default_settings_path()
@@ -537,38 +849,476 @@ pub async fn load_overview() -> CommandResult<OverviewPayload> {
 }
 
 #[tauri::command]
-pub fn launch_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
-    spawn_alunixa_x_launch(request, "启动任务已在后台开始，可稍后查看概览状态。")
+pub async fn launch_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        let _guard = match try_acquire_launch_guard() {
+            Ok(guard) => guard,
+            Err(message) => return failed(message, json!({})),
+        };
+        spawn_alunixa_x_launch(request, "启动任务已在后台开始，可稍后查看概览状态。")
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => failed(&format!("启动后台任务失败：{error}"), json!({})),
+    }
 }
 
 #[tauri::command]
-pub fn restart_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
-    if let Err(error) = alunixa_x_core::watcher::stop_launcher_processes_and_wait() {
-        return failed(
-            &format!("Alunixa X 后台进程未能完全停止，已取消重启：{error}"),
-            json!({
-                "debugPort": request.debug_port,
-                "helperPort": request.helper_port
-            }),
-        );
+pub async fn restart_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || restart_alunixa_x_blocking(request)).await {
+        Ok(result) => result,
+        Err(error) => failed(&format!("重启后台任务失败：{error}"), json!({})),
     }
-    if let Err(error) =
-        alunixa_x_core::watcher::stop_codex_processes_for_debug_port_and_wait(request.debug_port)
+}
+
+static LAUNCH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+struct LaunchGuard;
+
+impl Drop for LaunchGuard {
+    fn drop(&mut self) {
+        LAUNCH_IN_PROGRESS.store(false, Ordering::Release);
+    }
+}
+
+fn try_acquire_launch_guard() -> Result<LaunchGuard, &'static str> {
+    LAUNCH_IN_PROGRESS
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .map(|_| LaunchGuard)
+        .map_err(|_| "启动或重启正在进行，请等待本次操作完成。")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum RestartDisposition {
+    LaunchOnly,
+    StopAndRestart,
+}
+
+fn restart_disposition(sync_active_relay: bool, app_running: bool) -> RestartDisposition {
+    if !sync_active_relay && !app_running {
+        RestartDisposition::LaunchOnly
+    } else {
+        RestartDisposition::StopAndRestart
+    }
+}
+
+fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
+    let _launch_guard = match try_acquire_launch_guard() {
+        Ok(guard) => guard,
+        Err(message) => return failed(message, json!({})),
+    };
+    let request = normalize_launch_request(request);
+    // macOS scopes by debug port; other platforms detect all Codex desktop processes.
+    let app_running =
+        !alunixa_x_core::watcher::find_codex_processes_for_debug_port(request.debug_port)
+            .is_empty();
+    if restart_disposition(request.sync_active_relay, app_running) == RestartDisposition::LaunchOnly
     {
+        return spawn_alunixa_x_launch(request, "Codex 未运行，已按直接启动方式在后台唤起。");
+    }
+    let Ok(_guard) = relay_switch_mutex().try_lock() else {
         return failed(
-            &format!("Codex 进程未能完全停止，已取消重启：{error}"),
+            "供应商切换正在进行或锁不可用，未执行重启；请稍后重试。",
+            json!({}),
+        );
+    };
+    let settings = if request.sync_active_relay {
+        match SettingsStore::default().load() {
+            Ok(settings) => Some(settings),
+            Err(error) => {
+                return failed(
+                    &format!("读取已保存供应商设置失败，未执行重启：{error}"),
+                    json!({
+                        "debugPort": request.debug_port,
+                        "helperPort": request.helper_port
+                    }),
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let provider_guard = match ensure_provider_sync_is_idle_before_stop() {
+        Ok(guard) => guard,
+        Err(message) => return failed(&message, json!({})),
+    };
+    // 停止 Codex 后清理同进程后台服务，再确认浏览器恢复结果。
+    // 先记录停止阶段，让界面在等待期间显示进度（issue #2403）。
+    // 该状态带的是当前时间戳，早于后面返回给前端的 launch_started_at_ms，
+    // 因此等待完成度判定时会被视作 stale，不会误报成最终结果。
+    let _ = StatusStore::default().save_latest(&requested_launch_status_with_phase(
+        &request,
+        "stopping",
+        "正在停止 Codex 并清理后台服务…",
+        current_timestamp_ms(),
+        "restart_stopping",
+        10,
+    ));
+    let native_browser_shutdown = match stop_alunixa_x_for_restart(
+        || {
+            alunixa_x_core::watcher::stop_codex_processes_for_debug_port_and_wait(
+                request.debug_port,
+            );
+            anyhow::ensure!(
+                alunixa_x_core::watcher::find_codex_processes_for_debug_port(request.debug_port)
+                    .is_empty(),
+                "Codex 进程尚未退出；未启动新实例"
+            );
+            Ok(())
+        },
+        alunixa_x_launcher::stop,
+        || {
+            alunixa_x_core::native_browser::wait_for_monitor_shutdown(
+                std::time::Duration::from_secs(10),
+            )
+        },
+    ) {
+        Ok(shutdown) => shutdown,
+        Err(error) => {
+            return failed(
+                &restart_stop_failure_message(&error),
+                json!({"debugPort": request.debug_port, "helperPort": request.helper_port}),
+            );
+        }
+    };
+    let native_browser_restore_failed = matches!(
+        native_browser_shutdown,
+        alunixa_x_core::native_browser::NativeBrowserShutdown::RestoreFailed
+    );
+    if native_browser_restore_failed {
+        let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+            "native_browser.cleanup_not_restored",
+            json!({"state": "blocked"}),
+        );
+    }
+    if let Err(error) = prepare_fixed_helper_port_for_restart(settings.as_ref()) {
+        return failed(
+            &format!("重启 Codex 失败：{error:#}"),
+            json!({"debugPort": request.debug_port, "helperPort": request.helper_port}),
+        );
+    }
+    let home = alunixa_x_core::relay_config::default_codex_home_dir();
+    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+        "manager.restart_requested",
+        json!({
+            "debug_port": request.debug_port,
+            "helper_port": request.helper_port,
+            "app_path": request.app_path.trim(),
+            "sync_active_relay": request.sync_active_relay
+        }),
+    );
+    let launch_started_at_ms = current_timestamp_ms();
+    if let Err(error) = save_requested_launch_status(
+        &request,
+        "starting",
+        "Alunixa X launcher is starting",
+        launch_started_at_ms,
+    ) {
+        return failed(
+            &format!("记录重启状态失败，未执行重启：{error}"),
             json!({
                 "debugPort": request.debug_port,
-                "helperPort": request.helper_port
+                "helperPort": request.helper_port,
+                "syncActiveRelay": request.sync_active_relay
             }),
         );
     }
-    spawn_alunixa_x_launch(request, "Codex 已请求重启，启动任务正在后台运行。")
+    let restart_message = "Codex 已请求重启，启动任务正在后台运行。".to_string();
+    match restart_alunixa_x_after_stop(&request, &home, settings.as_ref(), |request| {
+        spawn_after_provider_guard_release(provider_guard, request, start_embedded_launcher)
+    }) {
+        Ok(()) => {
+            let (debug_port, helper_port, started_at_ms) =
+                accepted_launch_identity(&request, launch_started_at_ms);
+            CommandResult {
+                status: "accepted".to_string(),
+                message: restart_message,
+                payload: json!({
+                    "debugPort": debug_port,
+                    "helperPort": helper_port,
+                    "syncActiveRelay": request.sync_active_relay,
+                    "launchStartedAtMs": started_at_ms,
+                    "nativeBrowserRestoreFailed": native_browser_restore_failed,
+                    "forcedStoppedLauncherCount": 0
+                }),
+            }
+        }
+        Err(error) => {
+            let message = format!("重启 Codex 失败：{error}");
+            let _ =
+                save_requested_launch_status(&request, "failed", &message, launch_started_at_ms);
+            failed(
+                &message,
+                json!({
+                    "debugPort": request.debug_port,
+                    "helperPort": request.helper_port,
+                    "syncActiveRelay": request.sync_active_relay,
+                    "launchStartedAtMs": launch_started_at_ms,
+                    "nativeBrowserRestoreFailed": native_browser_restore_failed
+                }),
+            )
+        }
+    }
+}
+
+fn stop_alunixa_x_for_restart(
+    stop_codex: impl FnOnce() -> anyhow::Result<()>,
+    stop_runtime: impl FnOnce() -> anyhow::Result<()>,
+    wait_native: impl FnOnce() -> anyhow::Result<alunixa_x_core::native_browser::NativeBrowserShutdown>,
+) -> Result<alunixa_x_core::native_browser::NativeBrowserShutdown, RestartStopError> {
+    // 后台服务持有浏览器恢复任务。停止服务须等待它清理，不能结束主进程。
+    stop_codex().map_err(RestartStopError::Codex)?;
+    stop_runtime().map_err(RestartStopError::Runtime)?;
+    wait_native().map_err(RestartStopError::NativeBrowser)
+}
+
+#[derive(Debug)]
+enum RestartStopError {
+    Codex(anyhow::Error),
+    NativeBrowser(anyhow::Error),
+    Runtime(anyhow::Error),
+}
+
+fn restart_stop_failure_message(error: &RestartStopError) -> String {
+    match error {
+        RestartStopError::Codex(error) => {
+            format!("Codex 进程尚未确认退出，未清理原生浏览器或启动新实例：{error}")
+        }
+        RestartStopError::NativeBrowser(error) => {
+            let summary = if error
+                .downcast_ref::<alunixa_x_core::native_browser::NativeBrowserCleanupStillRunning>()
+                .is_some()
+            {
+                "仍在恢复"
+            } else {
+                "恢复失败"
+            };
+            format!("Codex 已请求停止，但原生浏览器文件{summary}，未启动新实例：{error}")
+        }
+        RestartStopError::Runtime(error) => {
+            format!("Codex 已请求停止，但后台服务尚未清理完成，未启动新实例：{error}")
+        }
+    }
+}
+
+fn prepare_fixed_helper_port_for_restart(settings: Option<&BackendSettings>) -> anyhow::Result<()> {
+    let loaded;
+    let settings = match settings {
+        Some(settings) => settings,
+        None => match SettingsStore::default().load() {
+            Ok(value) => {
+                loaded = value;
+                &loaded
+            }
+            // 读不到设置时仍交给 launcher 自己等。这里失败不应把一次普通重启拦死。
+            Err(_) => return Ok(()),
+        },
+    };
+    let Some(port) = alunixa_x_core::launcher::required_fixed_helper_port(settings) else {
+        return Ok(());
+    };
+    alunixa_x_core::launcher::wait_for_fixed_helper_port(
+        port,
+        alunixa_x_core::launcher::protocol_proxy_bind_retry_timeout_ms(),
+        alunixa_x_core::launcher::helper_bind_retry_interval_ms(),
+        probe_loopback_port,
+        |interval_ms| std::thread::sleep(std::time::Duration::from_millis(interval_ms)),
+    )
+}
+
+fn probe_loopback_port(port: u16) -> std::io::Result<()> {
+    let _listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    Ok(())
+}
+
+fn spawn_after_provider_guard_release(
+    guard: alunixa_x_data::ProviderSyncLifecycleGuard,
+    request: &LaunchRequest,
+    spawn: impl FnOnce(&LaunchRequest) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    guard
+        .release()
+        .map_err(|error| anyhow::anyhow!("释放历史同步锁失败，未启动新实例：{error}"))?;
+    spawn(request)
+}
+
+fn restart_alunixa_x_after_stop<F>(
+    request: &LaunchRequest,
+    home: &Path,
+    settings: Option<&BackendSettings>,
+    spawn: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce(&LaunchRequest) -> anyhow::Result<()>,
+{
+    let snapshot = if let Some(settings) = settings {
+        let snapshot = RelayLiveSnapshot::capture(home)?;
+        if let Err(error) = sync_active_relay_to_home(settings, home) {
+            if let Err(restore_error) = snapshot.restore(home) {
+                anyhow::bail!("同步当前供应商失败：{error}；回滚 live 配置也失败：{restore_error}");
+            }
+            return Err(error);
+        }
+        Some(snapshot)
+    } else {
+        None
+    };
+
+    if let Err(error) = spawn(request) {
+        if let Some(snapshot) = snapshot {
+            if let Err(restore_error) = snapshot.restore(home) {
+                anyhow::bail!("启动 Codex 失败：{error}；回滚 live 配置也失败：{restore_error}");
+            }
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RelayLiveSnapshot {
+    config: Option<Vec<u8>>,
+    auth: Option<Vec<u8>>,
+}
+
+impl RelayLiveSnapshot {
+    fn capture(home: &Path) -> anyhow::Result<Self> {
+        Ok(Self {
+            config: read_optional_file_bytes(&home.join("config.toml"))?,
+            auth: read_optional_file_bytes(&home.join("auth.json"))?,
+        })
+    }
+
+    fn restore(&self, home: &Path) -> anyhow::Result<()> {
+        std::fs::create_dir_all(home)?;
+        restore_optional_file_bytes(&home.join("config.toml"), self.config.as_deref())?;
+        restore_optional_file_bytes(&home.join("auth.json"), self.auth.as_deref())?;
+        Ok(())
+    }
+}
+
+fn read_optional_file_bytes(path: &Path) -> anyhow::Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn restore_optional_file_bytes(path: &Path, contents: Option<&[u8]>) -> anyhow::Result<()> {
+    match contents {
+        Some(contents) => alunixa_x_core::settings::atomic_write(path, contents)?,
+        None => match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        },
+    }
+    Ok(())
+}
+
+fn sync_active_relay_to_home(
+    settings: &BackendSettings,
+    home: &Path,
+) -> anyhow::Result<alunixa_x_core::relay_config::RelayApplyResult> {
+    if !settings.relay_profiles_enabled {
+        anyhow::bail!("供应商配置总开关已关闭，未同步 live 配置");
+    }
+    let relay = settings.active_relay_profile();
+    if relay.relay_mode == alunixa_x_core::settings::RelayMode::Aggregate {
+        if settings.active_aggregate_relay_profile().is_none() {
+            anyhow::bail!("当前聚合供应商配置不完整");
+        }
+        let aggregate = settings
+            .active_aggregate_relay_profile()
+            .ok_or_else(|| anyhow::anyhow!("当前聚合供应商配置不完整"))?;
+        return alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
+            home,
+            &alunixa_x_core::protocol_proxy::local_responses_proxy_base_url(
+                alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+            ),
+            "alunixa-x-aggregate",
+            alunixa_x_core::settings::RelayProtocol::Responses,
+            alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+            aggregate.session_provider,
+        );
+    }
+    if relay.relay_mode == alunixa_x_core::settings::RelayMode::Official
+        && !relay.official_mix_api_key
+    {
+        let auth_contents =
+            (!relay.auth_contents.trim().is_empty()).then_some(relay.auth_contents.as_str());
+        return alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(
+            home,
+            auth_contents,
+        );
+    }
+    if relay_has_complete_files(&relay) {
+        return alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules(
+            home,
+            &relay,
+            &relay_combined_common_config(settings),
+        );
+    }
+
+    let mut base_url = relay.base_url.trim().to_string();
+    let mut protocol = relay.protocol;
+    if relay.has_model_routes() {
+        base_url = alunixa_x_core::protocol_proxy::local_responses_proxy_base_url(
+            alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+        );
+        protocol = alunixa_x_core::settings::RelayProtocol::Responses;
+    }
+    if relay.relay_mode == alunixa_x_core::settings::RelayMode::PureApi {
+        return alunixa_x_core::relay_config::apply_pure_api_config_to_home_with_session_provider(
+            home,
+            &base_url,
+            &relay.api_key,
+            protocol,
+            alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+            alunixa_x_core::relay_config::relay_session_provider_from_config(
+                &relay.config_contents,
+            ),
+        );
+    }
+
+    let auth = alunixa_x_core::relay_config::chatgpt_auth_status_from_home(home);
+    if !auth.authenticated {
+        anyhow::bail!("未检测到 ChatGPT 登录状态，已停止同步 live 配置");
+    }
+    alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
+        home,
+        &base_url,
+        &relay.api_key,
+        protocol,
+        alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+        alunixa_x_core::relay_config::relay_session_provider_from_config(&relay.config_contents),
+    )
+}
+
+fn normalize_launch_request(mut request: LaunchRequest) -> LaunchRequest {
+    // launcher 收到显式 --app-path 时不会回退自动探测（避免静默启动错误目录），
+    // 所以这里先把明显无效的路径摘掉，让它走探测而不是永久失败（#1972）。
+    let requested_app_path = request.app_path.trim().to_string();
+    if !requested_app_path.is_empty()
+        && alunixa_x_core::app_paths::normalize_codex_app_path(Path::new(&requested_app_path))
+            .is_none()
+    {
+        let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+            "manager.launch_app_path_rejected",
+            json!({ "app_path": requested_app_path }),
+        );
+        request.app_path = String::new();
+    }
+    request
 }
 
 fn spawn_alunixa_x_launch(request: LaunchRequest, accepted_message: &str) -> CommandResult<Value> {
+    let request = normalize_launch_request(request);
     let debug_port = request.debug_port;
     let helper_port = request.helper_port;
+    let launch_started_at_ms = current_timestamp_ms();
     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
         "manager.launch_requested",
         json!({
@@ -577,36 +1327,177 @@ fn spawn_alunixa_x_launch(request: LaunchRequest, accepted_message: &str) -> Com
             "app_path": request.app_path.trim()
         }),
     );
-    match spawn_silent_launcher(&request) {
-        Ok(()) => CommandResult {
-            status: "accepted".to_string(),
-            message: accepted_message.to_string(),
-            payload: json!({
-                "debugPort": debug_port,
-                "helperPort": helper_port
-            }),
-        },
-        Err(error) => failed(
-            &format!("启动静默入口失败：{error}"),
+    if let Err(error) = save_requested_launch_status(
+        &request,
+        "starting",
+        "Alunixa X launcher is starting",
+        launch_started_at_ms,
+    ) {
+        return failed(
+            &format!("记录启动状态失败，未执行启动：{error}"),
             json!({
                 "debugPort": debug_port,
                 "helperPort": helper_port
             }),
-        ),
+        );
+    }
+    match start_embedded_launcher(&request) {
+        Ok(()) => {
+            let (debug_port, helper_port, started_at_ms) =
+                accepted_launch_identity(&request, launch_started_at_ms);
+            CommandResult {
+                status: "accepted".to_string(),
+                message: accepted_message.to_string(),
+                payload: json!({
+                    "debugPort": debug_port,
+                    "helperPort": helper_port,
+                    "launchStartedAtMs": started_at_ms
+                }),
+            }
+        }
+        Err(error) => {
+            let message = format!("启动 Codex 失败：{error}");
+            let _ =
+                save_requested_launch_status(&request, "failed", &message, launch_started_at_ms);
+            failed(
+                &message,
+                json!({
+                    "debugPort": debug_port,
+                    "helperPort": helper_port,
+                    "launchStartedAtMs": launch_started_at_ms
+                }),
+            )
+        }
     }
 }
 
-fn spawn_silent_launcher(request: &LaunchRequest) -> anyhow::Result<()> {
-    let mut args = Vec::new();
-    if !request.app_path.trim().is_empty() {
-        args.push("--app-path".to_string());
-        args.push(request.app_path.trim().to_string());
+fn accepted_launch_identity(request: &LaunchRequest, requested_at: u64) -> (u16, u16, u64) {
+    let latest = StatusStore::default().load_latest().ok().flatten();
+    launch_identity_from_status(request, requested_at, latest.as_ref())
+}
+
+fn launch_identity_from_status(
+    request: &LaunchRequest,
+    requested_at: u64,
+    latest: Option<&LaunchStatus>,
+) -> (u16, u16, u64) {
+    // 重复启动会激活当前 session，其身份不能被新请求覆盖；端口也可能已自动换位。
+    if let Some(latest) =
+        latest.filter(|status| matches!(status.status.as_str(), "running" | "running_degraded"))
+    {
+        (
+            latest.debug_port.unwrap_or(request.debug_port),
+            latest.helper_port.unwrap_or(request.helper_port),
+            latest.started_at_ms,
+        )
+    } else {
+        (request.debug_port, request.helper_port, requested_at)
     }
-    args.push("--debug-port".to_string());
-    args.push(request.debug_port.to_string());
-    args.push("--helper-port".to_string());
-    args.push(request.helper_port.to_string());
-    alunixa_x_core::install::spawn_companion(SILENT_BINARY, &args).map(|_| ())
+}
+
+fn save_requested_launch_status(
+    request: &LaunchRequest,
+    status: &str,
+    message: &str,
+    started_at_ms: u64,
+) -> anyhow::Result<()> {
+    StatusStore::default().save_latest(&requested_launch_status(
+        request,
+        status,
+        message,
+        started_at_ms,
+    ))
+}
+
+fn requested_launch_status(
+    request: &LaunchRequest,
+    status: &str,
+    message: &str,
+    started_at_ms: u64,
+) -> LaunchStatus {
+    LaunchStatus {
+        status: status.to_string(),
+        message: message.to_string(),
+        started_at_ms,
+        debug_port: Some(request.debug_port),
+        helper_port: Some(request.helper_port),
+        codex_app: (!request.app_path.trim().is_empty())
+            .then(|| request.app_path.trim().to_string()),
+        aumid: None,
+        phase: None,
+        progress: None,
+    }
+}
+
+/// 停止阶段的状态：带 `phase`/`progress`，让界面在阻塞的十几秒里有明确中间态
+/// （issue #2403：此前只有 `starting`，看不出是在处理还是卡死）。
+fn requested_launch_status_with_phase(
+    request: &LaunchRequest,
+    status: &str,
+    message: &str,
+    started_at_ms: u64,
+    phase: &str,
+    progress: u8,
+) -> LaunchStatus {
+    LaunchStatus {
+        phase: Some(phase.to_string()),
+        progress: Some(progress.min(100)),
+        ..requested_launch_status(request, status, message, started_at_ms)
+    }
+}
+
+fn current_timestamp_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn start_embedded_launcher(request: &LaunchRequest) -> anyhow::Result<()> {
+    anyhow::ensure!(!crate::app_is_exiting(), "Alunixa X 正在退出，未启动 Codex");
+    alunixa_x_launcher::start(alunixa_x_launcher::LaunchOptions {
+        app_dir: (!request.app_path.trim().is_empty())
+            .then(|| PathBuf::from(request.app_path.trim())),
+        debug_port: request.debug_port,
+        helper_port: request.helper_port,
+        status_store: StatusStore::default(),
+    })
+}
+
+/// 重新打开管理界面时恢复已有 Codex 的 Helper、代理和注入，不启动官方应用。
+pub fn resume_existing_codex_background(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn_blocking(move || {
+        if crate::app_is_exiting() {
+            return;
+        }
+        let settings = SettingsStore::default().load().unwrap_or_default();
+        let latest = StatusStore::default().load_latest().unwrap_or(None);
+        let options = alunixa_x_launcher::LaunchOptions {
+            app_dir: alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+                latest
+                    .as_ref()
+                    .and_then(|status| status.codex_app.as_deref())
+                    .map(Path::new),
+                Some(settings.codex_app_path.as_str()),
+            ),
+            debug_port: latest
+                .as_ref()
+                .and_then(|status| status.debug_port)
+                .unwrap_or_else(default_debug_port),
+            helper_port: latest
+                .as_ref()
+                .and_then(|status| status.helper_port)
+                .unwrap_or_else(default_helper_port),
+            status_store: StatusStore::default(),
+        };
+        if let Err(error) = alunixa_x_launcher::resume_if_running(options) {
+            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                "manager.resume_existing_failed",
+                json!({ "message": error.to_string() }),
+            );
+        }
+        let _ = tauri::Emitter::emit(&app, "runtime-health-changed", ());
+    });
 }
 
 pub fn start_weixin_connect_from_saved_settings() {
@@ -677,13 +1568,13 @@ pub async fn weixin_connect_qr_status() -> CommandResult<WeixinQrPayload> {
         );
     };
 
-    let qr_status = match alunixa_x_core::connect::weixin::WeixinClient::poll_qr_status(
+    let result = alunixa_x_core::connect::weixin::WeixinClient::poll_qr_status(
         &session.base_url,
         &session.route_tag,
         &session.qr_code,
     )
-    .await
-    {
+    .await;
+    let qr_status = match result {
         Ok(status) => status,
         Err(error) => {
             return failed(
@@ -718,9 +1609,12 @@ pub async fn weixin_connect_qr_status() -> CommandResult<WeixinQrPayload> {
         let mut settings = store.load().unwrap_or_default();
         settings.weixin_connect_token = qr_status.bot_token;
         settings.weixin_connect_account_id = qr_status.ilink_bot_id.clone();
-        settings.weixin_connect_base_url =
-            alunixa_x_core::connect::weixin::normalize_service_base_url(&qr_status.baseurl)
-                .unwrap_or(session.base_url.clone());
+        if !qr_status.baseurl.trim().is_empty() {
+            settings.weixin_connect_base_url =
+                qr_status.baseurl.trim().trim_end_matches('/').to_string();
+        } else {
+            settings.weixin_connect_base_url = session.base_url.clone();
+        }
         if settings.weixin_connect_allow_from.trim().is_empty()
             && !qr_status.ilink_user_id.trim().is_empty()
         {
@@ -771,7 +1665,11 @@ pub async fn weixin_connect_qr_status() -> CommandResult<WeixinQrPayload> {
 
 #[tauri::command]
 pub fn weixin_connect_status() -> CommandResult<alunixa_x_core::connect::WeixinConnectStatus> {
-    ok("微信连接状态已读取。", current_weixin_status())
+    let status = weixin_status()
+        .lock()
+        .map(|status| status.clone())
+        .unwrap_or_default();
+    ok("微信连接状态已读取。", status)
 }
 
 #[tauri::command]
@@ -833,38 +1731,132 @@ pub fn weixin_connect_stop() -> CommandResult<alunixa_x_core::connect::WeixinCon
 }
 
 #[tauri::command]
+pub fn query_builtin_model_metadata(slug: String) -> CommandResult<Value> {
+    match alunixa_x_core::model_suffix::builtin_model_metadata(slug.as_str()) {
+        Some(metadata) => ok(
+            "内置元数据已匹配。",
+            json!({
+                "matched": true,
+                "source": metadata.source,
+                "entry": metadata.entry,
+            }),
+        ),
+        None => {
+            // 回退值从 bundled 静态资产首条实时取，不写死——
+            // sync_official_models.py 调整首条后这里自动跟随。
+            let (fallback_slug, fallback_window) =
+                alunixa_x_core::model_suffix::fallback_template_info()
+                    .unwrap_or_else(|| ("gpt-5.5".to_string(), 272_000));
+            ok(
+                "未命中内置元数据，生成时回退官方模板。",
+                json!({
+                    "matched": false,
+                    "fallback": {
+                        "slug": fallback_slug,
+                        "context_window": fallback_window,
+                    },
+                }),
+            )
+        }
+    }
+}
+
+#[tauri::command]
+pub fn builtin_model_metadata_index() -> CommandResult<Value> {
+    let index = alunixa_x_core::model_suffix::builtin_model_metadata_index();
+    let count = index.len();
+    ok(
+        "内置元数据索引已读取。",
+        json!({ "entries": index, "count": count }),
+    )
+}
+
+#[tauri::command]
 pub fn find_desktop_codex_cli() -> CommandResult<Value> {
-    let settings = match SettingsStore::default().load() {
-        Ok(settings) => settings,
-        Err(error) => {
+    // Windows 标准路径：桌面版在用户目录维护、可直接运行的 CLI。
+    // Store 包目录（WindowsApps）内的资源受系统保护，第三方进程无法执行（#2028），
+    // 因此这里不再返回包内路径，避免把必然失败的路径写进设置。
+    #[cfg(windows)]
+    {
+        return match alunixa_x_core::app_paths::find_desktop_managed_codex_cli() {
+            Some(path) => ok(
+                "已填入桌面版内置 Codex CLI。",
+                json!({ "path": path.to_string_lossy() }),
+            ),
+            None => failed(
+                "未找到可运行的桌面版内置 Codex CLI。请先通过 Alunixa X 启动一次 Codex 桌面版后重试，\
+                 或将「Codex CLI 路径」留空自动查找。",
+                json!({ "path": null }),
+            ),
+        };
+    }
+    #[cfg(not(windows))]
+    {
+        let settings = match SettingsStore::default().load() {
+            Ok(settings) => settings,
+            Err(error) => {
+                return failed(
+                    &format!("读取 Codex 应用设置失败：{error}"),
+                    json!({ "path": null }),
+                );
+            }
+        };
+        let Some(app_dir) = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+            None,
+            Some(settings.codex_app_path.as_str()),
+        ) else {
+            return failed("未找到 Codex Desktop 应用。", json!({ "path": null }));
+        };
+        // 包内 CLI 可能存在于受系统保护的目录而无法执行（#2028 同类问题），
+        // 因此先验证能真正启动，失败时回退到用户目录中的独立 CLI。
+        let bundled = alunixa_x_core::app_paths::find_bundled_codex_cli(&app_dir);
+        let standalone = alunixa_x_core::app_paths::find_standalone_codex_cli();
+        let Some(path) = [bundled, standalone]
+            .into_iter()
+            .flatten()
+            .find(|candidate| codex_cli_can_start(candidate))
+        else {
             return failed(
-                &format!("读取 Codex 应用设置失败：{error}"),
+                "已找到 Codex Desktop，但没有可用的 Codex CLI；请安装或指定用户目录中的 Codex CLI。",
                 json!({ "path": null }),
             );
+        };
+        ok(
+            "已填入桌面版内置 Codex CLI。",
+            json!({ "path": path.to_string_lossy() }),
+        )
+    }
+}
+
+fn codex_cli_can_start(path: &std::path::Path) -> bool {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let mut command = Command::new(path);
+    command
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(alunixa_x_core::windows_create_no_window());
+    }
+    let Ok(mut child) = command.spawn() else {
+        return false;
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
         }
-    };
-    let cached = alunixa_x_core::app_paths::find_cached_codex_cli();
-    let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
-        None,
-        Some(settings.codex_app_path.as_str()),
-    );
-    let Some(path) = cached
-        .or_else(|| {
-            app_dir
-                .as_deref()
-                .and_then(alunixa_x_core::app_paths::find_bundled_codex_cli)
-        })
-        .or_else(alunixa_x_core::app_paths::find_codex_cli_on_path)
-    else {
-        return failed(
-            "未找到可用的 Codex CLI，请先安装或启动一次 Codex Desktop。",
-            json!({ "path": null }),
-        );
-    };
-    ok(
-        "已填入桌面版可用 Codex CLI。",
-        json!({ "path": path.to_string_lossy() }),
-    )
+    }
 }
 
 fn spawn_weixin_connect(
@@ -892,8 +1884,10 @@ fn spawn_weixin_connect(
     if runtime.is_some() {
         anyhow::bail!("微信连接已在运行或正在停止");
     }
+    let codex_path = alunixa_x_core::connect::WeixinCodexPath::new(&config.codex_path);
     *runtime = Some(WeixinRuntime {
         stop: Arc::clone(&stop),
+        codex_path: codex_path.clone(),
     });
     drop(runtime);
     let status = weixin_status();
@@ -906,9 +1900,13 @@ fn spawn_weixin_connect(
     let task_status = Arc::clone(&status);
     let task_stop = Arc::clone(&stop);
     tauri::async_runtime::spawn(async move {
-        if let Err(error) =
-            alunixa_x_core::connect::run_weixin_connect(config, stop, Arc::clone(&task_status))
-                .await
+        if let Err(error) = alunixa_x_core::connect::run_weixin_connect_with_codex_path(
+            config,
+            stop,
+            Arc::clone(&task_status),
+            codex_path,
+        )
+        .await
             && let Ok(mut current) = task_status.lock()
         {
             current.state = "error".to_string();
@@ -959,63 +1957,318 @@ fn empty_weixin_qr_payload(status: &str) -> WeixinQrPayload {
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct NativeBrowserDiagnostics {
+    compatibility: alunixa_x_core::native_browser::BrowserStatus,
+    connection: alunixa_x_core::native_browser_connection::ConnectionStatus,
+}
+
+#[tauri::command]
+pub async fn native_browser_status() -> NativeBrowserDiagnostics {
+    let compatibility =
+        tauri::async_runtime::spawn_blocking(alunixa_x_core::native_browser::read_status)
+            .await
+            .unwrap_or_else(|_| alunixa_x_core::native_browser::BrowserStatus {
+                state: "unavailable".into(),
+                detail: String::new(),
+            });
+    let connection = alunixa_x_core::native_browser_connection::check_connection().await;
+    NativeBrowserDiagnostics {
+        compatibility,
+        connection,
+    }
+}
+
+#[tauri::command]
+pub fn load_settings() -> CommandResult<SettingsPayload> {
+    settings_payload("设置已加载。", "设置读取失败")
+}
+
+#[tauri::command]
+pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
+    let settings = normalize_settings_before_save(settings);
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            SettingsPayload {
+                settings,
+                settings_path: alunixa_x_core::paths::default_settings_path()
+                    .to_string_lossy()
+                    .to_string(),
+                user_scripts: user_script_inventory(),
+            },
+        );
+    };
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let dream_skin_enabled = settings.enhancements_enabled && settings.codex_app_dream_skin_enabled;
+    if let Err(error) = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+        dream_skin_enabled,
+        &settings.codex_app_dream_skin_theme_config,
+    ) {
+        return failed(
+            &format!("保存皮肤基础主题失败：{error}"),
+            SettingsPayload {
+                settings,
+                settings_path: alunixa_x_core::paths::default_settings_path()
+                    .to_string_lossy()
+                    .to_string(),
+                user_scripts: user_script_inventory(),
+            },
+        );
+    }
+    match store.save(&settings) {
+        Ok(()) => {
+            if let Ok(runtime) = weixin_runtime().lock()
+                && let Some(runtime) = runtime.as_ref()
+            {
+                runtime.codex_path.set(&settings.weixin_connect_codex_path);
+            }
+            settings_payload("设置已保存。", "设置保存后重新读取失败")
+        }
+        Err(error) => {
+            let _ = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+                previous.enhancements_enabled && previous.codex_app_dream_skin_enabled,
+                &previous.codex_app_dream_skin_theme_config,
+            );
+            failed(
+                &format!("保存设置失败：{error}"),
+                SettingsPayload {
+                    settings,
+                    settings_path: alunixa_x_core::paths::default_settings_path()
+                        .to_string_lossy()
+                        .to_string(),
+                    user_scripts: user_script_inventory(),
+                },
+            )
+        }
+    }
+}
+
+#[tauri::command]
+pub fn import_dream_skin_image(path: String) -> CommandResult<DreamSkinImagePayload> {
+    let source = PathBuf::from(path.trim());
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let previous_path = PathBuf::from(previous.codex_app_dream_skin_image_path.trim());
+    let previous_backup = managed_dream_skin_image_backup(&previous_path, &state_dir).ok();
+
+    let imported = match alunixa_x_core::dream_skin::import_dream_skin_image(&source, &state_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            return failed(
+                &format!("导入皮肤图片失败：{error}"),
+                empty_dream_skin_image_payload(),
+            );
+        }
+    };
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinImagePath": imported.to_string_lossy()
+    })) {
+        let _ = alunixa_x_core::dream_skin::clear_managed_dream_skin_image(&state_dir);
+        if let Some(backup) = previous_backup {
+            let _ = restore_managed_dream_skin_image_backup(backup);
+        }
+        return failed(
+            &format!("保存皮肤图片设置失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+
+    let size_bytes = fs::metadata(&imported)
+        .map(|metadata| metadata.len())
+        .unwrap_or_default();
+    ok(
+        "皮肤图片已导入。",
+        DreamSkinImagePayload {
+            path: imported.to_string_lossy().to_string(),
+            content_type: dream_skin_content_type(&imported).to_string(),
+            size_bytes,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn reset_dream_skin_image() -> CommandResult<DreamSkinImagePayload> {
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    if let Err(error) = store.update(json!({ "codexAppDreamSkinImagePath": "" })) {
+        return failed(
+            &format!("恢复默认皮肤图片失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+    if let Err(error) = alunixa_x_core::dream_skin::clear_managed_dream_skin_image(&state_dir) {
+        let _ = store.update(json!({
+            "codexAppDreamSkinImagePath": previous.codex_app_dream_skin_image_path
+        }));
+        return failed(
+            &format!("清理自定义皮肤图片失败：{error}"),
+            empty_dream_skin_image_payload(),
+        );
+    }
+    ok("已恢复目标项目默认图片。", empty_dream_skin_image_payload())
+}
+
 #[tauri::command]
 pub fn list_dream_skin_themes()
 -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
     let settings = SettingsStore::default().load().unwrap_or_default();
-    match alunixa_x_core::dream_skin_library::list_dream_skin_themes(
-        &alunixa_x_core::paths::default_app_state_dir(),
-        &settings,
-    ) {
-        Ok(library) => ok("DreamSkin 主题库已加载。", library),
+    match current_dream_skin_library(&settings) {
+        Ok(library) => ok("Dream Skin 主题库已加载。", library),
         Err(error) => failed(
-            &format!("读取 DreamSkin 主题库失败：{error}"),
+            &format!("读取 Dream Skin 主题库失败：{error}"),
             empty_dream_skin_library(&settings),
         ),
     }
 }
 
 #[tauri::command]
-pub async fn refresh_dream_skin_community()
--> CommandResult<alunixa_x_core::dream_skin_community::DreamSkinCommunityCatalog> {
-    match alunixa_x_core::dream_skin_community::load_community_catalog(
-        &alunixa_x_core::paths::default_app_state_dir(),
-    )
-    .await
-    {
-        Ok(catalog) => ok("DreamSkin 社区主题已刷新。", catalog),
+pub async fn refresh_dream_skin_market() -> CommandResult<DreamSkinMarketPayload> {
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    match alunixa_x_core::dream_skin_market::load_market(&state_dir).await {
+        Ok(load) => {
+            let message = if load.cached {
+                "已加载主题市场缓存。"
+            } else {
+                "主题市场已刷新。"
+            };
+            ok(message, dream_skin_market_payload(load))
+        }
+        Err(error) => failed(
+            &format!("主题市场加载失败：{error}"),
+            empty_dream_skin_market_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_dream_skin_community() -> CommandResult<DreamSkinCommunityPayload> {
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    match alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir).await {
+        Ok(catalog) => ok("DreamSkin 社区已刷新。", catalog),
         Err(error) => failed(
             &format!("DreamSkin 社区加载失败：{error}"),
-            empty_dream_skin_community(),
+            empty_dream_skin_community_payload(),
         ),
     }
 }
 
 #[tauri::command]
 pub async fn install_dream_skin_community_theme(
-    version_id: String,
-) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
+    id: String,
+) -> CommandResult<DreamSkinCommunityPayload> {
     let state_dir = alunixa_x_core::paths::default_app_state_dir();
-    let settings = SettingsStore::default().load().unwrap_or_default();
-    match alunixa_x_core::dream_skin_community::install_community_theme(
+    let installed =
+        match alunixa_x_core::dream_skin_community::install_community_theme(&state_dir, id.trim())
+            .await
+        {
+            Ok(installed) => installed,
+            Err(error) => {
+                return failed(
+                    &format!("安装 DreamSkin 社区主题失败：{error}"),
+                    alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir)
+                        .await
+                        .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+                );
+            }
+        };
+    match alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir).await {
+        Ok(mut catalog) => {
+            catalog.installed_theme_id = installed.id;
+            ok("主题已安装到“我的主题”。", catalog)
+        }
+        Err(_) => {
+            let mut catalog = empty_dream_skin_community_payload();
+            catalog.installed_theme_id = installed.id;
+            ok("主题已安装到“我的主题”。", catalog)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn load_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match alunixa_x_core::dream_skin_community::load_pending_community_link() {
+        Ok(version_id) => ok(
+            "待处理的一键换肤链接已读取。",
+            PendingDreamSkinCommunityPayload {
+                version_id: version_id.unwrap_or_default(),
+            },
+        ),
+        Err(error) => failed(
+            &format!("读取一键换肤链接失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn confirm_pending_dream_skin_community() -> CommandResult<DreamSkinCommunityPayload> {
+    let version_id = match alunixa_x_core::dream_skin_community::load_pending_community_link() {
+        Ok(Some(version_id)) => version_id,
+        Ok(None) => {
+            return failed(
+                "没有待处理的一键换肤链接。",
+                empty_dream_skin_community_payload(),
+            );
+        }
+        Err(error) => {
+            return failed(
+                &format!("读取一键换肤链接失败：{error}"),
+                empty_dream_skin_community_payload(),
+            );
+        }
+    };
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    let installed = match alunixa_x_core::dream_skin_community::install_community_theme(
         &state_dir,
-        version_id.trim(),
+        &version_id,
     )
     .await
     {
-        Ok(_) => {
-            match alunixa_x_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
-            {
-                Ok(library) => ok("社区主题已安装到本地主题库。", library),
-                Err(error) => failed(
-                    &format!("主题已安装，但刷新本地主题库失败：{error}"),
-                    empty_dream_skin_library(&settings),
-                ),
-            }
+        Ok(installed) => installed,
+        Err(error) => {
+            return failed(
+                &format!("安装 DreamSkin 社区主题失败：{error}"),
+                alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir)
+                    .await
+                    .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+            );
         }
+    };
+    if let Err(error) = alunixa_x_core::dream_skin_community::clear_pending_community_link() {
+        return failed(
+            &format!("主题已安装，但清理一键换肤记录失败：{error}"),
+            alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir)
+                .await
+                .unwrap_or_else(|_| empty_dream_skin_community_payload()),
+        );
+    }
+    let mut catalog = alunixa_x_core::dream_skin_community::load_community_catalog(&state_dir)
+        .await
+        .unwrap_or_else(|_| empty_dream_skin_community_payload());
+    catalog.installed_theme_id = installed.id;
+    ok("主题已安装，正在应用。", catalog)
+}
+
+#[tauri::command]
+pub fn dismiss_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
+    match alunixa_x_core::dream_skin_community::clear_pending_community_link() {
+        Ok(()) => ok(
+            "已取消一键换肤。",
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
+        ),
         Err(error) => failed(
-            &format!("安装社区主题失败：{error}"),
-            empty_dream_skin_library(&settings),
+            &format!("取消一键换肤失败：{error}"),
+            PendingDreamSkinCommunityPayload {
+                version_id: String::new(),
+            },
         ),
     }
 }
@@ -1024,92 +2277,152 @@ pub async fn install_dream_skin_community_theme(
 pub fn import_dream_skin_theme_package(
     path: String,
 ) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
-    let state_dir = alunixa_x_core::paths::default_app_state_dir();
     let settings = SettingsStore::default().load().unwrap_or_default();
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
     match alunixa_x_core::dream_skin_community::import_theme_package(
         &state_dir,
         Path::new(path.trim()),
     ) {
-        Ok(_) => {
-            match alunixa_x_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
-            {
-                Ok(library) => ok("DreamSkin ZIP 主题已导入。", library),
-                Err(error) => failed(
-                    &format!("主题已导入，但刷新本地主题库失败：{error}"),
-                    empty_dream_skin_library(&settings),
-                ),
-            }
-        }
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("DreamSkin 主题包已导入。", library),
+            Err(error) => failed(
+                &format!("主题包已导入，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
         Err(error) => failed(
-            &format!("导入 DreamSkin ZIP 主题失败：{error}"),
-            empty_dream_skin_library(&settings),
+            &format!("导入 DreamSkin 主题包失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
         ),
     }
 }
 
 #[tauri::command]
-pub fn activate_dream_skin_theme(
-    id: String,
-) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
+pub async fn install_dream_skin_market_theme(id: String) -> CommandResult<DreamSkinMarketPayload> {
+    let id = id.trim();
+    if id.is_empty() {
+        return failed("主题 ID 不能为空。", empty_dream_skin_market_payload());
+    }
     let state_dir = alunixa_x_core::paths::default_app_state_dir();
-    let store = SettingsStore::default();
-    let previous = store.load().unwrap_or_default();
-    let draft = if id.trim() == "builtin" || id.trim() == "dream-skin-default" {
-        alunixa_x_core::dream_skin_library::DreamSkinThemeDraft {
-            config: alunixa_x_core::settings::DreamSkinThemeConfig::default(),
-            image_path: String::new(),
-            builtin: true,
-        }
-    } else {
-        match alunixa_x_core::dream_skin_library::load_stored_dream_skin_theme(
-            &state_dir,
-            id.trim(),
-        ) {
-            Ok(draft) => draft,
-            Err(error) => {
-                return failed(
-                    &format!("加载 DreamSkin 主题失败：{error}"),
-                    empty_dream_skin_library(&previous),
-                );
-            }
+    let load = match alunixa_x_core::dream_skin_market::load_market(&state_dir).await {
+        Ok(load) => load,
+        Err(error) => {
+            return failed(
+                &format!("主题市场加载失败：{error}"),
+                empty_dream_skin_market_payload(),
+            );
         }
     };
-    let activation =
-        match alunixa_x_core::dream_skin_library::prepare_dream_skin_activation(&state_dir, &draft)
-        {
-            Ok(activation) => activation,
-            Err(error) => {
-                return failed(
-                    &format!("准备 DreamSkin 主题失败：{error}"),
-                    empty_dream_skin_library(&previous),
-                );
-            }
-        };
-    let mut settings = previous.clone();
-    settings.codex_app_dream_skin_enabled = true;
-    settings.codex_app_dream_skin_paused = false;
-    settings.codex_app_dream_skin_theme_config = activation.config;
-    settings.codex_app_dream_skin_image_path = activation.active_image_path;
-    let saved = store
-        .save_preserving_runtime_model_selection(&settings)
-        .and_then(|_| {
-            alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-                settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
-                &settings.codex_app_dream_skin_theme_config,
-            )
-        });
-    if let Err(error) = saved {
-        let _ = store.save(&previous);
+    let Some(theme) = load.manifest.themes.iter().find(|theme| theme.id == id) else {
         return failed(
-            &format!("保存 DreamSkin 主题失败：{error}"),
-            empty_dream_skin_library(&previous),
+            "主题市场清单中未找到该主题。",
+            dream_skin_market_payload(load),
+        );
+    };
+    if let Err(error) =
+        alunixa_x_core::dream_skin_market::install_market_theme(&state_dir, theme).await
+    {
+        return failed(
+            &format!("安装市场主题失败：{error}"),
+            dream_skin_market_payload(load),
         );
     }
-    match alunixa_x_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings) {
-        Ok(library) => ok("主题已保存，将在下次启动 Alunixa X 时生效。", library),
+    let manifest =
+        alunixa_x_core::dream_skin_market::enrich_market_manifest(&state_dir, load.manifest);
+    ok(
+        "主题已安装到“我的主题”。",
+        DreamSkinMarketPayload {
+            schema_version: manifest.schema_version,
+            updated_at: manifest.updated_at,
+            repository_url: alunixa_x_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+                .to_string(),
+            cached: load.cached,
+            warning: load.warning.unwrap_or_default(),
+            themes: manifest.themes,
+        },
+    )
+}
+
+#[tauri::command]
+pub fn load_dream_skin_theme(
+    id: String,
+) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeDraft> {
+    match alunixa_x_core::dream_skin_library::load_stored_dream_skin_theme(
+        &alunixa_x_core::paths::default_app_state_dir(),
+        id.trim(),
+    ) {
+        Ok(draft) => ok("Dream Skin 主题已加载。", draft),
         Err(error) => failed(
-            &format!("主题已保存，但刷新主题库失败：{error}"),
-            empty_dream_skin_library(&settings),
+            &format!("加载 Dream Skin 主题失败：{error}"),
+            builtin_dream_skin_draft(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn create_dream_skin_theme(
+    path: String,
+) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeDraft> {
+    let source = PathBuf::from(path.trim());
+    match alunixa_x_core::dream_skin_library::create_dream_skin_theme_from_image(
+        &source,
+        &alunixa_x_core::paths::default_app_state_dir(),
+    ) {
+        Ok(draft) => ok("Dream Skin 主题已创建。", draft),
+        Err(error) => failed(
+            &format!("创建 Dream Skin 主题失败：{error}"),
+            builtin_dream_skin_draft(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn save_dream_skin_theme(
+    draft: alunixa_x_core::dream_skin_library::DreamSkinThemeDraft,
+) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match alunixa_x_core::dream_skin_library::save_dream_skin_theme(
+        &alunixa_x_core::paths::default_app_state_dir(),
+        &draft,
+    ) {
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已保存。", library),
+            Err(error) => failed(
+                &format!("主题已保存，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("保存 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn rename_dream_skin_theme(
+    id: String,
+    name: String,
+) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match alunixa_x_core::dream_skin_library::rename_dream_skin_theme(
+        &alunixa_x_core::paths::default_app_state_dir(),
+        id.trim(),
+        name.trim(),
+    ) {
+        Ok(_) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已重命名。", library),
+            Err(error) => failed(
+                &format!("主题已重命名，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("重命名 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
         ),
     }
 }
@@ -1118,96 +2431,334 @@ pub fn activate_dream_skin_theme(
 pub fn delete_dream_skin_theme(
     id: String,
 ) -> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
-    let state_dir = alunixa_x_core::paths::default_app_state_dir();
     let settings = SettingsStore::default().load().unwrap_or_default();
     match alunixa_x_core::dream_skin_library::delete_dream_skin_theme(
-        &state_dir,
+        &alunixa_x_core::paths::default_app_state_dir(),
         id.trim(),
         Some(settings.codex_app_dream_skin_theme_config.id.as_str()),
     ) {
-        Ok(()) => {
-            match alunixa_x_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
+        Ok(()) => match current_dream_skin_library(&settings) {
+            Ok(library) => ok("Dream Skin 主题已删除。", library),
+            Err(error) => failed(
+                &format!("主题已删除，但刷新主题库失败：{error}"),
+                empty_dream_skin_library(&settings),
+            ),
+        },
+        Err(error) => failed(
+            &format!("删除 Dream Skin 主题失败：{error}"),
+            current_dream_skin_library(&settings)
+                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
+        ),
+    }
+}
+
+#[tauri::command]
+pub async fn activate_dream_skin_theme(
+    request: DreamSkinThemeActivationRequest,
+) -> CommandResult<DreamSkinThemeActivationPayload> {
+    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let previous_runtime_signature =
+        alunixa_x_core::assets::dream_skin_runtime_content_signature(&previous);
+    let previous_path = PathBuf::from(previous.codex_app_dream_skin_image_path.trim());
+    let previous_backup = managed_dream_skin_image_backup(&previous_path, &state_dir).ok();
+    let activation = match alunixa_x_core::dream_skin_library::prepare_dream_skin_activation(
+        &state_dir,
+        &request.draft,
+    ) {
+        Ok(activation) => activation,
+        Err(error) => {
+            return failed(
+                &format!("准备 Dream Skin 主题失败：{error}"),
+                failed_dream_skin_activation_payload(&previous, request.debug_port).await,
+            );
+        }
+    };
+    let theme = serde_json::to_value(&activation.config).unwrap_or_else(|_| json!({}));
+    let saved = store.update(json!({
+        "codexAppDreamSkinThemeConfig": theme,
+        "codexAppDreamSkinImagePath": activation.active_image_path
+    }));
+    let settings = match saved {
+        Ok(settings) => settings,
+        Err(error) => {
+            let _ = alunixa_x_core::dream_skin::clear_managed_dream_skin_image(&state_dir);
+            if let Some(backup) = previous_backup {
+                let _ = restore_managed_dream_skin_image_backup(backup);
+            }
+            let _ = store.save(&previous);
+            return failed(
+                &format!("保存 Dream Skin 活动主题失败：{error}"),
+                failed_dream_skin_activation_payload(&previous, request.debug_port).await,
+            );
+        }
+    };
+
+    let should_apply = settings.enhancements_enabled
+        && settings.codex_app_dream_skin_enabled
+        && !settings.codex_app_dream_skin_paused;
+    let theme_changed = previous_runtime_signature
+        != alunixa_x_core::assets::dream_skin_runtime_content_signature(&settings);
+    let (runtime, saved_for_next_launch, message) = if should_apply {
+        if let Err(error) = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+            true,
+            &settings.codex_app_dream_skin_theme_config,
+        ) {
+            (
+                alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+                true,
+                format!("主题已保存，下次启动生效；同步基础主题失败：{error}"),
+            )
+        } else if theme_changed {
+            (
+                alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus::pending_restart(
+                    true, false,
+                ),
+                true,
+                "主题已保存；为避免不同主题样式残留，需要重启 Codex 后完整切换。".to_string(),
+            )
+        } else {
+            match alunixa_x_core::dream_skin_runtime::apply_dream_skin_live(
+                request.debug_port,
+                request.helper_port,
+            )
+            .await
             {
-                Ok(library) => ok("DreamSkin 主题已删除。", library),
-                Err(error) => failed(
-                    &format!("主题已删除，但刷新主题库失败：{error}"),
-                    empty_dream_skin_library(&settings),
+                Ok(runtime) => (runtime, false, "Dream Skin 主题已应用。".to_string()),
+                Err(error) => (
+                    alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port)
+                        .await,
+                    true,
+                    format!("主题已保存，下次启动生效；实时应用失败：{error}"),
                 ),
             }
         }
-        Err(error) => failed(
-            &format!("删除 DreamSkin 主题失败：{error}"),
-            empty_dream_skin_library(&settings),
-        ),
-    }
+    } else {
+        (
+            alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+            true,
+            "主题已保存，下次启用或启动 Codex 时生效。".to_string(),
+        )
+    };
+    let library = current_dream_skin_library(&settings)
+        .unwrap_or_else(|_| empty_dream_skin_library(&settings));
+    ok(
+        &message,
+        DreamSkinThemeActivationPayload {
+            library,
+            runtime,
+            saved_for_next_launch,
+        },
+    )
 }
 
 #[tauri::command]
-pub fn restore_default_dream_skin()
--> CommandResult<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
-    let state_dir = alunixa_x_core::paths::default_app_state_dir();
+pub async fn dream_skin_status(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
+    ok(
+        "Dream Skin 状态已刷新。",
+        alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+    )
+}
+
+#[tauri::command]
+pub async fn apply_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
     let store = SettingsStore::default();
-    let mut settings = store.load().unwrap_or_default();
-    settings.codex_app_dream_skin_enabled = false;
-    settings.codex_app_dream_skin_paused = false;
-    settings.codex_app_dream_skin_theme = alunixa_x_core::settings::default_dream_skin_theme();
-    settings.codex_app_dream_skin_theme_config = Default::default();
-    settings.codex_app_dream_skin_image_path.clear();
-    let result = store
-        .save_preserving_runtime_model_selection(&settings)
-        .and_then(|_| alunixa_x_core::dream_skin::clear_managed_dream_skin_image(&state_dir))
-        .and_then(|_| {
-            alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-                false,
-                &settings.codex_app_dream_skin_theme_config,
-            )
-        });
-    match result {
-        Ok(()) => ok(
-            "已恢复 Codex 默认外观，下次启动生效。",
-            alunixa_x_core::dream_skin_library::list_dream_skin_themes(&state_dir, &settings)
-                .unwrap_or_else(|_| empty_dream_skin_library(&settings)),
-        ),
+    let settings = match store.update(json!({ "codexAppDreamSkinPaused": false })) {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("更新 Dream Skin 状态失败：{error}"),
+                alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(
+                    true, false,
+                ),
+            );
+        }
+    };
+    if !settings.enhancements_enabled || !settings.codex_app_dream_skin_enabled {
+        return failed(
+            "请先启用 Codex增强和 Dream Skin。",
+            alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    if let Err(error) = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+        true,
+        &settings.codex_app_dream_skin_theme_config,
+    ) {
+        return failed(
+            &format!("同步 Dream Skin 基础主题失败：{error}"),
+            alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    match alunixa_x_core::dream_skin_runtime::apply_dream_skin_live(
+        request.debug_port,
+        request.helper_port,
+    )
+    .await
+    {
+        Ok(status) => ok("Dream Skin 已应用。", status),
         Err(error) => failed(
-            &format!("恢复 Codex 默认外观失败：{error}"),
-            empty_dream_skin_library(&settings),
+            &format!("实时应用失败，下次启动会继续应用：{error}"),
+            alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(true, false),
         ),
     }
 }
 
 #[tauri::command]
-pub fn load_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
-    match alunixa_x_core::dream_skin_community::load_pending_community_link() {
-        Ok(version_id) => ok(
-            "DreamSkin 一键换肤状态已读取。",
-            PendingDreamSkinCommunityPayload {
-                version_id: version_id.unwrap_or_default(),
-            },
-        ),
-        Err(error) => failed(
-            &format!("读取 DreamSkin 一键换肤请求失败：{error}"),
-            PendingDreamSkinCommunityPayload {
-                version_id: String::new(),
-            },
+pub async fn restore_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus> {
+    let store = SettingsStore::default();
+    if let Err(error) = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+        false,
+        &alunixa_x_core::settings::DreamSkinThemeConfig::default(),
+    ) {
+        return failed(
+            &format!("恢复 Codex 原始外观失败：{error}"),
+            alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
+        );
+    }
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinEnabled": false,
+        "codexAppDreamSkinPaused": false
+    })) {
+        return failed(
+            &format!("保存恢复状态失败：{error}"),
+            alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus::not_running(false, false),
+        );
+    }
+    let live = alunixa_x_core::dream_skin_runtime::pause_dream_skin_live(request.debug_port).await;
+    let status =
+        alunixa_x_core::dream_skin_runtime::DreamSkinRuntimeStatus::pending_restart(false, false);
+    match live {
+        Ok(()) => ok("外观配置已恢复，重启 Codex 后完整生效。", status),
+        Err(error) => ok(
+            &format!("外观配置已恢复，重启 Codex 后完整生效；当前无法清理实时皮肤：{error}"),
+            status,
         ),
     }
 }
 
 #[tauri::command]
-pub fn dismiss_pending_dream_skin_community() -> CommandResult<PendingDreamSkinCommunityPayload> {
-    match alunixa_x_core::dream_skin_community::clear_pending_community_link() {
-        Ok(()) => ok(
-            "已忽略 DreamSkin 一键换肤请求。",
-            PendingDreamSkinCommunityPayload {
-                version_id: String::new(),
-            },
-        ),
+pub fn reset_dream_skin_theme() -> CommandResult<SettingsPayload> {
+    let store = SettingsStore::default();
+    let previous = store.load().unwrap_or_default();
+    let theme = serde_json::to_value(alunixa_x_core::settings::DreamSkinThemeConfig::default())
+        .unwrap_or_else(|_| json!({}));
+    if let Err(error) = store.update(json!({
+        "codexAppDreamSkinThemeConfig": theme,
+        "codexAppDreamSkinImagePath": ""
+    })) {
+        return failed(
+            &format!("恢复默认 Dream Skin 主题失败：{error}"),
+            fallback_settings_payload(),
+        );
+    }
+    if let Err(error) = alunixa_x_core::dream_skin::clear_managed_dream_skin_image(
+        &alunixa_x_core::paths::default_app_state_dir(),
+    ) {
+        let previous_theme = serde_json::to_value(&previous.codex_app_dream_skin_theme_config)
+            .unwrap_or_else(|_| json!({}));
+        let _ = store.update(json!({
+            "codexAppDreamSkinThemeConfig": previous_theme,
+            "codexAppDreamSkinImagePath": previous.codex_app_dream_skin_image_path
+        }));
+        return failed(
+            &format!("清理自定义 Dream Skin 图片失败：{error}"),
+            fallback_settings_payload(),
+        );
+    }
+    settings_payload("已恢复目标项目默认主题。", "恢复后重新读取设置失败")
+}
+
+#[tauri::command]
+pub async fn verify_dream_skin(
+    request: DreamSkinRuntimeRequest,
+) -> CommandResult<alunixa_x_core::dream_skin_runtime::DreamSkinVerification> {
+    let screenshot = request
+        .screenshot_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(Path::new);
+    match alunixa_x_core::dream_skin_runtime::verify_dream_skin(request.debug_port, screenshot)
+        .await
+    {
+        Ok(result) if result.pass => ok("Dream Skin 实机验证通过。", result),
+        Ok(result) => failed("Dream Skin 实机验证未通过。", result),
         Err(error) => failed(
-            &format!("清理 DreamSkin 一键换肤请求失败：{error}"),
-            PendingDreamSkinCommunityPayload {
-                version_id: String::new(),
+            &format!("Dream Skin 实机验证失败：{error}"),
+            alunixa_x_core::dream_skin_runtime::DreamSkinVerification {
+                state: alunixa_x_core::dream_skin_runtime::DreamSkinState::NotRunning,
+                pass: false,
+                version: None,
+                checks: Vec::new(),
+                screenshot_path: None,
+                raw: json!({}),
             },
         ),
+    }
+}
+
+fn dream_skin_market_payload(
+    load: alunixa_x_core::dream_skin_market::DreamSkinMarketLoad,
+) -> DreamSkinMarketPayload {
+    DreamSkinMarketPayload {
+        schema_version: load.manifest.schema_version,
+        updated_at: load.manifest.updated_at,
+        repository_url: alunixa_x_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+            .to_string(),
+        cached: load.cached,
+        warning: load.warning.unwrap_or_default(),
+        themes: load.manifest.themes,
+    }
+}
+
+fn empty_dream_skin_market_payload() -> DreamSkinMarketPayload {
+    DreamSkinMarketPayload {
+        schema_version: 1,
+        updated_at: String::new(),
+        repository_url: alunixa_x_core::dream_skin_market::DEFAULT_MARKET_REPOSITORY_URL
+            .to_string(),
+        cached: false,
+        warning: String::new(),
+        themes: Vec::new(),
+    }
+}
+
+fn empty_dream_skin_community_payload() -> DreamSkinCommunityPayload {
+    DreamSkinCommunityPayload {
+        items: Vec::new(),
+        total: 0,
+        fetched_at: String::new(),
+        cached: false,
+        warning: String::new(),
+        installed_theme_id: String::new(),
+    }
+}
+
+fn default_dream_skin_helper_port() -> u16 {
+    alunixa_x_core::protocol_proxy::protocol_proxy_port()
+}
+
+fn current_dream_skin_library(
+    settings: &BackendSettings,
+) -> anyhow::Result<alunixa_x_core::dream_skin_library::DreamSkinThemeLibrary> {
+    alunixa_x_core::dream_skin_library::list_dream_skin_themes(
+        &alunixa_x_core::paths::default_app_state_dir(),
+        settings,
+    )
+}
+
+fn builtin_dream_skin_draft() -> alunixa_x_core::dream_skin_library::DreamSkinThemeDraft {
+    alunixa_x_core::dream_skin_library::DreamSkinThemeDraft {
+        config: alunixa_x_core::settings::DreamSkinThemeConfig::default(),
+        image_path: String::new(),
+        builtin: true,
     }
 }
 
@@ -1224,394 +2775,85 @@ fn empty_dream_skin_library(
     }
 }
 
-fn empty_dream_skin_community() -> alunixa_x_core::dream_skin_community::DreamSkinCommunityCatalog {
-    alunixa_x_core::dream_skin_community::DreamSkinCommunityCatalog {
-        items: Vec::new(),
-        total: 0,
-        fetched_at: String::new(),
-        cached: false,
-        warning: String::new(),
-        installed_theme_id: String::new(),
+async fn failed_dream_skin_activation_payload(
+    settings: &BackendSettings,
+    debug_port: u16,
+) -> DreamSkinThemeActivationPayload {
+    DreamSkinThemeActivationPayload {
+        library: current_dream_skin_library(settings)
+            .unwrap_or_else(|_| empty_dream_skin_library(settings)),
+        runtime: alunixa_x_core::dream_skin_runtime::dream_skin_status(debug_port).await,
+        saved_for_next_launch: false,
     }
 }
 
-#[tauri::command]
-pub fn load_settings() -> CommandResult<SettingsPayload> {
-    settings_payload("设置已加载。", "设置读取失败")
-}
-
-#[tauri::command]
-pub async fn inspect_runtime_health() -> alunixa_x_core::runtime_health::RuntimeHealth {
-    let status = alunixa_x_core::status::StatusStore::default()
-        .load_latest()
-        .ok()
-        .flatten();
-    alunixa_x_core::runtime_health::inspect(status.as_ref()).await
-}
-
-#[tauri::command]
-pub async fn inspect_agent_capabilities()
--> Result<alunixa_x_core::agent_capabilities::CapabilityAudit, String> {
-    alunixa_x_core::agent_capabilities::inspect()
-        .await
-        .map_err(|error| {
-            alunixa_x_core::agent_capabilities::inspection_error_message(&error).into()
-        })
-}
-
-fn current_config_revision() -> Option<String> {
-    alunixa_x_core::config_transaction::revision(
-        &alunixa_x_core::paths::default_settings_path(),
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-    )
-    .ok()
-}
-
-#[tauri::command]
-pub async fn packaged_proxy_action(
-    action: String,
-    expected_revision: Option<String>,
-    backup_id: Option<String>,
-) -> Result<alunixa_x_core::packaged_proxy::ProxyReport, String> {
-    if !["inspect", "repair", "restore"].contains(&action.as_str()) {
-        return Err("不支持的代理操作".into());
+fn empty_dream_skin_image_payload() -> DreamSkinImagePayload {
+    DreamSkinImagePayload {
+        path: String::new(),
+        content_type: String::new(),
+        size_bytes: 0,
     }
-    let settings = SettingsStore::default()
-        .load()
-        .map_err(|_| "无法读取设置")?;
-    let app = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
-        None,
-        Some(&settings.codex_app_path),
-    )
-    .ok_or("无法定位 Codex 应用包")?;
-    let launcher = alunixa_x_core::install::option_or_current_exe(&None, SILENT_BINARY);
-    let result = alunixa_x_core::packaged_proxy::inspect_or_repair(
-        &app,
-        &launcher,
-        &action,
-        expected_revision,
-        backup_id,
-    )
-    .await;
-    log_manager_event(
-        "manager.packaged_proxy",
-        serde_json::to_value(&result).unwrap_or_default(),
-    );
-    Ok(result)
 }
 
-#[tauri::command]
-pub async fn import_wallpaper_media(
-    app: tauri::AppHandle,
-    path: String,
-) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
-    let source = tauri::async_runtime::spawn_blocking(move || {
-        alunixa_x_core::wallpaper::import_media(
-            Path::new(&path),
-            &alunixa_x_core::paths::default_app_state_dir(),
-        )
+fn managed_dream_skin_image_backup(
+    path: &Path,
+    state_dir: &Path,
+) -> anyhow::Result<ManagedDreamSkinImageBackup> {
+    if !alunixa_x_core::dream_skin::is_managed_dream_skin_image(path, state_dir) {
+        anyhow::bail!("Dream Skin image is not managed by Alunixa X");
+    }
+    Ok(ManagedDreamSkinImageBackup {
+        path: path.to_path_buf(),
+        bytes: fs::read(path)?,
     })
-    .await
-    .map_err(|_| "导入壁纸任务失败".to_string())?
-    .map_err(|e| e.to_string())?;
-    app.asset_protocol_scope()
-        .allow_file(&source.entry)
-        .map_err(|e| e.to_string())?;
-    Ok(source)
 }
 
-#[tauri::command]
-pub fn inspect_wallpaper(
-    app: tauri::AppHandle,
-    path: String,
-) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
-    let source = alunixa_x_core::wallpaper::resolve(Path::new(&path)).map_err(|e| e.to_string())?;
-    if matches!(source.kind.as_str(), "image" | "video") {
-        app.asset_protocol_scope()
-            .allow_file(&source.entry)
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(source)
+fn restore_managed_dream_skin_image_backup(
+    backup: ManagedDreamSkinImageBackup,
+) -> anyhow::Result<()> {
+    alunixa_x_core::settings::atomic_write(&backup.path, &backup.bytes)
 }
 
-#[tauri::command]
-pub fn repair_codex_feature_config() -> Result<bool, String> {
-    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-    )
-    .map_err(|_| "配置修复失败，未替换为默认配置；请检查 TOML 语法和文件权限".into())
-}
-
-#[tauri::command]
-pub async fn save_settings(
-    settings: BackendSettings,
-    expected_revision: Option<String>,
-    capability_writes: Option<Vec<String>>,
-) -> CommandResult<SettingsPayload> {
-    if expected_revision.is_none() {
-        return failed(
-            "缺少配置修订号，请刷新后重试；未覆盖当前配置",
-            fallback_settings_payload(),
-        );
-    }
-    let previous = match SettingsStore::default().load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("读取原设置失败，未保存任何修改：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
-    let settings = match normalize_settings_before_save(settings) {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("配置校验失败，未保存任何修改：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
-    let native_baseline = match alunixa_x_core::agent_capabilities::native_edit_baseline(
-        &previous,
-        &settings,
-        capability_writes.as_deref().unwrap_or_default(),
-    ) {
-        Ok(value) => value,
-        Err(error) => return failed(&error.to_string(), fallback_settings_payload()),
-    };
-    if settings.codex_app_fast_mode != native_baseline.codex_app_fast_mode
-        || settings.codex_goals_enabled != native_baseline.codex_goals_enabled
+fn dream_skin_content_type(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
     {
-        let cli = alunixa_x_core::official_remote::find_codex_cli_executable(Some(
-            &settings.codex_app_path,
-        ));
-        let features = alunixa_x_core::agent_capabilities::discover_features(cli.as_deref()).await;
-        if let Err(error) = alunixa_x_core::agent_capabilities::validate_native_feature_changes(
-            &native_baseline,
-            &settings,
-            &features,
-        ) {
-            return failed(&error.to_string(), fallback_settings_payload());
-        }
-    }
-    if settings.codex_app_path != previous.codex_app_path && !settings.codex_app_path.is_empty() {
-        let executable =
-            alunixa_x_core::app_paths::build_codex_executable(Path::new(&settings.codex_app_path));
-        if !executable.is_file() {
-            return failed(
-                "Codex 应用路径不存在或无法访问，未保存",
-                fallback_settings_payload(),
-            );
-        }
-    }
-    let wallpaper_changed = settings.codex_app_image_overlay_enabled
-        != previous.codex_app_image_overlay_enabled
-        || settings.codex_app_image_overlay_path != previous.codex_app_image_overlay_path;
-    if wallpaper_changed && settings.codex_app_image_overlay_enabled {
-        let validation = alunixa_x_core::wallpaper::resolve(Path::new(
-            settings.codex_app_image_overlay_path.trim(),
-        ));
-        if let Err(error) = validation {
-            return failed(
-                &format!("壁纸配置无效，未保存：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    }
-    let save_result = alunixa_x_core::config_transaction::run(
-        &alunixa_x_core::paths::default_settings_path(),
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-        expected_revision.as_deref(),
-        || {
-            let home = alunixa_x_core::relay_config::default_codex_home_dir();
-            alunixa_x_core::agent_capabilities::validate_profile_feature_changes_in_home(
-                &home,
-                &native_baseline,
-                &settings,
-            )?;
-            SettingsStore::default()
-                .save_preserving_runtime_model_selection(&settings)
-                .and_then(|_| {
-                    if settings.codex_app_sub_agent_max_threads
-                        == previous.codex_app_sub_agent_max_threads
-                    {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_sub_agent_max_threads_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_sub_agent_max_threads,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    if settings.codex_app_fast_mode == native_baseline.codex_app_fast_mode {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_fast_mode,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    if settings.codex_goals_enabled == native_baseline.codex_goals_enabled {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_goals_feature_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_goals_enabled,
-                    )
-                })
-                .and_then(|_| {
-                    if settings.codex_app_disable_wss == native_baseline.codex_app_disable_wss {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::apply_wss_policy_to_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_disable_wss,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| remove_retired_context_config())
-                .and_then(|_| {
-                    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    alunixa_x_core::codex_instructions::sync_model_instructions_after_settings_save(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        &previous,
-                        &settings,
-                    )
-                })
-                .and_then(|_| apply_codex_hook_policy(&settings))
-                .and_then(|_| {
-                    alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-                        settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
-                        &settings.codex_app_dream_skin_theme_config,
-                    )
-                })
-        },
-    );
-    match save_result {
-        Ok(()) => settings_payload(
-            "设置已保存；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用。",
-            "设置保存后重新读取失败",
-        ),
-        Err(error) => failed(
-            &format!("保存设置失败：{error}"),
-            fallback_settings_payload(),
-        ),
-    }
-}
-
-fn apply_codex_hook_policy(settings: &BackendSettings) -> anyhow::Result<()> {
-    let launcher_path = alunixa_x_core::install::option_or_current_exe(&None, SILENT_BINARY);
-    alunixa_x_core::codex_hooks::apply_alunixa_x_hooks(settings, &launcher_path).map(|_| ())
-}
-
-fn remove_retired_context_config() -> anyhow::Result<()> {
-    alunixa_x_core::retired_context::remove_from_home(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-    )
-    .map(|_| ())
-}
-
-fn apply_codex_instructions_policy(settings: &BackendSettings) -> anyhow::Result<()> {
-    alunixa_x_core::codex_instructions::apply_model_instructions_policy(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-        settings.codex_app_instructions_enabled,
-        &settings.codex_app_instructions,
-    )
-}
-
-async fn trust_codex_hooks_and_log(codex_app_path: String) {
-    match alunixa_x_core::codex_hooks::trust_alunixa_x_hooks(Some(&codex_app_path)).await {
-        Ok(result) => log_manager_event(
-            "manager.codex_hooks.trusted",
-            json!({ "trusted": result.trusted }),
-        ),
-        Err(error) => log_manager_event(
-            "manager.codex_hooks.trust_failed",
-            json!({ "error": error.to_string() }),
-        ),
-    }
-}
-
-#[tauri::command]
-pub fn export_full_config(path: String) -> CommandResult<Value> {
-    let path = PathBuf::from(path.trim());
-    if path.as_os_str().is_empty() {
-        return failed("请选择配置导出文件。", json!({}));
-    }
-    match alunixa_x_core::config_backup::export_full_config(&path, &default_config_backup_paths()) {
-        Ok(user_script_count) => ok(
-            "完整配置已导出。文件包含 API Key 和登录信息，请妥善保管。",
-            json!({
-                "path": path.to_string_lossy(),
-                "userScriptCount": user_script_count
-            }),
-        ),
-        Err(error) => failed(&format!("导出完整配置失败：{error}"), json!({})),
-    }
-}
-
-#[tauri::command]
-pub fn import_full_config(path: String) -> CommandResult<Value> {
-    let path = PathBuf::from(path.trim());
-    if path.as_os_str().is_empty() {
-        return failed("请选择配置备份文件。", json!({}));
-    }
-    match alunixa_x_core::config_backup::import_full_config(&path, &default_config_backup_paths()) {
-        Ok(result) => {
-            let payload = serde_json::to_value(result).unwrap_or_else(|_| json!({}));
-            let policy_result = SettingsStore::default().load().and_then(|settings| {
-                alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
-                    settings.codex_app_disable_auto_update,
-                )?;
-                // Full restore includes the actual config; do not replace it with
-                // a potentially stale switch value from the archived AX settings.
-                apply_codex_instructions_policy(&settings)?;
-                apply_codex_hook_policy(&settings)?;
-                remove_retired_context_config()?;
-                Ok(settings.codex_app_path)
-            });
-            match policy_result {
-                Ok(codex_app_path) => {
-                    tauri::async_runtime::spawn(trust_codex_hooks_and_log(codex_app_path));
-                    ok("完整配置已导入，并已在导入前自动备份原配置。", payload)
-                }
-                Err(error) => failed(
-                    &format!("完整配置已导入，但应用 Codex 运行策略失败：{error}"),
-                    payload,
-                ),
-            }
-        }
-        Err(error) => failed(&format!("导入完整配置失败：{error}"), json!({})),
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        Some("bmp") => "image/bmp",
+        _ => "application/octet-stream",
     }
 }
 
 #[tauri::command]
 pub fn load_ccs_providers() -> CommandResult<CcsProvidersPayload> {
-    let db_path = alunixa_x_core::ccs_import::default_ccs_db_path();
-    match alunixa_x_core::ccs_import::list_codex_providers_from_db(&db_path) {
-        Ok(providers) => ok(
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
+        Ok(source) => ok(
             &format!(
                 "已读取 cc-switch Codex 供应商配置：{} 个。",
-                providers.len()
+                source.providers.len()
             ),
             CcsProvidersPayload {
-                db_path: db_path.to_string_lossy().to_string(),
-                providers,
+                db_path: source.db_path.to_string_lossy().to_string(),
+                configured_db_path: source.configured_db_path,
+                fallback_reason: source.fallback_reason,
+                providers: source.providers,
             },
         ),
         Err(error) => failed(
             &format!("读取 cc-switch 供应商配置失败：{error}"),
             CcsProvidersPayload {
-                db_path: db_path.to_string_lossy().to_string(),
+                db_path: alunixa_x_core::ccs_import::default_ccs_db_path()
+                    .to_string_lossy()
+                    .to_string(),
+                configured_db_path: settings.ccs_db_path,
+                fallback_reason: None,
                 providers: Vec::new(),
             },
         ),
@@ -1620,24 +2862,17 @@ pub fn load_ccs_providers() -> CommandResult<CcsProvidersPayload> {
 
 #[tauri::command]
 pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
-    let providers = match alunixa_x_core::ccs_import::list_codex_providers_from_default_db() {
-        Ok(providers) => providers,
-        Err(error) => {
-            let payload = settings_payload_value().unwrap_or_else(|(_, payload)| payload);
-            return failed(&format!("读取 cc-switch 供应商配置失败：{error}"), payload);
-        }
-    };
-
     let store = SettingsStore::default();
-    let mut settings = match store.load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("读取现有设置失败，已停止导入以避免覆盖配置：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
+    let mut settings = store.load().unwrap_or_default();
+    let providers =
+        match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
+            Ok(source) => source.providers,
+            Err(error) => {
+                let payload = settings_payload_value().unwrap_or_else(|(_, payload)| payload);
+                return failed(&format!("读取 cc-switch 供应商配置失败：{error}"), payload);
+            }
+        };
+
     let mut existing_keys: Vec<String> = settings
         .relay_profiles
         .iter()
@@ -1666,15 +2901,7 @@ pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
         return settings_payload("没有新的 cc-switch 供应商配置需要导入。", "设置读取失败");
     }
 
-    settings = match normalize_settings_before_save(settings) {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("导入供应商配置校验失败，未保存任何修改：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
+    settings = normalize_settings_before_save(settings);
     match store.save(&settings) {
         Ok(()) => settings_payload(
             &format!("已从 cc-switch 导入供应商配置：{imported} 个。"),
@@ -1748,9 +2975,18 @@ pub fn list_local_sessions(
     let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
     let db_paths = alunixa_x_core::codex_sqlite::codex_session_db_paths_from_home(&home);
     let mut sessions = Vec::new();
+    let mut session_ids = std::collections::HashSet::new();
     let mut errors = Vec::new();
     for db_path in &db_paths {
         let adapter = local_session_adapter(db_path);
+        match adapter.list_local_session_ids() {
+            Ok(ids) => session_ids.extend(ids),
+            Err(error) if db_path.exists() => {
+                errors.push(format!("{}: {error}", db_path.to_string_lossy()));
+                continue;
+            }
+            Err(_) => continue,
+        }
         match adapter.list_local_sessions_limited(fetch_limit) {
             Ok(mut items) => sessions.append(&mut items),
             Err(error) if db_path.exists() => {
@@ -1782,6 +3018,7 @@ pub fn list_local_sessions(
         offset,
         limit,
         has_more,
+        total_count: session_ids.len(),
     };
     let page = offset / limit + 1;
     if errors.is_empty() {
@@ -1798,105 +3035,6 @@ pub fn list_local_sessions(
             payload,
         )
     }
-}
-
-#[tauri::command]
-pub fn dashboard_usage_analytics() -> CommandResult<alunixa_x_data::DashboardUsageAnalytics> {
-    let sessions = list_local_sessions(Some(ListLocalSessionsRequest {
-        offset: 0,
-        limit: MAX_LOCAL_SESSIONS_PAGE_SIZE,
-    }));
-    let analytics = alunixa_x_data::summarize_local_session_usage(
-        &sessions.payload.sessions,
-        MAX_LOCAL_SESSIONS_PAGE_SIZE,
-    );
-    if sessions.status == "failed" {
-        failed(
-            &format!("已生成部分使用统计；{}", sessions.message),
-            analytics,
-        )
-    } else {
-        ok(
-            &format!(
-                "已统计 {} 个会话、{} 个模型调用回合。",
-                analytics.sessions_scanned, analytics.turns
-            ),
-            analytics,
-        )
-    }
-}
-
-#[tauri::command]
-pub fn list_zed_remote_projects() -> CommandResult<ZedRemoteProjectsPayload> {
-    let result = alunixa_x_core::zed_remote::list_zed_remote_projects_response(&json!({}));
-    if result.get("status").and_then(Value::as_str) == Some("ok") {
-        let projects = serde_json::from_value::<Vec<ZedRemoteProject>>(
-            result
-                .get("projects")
-                .cloned()
-                .unwrap_or_else(|| Value::Array(Vec::new())),
-        )
-        .unwrap_or_default();
-        return ok(
-            &format!("已读取 {} 个 Zed 远程项目。", projects.len()),
-            ZedRemoteProjectsPayload { projects },
-        );
-    }
-    failed(
-        result
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("读取 Zed 远程项目失败。"),
-        ZedRemoteProjectsPayload {
-            projects: Vec::new(),
-        },
-    )
-}
-
-#[tauri::command]
-pub fn open_zed_remote(payload: Value) -> CommandResult<ZedRemoteOpenPayload> {
-    let result = alunixa_x_core::zed_remote::open_zed_remote(&payload);
-    let strategy = result
-        .get("strategy")
-        .cloned()
-        .and_then(|value| serde_json::from_value::<ZedOpenStrategy>(value).ok())
-        .unwrap_or_default();
-    let url = result
-        .get("url")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if result.get("status").and_then(Value::as_str) == Some("ok") {
-        return ok(
-            "已在 Zed Remote 打开项目。",
-            ZedRemoteOpenPayload { url, strategy },
-        );
-    }
-    failed(
-        result
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("无法在 Zed Remote 打开项目。"),
-        ZedRemoteOpenPayload { url, strategy },
-    )
-}
-
-#[tauri::command]
-pub fn forget_zed_remote_project(id: String) -> CommandResult<ZedRemoteProjectsPayload> {
-    let result =
-        alunixa_x_core::zed_remote::forget_zed_remote_project_response(&json!({ "id": id }));
-    if result.get("status").and_then(Value::as_str) != Some("ok") {
-        return failed(
-            result
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("移除 Zed 远程项目失败。"),
-            ZedRemoteProjectsPayload {
-                projects: Vec::new(),
-            },
-        );
-    }
-    list_zed_remote_projects()
 }
 
 #[tauri::command]
@@ -1917,7 +3055,9 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
     let session = SessionRef {
         session_id: session_id.to_string(),
         title: request.title,
+        host_id: Some("local".into()),
     };
+    let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
     let mut candidate_paths = Vec::new();
     if let Some(path) = request.db_path.as_deref() {
         let path = PathBuf::from(path);
@@ -1925,9 +3065,7 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
             candidate_paths.push(path);
         }
     }
-    for path in alunixa_x_core::codex_sqlite::codex_session_db_paths_from_home(
-        &alunixa_x_core::codex_sqlite::default_codex_home_dir(),
-    ) {
+    for path in alunixa_x_core::codex_sqlite::codex_session_db_paths_from_home(&home) {
         if !candidate_paths.iter().any(|candidate| candidate == &path) {
             candidate_paths.push(path);
         }
@@ -1944,13 +3082,13 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
                 .collect::<Vec<_>>(),
         }),
     );
-    let result = alunixa_x_data::delete_local_from_paths_with_home(
+    let result = alunixa_x_data::delete_local_from_paths(
         candidate_paths.clone(),
         alunixa_x_data::BackupStore::new(
             alunixa_x_core::paths::default_app_state_dir().join("backups"),
         ),
         &session,
-        &alunixa_x_core::codex_sqlite::default_codex_home_dir(),
+        Some(&home),
     );
     log_manager_event(
         "manager.delete_local_session.finish",
@@ -1988,14 +3126,25 @@ fn local_session_adapter(db_path: &Path) -> alunixa_x_data::SQLiteStorageAdapter
     )
 }
 
-fn normalize_settings_before_save(
-    mut settings: BackendSettings,
-) -> anyhow::Result<BackendSettings> {
-    if let Some(path) =
-        alunixa_x_core::app_paths::normalize_codex_app_path(Path::new(&settings.codex_app_path))
-    {
-        settings.codex_app_path = path.to_string_lossy().to_string();
+/// 归一化「Codex 应用路径」。**无效路径一律丢弃，不落库。**
+///
+/// 之前的写法是 normalize 成功才覆盖、失败就原样保留，于是误选的路径会被存进
+/// settings.json。而 launcher 拿到显式 --app-path 且无效时不回退自动探测，
+/// 结果就是启动永久失败、只能手改配置文件才能恢复（#1972：用户误选了 Alunixa X
+/// 自己的 alunixa-x-plus.exe，因为文件选择器只按 exe 扩展名过滤）。
+///
+/// 清空之后 resolve_codex_app_dir_with_saved 会走自动探测，至少还能起来。
+fn normalized_codex_app_path_for_save(raw: &str) -> String {
+    if raw.trim().is_empty() {
+        return String::new();
     }
+    alunixa_x_core::app_paths::normalize_codex_app_path(Path::new(raw))
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default()
+}
+
+fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSettings {
+    settings.codex_app_path = normalized_codex_app_path_for_save(&settings.codex_app_path);
     settings.relay_common_config_contents =
         alunixa_x_core::relay_config::sanitize_common_config_contents(
             &settings.relay_common_config_contents,
@@ -2009,12 +3158,27 @@ fn normalize_settings_before_save(
         alunixa_x_core::relay_config::sanitize_common_config_contents(
             &settings.relay_context_config_contents,
         );
+    for profile in &mut settings.relay_profiles {
+        if let Err(error) =
+            alunixa_x_core::relay_config::normalize_relay_profile_for_storage(profile)
+        {
+            log_manager_event(
+                "manager.normalize_relay_profile_for_storage.failed",
+                json!({
+                    "profileId": profile.id,
+                    "profileName": profile.name,
+                    "error": error.to_string()
+                }),
+            );
+        }
+    }
     let common_config = relay_combined_common_config(&settings);
     if !common_config.trim().is_empty() {
         for profile in &mut settings.relay_profiles {
             if !profile.use_common_config || profile.config_contents.trim().is_empty() {
                 continue;
             }
+            let goals_override = relay_config_goals_value(&profile.config_contents);
             match alunixa_x_core::relay_config::strip_common_config_from_config(
                 &profile.config_contents,
                 &common_config,
@@ -2028,29 +3192,10 @@ fn normalize_settings_before_save(
                         strip_common_config_text_fallback(&profile.config_contents, &common_config);
                 }
             }
-        }
-    }
-    for profile in &mut settings.relay_profiles {
-        if let Err(error) =
-            alunixa_x_core::relay_config::normalize_relay_profile_for_storage(profile)
-        {
-            log_manager_event(
-                "manager.normalize_relay_profile_for_storage.failed",
-                json!({
-                    "profileId": profile.id,
-                    "profileName": profile.name,
-                    "error": error.to_string()
-                }),
-            );
-            return Err(anyhow::anyhow!(
-                "供应商 {} 配置无效：{}",
-                if profile.name.trim().is_empty() {
-                    profile.id.as_str()
-                } else {
-                    profile.name.as_str()
-                },
-                error
-            ));
+            if let Some(enabled) = goals_override {
+                profile.config_contents =
+                    relay_config_set_goals_override(&profile.config_contents, enabled);
+            }
         }
     }
     settings.provider_sync_saved_providers =
@@ -2061,7 +3206,31 @@ fn normalize_settings_before_save(
         .provider_sync_last_selected_provider
         .trim()
         .to_string();
-    Ok(settings)
+    settings
+}
+
+fn relay_config_goals_value(config: &str) -> Option<bool> {
+    let doc = config.parse::<toml_edit::DocumentMut>().ok()?;
+    doc.get("features")?
+        .as_table_like()?
+        .get("goals")?
+        .as_bool()
+}
+
+fn relay_config_set_goals_override(config: &str, enabled: bool) -> String {
+    let Ok(mut doc) = config.parse::<toml_edit::DocumentMut>() else {
+        return config.to_string();
+    };
+    if !doc.as_table().contains_key("features")
+        || doc
+            .get("features")
+            .and_then(toml_edit::Item::as_table_like)
+            .is_none()
+    {
+        doc["features"] = toml_edit::table();
+    }
+    doc["features"]["goals"] = toml_edit::value(enabled);
+    alunixa_x_core::relay_config::normalize_config_text(&doc.to_string())
 }
 
 fn normalize_provider_sync_provider_list(values: Vec<String>) -> Vec<String> {
@@ -2096,7 +3265,10 @@ fn relay_join_config_sections(sections: &[&str]) -> String {
     if sections.is_empty() {
         String::new()
     } else {
-        alunixa_x_core::relay_config::normalize_config_text(&format!("{}\n", sections.join("\n\n")))
+        alunixa_x_core::relay_config::normalize_config_text(&format!(
+            "{}\n",
+            sections.join("\n\n")
+        ))
     }
 }
 
@@ -2260,7 +3432,7 @@ pub async fn load_provider_sync_targets() -> CommandResult<Value> {
                     }
                 })
                 .collect::<Vec<_>>();
-            merge_manual_provider_sync_targets(&mut targets, &manual, &settings);
+            merge_manual_provider_sync_targets(&mut targets, &manual, &settings, None);
             ok(
                 "Provider 同步目标已加载。",
                 serde_json::to_value(targets).unwrap_or_else(|_| json!({})),
@@ -2274,6 +3446,7 @@ fn merge_manual_provider_sync_targets(
     targets: &mut alunixa_x_data::ProviderSyncTargetList,
     manual: &[String],
     settings: &BackendSettings,
+    codex_home: Option<&Path>,
 ) {
     for id in manual {
         if let Some(existing) = targets.targets.iter_mut().find(|target| target.id == *id) {
@@ -2289,6 +3462,11 @@ fn merge_manual_provider_sync_targets(
             existing.is_manual = settings.provider_sync_manual_providers.contains(id);
             existing.is_saved = settings.provider_sync_saved_providers.contains(id);
         } else {
+            let (is_resolvable, unavailable_reason) =
+                match alunixa_x_data::validate_provider_sync_target(codex_home, Some(id)) {
+                    Ok(_) => (true, None),
+                    Err(reason) => (false, Some(reason)),
+                };
             targets
                 .targets
                 .push(alunixa_x_data::ProviderSyncTargetOption {
@@ -2297,6 +3475,8 @@ fn merge_manual_provider_sync_targets(
                     is_current_provider: *id == targets.current_provider,
                     is_manual: settings.provider_sync_manual_providers.contains(id),
                     is_saved: settings.provider_sync_saved_providers.contains(id),
+                    is_resolvable,
+                    unavailable_reason,
                 });
         }
     }
@@ -2306,6 +3486,36 @@ fn merge_manual_provider_sync_targets(
             .cmp(&left.is_current_provider)
             .then_with(|| left.id.cmp(&right.id))
     });
+}
+
+#[tauri::command]
+pub async fn repair_session_index() -> CommandResult<Value> {
+    let result =
+        tauri::async_runtime::spawn_blocking(|| alunixa_x_data::repair_session_index(None))
+            .await
+            .map_err(|error| anyhow::anyhow!("session index repair task failed: {error}"))
+            .and_then(|result| result);
+    match result {
+        Ok(report) => ok(
+            &format!("会话索引检查完成，恢复 {} 条消息。", report.repaired_items),
+            json!(report),
+        ),
+        Err(error) => failed(&format!("修复会话索引失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn load_session_index_repair_report() -> CommandResult<Value> {
+    let result = tauri::async_runtime::spawn_blocking(|| {
+        alunixa_x_data::load_session_index_repair_report(None)
+    })
+    .await
+    .map_err(|error| anyhow::anyhow!("session index report task failed: {error}"))
+    .and_then(|result| result);
+    match result {
+        Ok(report) => ok("已读取会话索引修复报告。", json!({ "report": report })),
+        Err(error) => failed(&format!("读取会话索引修复报告失败：{error}"), json!({})),
+    }
 }
 
 #[tauri::command]
@@ -2367,75 +3577,96 @@ pub async fn apply_session_index_cleanup(
     }
 }
 
+const PROVIDER_SYNC_PROGRESS_EVENT: &str = "provider-sync-progress";
+
+/// issue #240：执行前先给「会动到什么、备份在哪」的只读预览。
+///
+/// 用户报「修复历史会话后会话从列表消失」，所以真实执行前要先看影响范围。
+/// 这条命令不写盘：不开锁、不备份、不改 sqlite，只统计。
 #[tauri::command]
-pub async fn preview_rollout_image_cleanup() -> CommandResult<Value> {
+pub async fn preview_provider_sync() -> CommandResult<Value> {
     let result = tauri::async_runtime::spawn_blocking(|| {
-        alunixa_x_data::preview_rollout_image_cleanup(None)
+        alunixa_x_data::provider_sync::preview_provider_sync(None)
     })
     .await
-    .map_err(|error| anyhow::anyhow!("rollout image cleanup preview task failed: {error}"))
+    .map_err(|error| anyhow::anyhow!("provider sync preview task failed: {error}"))
     .and_then(|result| result);
     match result {
-        Ok(preview) => ok(
-            &preview.message.clone(),
-            rollout_image_cleanup_payload(preview),
-        ),
-        Err(error) => failed(&format!("预览会话图片清理失败：{error}"), json!({})),
+        Ok(preview) => {
+            let audit = &preview.audit;
+            let message = if audit.catalog_only_sessions > 0 {
+                format!(
+                    "预览：审计发现 {} 条仅存在于会话目录的记录，其中 {} 条仍有当前 rollout、{} 条只能从历史备份恢复、{} 条没有恢复来源。执行时的备份目录：{}",
+                    audit.catalog_only_sessions,
+                    audit.catalog_only_with_current_rollout,
+                    audit.catalog_only_with_backup_database,
+                    audit.catalog_only_without_recovery_source,
+                    preview.backup_root.to_string_lossy(),
+                )
+            } else {
+                format!(
+                    "预览：未发现仅存在于会话目录的记录。执行时的备份目录：{}",
+                    preview.backup_root.to_string_lossy(),
+                )
+            };
+            ok(
+                &message,
+                json!({
+                    "targetProvider": preview.target_provider,
+                    "repairAudit": preview.audit,
+                    "backupRoot": preview.backup_root,
+                }),
+            )
+        }
+        Err(error) => failed(&format!("预览历史会话修复失败：{error}"), json!({})),
     }
 }
 
 #[tauri::command]
-pub async fn apply_rollout_image_cleanup() -> CommandResult<Value> {
-    let result =
-        tauri::async_runtime::spawn_blocking(|| alunixa_x_data::run_rollout_image_cleanup(None))
-            .await
-            .map_err(|error| anyhow::anyhow!("rollout image cleanup task failed: {error}"))
-            .and_then(|result| result);
-    match result {
-        Ok(cleanup) => ok(
-            &cleanup.message.clone(),
-            rollout_image_cleanup_payload(cleanup),
-        ),
-        Err(error) => failed(&format!("清理会话图片失败：{error}"), json!({})),
-    }
-}
-
-#[tauri::command]
-pub async fn restore_rollout_image_cleanup(backup_id: String) -> CommandResult<Value> {
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        alunixa_x_data::restore_rollout_image_cleanup(None, &backup_id)
-    })
-    .await
-    .map_err(|error| anyhow::anyhow!("rollout image restore task failed: {error}"))
-    .and_then(|result| result);
-    match result {
-        Ok(restore) => ok(
-            &restore.message.clone(),
-            rollout_image_cleanup_payload(restore),
-        ),
-        Err(error) => failed(&format!("恢复会话图片失败：{error}"), json!({})),
-    }
-}
-
-fn rollout_image_cleanup_payload(result: alunixa_x_data::RolloutImageCleanupResult) -> Value {
-    let mut value = serde_json::to_value(result).unwrap_or_default();
-    if let Some(object) = value.as_object_mut() {
-        object.remove("status");
-        object.remove("message");
-    }
-    value
-}
-
-#[tauri::command]
-pub async fn sync_providers_now(target_provider: Option<String>) -> CommandResult<Value> {
+pub async fn sync_providers_now(
+    window: tauri::WebviewWindow,
+    target_provider: Option<String>,
+) -> CommandResult<Value> {
     let target_provider = target_provider
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    let target_for_validation = target_provider.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_data::validate_provider_sync_target(None, target_for_validation.as_deref())
+    })
+    .await
+    {
+        // Keep None as "use current" so the sync reads the live selection again.
+        Ok(Ok(_)) => {}
+        Ok(Err(message)) => return provider_sync_preflight_failure(&message),
+        Err(error) => {
+            return provider_sync_preflight_failure(&format!(
+                "provider target validation task failed: {error}"
+            ));
+        }
+    };
     let target_for_settings = target_provider.clone();
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    prepare_codex_app_state_before_provider_switch(&home, "manager.sync_providers_now.before");
+    let progress_window = window.clone();
+    let before_home = home.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        alunixa_x_data::run_provider_sync_with_target(None, target_provider.as_deref())
+        // issue #1341：快照要读整份 app state 文件，属阻塞 IO，必须留在阻塞线程里，
+        // 否则同步一跑起来就把 async 运行时的那条工作线程占住，界面卡死。
+        prepare_codex_app_state_before_provider_switch(
+            &before_home,
+            "manager.sync_providers_now.before",
+        );
+        alunixa_x_data::run_provider_sync_with_target_and_progress(
+            None,
+            target_provider.as_deref(),
+            |progress| {
+                let _ = progress_window.emit_to(
+                    progress_window.label(),
+                    PROVIDER_SYNC_PROGRESS_EVENT,
+                    progress,
+                );
+            },
+        )
     })
     .await
     .map_err(|error| anyhow::anyhow!("provider sync task failed: {error}"));
@@ -2452,35 +3683,91 @@ pub async fn sync_providers_now(target_provider: Option<String>) -> CommandResul
                     "manager.sync_providers_now.after",
                 );
             }
-            ok(
-                &format!(
-                    "供应商已同步一次：{} 个会话文件，{} 行索引，跳过 {} 个占用文件。",
-                    sync.changed_session_files,
-                    sync.sqlite_rows_updated,
-                    sync.skipped_locked_rollout_files.len()
-                ),
+            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                "manager.provider_sync.completed",
                 json!({
-                    "syncStatus": sync.status,
-                    "targetProvider": sync.target_provider,
+                    "status": sync.status.clone(),
                     "changedSessionFiles": sync.changed_session_files,
-                    "skippedLockedRolloutFiles": sync.skipped_locked_rollout_files,
                     "sqliteRowsUpdated": sync.sqlite_rows_updated,
-                    "sqliteProviderRowsUpdated": sync.sqlite_provider_rows_updated,
-                    "sqliteUserEventRowsUpdated": sync.sqlite_user_event_rows_updated,
-                    "sqliteCwdRowsUpdated": sync.sqlite_cwd_rows_updated,
-                    "updatedWorkspaceRoots": sync.updated_workspace_roots,
-                    "encryptedContentWarning": sync.encrypted_content_warning,
-                    "backupDir": sync.backup_dir,
-                    "syncMessage": sync.message,
+                    "sqliteCatalogRowsInserted": sync.sqlite_catalog_rows_inserted,
+                    "sqliteCatalogRowsRemoved": sync.sqlite_catalog_rows_removed,
+                    "skippedLockedRolloutFiles": sync.skipped_locked_rollout_files.len(),
                 }),
-            )
+            );
+            provider_sync_command_result(sync)
         }
-        Err(error) => failed(&format!("供应商同步失败：{error}"), json!({})),
+        Err(error) => {
+            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                "manager.provider_sync.failed",
+                json!({ "message": error.to_string() }),
+            );
+            failed(&format!("供应商同步失败：{error}"), json!({}))
+        }
     }
+}
+
+fn provider_sync_preflight_failure(message: &str) -> CommandResult<Value> {
+    failed(
+        &format!("供应商同步未执行：{message}"),
+        json!({
+            "syncStatus": "skipped",
+            "targetProvider": "",
+            "syncMessage": message,
+        }),
+    )
 }
 
 fn is_success_sync_status(status: &alunixa_x_data::ProviderSyncStatus) -> bool {
     matches!(status, alunixa_x_data::ProviderSyncStatus::Synced)
+}
+
+fn provider_sync_command_result(sync: alunixa_x_data::ProviderSyncResult) -> CommandResult<Value> {
+    let succeeded = is_success_sync_status(&sync.status);
+    let success_message = format!(
+        "供应商已同步一次：{} 个会话文件，{} 行索引，跳过 {} 个占用文件。{}",
+        sync.changed_session_files,
+        sync.sqlite_rows_updated,
+        sync.skipped_locked_rollout_files.len(),
+        if sync.repair_audit.catalog_only_sessions > 0 {
+            format!(
+                " 审计发现 {} 条仅存在于会话目录的记录，其中 {} 条没有可用恢复来源。",
+                sync.repair_audit.catalog_only_sessions,
+                sync.repair_audit.catalog_only_without_recovery_source,
+            )
+        } else {
+            String::new()
+        }
+    );
+    // issue #240：改动了记录就把备份位置一并告诉用户，出事时能自己找回。
+    let success_message = match sync.backup_dir.as_ref() {
+        Some(path) if sync.changed_session_files > 0 || sync.sqlite_catalog_rows_inserted > 0 => {
+            format!("{success_message} 备份目录：{}", path.to_string_lossy())
+        }
+        _ => success_message,
+    };
+    let failure_message = format!("历史会话修复未执行：{}", sync.message);
+    let payload = json!({
+        "syncStatus": sync.status,
+        "targetProvider": sync.target_provider,
+        "changedSessionFiles": sync.changed_session_files,
+        "skippedLockedRolloutFiles": sync.skipped_locked_rollout_files,
+        "sqliteRowsUpdated": sync.sqlite_rows_updated,
+        "sqliteProviderRowsUpdated": sync.sqlite_provider_rows_updated,
+        "sqliteUserEventRowsUpdated": sync.sqlite_user_event_rows_updated,
+        "sqliteCwdRowsUpdated": sync.sqlite_cwd_rows_updated,
+        "sqliteCatalogRowsInserted": sync.sqlite_catalog_rows_inserted,
+        "sqliteCatalogRowsRemoved": sync.sqlite_catalog_rows_removed,
+        "updatedWorkspaceRoots": sync.updated_workspace_roots,
+        "encryptedContentWarning": sync.encrypted_content_warning,
+        "repairAudit": sync.repair_audit,
+        "backupDir": sync.backup_dir,
+        "syncMessage": sync.message,
+    });
+    if succeeded {
+        ok(&success_message, payload)
+    } else {
+        failed(&failure_message, payload)
+    }
 }
 
 fn persist_provider_sync_selection(provider: &str) {
@@ -2489,27 +3776,20 @@ fn persist_provider_sync_selection(provider: &str) {
         return;
     }
     let store = SettingsStore::default();
-    let result = store.mutate(|settings| {
-        settings.provider_sync_last_selected_provider = trimmed.to_string();
-        if !settings
+    let mut settings = store.load().unwrap_or_default();
+    settings.provider_sync_last_selected_provider = trimmed.to_string();
+    if !settings
+        .provider_sync_saved_providers
+        .iter()
+        .any(|item| item == trimmed)
+    {
+        settings
             .provider_sync_saved_providers
-            .iter()
-            .any(|item| item == trimmed)
-        {
-            settings
-                .provider_sync_saved_providers
-                .push(trimmed.to_string());
-        }
-        settings.provider_sync_saved_providers = normalize_provider_sync_provider_list(
-            std::mem::take(&mut settings.provider_sync_saved_providers),
-        );
-    });
-    if let Err(error) = result {
-        log_manager_event(
-            "manager.persist_provider_sync_selection.failed",
-            json!({ "error": error.to_string() }),
-        );
+            .push(trimmed.to_string());
     }
+    settings.provider_sync_saved_providers =
+        normalize_provider_sync_provider_list(settings.provider_sync_saved_providers);
+    let _ = store.save(&settings);
 }
 
 #[tauri::command]
@@ -2521,35 +3801,9 @@ pub async fn load_ads() -> CommandResult<AdsPayload> {
             AdsPayload {
                 version: 1,
                 ads: Vec::new(),
+                top_ad: None,
+                top_ads: Vec::new(),
             },
-        ),
-    }
-}
-
-#[tauri::command]
-pub fn get_manager_autostart() -> CommandResult<alunixa_x_core::autostart::AutostartStatus> {
-    ok(
-        "已读取开机自启状态。",
-        alunixa_x_core::autostart::get_manager_autostart_status(),
-    )
-}
-
-#[tauri::command]
-pub fn set_manager_autostart_enabled(
-    enabled: bool,
-) -> CommandResult<alunixa_x_core::autostart::AutostartStatus> {
-    match alunixa_x_core::autostart::set_manager_autostart_enabled(enabled) {
-        Ok(status) => ok(
-            if enabled {
-                "已启用开机时启动 Alunixa X。"
-            } else {
-                "已关闭开机时启动 Alunixa X。"
-            },
-            status,
-        ),
-        Err(error) => failed(
-            &format!("设置开机自启失败：{error}"),
-            alunixa_x_core::autostart::get_manager_autostart_status(),
         ),
     }
 }
@@ -2565,6 +3819,46 @@ pub async fn refresh_script_market() -> CommandResult<ScriptMarketPayload> {
             &format!("脚本市场加载失败：{error}"),
             failed_script_market_payload(&format!("脚本市场加载失败：{error}")),
         ),
+    }
+}
+
+#[tauri::command]
+pub async fn refresh_plugin_market(source: String, refresh: bool) -> Value {
+    match alunixa_x_core::plugin_market::list_plugins(
+        &alunixa_x_core::codex_home::default_codex_home_dir(),
+        &source,
+        refresh,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(error) => json!({"status": "failed", "message": error.to_string(), "plugins": []}),
+    }
+}
+
+#[tauri::command]
+pub async fn install_plugin_market_item(source: String, id: String) -> Value {
+    match alunixa_x_core::plugin_market::install_plugin(
+        &alunixa_x_core::codex_home::default_codex_home_dir(),
+        &source,
+        &id,
+    )
+    .await
+    {
+        Ok(payload) => payload,
+        Err(error) => json!({"status": "failed", "message": error.to_string()}),
+    }
+}
+
+#[tauri::command]
+pub fn plugin_market_install_status(source: String, id: String) -> Value {
+    match alunixa_x_core::plugin_market::install_status(
+        &alunixa_x_core::codex_home::default_codex_home_dir(),
+        &source,
+        &id,
+    ) {
+        Ok(payload) => payload,
+        Err(error) => json!({"status": "failed", "message": error.to_string(), "busy": false}),
     }
 }
 
@@ -2600,7 +3894,6 @@ pub async fn refresh_user_script_inventory() -> CommandResult<SettingsPayload> {
     ok(
         message,
         SettingsPayload {
-            revision: current_config_revision(),
             settings: SettingsStore::default().load().unwrap_or_default(),
             settings_path: alunixa_x_core::paths::default_settings_path()
                 .to_string_lossy()
@@ -2608,6 +3901,48 @@ pub async fn refresh_user_script_inventory() -> CommandResult<SettingsPayload> {
             user_scripts,
         },
     )
+}
+
+#[tauri::command]
+pub async fn reload_user_scripts() -> CommandResult<SettingsPayload> {
+    let debug_port = StatusStore::default()
+        .load_latest()
+        .ok()
+        .flatten()
+        .and_then(|status| status.debug_port)
+        .unwrap_or_else(default_debug_port);
+    let manager = default_user_script_manager();
+    match alunixa_x_core::user_scripts::reload_live_scripts(debug_port, &manager).await {
+        Ok(user_scripts) => {
+            let page_reload = user_scripts["reload_mode"] == "page";
+            let script_failed = user_scripts["scripts"]
+                .as_array()
+                .is_some_and(|scripts| scripts.iter().any(|script| script["status"] == "failed"));
+            let payload = SettingsPayload {
+                settings: SettingsStore::default().load().unwrap_or_default(),
+                settings_path: alunixa_x_core::paths::default_settings_path()
+                    .to_string_lossy()
+                    .to_string(),
+                user_scripts,
+            };
+            if script_failed {
+                failed("部分脚本执行失败，请查看本地脚本状态。", payload)
+            } else {
+                ok(
+                    if page_reload {
+                        "已请求刷新 Codex 页面以安全重载旧脚本。"
+                    } else {
+                        "用户脚本已热重载。"
+                    },
+                    payload,
+                )
+            }
+        }
+        Err(error) => failed(
+            &format!("用户脚本热重载失败：{error}"),
+            fallback_settings_payload(),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -2653,6 +3988,25 @@ pub async fn install_market_script(id: String) -> CommandResult<ScriptMarketPayl
 }
 
 #[tauri::command]
+pub fn set_user_scripts_enabled(enabled: bool) -> CommandResult<SettingsPayload> {
+    let manager = default_user_script_manager();
+    match manager.set_global_enabled(enabled) {
+        Ok(_) => settings_payload(
+            if enabled {
+                "本地拓展整体已开启。"
+            } else {
+                "本地拓展整体已关闭。"
+            },
+            "本地拓展整体开关设置失败",
+        ),
+        Err(error) => failed(
+            &format!("本地拓展整体开关设置失败：{error}"),
+            fallback_settings_payload(),
+        ),
+    }
+}
+
+#[tauri::command]
 pub fn set_user_script_enabled(key: String, enabled: bool) -> CommandResult<SettingsPayload> {
     let trimmed = key.trim();
     if trimmed.is_empty() {
@@ -2691,6 +4045,288 @@ pub fn delete_user_script(key: String) -> CommandResult<SettingsPayload> {
     }
 }
 
+/// 拉取所有启用仓库的 skill 清单，合并本地安装/启用状态后返回。
+///
+/// 单个仓库失败（限流、网络、仓库删了）不影响其它仓库，错误单独收集回前端。
+#[tauri::command]
+pub async fn refresh_skill_catalog() -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    let repos = manager.list_repos();
+    let mut remote = Vec::new();
+    let mut repo_errors = Vec::new();
+
+    for repo in repos.iter().filter(|repo| repo.enabled) {
+        let cached = cached_repo_skills(&repo.key());
+        match alunixa_x_core::skills::fetch_repo_skills(repo, &cached).await {
+            Ok(skills) => {
+                store_repo_skills(&repo.key(), &skills);
+                remote.extend(skills);
+            }
+            Err(error) => {
+                repo_errors.push(format!("{}/{}：{error}", repo.owner, repo.name));
+                // 拉不动就先用上一次的结果撑着，别让已知的 skill 从列表里消失
+                remote.extend(cached.into_values());
+            }
+        }
+    }
+
+    let message = if repo_errors.is_empty() {
+        "Skills 列表已刷新。".to_string()
+    } else {
+        format!("Skills 列表已刷新，{} 个仓库拉取失败。", repo_errors.len())
+    };
+    let payload = skills_payload(&manager, &remote, repo_errors);
+    if payload.repo_errors.is_empty() {
+        ok(&message, payload)
+    } else {
+        failed(&message, payload)
+    }
+}
+
+/// 只读本地状态，不联网。切到 Skills 页时先用它把已装的列出来。
+#[tauri::command]
+pub fn list_installed_skills() -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    let payload = skills_payload(&manager, &[], Vec::new());
+    ok("已加载本地 Skills。", payload)
+}
+
+#[tauri::command]
+pub async fn install_skill(repo_key: String, id: String) -> CommandResult<SkillsPayload> {
+    install_or_update_skill(&repo_key, &id, "Skill 已安装。", "安装 Skill 失败").await
+}
+
+#[tauri::command]
+pub async fn update_skill(repo_key: String, id: String) -> CommandResult<SkillsPayload> {
+    install_or_update_skill(&repo_key, &id, "Skill 已更新。", "更新 Skill 失败").await
+}
+
+async fn install_or_update_skill(
+    repo_key: &str,
+    id: &str,
+    success_message: &str,
+    failure_prefix: &str,
+) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    let Some(repo) = alunixa_x_core::skills::parse_repo_key(repo_key) else {
+        return failed(
+            &format!("{failure_prefix}：仓库标识无法解析（{repo_key}）。"),
+            current_skills_payload(&manager),
+        );
+    };
+
+    // 装之前重新拉一次树，拿到当前的 repo_path 和哈希，避免用陈旧缓存装错版本。
+    let cached = cached_repo_skills(repo_key);
+    let skills = match alunixa_x_core::skills::fetch_repo_skills(&repo, &cached).await {
+        Ok(skills) => {
+            store_repo_skills(repo_key, &skills);
+            skills
+        }
+        Err(error) => {
+            return failed(
+                &format!("{failure_prefix}：{error}"),
+                current_skills_payload(&manager),
+            );
+        }
+    };
+    let Some(skill) = skills.iter().find(|skill| skill.id == id) else {
+        return failed(
+            &format!("{failure_prefix}：仓库里没有找到 {id}。"),
+            current_skills_payload(&manager),
+        );
+    };
+
+    let zip = match alunixa_x_core::skills::download_repo_zip(&repo).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return failed(
+                &format!("{failure_prefix}：{error}"),
+                current_skills_payload(&manager),
+            );
+        }
+    };
+    match manager.install_from_zip(skill, &zip) {
+        Ok(_) => ok(success_message, current_skills_payload(&manager)),
+        Err(error) => failed(
+            &format!("{failure_prefix}：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn set_skill_enabled(id: String, enabled: bool) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.set_enabled(id.trim(), enabled) {
+        Ok(()) => ok(
+            if enabled {
+                "Skill 已启用，下次对话生效。"
+            } else {
+                "Skill 已停用。"
+            },
+            current_skills_payload(&manager),
+        ),
+        Err(error) => failed(
+            &format!("Skill 启停失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn uninstall_skill(id: String) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.uninstall(id.trim()) {
+        Ok(_) => ok(
+            "Skill 已卸载，源目录已备份，可随时恢复。",
+            current_skills_payload(&manager),
+        ),
+        Err(error) => failed(
+            &format!("卸载 Skill 失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn restore_skill_backup(backup_id: String) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.restore_backup(backup_id.trim()) {
+        Ok(_) => ok("Skill 已从备份恢复。", current_skills_payload(&manager)),
+        Err(error) => failed(
+            &format!("从备份恢复失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn delete_skill_backup(backup_id: String) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.delete_backup(backup_id.trim()) {
+        Ok(_) => ok("备份已删除。", current_skills_payload(&manager)),
+        Err(error) => failed(
+            &format!("删除备份失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn upsert_skill_repo(repo: alunixa_x_core::skills::SkillRepo) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.upsert_repo(repo) {
+        Ok(_) => ok("仓库源已保存。", current_skills_payload(&manager)),
+        Err(error) => failed(
+            &format!("保存仓库源失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn delete_skill_repo(key: String) -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    match manager.delete_repo(key.trim()) {
+        Ok(_) => {
+            forget_repo_skills(key.trim());
+            ok("仓库源已删除。", current_skills_payload(&manager))
+        }
+        Err(error) => failed(
+            &format!("删除仓库源失败：{error}"),
+            current_skills_payload(&manager),
+        ),
+    }
+}
+
+fn skills_payload(
+    manager: &alunixa_x_core::skills::SkillsManager,
+    remote: &[alunixa_x_core::skills::RemoteSkill],
+    repo_errors: Vec<String>,
+) -> SkillsPayload {
+    SkillsPayload {
+        skills: if remote.is_empty() {
+            manager.local_inventory()
+        } else {
+            manager.merge_entries(remote)
+        },
+        repos: manager.list_repos(),
+        backups: manager.list_backups(),
+        repo_errors,
+        skills_dir: manager.source_dir().to_string_lossy().to_string(),
+        codex_skills_dir: manager.linked_dir().to_string_lossy().to_string(),
+    }
+}
+
+fn current_skills_payload(manager: &alunixa_x_core::skills::SkillsManager) -> SkillsPayload {
+    skills_payload(manager, &all_cached_repo_skills(), Vec::new())
+}
+
+fn default_skills_manager() -> alunixa_x_core::skills::SkillsManager {
+    alunixa_x_core::skills::SkillsManager::new(
+        alunixa_x_core::paths::default_skills_source_dir(),
+        alunixa_x_core::paths::default_skill_backups_dir(),
+        alunixa_x_core::paths::default_skills_state_path(),
+        alunixa_x_core::codex_home::default_codex_home_dir(),
+    )
+}
+
+/// 上一次成功拉取的远端清单，按仓库 key 存。
+///
+/// 两个用途：拉取时传给 `fetch_repo_skills` 跳过没变的 SKILL.md 请求；
+/// 以及在只读命令里还原出完整视图，不必每次都联网。进程内缓存，重启即失效。
+type RepoSkillCache = std::collections::HashMap<
+    String,
+    std::collections::BTreeMap<String, alunixa_x_core::skills::RemoteSkill>,
+>;
+
+fn repo_skill_cache() -> &'static std::sync::Mutex<RepoSkillCache> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<RepoSkillCache>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(RepoSkillCache::new()))
+}
+
+fn cached_repo_skills(
+    repo_key: &str,
+) -> std::collections::BTreeMap<String, alunixa_x_core::skills::RemoteSkill> {
+    repo_skill_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(repo_key).cloned())
+        .unwrap_or_default()
+}
+
+fn all_cached_repo_skills() -> Vec<alunixa_x_core::skills::RemoteSkill> {
+    repo_skill_cache()
+        .lock()
+        .ok()
+        .map(|cache| {
+            cache
+                .values()
+                .flat_map(|skills| skills.values().cloned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn store_repo_skills(repo_key: &str, skills: &[alunixa_x_core::skills::RemoteSkill]) {
+    if let Ok(mut cache) = repo_skill_cache().lock() {
+        cache.insert(
+            repo_key.to_string(),
+            skills
+                .iter()
+                .map(|skill| (skill.id.clone(), skill.clone()))
+                .collect(),
+        );
+    }
+}
+
+fn forget_repo_skills(repo_key: &str) {
+    if let Ok(mut cache) = repo_skill_cache().lock() {
+        cache.remove(repo_key);
+    }
+}
+
 #[tauri::command]
 pub fn open_external_url(url: String) -> CommandResult<Value> {
     let trimmed = url.trim();
@@ -2722,193 +4358,6 @@ pub async fn repair_shortcuts() -> InstallActionResult {
     tauri::async_runtime::spawn_blocking(install::repair_shortcuts)
         .await
         .unwrap_or_else(|error| install_background_failure("修复快捷方式", error))
-}
-
-#[tauri::command]
-pub fn plugin_marketplace_status() -> CommandResult<PluginMarketplaceStatusPayload> {
-    let home = alunixa_x_core::codex_home::default_codex_home_dir();
-    let status = alunixa_x_core::plugin_marketplace::openai_curated_marketplace_status(&home);
-    ok(
-        if status.needs_repair() {
-            "插件市场需要初始化或注册。"
-        } else {
-            "插件市场已可用。"
-        },
-        PluginMarketplaceStatusPayload {
-            codex_home: home.to_string_lossy().to_string(),
-            marketplace_root: status
-                .marketplace_root
-                .as_ref()
-                .map(|path| path.to_string_lossy().to_string()),
-            config_registered: status.config_registered,
-            needs_repair: status.needs_repair(),
-        },
-    )
-}
-
-#[tauri::command]
-pub async fn repair_plugin_marketplace() -> CommandResult<PluginMarketplaceRepairPayload> {
-    let home = alunixa_x_core::codex_home::default_codex_home_dir();
-    match alunixa_x_core::plugin_marketplace::initialize_openai_curated_marketplace_and_configure(
-        &home,
-    )
-    .await
-    {
-        Ok(result) => ok(
-            if result.initialized {
-                "插件市场已从 openai/plugins 初始化并注册。"
-            } else if result.configured {
-                "已注册本地插件市场。"
-            } else {
-                "插件市场已可用，无需修复。"
-            },
-            PluginMarketplaceRepairPayload {
-                codex_home: home.to_string_lossy().to_string(),
-                marketplace_root:
-                    alunixa_x_core::plugin_marketplace::openai_curated_marketplace_status(&home)
-                        .marketplace_root
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
-                initialized: result.initialized,
-                configured: result.configured,
-                needs_repair: false,
-            },
-        ),
-        Err(error) => failed(
-            &format!("插件市场修复失败：{error}"),
-            PluginMarketplaceRepairPayload {
-                codex_home: home.to_string_lossy().to_string(),
-                marketplace_root:
-                    alunixa_x_core::plugin_marketplace::openai_curated_marketplace_status(&home)
-                        .marketplace_root
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
-                initialized: false,
-                configured: false,
-                needs_repair: true,
-            },
-        ),
-    }
-}
-
-#[tauri::command]
-pub fn remote_plugin_marketplace_status() -> CommandResult<RemotePluginMarketplacePayload> {
-    let home = alunixa_x_core::codex_home::default_codex_home_dir();
-    let status =
-        alunixa_x_core::plugin_marketplace::openai_curated_remote_marketplace_status(&home);
-    let (plugin_count, skill_count) =
-        remote_plugin_marketplace_counts(status.marketplace_root.as_deref());
-    ok(
-        if status.needs_repair() {
-            "官方远端插件缓存需要释放或注册。"
-        } else {
-            "官方远端插件缓存已可用。"
-        },
-        RemotePluginMarketplacePayload {
-            codex_home: home.to_string_lossy().to_string(),
-            marketplace_root: status
-                .marketplace_root
-                .as_ref()
-                .map(|path| path.to_string_lossy().to_string()),
-            config_registered: status.config_registered,
-            needs_repair: status.needs_repair(),
-            plugin_count,
-            skill_count,
-        },
-    )
-}
-
-#[tauri::command]
-pub fn repair_remote_plugin_marketplace() -> CommandResult<RemotePluginMarketplacePayload> {
-    let home = alunixa_x_core::codex_home::default_codex_home_dir();
-    match alunixa_x_core::plugin_marketplace::ensure_openai_curated_remote_marketplace_available(
-        &home,
-    ) {
-        Ok(result) => {
-            let status =
-                alunixa_x_core::plugin_marketplace::openai_curated_remote_marketplace_status(&home);
-            let (plugin_count, skill_count) =
-                remote_plugin_marketplace_counts(status.marketplace_root.as_deref());
-            ok(
-                if result.initialized {
-                    "已释放并注册内置官方远端插件缓存。"
-                } else if result.configured {
-                    "已注册官方远端插件缓存。"
-                } else {
-                    "官方远端插件缓存已可用，无需修复。"
-                },
-                RemotePluginMarketplacePayload {
-                    codex_home: home.to_string_lossy().to_string(),
-                    marketplace_root: status
-                        .marketplace_root
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
-                    config_registered: status.config_registered,
-                    needs_repair: status.needs_repair(),
-                    plugin_count,
-                    skill_count,
-                },
-            )
-        }
-        Err(error) => {
-            let status =
-                alunixa_x_core::plugin_marketplace::openai_curated_remote_marketplace_status(&home);
-            let (plugin_count, skill_count) =
-                remote_plugin_marketplace_counts(status.marketplace_root.as_deref());
-            failed(
-                &format!("官方远端插件缓存修复失败：{error}"),
-                RemotePluginMarketplacePayload {
-                    codex_home: home.to_string_lossy().to_string(),
-                    marketplace_root: status
-                        .marketplace_root
-                        .as_ref()
-                        .map(|path| path.to_string_lossy().to_string()),
-                    config_registered: status.config_registered,
-                    needs_repair: status.needs_repair(),
-                    plugin_count,
-                    skill_count,
-                },
-            )
-        }
-    }
-}
-
-fn remote_plugin_marketplace_counts(root: Option<&Path>) -> (usize, usize) {
-    let Some(root) = root else {
-        return (0, 0);
-    };
-    let marketplace_path = root
-        .join(".agents")
-        .join("plugins")
-        .join("marketplace.json");
-    let plugin_count = std::fs::read_to_string(&marketplace_path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|marketplace| {
-            marketplace
-                .get("plugins")
-                .and_then(Value::as_array)
-                .map(Vec::len)
-        })
-        .unwrap_or(0);
-    let skill_count = count_skill_files(&root.join("plugins")).unwrap_or(0);
-    (plugin_count, skill_count)
-}
-
-fn count_skill_files(root: &Path) -> std::io::Result<usize> {
-    if !root.is_dir() {
-        return Ok(0);
-    }
-    let mut total = 0;
-    for entry in std::fs::read_dir(root)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            total += count_skill_files(&path)?;
-        } else if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
-            total += 1;
-        }
-    }
-    Ok(total)
 }
 
 #[tauri::command]
@@ -2953,8 +4402,33 @@ pub async fn check_update() -> CommandResult<Value> {
     }
 }
 
+#[cfg(any(windows, target_os = "macos"))]
 #[tauri::command]
 pub async fn perform_update(
+    app: tauri::AppHandle,
+    release: Option<alunixa_x_core::update::Release>,
+) -> CommandResult<Value> {
+    let result = perform_update_inner(release).await;
+    if result.status == "ok" {
+        // 返回下载结果后正常退出，安装器等待后台服务清理完成再替换程序。
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(750));
+            app.exit(0);
+        });
+    }
+    result
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+#[tauri::command]
+pub async fn perform_update(
+    release: Option<alunixa_x_core::update::Release>,
+) -> CommandResult<Value> {
+    perform_update_inner(release).await
+}
+
+// 无需 app runtime 的业务核心；其它平台测试不应引入 Wry 析构依赖。
+async fn perform_update_inner(
     release: Option<alunixa_x_core::update::Release>,
 ) -> CommandResult<Value> {
     let Some(release) = release else {
@@ -2969,14 +4443,18 @@ pub async fn perform_update(
     let download_dir = alunixa_x_core::paths::default_app_state_dir().join("updates");
     match alunixa_x_core::update::perform_update(&release, &download_dir).await {
         Ok(result) => ok(
-            "安装包已下载并启动，请按安装向导完成更新。",
+            if cfg!(target_os = "macos") {
+                "安装包已验证，Alunixa X 将关闭以安装更新，完成后自动重启；失败时保留旧版。"
+            } else {
+                "安装包已下载并启动，请按安装向导完成更新。"
+            },
             json!({
-                "currentVersion": alunixa_x_core::version::VERSION,
-                "latestVersion": result.release.version,
-                "releaseSummary": result.release.body,
-                "installedPath": result.installer_path.to_string_lossy(),
-                "launched": result.launched,
-                "progress": 100
+            "currentVersion": alunixa_x_core::version::VERSION,
+            "latestVersion": result.release.version,
+            "releaseSummary": result.release.body,
+            "installedPath": result.installer_path.to_string_lossy(),
+            "launched": result.launched,
+            "progress": 100
             }),
         ),
         Err(error) => failed(
@@ -2993,7 +4471,7 @@ pub async fn perform_update(
 
 #[tauri::command]
 pub fn load_watcher_state() -> CommandResult<WatcherPayload> {
-    ok("watcher 状态已加载。", watcher_payload())
+    ok("开机启动状态已加载。", watcher_payload())
 }
 
 #[tauri::command]
@@ -3001,32 +4479,32 @@ pub fn install_watcher() -> CommandResult<WatcherPayload> {
     let launcher_path =
         alunixa_x_core::install::companion_binary_path(alunixa_x_core::install::SILENT_BINARY);
     match alunixa_x_core::watcher::install_watcher(&launcher_path, default_debug_port()) {
-        Ok(()) => ok("watcher 已安装。", watcher_payload()),
-        Err(error) => failed(&format!("安装 watcher 失败：{error}"), watcher_payload()),
+        Ok(()) => ok("开机启动已设置。", watcher_payload()),
+        Err(error) => failed(&format!("设置开机启动失败：{error}"), watcher_payload()),
     }
 }
 
 #[tauri::command]
 pub fn uninstall_watcher() -> CommandResult<WatcherPayload> {
     match alunixa_x_core::watcher::uninstall_watcher() {
-        Ok(()) => ok("watcher 已移除。", watcher_payload()),
-        Err(error) => failed(&format!("移除 watcher 失败：{error}"), watcher_payload()),
+        Ok(()) => ok("开机启动已移除。", watcher_payload()),
+        Err(error) => failed(&format!("移除开机启动失败：{error}"), watcher_payload()),
     }
 }
 
 #[tauri::command]
 pub fn enable_watcher() -> CommandResult<WatcherPayload> {
     match alunixa_x_core::watcher::enable_watcher() {
-        Ok(()) => ok("watcher 已启用。", watcher_payload()),
-        Err(error) => failed(&format!("启用 watcher 失败：{error}"), watcher_payload()),
+        Ok(()) => ok("开机启动已启用。", watcher_payload()),
+        Err(error) => failed(&format!("启用开机启动失败：{error}"), watcher_payload()),
     }
 }
 
 #[tauri::command]
 pub fn disable_watcher() -> CommandResult<WatcherPayload> {
     match alunixa_x_core::watcher::disable_watcher() {
-        Ok(()) => ok("watcher 已禁用。", watcher_payload()),
-        Err(error) => failed(&format!("禁用 watcher 失败：{error}"), watcher_payload()),
+        Ok(()) => ok("开机启动已禁用。", watcher_payload()),
+        Err(error) => failed(&format!("禁用开机启动失败：{error}"), watcher_payload()),
     }
 }
 
@@ -3034,12 +4512,14 @@ pub fn disable_watcher() -> CommandResult<WatcherPayload> {
 pub fn read_latest_logs(request: LogRequest) -> CommandResult<LogsPayload> {
     let path = alunixa_x_core::paths::default_diagnostic_log_path();
     match read_tail(&path, request.lines) {
-        Ok(text) => ok(
+        Ok(tail) => ok(
             "日志已读取。",
             LogsPayload {
                 path: path.to_string_lossy().to_string(),
-                text,
+                text: tail.text,
                 lines: request.lines,
+                truncated: tail.truncated,
+                file_size: tail.file_size,
             },
         ),
         Err(error) => failed(
@@ -3048,6 +4528,35 @@ pub fn read_latest_logs(request: LogRequest) -> CommandResult<LogsPayload> {
                 path: path.to_string_lossy().to_string(),
                 text: String::new(),
                 lines: request.lines,
+                truncated: false,
+                file_size: 0,
+            },
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn clear_logs() -> CommandResult<LogsPayload> {
+    let path = alunixa_x_core::paths::default_diagnostic_log_path();
+    match alunixa_x_core::diagnostic_log::clear_diagnostic_log() {
+        Ok(()) => ok(
+            "日志已清理。",
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text: String::new(),
+                lines: 0,
+                truncated: false,
+                file_size: 0,
+            },
+        ),
+        Err(error) => failed(
+            &format!("清理日志失败：{error}"),
+            LogsPayload {
+                path: path.to_string_lossy().to_string(),
+                text: String::new(),
+                lines: 0,
+                truncated: false,
+                file_size: 0,
             },
         ),
     }
@@ -3066,31 +4575,11 @@ pub fn copy_diagnostics() -> CommandResult<DiagnosticsPayload> {
 #[tauri::command]
 pub fn reset_settings() -> CommandResult<SettingsPayload> {
     let settings = BackendSettings::default();
-    match SettingsStore::default()
-        .save(&settings)
-        .and_then(|_| {
-            alunixa_x_core::codex_auto_update::apply_codex_auto_update_policy(
-                settings.codex_app_disable_auto_update,
-            )
-        })
-        .and_then(|_| {
-            alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
-                &alunixa_x_core::relay_config::default_codex_home_dir(),
-                settings.codex_app_fast_mode,
-            )
-            .map(|_| ())
-        })
-        .and_then(|_| apply_codex_instructions_policy(&settings))
-        .and_then(|_| apply_codex_hook_policy(&settings))
-    {
-        Ok(()) => {
-            tauri::async_runtime::spawn(trust_codex_hooks_and_log(settings.codex_app_path.clone()));
-            settings_payload("设置已重置为默认值。", "设置重置后重新读取失败")
-        }
+    match SettingsStore::default().save(&settings) {
+        Ok(()) => settings_payload("设置已重置为默认值。", "设置重置后重新读取失败"),
         Err(error) => failed(
             &format!("重置设置失败：{error}"),
             SettingsPayload {
-                revision: current_config_revision(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -3104,38 +4593,18 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
 #[tauri::command]
 pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
     let store = SettingsStore::default();
-    let mut settings = match store.load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("读取现有设置失败，已停止重置以避免覆盖配置：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
+    let mut settings = store.load().unwrap_or_default();
     let defaults = BackendSettings::default();
     settings.codex_app_image_overlay_enabled = defaults.codex_app_image_overlay_enabled;
     settings.codex_app_image_overlay_path = defaults.codex_app_image_overlay_path;
     settings.codex_app_image_overlay_opacity = defaults.codex_app_image_overlay_opacity;
     settings.codex_app_image_overlay_fit_mode = defaults.codex_app_image_overlay_fit_mode;
-    settings.codex_app_wallpaper_muted = true;
-    settings.codex_app_wallpaper_paused = false;
-    settings.codex_app_wallpaper_engine_path.clear();
-    let settings = match normalize_settings_before_save(settings) {
-        Ok(settings) => settings,
-        Err(error) => {
-            return failed(
-                &format!("图片覆盖层重置前配置校验失败，未保存任何修改：{error}"),
-                fallback_settings_payload(),
-            );
-        }
-    };
+    let settings = normalize_settings_before_save(settings);
     match store.save(&settings) {
         Ok(()) => settings_payload("图片覆盖层设置已重置。", "图片覆盖层重置后重新读取失败"),
         Err(error) => failed(
             &format!("重置图片覆盖层失败：{error}"),
             SettingsPayload {
-                revision: current_config_revision(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -3158,285 +4627,6 @@ pub fn relay_status() -> CommandResult<RelayPayload> {
 }
 
 #[tauri::command]
-pub async fn chatgpt_web_login_start()
--> CommandResult<alunixa_x_core::official_remote::ChatGptLoginStart> {
-    let store = SettingsStore::default();
-    let settings = store.load().unwrap_or_default();
-    let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let mut runtime = official_remote_runtime().lock().await;
-    log_manager_event(
-        "manager.chatgpt_web_login.start",
-        json!({
-            "activeRelayId": settings.active_relay_id
-        }),
-    );
-    match runtime
-        .login_start(Some(settings.codex_app_path.as_str()), &store, &home)
-        .await
-    {
-        Ok(payload) => ok(
-            "已准备 ChatGPT 网页登录，请在浏览器中完成账号登录。",
-            payload,
-        ),
-        Err(error) => {
-            log_manager_event(
-                "manager.chatgpt_web_login.failed",
-                json!({ "error": error.to_string() }),
-            );
-            failed(
-                &format!("发起 ChatGPT 网页登录失败：{error}"),
-                empty_chatgpt_login_start(),
-            )
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn chatgpt_device_login_start()
--> CommandResult<alunixa_x_core::official_remote::ChatGptDeviceLoginStart> {
-    let store = SettingsStore::default();
-    let settings = store.load().unwrap_or_default();
-    let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let mut runtime = official_remote_runtime().lock().await;
-    log_manager_event(
-        "manager.chatgpt_device_login.start",
-        json!({
-            "activeRelayId": settings.active_relay_id
-        }),
-    );
-    match runtime
-        .device_login_start(Some(settings.codex_app_path.as_str()), &store, &home)
-        .await
-    {
-        Ok(payload) => ok(
-            "已生成 ChatGPT 设备码，请在手机或其他设备完成授权。",
-            payload,
-        ),
-        Err(error) => {
-            log_manager_event(
-                "manager.chatgpt_device_login.failed",
-                json!({ "error": error.to_string() }),
-            );
-            failed(
-                &format!("发起 ChatGPT 设备码登录失败：{error}"),
-                empty_chatgpt_device_login_start(),
-            )
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn chatgpt_web_login_status(
-    login_id: String,
-) -> CommandResult<alunixa_x_core::official_remote::ChatGptLoginProgress> {
-    let store = SettingsStore::default();
-    let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.login_status(login_id.trim(), &store, &home).await {
-        Ok(payload) => {
-            let message = payload.message.clone();
-            if payload.state == "succeeded" {
-                log_manager_event(
-                    "manager.chatgpt_web_login.ok",
-                    json!({
-                        "activeRelayId": payload
-                            .settings
-                            .as_ref()
-                            .map(|settings| settings.active_relay_id.as_str())
-                    }),
-                );
-            }
-            ok(&message, payload)
-        }
-        Err(error) => {
-            log_manager_event(
-                "manager.chatgpt_web_login.migration_failed",
-                json!({ "error": error.to_string() }),
-            );
-            failed(
-                &format!("检查 ChatGPT 登录状态失败：{error}"),
-                empty_chatgpt_login_progress(),
-            )
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn chatgpt_web_login_cancel(
-    login_id: String,
-) -> CommandResult<alunixa_x_core::official_remote::ChatGptLoginProgress> {
-    let store = SettingsStore::default();
-    let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.login_cancel(login_id.trim(), &store, &home).await {
-        Ok(payload) => {
-            let message = payload.message.clone();
-            ok(&message, payload)
-        }
-        Err(error) => failed(
-            &format!("取消 ChatGPT 登录失败：{error}"),
-            empty_chatgpt_login_progress(),
-        ),
-    }
-}
-
-#[tauri::command]
-pub async fn chatgpt_account_logout() -> CommandResult<SettingsPayload> {
-    let store = SettingsStore::default();
-    let settings = store.load().unwrap_or_default();
-    let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime
-        .logout(Some(settings.codex_app_path.as_str()), &store, &home)
-        .await
-    {
-        Ok(settings) => {
-            log_manager_event(
-                "manager.chatgpt_account.logout",
-                json!({ "activeRelayId": settings.active_relay_id }),
-            );
-            settings_payload("ChatGPT 账号已退出。", "退出后重新读取设置失败")
-        }
-        Err(error) => failed(
-            &format!("退出 ChatGPT 登录失败：{error}"),
-            fallback_settings_payload(),
-        ),
-    }
-}
-
-#[tauri::command]
-pub async fn official_remote_control_status()
--> CommandResult<alunixa_x_core::official_remote::RemoteControlSnapshot> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.status(saved_app_path.as_deref()).await {
-        Ok(payload) => ok("官方手机远控状态已刷新。", payload),
-        Err(error) => failed(
-            &format!("读取官方手机远控状态失败：{error}"),
-            empty_remote_control_snapshot(),
-        ),
-    }
-}
-
-#[tauri::command]
-pub async fn official_remote_control_enable()
--> CommandResult<alunixa_x_core::official_remote::RemoteControlSnapshot> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.enable(saved_app_path.as_deref()).await {
-        Ok(payload) => {
-            log_manager_event(
-                "manager.official_remote_control.enabled",
-                json!({
-                    "status": payload.status,
-                    "hasEnvironmentId": payload.environment_id.is_some()
-                }),
-            );
-            ok("官方手机远控已启用。", payload)
-        }
-        Err(error) => failed(
-            &format!("启用官方手机远控失败：{error}"),
-            empty_remote_control_snapshot(),
-        ),
-    }
-}
-
-#[tauri::command]
-pub async fn official_remote_control_disable()
--> CommandResult<alunixa_x_core::official_remote::RemoteControlSnapshot> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.disable(saved_app_path.as_deref()).await {
-        Ok(payload) => {
-            log_manager_event(
-                "manager.official_remote_control.disabled",
-                json!({ "status": payload.status }),
-            );
-            ok("官方手机远控已关闭。", payload)
-        }
-        Err(error) => failed(
-            &format!("关闭官方手机远控失败：{error}"),
-            empty_remote_control_snapshot(),
-        ),
-    }
-}
-
-#[tauri::command]
-pub async fn official_remote_control_pairing_start()
--> CommandResult<alunixa_x_core::official_remote::RemoteControlPairing> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime.pairing_start(saved_app_path.as_deref()).await {
-        Ok(payload) => ok("手机配对码已生成。", payload),
-        Err(error) => failed(
-            &format!("生成手机配对码失败：{error}"),
-            empty_remote_control_pairing(),
-        ),
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemotePairingStatusRequest {
-    pub pairing_code: Option<String>,
-    pub manual_pairing_code: Option<String>,
-}
-
-#[tauri::command]
-pub async fn official_remote_control_pairing_status(
-    request: RemotePairingStatusRequest,
-) -> CommandResult<RemotePairingStatusPayload> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime
-        .pairing_status(
-            saved_app_path.as_deref(),
-            request.pairing_code.as_deref(),
-            request.manual_pairing_code.as_deref(),
-        )
-        .await
-    {
-        Ok(claimed) => ok(
-            "手机配对状态已刷新。",
-            RemotePairingStatusPayload { claimed },
-        ),
-        Err(error) => failed(
-            &format!("读取手机配对状态失败：{error}"),
-            RemotePairingStatusPayload { claimed: false },
-        ),
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RemoteClientRevokeRequest {
-    pub environment_id: String,
-    pub client_id: String,
-}
-
-#[tauri::command]
-pub async fn official_remote_control_revoke_client(
-    request: RemoteClientRevokeRequest,
-) -> CommandResult<alunixa_x_core::official_remote::RemoteControlSnapshot> {
-    let saved_app_path = saved_codex_app_path();
-    let mut runtime = official_remote_runtime().lock().await;
-    match runtime
-        .revoke_client(
-            saved_app_path.as_deref(),
-            request.environment_id.trim(),
-            request.client_id.trim(),
-        )
-        .await
-    {
-        Ok(payload) => ok("已撤销所选手机设备。", payload),
-        Err(error) => failed(
-            &format!("撤销手机设备失败：{error}"),
-            empty_remote_control_snapshot(),
-        ),
-    }
-}
-
-#[tauri::command]
 pub fn read_relay_files() -> CommandResult<RelayFilesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     match relay_files_payload_from_home(&home) {
@@ -3444,7 +4634,6 @@ pub fn read_relay_files() -> CommandResult<RelayFilesPayload> {
         Err(error) => failed(
             &format!("读取配置文件失败：{error}"),
             RelayFilesPayload {
-                revision: String::new(),
                 config_path: home.join("config.toml").to_string_lossy().to_string(),
                 auth_path: home.join("auth.json").to_string_lossy().to_string(),
                 config_contents: String::new(),
@@ -3507,25 +4696,43 @@ pub fn remove_env_conflicts(
 #[tauri::command]
 pub fn save_relay_file(request: SaveRelayFileRequest) -> CommandResult<RelayFilesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let saved = request
-        .expected_revision
-        .as_deref()
-        .filter(|revision| !revision.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("缺少文件修订号，请刷新后再保存"))
-        .and_then(|revision| {
-            alunixa_x_core::config_transaction::run(
-                &home.join("config.toml"),
-                &home,
-                Some(revision),
-                || save_relay_file_in_home(&home, &request.kind, &request.contents),
-            )
-        });
-    match saved.and_then(|_| relay_files_payload_from_home(&home)) {
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            relay_files_payload_from_home(&home).unwrap_or_else(|_| RelayFilesPayload {
+                config_path: home.join("config.toml").to_string_lossy().to_string(),
+                auth_path: home.join("auth.json").to_string_lossy().to_string(),
+                config_contents: String::new(),
+                auth_contents: String::new(),
+            }),
+        );
+    };
+    let active_profile = SettingsStore::default()
+        .load()
+        .unwrap_or_default()
+        .active_relay_profile();
+    let contents =
+        match prepare_relay_file_contents(&request.kind, &request.contents, &active_profile) {
+            Ok(contents) => contents,
+            Err(error) => {
+                return failed(
+                    &format!("保存配置文件失败：{error}"),
+                    relay_files_payload_from_home(&home).unwrap_or_else(|_| RelayFilesPayload {
+                        config_path: home.join("config.toml").to_string_lossy().to_string(),
+                        auth_path: home.join("auth.json").to_string_lossy().to_string(),
+                        config_contents: String::new(),
+                        auth_contents: String::new(),
+                    }),
+                );
+            }
+        };
+    match save_relay_file_in_home(&home, &request.kind, &contents)
+        .and_then(|_| relay_files_payload_from_home(&home))
+    {
         Ok(payload) => ok("配置文件已保存。", payload),
         Err(error) => failed(
             &format!("保存配置文件失败：{error}"),
             relay_files_payload_from_home(&home).unwrap_or_else(|_| RelayFilesPayload {
-                revision: String::new(),
                 config_path: home.join("config.toml").to_string_lossy().to_string(),
                 auth_path: home.join("auth.json").to_string_lossy().to_string(),
                 config_contents: String::new(),
@@ -3541,26 +4748,27 @@ pub struct RelayProfileSwitchRequest {
     pub settings: BackendSettings,
     #[serde(default)]
     pub previous_active_relay_id: String,
-    pub expected_revision: Option<String>,
 }
 
 #[tauri::command]
-pub async fn switch_relay_profile(
+pub fn switch_relay_profile(
     request: RelayProfileSwitchRequest,
 ) -> CommandResult<RelaySwitchPayload> {
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        let status = alunixa_x_core::relay_config::default_relay_status();
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            relay_switch_payload(
+                SettingsStore::default().load().unwrap_or_default(),
+                status,
+                None,
+            ),
+        );
+    };
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     let store = SettingsStore::default();
     let previous_active_relay_id = request.previous_active_relay_id;
-    let settings = match normalize_settings_before_save(request.settings) {
-        Ok(settings) => settings,
-        Err(error) => {
-            let status = alunixa_x_core::relay_config::default_relay_status();
-            return failed(
-                &format!("供应商切换前配置校验失败，未切换任何配置：{error}"),
-                relay_switch_payload(store.load().unwrap_or_default(), status, None),
-            );
-        }
-    };
+    let settings = normalize_settings_before_save(request.settings);
     log_manager_event(
         "manager.switch_relay_profile.start",
         json!({
@@ -3568,35 +4776,12 @@ pub async fn switch_relay_profile(
             "targetRelayId": settings.active_relay_id
         }),
     );
-    let switch_result = {
-        let Ok(_guard) = relay_switch_mutex().lock() else {
-            let status = alunixa_x_core::relay_config::default_relay_status();
-            return failed(
-                "供应商切换锁已损坏，请重启管理器后再试。",
-                relay_switch_payload(
-                    SettingsStore::default().load().unwrap_or_default(),
-                    status,
-                    None,
-                ),
-            );
-        };
-        request
-            .expected_revision
-            .as_deref()
-            .filter(|revision| !revision.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("缺少配置修订号，请刷新后再切换"))
-            .and_then(|revision| {
-                alunixa_x_core::config_transaction::run(store.path(), &home, Some(revision), || {
-                    alunixa_x_core::relay_switch::switch_relay_profile_in_home(
-                        &store,
-                        &home,
-                        settings,
-                        &previous_active_relay_id,
-                    )
-                })
-            })
-    };
-    match switch_result {
+    match alunixa_x_core::relay_switch::switch_relay_profile_in_home(
+        &store,
+        &home,
+        settings,
+        &previous_active_relay_id,
+    ) {
         Ok(result) => {
             let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
             log_manager_event(
@@ -3608,7 +4793,7 @@ pub async fn switch_relay_profile(
                 }),
             );
             ok(
-                "供应商已保存；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用配置、模型目录和默认模型。",
+                "供应商已切换。",
                 relay_switch_payload(result.settings, status, result.backup_path),
             )
         }
@@ -3640,6 +4825,35 @@ pub fn write_diagnostic_event(event: String, detail: Value) -> CommandResult<Val
     }
 }
 
+/// 预检 live config.toml 能否被回填流程解析（issue #618）。
+///
+/// core 侧的 `backfill_relay_profile_from_home_with_common` 会先做重复表头/重复
+/// 根键的语义归一化（`normalize_duplicate_toml_text`，公开入口是
+/// `normalize_config_text`），再对归一化结果做整份 TOML 解析。所以这里必须走同一
+/// 条归一化路径，否则会对「只是有重复表头」的文件误报语法错误。
+///
+/// 返回 `Some(错误描述)` 表示回填注定失败：要么读文件失败，要么归一化后仍不是合法
+/// TOML。返回 `None` 表示可以继续回填。文件不存在等同于空文件，属可回填。
+fn live_config_backfill_blocking_error(home: &Path) -> Option<String> {
+    let config_path = home.join("config.toml");
+    let contents = match fs::read_to_string(&config_path) {
+        Ok(contents) => contents,
+        // 不存在按空文件处理，与 core 的 read_optional_text 一致。
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => return Some(format!("读取 {} 失败：{error}", config_path.display())),
+    };
+    // 与 core 的 parse_toml_document 一样先剥掉 BOM。
+    let contents = contents.trim_start_matches('\u{feff}');
+    if contents.trim().is_empty() {
+        return None;
+    }
+    let normalized = alunixa_x_core::relay_config::normalize_config_text(contents);
+    match normalized.parse::<toml_edit::DocumentMut>() {
+        Ok(_) => None,
+        Err(error) => Some(format!("{error}")),
+    }
+}
+
 #[tauri::command]
 pub fn backfill_relay_profile_from_live(
     request: BackfillRelayProfileRequest,
@@ -3654,10 +4868,10 @@ pub fn backfill_relay_profile_from_live(
             "activeRelayId": settings.active_relay_id
         }),
     );
-    let Some(profile) = settings
+    let Some(profile_index) = settings
         .relay_profiles
-        .iter_mut()
-        .find(|profile| profile.id == request.profile_id)
+        .iter()
+        .position(|profile| profile.id == request.profile_id)
     else {
         log_manager_event(
             "manager.backfill_relay_profile_from_live.missing_profile",
@@ -3671,12 +4885,66 @@ pub fn backfill_relay_profile_from_live(
         );
     };
 
-    match alunixa_x_core::relay_config::backfill_relay_profile_from_home_with_common(
+    // live 的 config.toml 只要有一处手写语法错误，core 的整份 TOML 解析就会失败
+    // （relay_config.rs 的 parse_toml_document），回填因此无法进行。但「回填」只是
+    // 切换前的一次快照采集，不是切换到新供应商的必要条件；让整条切换流程失败会
+    // 把用户卡死在中转态（issue #618）。这里比照同文件 2089 / 2350 两处既有写法，
+    // 在解析失败时降级：保留原 settings 不动、只提示用户先修 config.toml 语法。
+    if let Some(error) = live_config_backfill_blocking_error(&home) {
+        log_manager_event(
+            "manager.backfill_relay_profile_from_live.degraded",
+            json!({
+                "profileId": requested_profile_id,
+                "error": error
+            }),
+        );
+        return degraded(
+            &format!("config.toml 有语法错误，已跳过回填并保留原有配置（切换照常进行）：{error}"),
+            SettingsBackfillPayload { settings },
+        );
+    }
+
+    if !request.adopt_provider_identity {
+        match alunixa_x_core::relay_config::live_config_matches_other_profile_in_home(
+            &home,
+            &settings,
+            &request.profile_id,
+        ) {
+            Ok(true) => {
+                return ok(
+                    "实时配置属于其它已保存供应商，已保留原快照。",
+                    SettingsBackfillPayload { settings },
+                );
+            }
+            Ok(false) => {}
+            Err(error) => {
+                return failed(
+                    &format!("读取实时配置归属失败，已保留原配置：{error}"),
+                    SettingsBackfillPayload { settings },
+                );
+            }
+        }
+    }
+
+    // 回填会就地改写 profile 与公共配置。先在副本上跑，成功才提交，避免中途
+    // 失败时留下「改了一半」的 profile 被后续切换流程用上。
+    let mut next_profile = settings.relay_profiles[profile_index].clone();
+    let mut next_context = settings.relay_context_config_contents.clone();
+    match alunixa_x_core::relay_config::backfill_relay_profile_from_home_with_common_and_policy(
         &home,
-        profile,
-        &mut settings.relay_context_config_contents,
+        &mut next_profile,
+        &mut next_context,
+        if request.adopt_provider_identity {
+            alunixa_x_core::relay_config::RelayBackfillPolicy::AdoptLiveIdentity
+        } else {
+            alunixa_x_core::relay_config::RelayBackfillPolicy::PreserveIdentity
+        },
     ) {
         Ok(()) => {
+            let changed = next_profile != settings.relay_profiles[profile_index]
+                || next_context != settings.relay_context_config_contents;
+            settings.relay_profiles[profile_index] = next_profile;
+            settings.relay_context_config_contents = next_context;
             log_manager_event(
                 "manager.backfill_relay_profile_from_live.ok",
                 json!({
@@ -3684,7 +4952,13 @@ pub fn backfill_relay_profile_from_live(
                 }),
             );
             ok(
-                "当前供应商配置已从 live 文件回填。",
+                if !changed {
+                    "实时配置没有需要回填的内容，已保留当前供应商快照。"
+                } else if request.adopt_provider_identity {
+                    "已采纳当前 URL 与认证，并重置旧自定义请求头。"
+                } else {
+                    "当前供应商配置已从 live 文件回填。"
+                },
                 SettingsBackfillPayload { settings },
             )
         }
@@ -3712,14 +4986,14 @@ pub fn list_context_entries(
         &request.settings.relay_context_config_contents,
     ) {
         Ok(entries) => ok(
-            "工具与插件列表已读取。",
+            "MCP&插件列表已读取。",
             ContextEntriesPayload {
                 settings: request.settings,
                 entries,
             },
         ),
         Err(error) => failed(
-            &format!("读取工具与插件列表失败：{error}"),
+            &format!("读取MCP&插件列表失败：{error}"),
             ContextEntriesPayload {
                 settings: request.settings,
                 entries: empty_context_entries(),
@@ -3732,23 +5006,15 @@ pub fn list_context_entries(
 pub fn read_live_context_entries() -> CommandResult<LiveContextEntriesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     let config_path = home.join("config.toml");
-    let read = (|| {
-        let _lock = alunixa_x_core::config_transaction::ConfigLock::acquire(&home)?;
-        let config = read_optional_text_file(&config_path)?;
-        Ok::<_, anyhow::Error>((
-            alunixa_x_core::relay_config::list_context_entries_from_common_config(&config)?,
-            current_config_revision(),
-        ))
-    })();
-    match read {
-        Ok((entries, revision)) => ok(
-            "live 工具与插件已读取。",
-            LiveContextEntriesPayload { entries, revision },
+    let config = read_optional_text_file(&config_path).unwrap_or_default();
+    match alunixa_x_core::relay_config::list_context_entries_from_common_config(&config) {
+        Ok(entries) => ok(
+            "live MCP&插件已读取。",
+            LiveContextEntriesPayload { entries },
         ),
         Err(error) => failed(
-            &format!("读取 live 工具与插件失败：{error}"),
+            &format!("读取 live MCP&插件失败：{error}"),
             LiveContextEntriesPayload {
-                revision: None,
                 entries: empty_context_entries(),
             },
         ),
@@ -3769,7 +5035,7 @@ pub fn upsert_context_entry(request: ContextEntryRequest) -> CommandResult<Conte
             list_context_entries(ContextSettingsRequest { settings })
         }
         Err(error) => failed(
-            &format!("保存工具与插件失败：{error}"),
+            &format!("保存MCP&插件失败：{error}"),
             ContextEntriesPayload {
                 settings,
                 entries: empty_context_entries(),
@@ -3778,49 +5044,204 @@ pub fn upsert_context_entry(request: ContextEntryRequest) -> CommandResult<Conte
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpFormPayload {
+    pub form: alunixa_x_core::mcp_config::McpServerForm,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpTomlPayload {
+    pub toml_body: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpImportRequest {
+    pub settings: BackendSettings,
+    pub json: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpImportPreviewPayload {
+    pub entries: Vec<alunixa_x_core::mcp_config::McpJsonEntry>,
+    pub warnings: Vec<String>,
+}
+
+/// 把 TOML 表体拆成表单字段。纯转换，不碰 settings——
+/// 打开编辑器时解析一次即可，不必每次按键都往返后端。
+#[tauri::command]
+pub fn parse_mcp_entry(toml_body: String) -> CommandResult<McpFormPayload> {
+    match alunixa_x_core::mcp_config::parse_mcp_toml_body(&toml_body) {
+        Ok(form) => ok("已解析 MCP 配置。", McpFormPayload { form }),
+        Err(error) => failed(
+            &format!("解析 MCP 配置失败：{error}"),
+            McpFormPayload {
+                form: Default::default(),
+            },
+        ),
+    }
+}
+
+/// 表单字段拼回 TOML 表体。同样是纯转换。
+#[tauri::command]
+pub fn build_mcp_entry(
+    form: alunixa_x_core::mcp_config::McpServerForm,
+) -> CommandResult<McpTomlPayload> {
+    match alunixa_x_core::mcp_config::build_mcp_toml_body(&form) {
+        Ok(toml_body) => ok("已生成 MCP 配置。", McpTomlPayload { toml_body }),
+        Err(error) => failed(
+            &format!("生成 MCP 配置失败：{error}"),
+            McpTomlPayload {
+                toml_body: String::new(),
+            },
+        ),
+    }
+}
+
+/// 只解析不写入，让用户先看清会导入哪几条、有哪些字段被改写。
+#[tauri::command]
+pub fn preview_mcp_servers_json(json: String) -> CommandResult<McpImportPreviewPayload> {
+    match alunixa_x_core::mcp_config::parse_mcp_servers_json(&json) {
+        Ok(import) => {
+            let message = if import.warnings.is_empty() {
+                format!("解析出 {} 个 MCP 服务器。", import.entries.len())
+            } else {
+                format!(
+                    "解析出 {} 个 MCP 服务器，{} 处需要注意。",
+                    import.entries.len(),
+                    import.warnings.len()
+                )
+            };
+            ok(
+                &message,
+                McpImportPreviewPayload {
+                    entries: import.entries,
+                    warnings: import.warnings,
+                },
+            )
+        }
+        Err(error) => failed(
+            &format!("解析 JSON 失败：{error}"),
+            McpImportPreviewPayload {
+                entries: Vec::new(),
+                warnings: Vec::new(),
+            },
+        ),
+    }
+}
+
+/// 批量写入。一次性更新 settings，避免 N 条 MCP 就往返 N 次。
+#[tauri::command]
+pub fn import_mcp_servers_json(request: McpImportRequest) -> CommandResult<ContextEntriesPayload> {
+    let mut settings = request.settings;
+    let import = match alunixa_x_core::mcp_config::parse_mcp_servers_json(&request.json) {
+        Ok(import) => import,
+        Err(error) => {
+            return failed(
+                &format!("解析 JSON 失败：{error}"),
+                ContextEntriesPayload {
+                    settings,
+                    entries: empty_context_entries(),
+                },
+            );
+        }
+    };
+
+    let total = import.entries.len();
+    let mut common = settings.relay_context_config_contents.clone();
+    for entry in &import.entries {
+        match alunixa_x_core::relay_config::upsert_context_entry_in_common_config(
+            &common,
+            "mcp",
+            &entry.id,
+            &entry.toml_body,
+        ) {
+            Ok(updated) => common = updated,
+            Err(error) => {
+                return failed(
+                    &format!("导入 {} 失败：{error}", entry.id),
+                    ContextEntriesPayload {
+                        settings,
+                        entries: empty_context_entries(),
+                    },
+                );
+            }
+        }
+    }
+
+    settings.relay_context_config_contents = common;
+    let mut result = list_context_entries(ContextSettingsRequest { settings });
+    result.message = if import.warnings.is_empty() {
+        format!("已导入 {total} 个 MCP 服务器。")
+    } else {
+        format!(
+            "已导入 {total} 个 MCP 服务器：{}",
+            import.warnings.join("；")
+        )
+    };
+    result
+}
+
 #[tauri::command]
 pub fn sync_live_context_entries(
     request: ContextSettingsRequest,
-    expected_revision: Option<String>,
 ) -> CommandResult<LiveContextEntriesPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     let config_path = home.join("config.toml");
-    let result = expected_revision
-        .as_deref()
-        .filter(|revision| !revision.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("缺少配置修订号，请刷新后再同步"))
-        .and_then(|revision| {
-            alunixa_x_core::config_transaction::run(
-                &alunixa_x_core::paths::default_settings_path(),
-                &home,
-                Some(revision),
-                || {
-                    let current = read_optional_text_file(&config_path)?;
-                    let updated = alunixa_x_core::relay_config::sync_live_config_context_entries(
-                        &current,
-                        &request.settings.relay_context_config_contents,
-                    )?;
-                    let entries =
-                        alunixa_x_core::relay_config::list_context_entries_from_common_config(
-                            &updated,
-                        )?;
-                    alunixa_x_core::settings::atomic_write(&config_path, updated.as_bytes())?;
-                    Ok(entries)
+    let current_config = match read_optional_text_file(&config_path) {
+        Ok(config) => config,
+        Err(error) => {
+            return failed(
+                &format!("读取 live config.toml 失败：{error}"),
+                LiveContextEntriesPayload {
+                    entries: empty_context_entries(),
                 },
-            )
-        });
-    match result {
-        Ok(entries) => ok(
-            "live 工具与插件已同步。",
+            );
+        }
+    };
+    let updated_config = match alunixa_x_core::relay_config::sync_live_config_context_entries(
+        &current_config,
+        &request.settings.relay_context_config_contents,
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            return failed(
+                &format!("同步 live MCP&插件失败：{error}"),
+                LiveContextEntriesPayload {
+                    entries: empty_context_entries(),
+                },
+            );
+        }
+    };
+    if let Some(parent) = config_path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            return failed(
+                &format!("创建 Codex 配置目录失败：{error}"),
+                LiveContextEntriesPayload {
+                    entries: empty_context_entries(),
+                },
+            );
+        }
+    }
+    if let Err(error) = std::fs::write(&config_path, &updated_config) {
+        return failed(
+            &format!("写入 live config.toml 失败：{error}"),
             LiveContextEntriesPayload {
-                entries,
-                revision: current_config_revision(),
+                entries: empty_context_entries(),
             },
+        );
+    }
+    match alunixa_x_core::relay_config::list_context_entries_from_common_config(&updated_config) {
+        Ok(entries) => ok(
+            "live MCP&插件已同步。",
+            LiveContextEntriesPayload { entries },
         ),
         Err(error) => failed(
-            &format!("读取同步后的 live 工具与插件失败：{error}"),
+            &format!("读取同步后的 live MCP&插件失败：{error}"),
             LiveContextEntriesPayload {
-                revision: None,
                 entries: empty_context_entries(),
             },
         ),
@@ -3840,7 +5261,7 @@ pub fn delete_context_entry(request: ContextDeleteRequest) -> CommandResult<Cont
             list_context_entries(ContextSettingsRequest { settings })
         }
         Err(error) => failed(
-            &format!("删除工具与插件失败：{error}"),
+            &format!("删除MCP&插件失败：{error}"),
             ContextEntriesPayload {
                 settings,
                 entries: empty_context_entries(),
@@ -3935,29 +5356,12 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
 }
 
 #[tauri::command]
-pub async fn measure_relay_latency(url: String) -> CommandResult<RelayLatencyPayload> {
-    match alunixa_x_core::relay_latency::measure_relay_latency(&url).await {
-        Ok(measurement) => ok(
-            "目标 URL 延迟检测完成。",
-            RelayLatencyPayload {
-                latency_ms: Some(measurement.latency_ms),
-                http_status: Some(measurement.http_status),
-            },
-        ),
-        Err(error) => failed(
-            &format!("目标 URL 延迟检测失败：{error}"),
-            RelayLatencyPayload {
-                latency_ms: None,
-                http_status: None,
-            },
-        ),
-    }
-}
-
-#[tauri::command]
 pub async fn test_stepwise_settings(
     settings: BackendSettings,
 ) -> CommandResult<StepwiseTestPayload> {
+    let configured_protocol = alunixa_x_core::settings::normalize_stepwise_protocol(
+        &settings.codex_app_stepwise_protocol,
+    );
     match alunixa_x_core::stepwise::test_connection(&settings).await {
         Ok(result) => {
             let error = result
@@ -3970,25 +5374,43 @@ pub async fn test_stepwise_settings(
                 .and_then(Value::as_array)
                 .map(Vec::len)
                 .unwrap_or_default();
+            let protocol = result
+                .get("protocol")
+                .and_then(Value::as_str)
+                .unwrap_or(&configured_protocol)
+                .to_string();
             if error.is_empty() {
                 ok(
-                    &format!("Stepwise 连接正常，测试返回 {item_count} 条建议。"),
+                    &format!(
+                        "下一步建议连接正常（{}），测试返回 {item_count} 条建议。",
+                        stepwise_protocol_label(&protocol)
+                    ),
                     StepwiseTestPayload { item_count, error },
                 )
             } else {
                 failed(
-                    &format!("Stepwise 测试失败：{error}"),
+                    &format!("下一步建议测试失败：{error}"),
                     StepwiseTestPayload { item_count, error },
                 )
             }
         }
         Err(error) => failed(
-            &format!("Stepwise 测试失败：{error}"),
+            &format!("下一步建议测试失败：{error}"),
             StepwiseTestPayload {
                 item_count: 0,
                 error: error.to_string(),
             },
         ),
+    }
+}
+
+fn stepwise_protocol_label(protocol: &str) -> &str {
+    match protocol {
+        "chat_completions" => "Chat Completions",
+        "responses" => "Responses",
+        "anthropic_messages" => "Anthropic Messages",
+        "auto" => "自动兼容",
+        _ => protocol,
     }
 }
 
@@ -4014,6 +5436,65 @@ pub async fn fetch_relay_profile_models(
             },
         ),
     }
+}
+
+#[tauri::command]
+pub async fn fetch_sub2api_billing(profile: RelayProfile) -> CommandResult<Sub2ApiBillingPayload> {
+    let profile_name = if profile.name.trim().is_empty() {
+        "未命名供应商"
+    } else {
+        profile.name.trim()
+    };
+    match alunixa_x_core::sub2api::fetch_sub2api_billing_info(&profile).await {
+        Ok(info) => ok(
+            &format!(
+                "已从「{profile_name}」获取倍率：{}x。",
+                format_multiplier(info.effective_rate_multiplier)
+            ),
+            Sub2ApiBillingPayload {
+                endpoint: info.endpoint,
+                group_rate_multiplier: info.group_rate_multiplier,
+                user_rate_multiplier: info.user_rate_multiplier,
+                resolved_rate_multiplier: info.resolved_rate_multiplier,
+                peak_rate_enabled: info.peak_rate_enabled,
+                peak_rate_multiplier: info.peak_rate_multiplier,
+                applied_peak_multiplier: info.applied_peak_multiplier,
+                effective_rate_multiplier: info.effective_rate_multiplier,
+                observed_at: info.observed_at,
+            },
+        ),
+        Err(error) => failed(
+            &format!("从「{profile_name}」获取 sub2api 倍率失败：{error}"),
+            Sub2ApiBillingPayload {
+                endpoint: alunixa_x_core::sub2api::sub2api_billing_endpoint(
+                    if profile.upstream_base_url.trim().is_empty() {
+                        profile.base_url.trim()
+                    } else {
+                        profile.upstream_base_url.trim()
+                    },
+                ),
+                group_rate_multiplier: 0.0,
+                user_rate_multiplier: None,
+                resolved_rate_multiplier: 0.0,
+                peak_rate_enabled: false,
+                peak_rate_multiplier: None,
+                applied_peak_multiplier: None,
+                effective_rate_multiplier: 0.0,
+                observed_at: String::new(),
+            },
+        ),
+    }
+}
+
+fn format_multiplier(value: f64) -> String {
+    let mut text = format!("{value:.4}");
+    while text.contains('.') && text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
 }
 
 #[tauri::command]
@@ -4058,22 +5539,24 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
     if alunixa_x_core::relay_config::relay_profile_base_url(&profile)
         .trim()
         .is_empty()
-        || alunixa_x_core::relay_config::relay_profile_api_key(&profile)
-            .trim()
-            .is_empty()
+        || (!profile.uses_no_auth()
+            && alunixa_x_core::relay_config::relay_profile_api_key(&profile)
+                .trim()
+                .is_empty())
     {
         checks.push(ProviderDoctorCheck {
             id: "config".to_string(),
             title: "配置完整性".to_string(),
             status: "failed".to_string(),
-            detail: "Base URL 或 API Key 为空。".to_string(),
+            detail: "Base URL 为空，或需要认证但 API Key 为空。".to_string(),
         });
         let payload = ProviderDoctorPayload {
             profile_name,
             model: test_model,
             summary: "配置不完整，无法发起上游诊断。".to_string(),
-            recommendation: "先填写 Base URL 和 API Key；如果是官方账号，请切换到官方登录模式。"
-                .to_string(),
+            recommendation:
+                "先填写 Base URL，并填写 API Key 或为可信上游开启无需认证；如果是官方账号，请切换到官方登录模式。"
+                    .to_string(),
             checks,
         };
         return failed("Provider Doctor：配置不完整。", payload);
@@ -4086,17 +5569,9 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
         detail: format!(
             "{} / {}",
             alunixa_x_core::relay_config::relay_profile_base_url(&profile),
-            match profile.protocol_for_model(&test_model) {
-                Ok(alunixa_x_core::settings::RelayProtocol::Responses) => "Responses API",
-                Ok(alunixa_x_core::settings::RelayProtocol::ChatCompletions) => "Chat Completions",
-                Ok(alunixa_x_core::settings::RelayProtocol::Completions) => "Completions",
-                Ok(alunixa_x_core::settings::RelayProtocol::AnthropicMessages) => {
-                    "Anthropic Messages"
-                }
-                Ok(alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent) => {
-                    "Gemini generateContent"
-                }
-                Err(_) => "Invalid model protocol",
+            match profile.protocol {
+                alunixa_x_core::settings::RelayProtocol::Responses => "Responses API",
+                alunixa_x_core::settings::RelayProtocol::ChatCompletions => "Chat Completions",
             }
         ),
     });
@@ -4237,16 +5712,14 @@ fn provider_doctor_recommendation(checks: &[ProviderDoctorCheck]) -> String {
 #[tauri::command]
 pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let settings = match SettingsStore::default().load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-            return failed(
-                &format!("读取供应商设置失败，已停止写入 live 配置：{error}"),
-                relay_payload(status, None),
-            );
-        }
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            relay_payload(status, None),
+        );
     };
+    let settings = SettingsStore::default().load().unwrap_or_default();
     if !settings.relay_profiles_enabled {
         let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
         return failed(
@@ -4257,20 +5730,9 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     prepare_codex_app_state_before_provider_switch(&home, "manager.apply_relay_injection.before");
     let relay = settings.active_relay_profile();
     log_relay_apply_request("manager.apply_relay_injection", &settings, &relay);
-    if settings.active_aggregate_relay_profile().is_some() {
-        let response = apply_aggregate_relay_injection_to_home(&home);
+    if let Some(aggregate) = settings.active_aggregate_relay_profile() {
+        let response = apply_aggregate_relay_injection_to_home(&home, aggregate.session_provider);
         if response.status == "ok" {
-            if let Err(error) = alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                &home, &settings,
-            ) {
-                return failed(
-                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
-                    relay_payload(
-                        alunixa_x_core::relay_config::relay_status_from_home(&home),
-                        None,
-                    ),
-                );
-            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_relay_injection.aggregate",
@@ -4279,24 +5741,12 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
         return response;
     }
     if relay_has_complete_files(&relay) {
-        return match alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
+        return match alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules(
             &home,
             &relay,
             &relay_combined_common_config(&settings),
-            settings.computer_use_guard_enabled,
         ) {
             Ok(result) => {
-                if let Err(error) =
-                    alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                        &home, &settings,
-                    )
-                {
-                    let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-                    return failed(
-                        &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
-                        relay_payload(status, result.backup_path),
-                    );
-                }
                 finish_codex_app_state_after_provider_switch(
                     &home,
                     "manager.apply_relay_injection.profile",
@@ -4347,23 +5797,15 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
         );
     }
 
-    match alunixa_x_core::relay_config::apply_relay_config_to_home_with_protocol(
+    match alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
         &home,
         &relay.base_url,
         &relay.api_key,
         relay.protocol,
-        alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+        alunixa_x_core::relay_config::relay_session_provider_from_config(&relay.config_contents),
     ) {
         Ok(result) => {
-            if let Err(error) = alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                &home, &settings,
-            ) {
-                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-                return failed(
-                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
-                    relay_payload(status, result.backup_path),
-                );
-            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_relay_injection.generated",
@@ -4398,15 +5840,19 @@ pub fn apply_relay_injection() -> CommandResult<RelayPayload> {
     }
 }
 
-fn apply_aggregate_relay_injection_to_home(home: &Path) -> CommandResult<RelayPayload> {
-    match alunixa_x_core::relay_config::apply_relay_config_to_home_with_protocol(
+fn apply_aggregate_relay_injection_to_home(
+    home: &Path,
+    session_provider: RelaySessionProvider,
+) -> CommandResult<RelayPayload> {
+    match alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
         home,
         &alunixa_x_core::protocol_proxy::local_responses_proxy_base_url(
-            alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+            alunixa_x_core::protocol_proxy::protocol_proxy_port(),
         ),
         "alunixa-x-aggregate",
         alunixa_x_core::settings::RelayProtocol::Responses,
-        alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+        session_provider,
     ) {
         Ok(result) => {
             let status = alunixa_x_core::relay_config::relay_status_from_home(home);
@@ -4428,16 +5874,14 @@ fn apply_aggregate_relay_injection_to_home(home: &Path) -> CommandResult<RelayPa
 #[tauri::command]
 pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let settings = match SettingsStore::default().load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-            return failed(
-                &format!("读取供应商设置失败，已停止写入 live 配置：{error}"),
-                relay_payload(status, None),
-            );
-        }
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            relay_payload(status, None),
+        );
     };
+    let settings = SettingsStore::default().load().unwrap_or_default();
     if !settings.relay_profiles_enabled {
         let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
         return failed(
@@ -4452,24 +5896,12 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
     let relay = settings.active_relay_profile();
     log_relay_apply_request("manager.apply_pure_api_injection", &settings, &relay);
     if relay_has_complete_files(&relay) {
-        return match alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_computer_use_guard(
+        return match alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules(
             &home,
             &relay,
             &relay_combined_common_config(&settings),
-            settings.computer_use_guard_enabled,
         ) {
             Ok(result) => {
-                if let Err(error) =
-                    alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                        &home, &settings,
-                    )
-                {
-                    let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-                    return failed(
-                        &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
-                        relay_payload(status, result.backup_path),
-                    );
-                }
                 finish_codex_app_state_after_provider_switch(
                     &home,
                     "manager.apply_pure_api_injection.profile",
@@ -4510,23 +5942,15 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
         };
     }
 
-    match alunixa_x_core::relay_config::apply_pure_api_config_to_home_with_protocol(
+    match alunixa_x_core::relay_config::apply_pure_api_config_to_home_with_session_provider(
         &home,
         &relay.base_url,
         &relay.api_key,
         relay.protocol,
-        alunixa_x_core::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        alunixa_x_core::protocol_proxy::protocol_proxy_port(),
+        alunixa_x_core::relay_config::relay_session_provider_from_config(&relay.config_contents),
     ) {
         Ok(result) => {
-            if let Err(error) = alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                &home, &settings,
-            ) {
-                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-                return failed(
-                    &format!("供应商已写入，但同步 Agent 能力配置失败：{error}"),
-                    relay_payload(status, result.backup_path),
-                );
-            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.apply_pure_api_injection.generated",
@@ -4568,18 +5992,16 @@ pub fn apply_pure_api_injection() -> CommandResult<RelayPayload> {
 }
 
 #[tauri::command]
-pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
+pub fn clear_relay_injection() -> CommandResult<RelayPayload> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    let settings = match SettingsStore::default().load() {
-        Ok(settings) => settings,
-        Err(error) => {
-            let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-            return failed(
-                &format!("读取供应商设置失败，已停止清理 live 配置：{error}"),
-                relay_payload(status, None),
-            );
-        }
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            relay_payload(status, None),
+        );
     };
+    let settings = SettingsStore::default().load().unwrap_or_default();
     let relay = settings.active_relay_profile();
     log_manager_event("manager.clear_relay_injection.start", json!({}));
     prepare_codex_app_state_before_provider_switch(&home, "manager.clear_relay_injection.before");
@@ -4587,17 +6009,9 @@ pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
         && !relay.official_mix_api_key
         && !relay.auth_contents.trim().is_empty())
     .then_some(relay.auth_contents.as_str());
-    match alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents) {
+    match alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents)
+    {
         Ok(result) => {
-            if let Err(error) = alunixa_x_core::relay_config::sync_codex_agent_capabilities_in_home(
-                &home, &settings,
-            ) {
-                let status = alunixa_x_core::relay_config::relay_status_from_home(&home);
-                return failed(
-                    &format!("官方配置已恢复，但同步 Agent 能力配置失败：{error}"),
-                    relay_payload(status, result.backup_path),
-                );
-            }
             finish_codex_app_state_after_provider_switch(
                 &home,
                 "manager.clear_relay_injection.after",
@@ -4611,7 +6025,7 @@ pub async fn clear_relay_injection() -> CommandResult<RelayPayload> {
                 }),
             );
             ok(
-                "官方配置已恢复；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用。",
+                "已清除 custom 中转 API 模式，并切换到官方 ChatGPT 登录模式。",
                 relay_payload(status, result.backup_path),
             )
         }
@@ -4755,72 +6169,6 @@ fn relay_switch_mutex() -> &'static Mutex<()> {
     RELAY_SWITCH_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-fn official_remote_runtime()
--> &'static tokio::sync::Mutex<alunixa_x_core::official_remote::OfficialRemoteRuntime> {
-    static RUNTIME: OnceLock<
-        tokio::sync::Mutex<alunixa_x_core::official_remote::OfficialRemoteRuntime>,
-    > = OnceLock::new();
-    RUNTIME.get_or_init(|| {
-        tokio::sync::Mutex::new(alunixa_x_core::official_remote::OfficialRemoteRuntime::default())
-    })
-}
-
-fn saved_codex_app_path() -> Option<String> {
-    SettingsStore::default()
-        .load()
-        .ok()
-        .map(|settings| settings.codex_app_path)
-        .filter(|path| !path.trim().is_empty())
-}
-
-fn empty_chatgpt_login_start() -> alunixa_x_core::official_remote::ChatGptLoginStart {
-    alunixa_x_core::official_remote::ChatGptLoginStart {
-        login_id: String::new(),
-        auth_url: String::new(),
-        chatgpt_url: "https://chatgpt.com/".to_string(),
-    }
-}
-
-fn empty_chatgpt_device_login_start() -> alunixa_x_core::official_remote::ChatGptDeviceLoginStart {
-    alunixa_x_core::official_remote::ChatGptDeviceLoginStart {
-        login_id: String::new(),
-        verification_url: String::new(),
-        user_code: String::new(),
-    }
-}
-
-fn empty_chatgpt_login_progress() -> alunixa_x_core::official_remote::ChatGptLoginProgress {
-    alunixa_x_core::official_remote::ChatGptLoginProgress {
-        login_id: None,
-        state: "failed".to_string(),
-        message: String::new(),
-        settings: None,
-    }
-}
-
-fn empty_remote_control_snapshot() -> alunixa_x_core::official_remote::RemoteControlSnapshot {
-    alunixa_x_core::official_remote::RemoteControlSnapshot {
-        account_type: "none".to_string(),
-        account_label: None,
-        plan_type: None,
-        requires_openai_auth: false,
-        status: "disabled".to_string(),
-        server_name: String::new(),
-        installation_id: String::new(),
-        environment_id: None,
-        clients: Vec::new(),
-    }
-}
-
-fn empty_remote_control_pairing() -> alunixa_x_core::official_remote::RemoteControlPairing {
-    alunixa_x_core::official_remote::RemoteControlPairing {
-        pairing_code: String::new(),
-        manual_pairing_code: None,
-        environment_id: String::new(),
-        expires_at: 0,
-    }
-}
-
 fn empty_context_entries() -> alunixa_x_core::relay_config::CodexContextEntries {
     alunixa_x_core::relay_config::CodexContextEntries {
         mcp_servers: Vec::new(),
@@ -4830,11 +6178,9 @@ fn empty_context_entries() -> alunixa_x_core::relay_config::CodexContextEntries 
 }
 
 fn relay_files_payload_from_home(home: &std::path::Path) -> anyhow::Result<RelayFilesPayload> {
-    let _lock = alunixa_x_core::config_transaction::ConfigLock::acquire(home)?;
     let config_path = home.join("config.toml");
     let auth_path = home.join("auth.json");
     Ok(RelayFilesPayload {
-        revision: alunixa_x_core::config_transaction::revision(&config_path, home)?,
         config_path: config_path.to_string_lossy().to_string(),
         auth_path: auth_path.to_string_lossy().to_string(),
         config_contents: read_optional_text_file(&config_path)?,
@@ -4855,17 +6201,21 @@ fn save_relay_file_in_home(
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let contents = if kind == "config" {
-        alunixa_x_core::relay_config::validate_config_text(contents)?;
-        let existing = read_optional_text_file(&path)?;
-        alunixa_x_core::codex_instructions::preserve_model_instructions_file(&existing, contents)?
-    } else {
-        serde_json::from_str::<serde_json::Map<String, Value>>(contents)
-            .map_err(|_| anyhow::anyhow!("auth.json 不是有效 JSON 对象，未修改"))?;
-        contents.to_string()
-    };
-    alunixa_x_core::settings::atomic_write(&path, contents.as_bytes())?;
+    std::fs::write(path, contents)?;
     Ok(())
+}
+
+fn prepare_relay_file_contents(
+    kind: &str,
+    contents: &str,
+    profile: &RelayProfile,
+) -> anyhow::Result<String> {
+    if kind == "config" {
+        return alunixa_x_core::relay_config::apply_deepseek_responses_compatibility(
+            profile, contents,
+        );
+    }
+    Ok(contents.to_string())
 }
 
 fn read_optional_text_file(path: &std::path::Path) -> anyhow::Result<String> {
@@ -4881,6 +6231,12 @@ fn ads_payload(payload: Value) -> AdsPayload {
         version: payload.get("version").and_then(Value::as_u64).unwrap_or(1),
         ads: payload
             .get("ads")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        top_ad: payload.get("topAd").cloned(),
+        top_ads: payload
+            .get("topAds")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default(),
@@ -4910,17 +6266,12 @@ fn settings_payload(message: &str, failure_context: &str) -> CommandResult<Setti
 }
 
 fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsPayload)> {
-    let _lock = alunixa_x_core::config_transaction::ConfigLock::acquire(
-        &alunixa_x_core::relay_config::default_codex_home_dir(),
-    )
-    .map_err(|e| (e, fallback_settings_payload()))?;
     let store = SettingsStore::default();
     let settings_path = alunixa_x_core::paths::default_settings_path()
         .to_string_lossy()
         .to_string();
     match store.load() {
         Ok(settings) => Ok(SettingsPayload {
-            revision: current_config_revision(),
             settings,
             settings_path,
             user_scripts: user_script_inventory(),
@@ -4928,7 +6279,6 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
         Err(error) => Err((
             error,
             SettingsPayload {
-                revision: current_config_revision(),
                 settings: BackendSettings::default(),
                 settings_path,
                 user_scripts: user_script_inventory(),
@@ -4939,7 +6289,6 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
 
 fn fallback_settings_payload() -> SettingsPayload {
     SettingsPayload {
-        revision: current_config_revision(),
         settings: SettingsStore::default().load().unwrap_or_default(),
         settings_path: alunixa_x_core::paths::default_settings_path()
             .to_string_lossy()
@@ -5033,7 +6382,6 @@ fn market_script_payload(script: &MarketScript, installed: &BTreeMap<String, Str
         "tags": script.tags,
         "homepage": script.homepage,
         "script_url": script.script_url,
-        "sha256": script.sha256,
         "installed": is_installed,
         "installedVersion": installed_version,
         "updateAvailable": is_installed && installed.get(&script.id).map(|version| version != &script.version).unwrap_or(false)
@@ -5062,17 +6410,6 @@ fn user_scripts_config_dir() -> PathBuf {
         .join("Alunixa X")
 }
 
-fn default_config_backup_paths() -> ConfigBackupPaths {
-    let scripts_config_dir = user_scripts_config_dir();
-    ConfigBackupPaths {
-        settings_path: alunixa_x_core::paths::default_settings_path(),
-        codex_home: alunixa_x_core::codex_home::default_codex_home_dir(),
-        user_scripts_dir: scripts_config_dir.join("user_scripts"),
-        user_scripts_config_path: scripts_config_dir.join("user_scripts.json"),
-        automatic_backup_dir: alunixa_x_core::paths::default_app_state_dir().join("config-backups"),
-    }
-}
-
 fn builtin_user_scripts_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -5082,7 +6419,7 @@ fn builtin_user_scripts_dir() -> PathBuf {
 }
 
 fn diagnostics_report() -> String {
-    let (codex_app_path, entrypoints, latest_launch) = load_overview_payload();
+    let (codex_app_path, entrypoints, latest_launch, runtime_health) = load_overview_payload();
     let overview = ok(
         "概览已加载。",
         OverviewPayload {
@@ -5093,6 +6430,7 @@ fn diagnostics_report() -> String {
             silent_shortcut: shortcut_state(entrypoints.silent_shortcut),
             management_shortcut: shortcut_state(entrypoints.management_shortcut),
             latest_launch,
+            runtime_health,
             current_version: alunixa_x_core::version::VERSION.to_string(),
             update_status: "not_checked".to_string(),
             settings_path: alunixa_x_core::paths::default_settings_path()
@@ -5112,7 +6450,7 @@ fn diagnostics_report() -> String {
         "generatedAtMs": generated_at_ms,
         "version": alunixa_x_core::version::VERSION,
         "overview": overview.payload,
-        "settings": manager_settings_value(&settings).unwrap_or(Value::Null),
+        "settings": settings,
         "logs": {
             "diagnosticLogPath": alunixa_x_core::paths::default_diagnostic_log_path(),
             "latestStatusPath": alunixa_x_core::paths::default_latest_status_path()
@@ -5129,42 +6467,20 @@ fn load_overview_payload() -> (
     Option<PathBuf>,
     install::EntryPointState,
     Option<LaunchStatus>,
+    crate::runtime_health::RuntimeHealth,
 ) {
     let settings = SettingsStore::default().load().unwrap_or_default();
-    let codex_app = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
-        None,
-        Some(settings.codex_app_path.as_str()),
-    );
-    let mut latest_launch = StatusStore::default().load_latest().unwrap_or(None);
-    let codex_processes = alunixa_x_core::watcher::find_codex_processes();
-    if !codex_processes.is_empty()
-        && latest_launch
-            .as_ref()
-            .map(|status| {
-                !matches!(
-                    status.status.as_str(),
-                    "starting" | "running" | "running_degraded"
-                )
-            })
-            .unwrap_or(true)
-    {
-        latest_launch = Some(LaunchStatus {
-            status: "running_degraded".to_string(),
-            message: "已检测到 Codex 桌面进程，Alunixa X 正在等待启动器或注入桥接状态。"
-                .to_string(),
-            started_at_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-            debug_port: None,
-            helper_port: None,
-            codex_app: codex_app
-                .as_deref()
-                .map(|path| path.to_string_lossy().to_string()),
-            aumid: None,
-        });
-    }
-    (codex_app, install::inspect_entrypoints(), latest_launch)
+    let latest = StatusStore::default().load_latest().unwrap_or(None);
+    let runtime_health = crate::runtime_health::inspect(&settings, latest.as_ref());
+    (
+        alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+            None,
+            Some(settings.codex_app_path.as_str()),
+        ),
+        install::inspect_entrypoints(),
+        latest,
+        runtime_health,
+    )
 }
 
 fn install_background_failure(action: &str, error: impl std::fmt::Display) -> InstallActionResult {
@@ -5180,16 +6496,51 @@ fn install_background_failure(action: &str, error: impl std::fmt::Display) -> In
 fn watcher_payload() -> WatcherPayload {
     let flag = alunixa_x_core::watcher::default_watcher_disabled_flag();
     WatcherPayload {
-        enabled: !flag.exists(),
+        enabled: alunixa_x_core::watcher::watcher_is_installed() && !flag.exists(),
         disabled_flag: flag.to_string_lossy().to_string(),
     }
 }
 
-fn read_tail(path: &Path, max_lines: usize) -> std::io::Result<String> {
-    let contents = fs::read_to_string(path)?;
+const MAX_LOG_TAIL_READ_BYTES: u64 = 2 * 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct TailRead {
+    text: String,
+    truncated: bool,
+    file_size: u64,
+}
+
+fn read_tail(path: &Path, max_lines: usize) -> std::io::Result<TailRead> {
+    let mut file = fs::File::open(path)?;
+    let file_size = file.metadata()?.len();
+    if max_lines == 0 || file_size == 0 {
+        return Ok(TailRead {
+            text: String::new(),
+            truncated: false,
+            file_size,
+        });
+    }
+
+    let read_len = MAX_LOG_TAIL_READ_BYTES.min(file_size);
+    let start = file_size - read_len;
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::with_capacity(read_len as usize);
+    file.read_to_end(&mut bytes)?;
+    let truncated = start > 0;
+    if truncated {
+        if let Some(pos) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=pos);
+        }
+    }
+
+    let contents = String::from_utf8_lossy(&bytes);
     let mut lines = contents.lines().rev().take(max_lines).collect::<Vec<_>>();
     lines.reverse();
-    Ok(lines.join("\n"))
+    Ok(TailRead {
+        text: lines.join("\n"),
+        truncated,
+        file_size,
+    })
 }
 
 fn path_state(path: Option<PathBuf>) -> PathState {
@@ -5216,6 +6567,95 @@ fn shortcut_state(shortcut: install::ShortcutState) -> PathState {
     }
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestVlmRequest {
+    pub api_key: String,
+    pub model: String,
+    pub base_url: String,
+    pub image_data_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestVlmResult {
+    pub vlm_status: String,
+    pub http_code: Option<u16>,
+    pub duration_ms: u64,
+    pub error: Option<String>,
+    pub description: Option<String>,
+    pub model: String,
+    pub raw_request: Option<String>,
+    pub raw_response: Option<String>,
+}
+
+/// 用表单当前 VLM 配置 + 用户上传图片（data URL）测试 VLM 可用性。
+/// 用表单当前值（未保存亦可）；失败也返回结构化 payload 供前端渲染诊断。
+#[tauri::command]
+pub async fn test_vlm(request: TestVlmRequest) -> CommandResult<TestVlmResult> {
+    // 加固 spec §4.1 第二道门：前端校验可被绕过（IPC 直调），类型与大小在
+    // 信任边界重新校验；非法输入不发起网络请求。
+    if let Err(reason) = alunixa_x_core::vision::validate_image_data_url(&request.image_data_url) {
+        return failed(
+            "VLM 测试失败：invalid_image",
+            TestVlmResult {
+                vlm_status: "invalid_image".to_string(),
+                http_code: None,
+                duration_ms: 0,
+                error: Some(reason),
+                description: None,
+                model: request.model,
+                raw_request: None,
+                raw_response: None,
+            },
+        );
+    }
+    let config = alunixa_x_core::vision::VlmConfig {
+        api_key: request.api_key,
+        model: request.model.clone(),
+        base_url: request.base_url,
+    };
+    let client = match alunixa_x_core::http_client::vlm_http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            return failed(
+                &format!("VLM HTTP 客户端构建失败：{e}"),
+                TestVlmResult {
+                    vlm_status: "client_error".to_string(),
+                    http_code: None,
+                    duration_ms: 0,
+                    // 加固 spec §4.2：client_error 路径同样过脱敏，全仓库一条规则
+                    error: Some(alunixa_x_core::vision::redact_secrets(
+                        &e.to_string(),
+                        &config.api_key,
+                    )),
+                    description: None,
+                    model: request.model,
+                    raw_request: None,
+                    raw_response: None,
+                },
+            );
+        }
+    };
+    let outcome =
+        alunixa_x_core::vision::test_vlm_once(&config, &request.image_data_url, &client).await;
+    let result = TestVlmResult {
+        vlm_status: outcome.status.clone(),
+        http_code: outcome.http_code,
+        duration_ms: outcome.duration_ms,
+        error: outcome.error,
+        description: outcome.text,
+        model: request.model,
+        raw_request: outcome.raw_request,
+        raw_response: outcome.raw_response,
+    };
+    if outcome.status == "ok" {
+        ok("VLM 测试成功。", result)
+    } else {
+        failed(&format!("VLM 测试失败：{}", outcome.status), result)
+    }
+}
+
 fn ok<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
     CommandResult {
         status: "ok".to_string(),
@@ -5230,6 +6670,23 @@ fn failed<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
         message: message.to_string(),
         payload,
     }
+}
+
+/// 「功能降级但流程可继续」：与 `failed` 区分开，让调用方能继续走后面的步骤，
+/// 同时仍然把原因提示给用户（issue #618 的回填跳过即属此列）。
+fn degraded<T: Serialize>(message: &str, payload: T) -> CommandResult<T> {
+    CommandResult {
+        status: "degraded".to_string(),
+        message: message.to_string(),
+        payload,
+    }
+}
+
+// Hold ownership across stop and config sync, then release before the successor starts.
+fn ensure_provider_sync_is_idle_before_stop()
+-> Result<alunixa_x_data::ProviderSyncLifecycleGuard, String> {
+    alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(None)
+        .map_err(|error| format!("历史会话同步正在进行或锁不可用，未执行重启；请稍后重试：{error}"))
 }
 
 fn default_debug_port() -> u16 {
@@ -5248,76 +6705,213 @@ fn default_log_lines() -> usize {
 mod tests {
     use super::*;
 
-    #[test]
-    fn general_settings_responses_never_expose_independent_image_keys() {
-        let payload = SettingsPayload {
-            revision: current_config_revision(),
-            settings: BackendSettings {
-                image_models: vec![alunixa_x_core::image_models::ImageModel {
-                    id: "fixture".into(),
-                    name: "Images".into(),
-                    base_url: "https://images.example.invalid/v1".into(),
-                    api_key: "fixture-image-secret".into(),
-                    model: "image-fixture".into(),
-                }],
-                codex_app_path: "preserved-app".into(),
-                ..Default::default()
-            },
-            settings_path: "fixture-settings.json".into(),
-            user_scripts: json!({}),
-        };
-        let value = serde_json::to_value(&payload).unwrap();
-        assert!(value["settings"].get("imageModels").is_none());
-        assert!(!value.to_string().contains("fixture-image-secret"));
-        assert_eq!(value["settings"]["codexAppPath"], "preserved-app");
-        // Only the UI projection is redacted; storage and backups keep the original key.
-        assert_eq!(
-            payload.settings.image_models[0].api_key,
-            "fixture-image-secret"
-        );
-        let settings = payload.settings;
-        for value in [
-            serde_json::to_value(SettingsBackfillPayload {
-                settings: settings.clone(),
-            })
-            .unwrap(),
-            serde_json::to_value(ContextEntriesPayload {
-                settings: settings.clone(),
-                entries: alunixa_x_core::relay_config::CodexContextEntries {
-                    mcp_servers: vec![],
-                    skills: vec![],
-                    plugins: vec![],
-                },
-            })
-            .unwrap(),
-            serde_json::to_value(RelaySwitchPayload {
-                settings: settings.clone(),
-                relay: RelayPayload {
-                    authenticated: false,
-                    auth_source: String::new(),
-                    account_label: None,
-                    config_path: String::new(),
-                    configured: false,
-                    requires_openai_auth: false,
-                    has_bearer_token: false,
-                    backup_path: None,
-                },
-                settings_path: String::new(),
-                user_scripts: json!({}),
-            })
-            .unwrap(),
-            json!({ "settings": manager_settings_value(&settings).unwrap() }),
-        ] {
-            assert!(value["settings"].get("imageModels").is_none());
-            assert!(!value.to_string().contains("fixture-image-secret"));
-        }
-    }
+    /// 进程级全局状态的测试锁。
+    ///
+    /// 不止保护 `CODEX_HOME`：`paths::set_settings_path_for_tests`、
+    /// `GROK_HOME` 同样是进程级的，两个测试并行跑就会互相把对方的值冲掉
+    /// （表现为「单独跑过、全量跑挂」）。凡是动这几样的测试都必须先拿这把锁。
+    static GLOBAL_STATE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    fn codex_home_env_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn lock_codex_home_for_test() -> std::sync::MutexGuard<'static, ()> {
+        GLOBAL_STATE_TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn native_browser_diagnostics_keeps_connection_independent_from_patch_status() {
+        let result = NativeBrowserDiagnostics {
+            compatibility: alunixa_x_core::native_browser::BrowserStatus {
+                state: "runtime_unverified".into(),
+                detail: "Legacy runtime mismatch".into(),
+            },
+            connection: alunixa_x_core::native_browser_connection::ConnectionStatus {
+                state: "available".into(),
+                failed_checks: 0,
+                browsers: vec![
+                    alunixa_x_core::native_browser_connection::ConnectedBrowser {
+                        family: "edge".into(),
+                        header_enabled: Some(true),
+                        recognized: true,
+                    },
+                ],
+            },
+        };
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["compatibility"]["state"], "runtime_unverified");
+        assert_eq!(json["connection"]["state"], "available");
+        assert_eq!(json["connection"]["browsers"][0]["headerEnabled"], true);
+        assert_eq!(json["connection"]["failedChecks"], 0);
+    }
+
+    #[test]
+    fn requested_launch_status_identifies_the_current_request() {
+        let request = LaunchRequest {
+            app_path: "C:/Program Files/Codex".to_string(),
+            debug_port: 9333,
+            helper_port: 57322,
+            sync_active_relay: false,
+        };
+
+        let status = requested_launch_status(&request, "starting", "starting", 12345);
+
+        assert_eq!(status.status, "starting");
+        assert_eq!(status.message, "starting");
+        assert_eq!(status.started_at_ms, 12345);
+        assert_eq!(status.debug_port, Some(9333));
+        assert_eq!(status.helper_port, Some(57322));
+        assert_eq!(status.codex_app.as_deref(), Some("C:/Program Files/Codex"));
+    }
+
+    #[test]
+    fn repeated_activation_returns_the_current_session_identity_and_actual_ports() {
+        let request = launch_request(false);
+        let current = LaunchStatus {
+            status: "running".into(),
+            started_at_ms: 123,
+            debug_port: Some(9333),
+            helper_port: Some(57322),
+            ..LaunchStatus::default()
+        };
+        assert_eq!(
+            launch_identity_from_status(&request, 456, Some(&current)),
+            (9333, 57322, 123)
+        );
+        let starting = LaunchStatus {
+            status: "starting".into(),
+            ..current
+        };
+        assert_eq!(
+            launch_identity_from_status(&request, 456, Some(&starting)),
+            (request.debug_port, request.helper_port, 456)
+        );
+    }
+
+    #[test]
+    fn requested_launch_status_omits_an_unresolved_app_path() {
+        let request = LaunchRequest {
+            app_path: "  ".to_string(),
+            debug_port: 9229,
+            helper_port: 57321,
+            sync_active_relay: false,
+        };
+
+        let status = requested_launch_status(&request, "starting", "starting", 1);
+
+        assert_eq!(status.codex_app, None);
+    }
+
+    /// issue #2403：停止阶段要给出可判断的中间态（phase + progress），
+    /// 否则十几秒的阻塞等待在界面上和「卡死」无法区分。
+    #[test]
+    fn stopping_status_carries_phase_and_progress() {
+        let request = launch_request(false);
+
+        let status = requested_launch_status_with_phase(
+            &request,
+            "stopping",
+            "正在停止旧实例",
+            12345,
+            "restart_stopping",
+            10,
+        );
+
+        assert_eq!(status.status, "stopping");
+        assert_eq!(status.phase.as_deref(), Some("restart_stopping"));
+        assert_eq!(status.progress, Some(10));
+        // 中间态仍要带上请求标识，供「最近启动」判断是否属于本次重启。
+        assert_eq!(status.started_at_ms, 12345);
+        assert_eq!(status.debug_port, Some(request.debug_port));
+        assert_eq!(status.helper_port, Some(request.helper_port));
+    }
+
+    /// 进度百分比必须收敛到 0~100，越界值不能写进状态文件。
+    #[test]
+    fn stopping_status_clamps_progress() {
+        let request = launch_request(false);
+
+        let status =
+            requested_launch_status_with_phase(&request, "stopping", "msg", 1, "phase", 250);
+
+        assert_eq!(status.progress, Some(100));
+    }
+
+    /// 普通启动状态不带阶段信息，保持既有行为（进度字段为 None）。
+    #[test]
+    fn plain_launch_status_has_no_phase() {
+        let status = requested_launch_status(&launch_request(false), "starting", "starting", 1);
+
+        assert_eq!(status.phase, None);
+        assert_eq!(status.progress, None);
+    }
+
+    /// issue #618：live config.toml 有语法错误时必须被判成「可降级」，而不是让
+    /// 整条供应商切换流程失败。缺失文件等同于空文件，同样不阻断。
+    #[test]
+    fn live_config_backfill_blocking_error_only_flags_unparseable_toml() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path();
+
+        // 文件不存在（全新安装）→ 不阻断。
+        assert_eq!(live_config_backfill_blocking_error(home), None);
+
+        // 空文件 / 只有空白 → 不阻断。
+        std::fs::write(home.join("config.toml"), "  \n").unwrap();
+        assert_eq!(live_config_backfill_blocking_error(home), None);
+
+        // 正常 TOML → 不阻断。
+        std::fs::write(
+            home.join("config.toml"),
+            "model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://relay.example/v1\"\n",
+        )
+        .unwrap();
+        assert_eq!(live_config_backfill_blocking_error(home), None);
+
+        // 手写坏掉的 TOML（未闭合数组）→ 必须阻断并带上位置信息。
+        std::fs::write(
+            home.join("config.toml"),
+            "model_provider = \"custom\"\nmodel_list = [\"a\", \n",
+        )
+        .unwrap();
+        let error = live_config_backfill_blocking_error(home)
+            .expect("unparseable live config must be reported as blocking");
+        assert!(!error.is_empty(), "error detail must not be empty");
+    }
+
+    /// 重复表头/重复根键属于 core 归一层能修好的形态，预检不能误报成语法错误——
+    /// 否则 #618 的降级路径会吃掉本来能成功的回填。
+    #[test]
+    fn live_config_backfill_blocking_error_tolerates_duplicate_tables_and_root_keys() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "\
+model = \"a\"
+model = \"b\"
+
+[mcp_servers.node_repl]
+command = \"node\"
+
+[mcp_servers.node_repl]
+cwd = \"/tmp\"
+",
+        )
+        .unwrap();
+
+        assert_eq!(live_config_backfill_blocking_error(temp.path()), None);
+    }
+
+    /// 预检必须与 core 的读取路径同样剥掉 BOM，否则带 BOM 的正常文件会被误判。
+    #[test]
+    fn live_config_backfill_blocking_error_ignores_utf8_bom() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "\u{feff}model_provider = \"openai\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(live_config_backfill_blocking_error(temp.path()), None);
     }
 
     #[test]
@@ -5390,6 +6984,201 @@ mod tests {
         assert!(!result.payload.version.is_empty());
     }
 
+    fn provider_sync_result_for_test(
+        status: alunixa_x_data::ProviderSyncStatus,
+        message: &str,
+    ) -> alunixa_x_data::ProviderSyncResult {
+        alunixa_x_data::ProviderSyncResult {
+            status,
+            message: message.to_string(),
+            target_provider: "custom".to_string(),
+            backup_dir: None,
+            changed_session_files: 0,
+            skipped_locked_rollout_files: Vec::new(),
+            sqlite_rows_updated: 0,
+            sqlite_provider_rows_updated: 0,
+            sqlite_user_event_rows_updated: 0,
+            sqlite_cwd_rows_updated: 0,
+            sqlite_catalog_rows_inserted: 0,
+            sqlite_catalog_rows_removed: 0,
+            updated_workspace_roots: 0,
+            encrypted_content_warning: None,
+            repair_audit: alunixa_x_data::ProviderSyncAudit::default(),
+        }
+    }
+
+    #[test]
+    fn provider_sync_success_reports_backup_directory_when_something_changed() {
+        let mut sync = provider_sync_result_for_test(
+            alunixa_x_data::ProviderSyncStatus::Synced,
+            "Provider sync complete",
+        );
+        sync.changed_session_files = 3;
+        sync.backup_dir = Some(std::path::PathBuf::from("/tmp/backups/provider-sync/run-1"));
+
+        let result = provider_sync_command_result(sync);
+
+        assert_eq!(result.status, "ok");
+        assert!(
+            result.message.contains("/tmp/backups/provider-sync/run-1"),
+            "有改动时应告知备份目录：{}",
+            result.message
+        );
+    }
+
+    /// 什么都没改的时候不该多出一行备份目录，避免噪音。
+    #[test]
+    fn provider_sync_success_omits_backup_hint_without_changes() {
+        let sync = provider_sync_result_for_test(
+            alunixa_x_data::ProviderSyncStatus::Synced,
+            "Provider sync already up to date",
+        );
+
+        let result = provider_sync_command_result(sync);
+
+        assert_eq!(result.status, "ok");
+        assert!(
+            !result.message.contains("备份目录："),
+            "无改动时不该提示备份目录：{}",
+            result.message
+        );
+    }
+
+    #[test]
+    fn provider_sync_skipped_is_reported_as_command_failure() {
+        let result = provider_sync_command_result(provider_sync_result_for_test(
+            alunixa_x_data::ProviderSyncStatus::Skipped,
+            "Provider sync lock exists",
+        ));
+
+        assert_eq!(result.status, "failed");
+        assert!(result.message.contains("Provider sync lock exists"));
+        assert_eq!(result.payload["syncStatus"], "skipped");
+    }
+
+    #[test]
+    fn provider_sync_preflight_failure_is_structured_as_skipped() {
+        let result = provider_sync_preflight_failure("target is not resolvable");
+
+        assert_eq!(result.status, "failed");
+        assert_eq!(result.payload["syncStatus"], "skipped");
+        assert_eq!(result.payload["targetProvider"], "");
+        assert_eq!(result.payload["syncMessage"], "target is not resolvable");
+    }
+
+    #[test]
+    fn manual_provider_sync_targets_keep_unresolvable_history_visible() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            r#"model_provider = "relay-live"
+
+[model_providers.relay-live]
+base_url = "https://example.invalid/v1"
+"#,
+        )
+        .unwrap();
+        let mut settings = BackendSettings::default();
+        settings.provider_sync_manual_providers =
+            vec!["relay-live".to_string(), "relay-history".to_string()];
+        let manual = settings.provider_sync_manual_providers.clone();
+        let mut targets = alunixa_x_data::ProviderSyncTargetList {
+            current_provider: "relay-live".to_string(),
+            targets: Vec::new(),
+        };
+
+        merge_manual_provider_sync_targets(&mut targets, &manual, &settings, Some(temp.path()));
+
+        let live = targets
+            .targets
+            .iter()
+            .find(|target| target.id == "relay-live")
+            .unwrap();
+        assert!(live.is_resolvable);
+        assert!(live.unavailable_reason.is_none());
+        let history = targets
+            .targets
+            .iter()
+            .find(|target| target.id == "relay-history")
+            .unwrap();
+        assert!(!history.is_resolvable);
+        assert!(history.unavailable_reason.is_some());
+    }
+
+    #[test]
+    fn provider_sync_synced_is_reported_as_command_success() {
+        let result = provider_sync_command_result(provider_sync_result_for_test(
+            alunixa_x_data::ProviderSyncStatus::Synced,
+            "Provider sync complete",
+        ));
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.payload["syncStatus"], "synced");
+    }
+
+    #[test]
+    fn restart_absent_app_uses_launch_but_explicit_sync_still_restarts() {
+        assert_eq!(
+            restart_disposition(false, false),
+            RestartDisposition::LaunchOnly
+        );
+        for (sync, running) in [(true, false), (false, true), (true, true)] {
+            assert_eq!(
+                restart_disposition(sync, running),
+                RestartDisposition::StopAndRestart
+            );
+        }
+    }
+
+    #[test]
+    fn restart_and_launch_share_a_single_flight_guard() {
+        let first = try_acquire_launch_guard().unwrap();
+        assert!(try_acquire_launch_guard().is_err());
+        drop(first);
+        assert!(try_acquire_launch_guard().is_ok());
+    }
+
+    #[test]
+    fn restart_provider_guard_is_held_until_spawn_and_released_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let guard =
+            alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(temp.path())).unwrap();
+        assert!(
+            alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(temp.path())).is_err()
+        );
+        let spawned = std::cell::Cell::new(false);
+        spawn_after_provider_guard_release(guard, &launch_request(false), |_| {
+            let next =
+                alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(temp.path()))?;
+            next.release()?;
+            spawned.set(true);
+            Ok(())
+        })
+        .unwrap();
+        assert!(spawned.get());
+    }
+
+    #[test]
+    fn restart_provider_guard_release_failure_blocks_spawn() {
+        let temp = tempfile::tempdir().unwrap();
+        let guard =
+            alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(temp.path())).unwrap();
+        fs::write(
+            temp.path().join("tmp/provider-sync.lock/owner.json"),
+            json!({"pid": std::process::id(), "startedAt":1, "lockId":"replacement"}).to_string(),
+        )
+        .unwrap();
+        let spawned = std::cell::Cell::new(false);
+        assert!(
+            spawn_after_provider_guard_release(guard, &launch_request(false), |_| {
+                spawned.set(true);
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(!spawned.get());
+    }
+
     #[test]
     fn startup_options_returns_structured_payload() {
         let result = startup_options();
@@ -5416,7 +7205,7 @@ mod tests {
     #[test]
     fn startup_options_honors_show_update_argument() {
         assert!(should_show_update(
-            ["alunixa-x-manager.exe", "--show-update"],
+            ["alunixa-x-plus-manager.exe", "--show-update"],
             None
         ));
     }
@@ -5447,7 +7236,7 @@ mod tests {
 
     #[test]
     fn update_install_requires_release_payload() {
-        let result = tauri::async_runtime::block_on(perform_update(None));
+        let result = tauri::async_runtime::block_on(perform_update_inner(None));
 
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("请先检查更新"));
@@ -5468,6 +7257,154 @@ mod tests {
         if result.payload.text.is_empty() {
             assert_eq!(result.status, "failed");
         }
+    }
+
+    #[test]
+    fn dream_skin_image_payload_does_not_expose_image_bytes() {
+        let payload = DreamSkinImagePayload {
+            path: "managed/current.png".to_string(),
+            content_type: "image/png".to_string(),
+            size_bytes: 42,
+        };
+
+        let value = serde_json::to_value(payload).unwrap();
+
+        assert!(value.get("bytes").is_none());
+        assert_eq!(value["contentType"], "image/png");
+        assert_eq!(value["sizeBytes"], 42);
+    }
+
+    #[test]
+    fn dream_skin_theme_library_payload_does_not_expose_image_bytes() {
+        let settings = BackendSettings::default();
+        let library = empty_dream_skin_library(&settings);
+
+        let encoded = serde_json::to_string(&library).unwrap();
+
+        assert!(!encoded.contains("\"bytes\""));
+        assert!(!encoded.contains("data:image"));
+        assert!(!encoded.contains("apiKey"));
+    }
+
+    #[test]
+    fn dream_skin_image_backup_restores_after_managed_files_are_cleared() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path();
+        let image_path = state_dir.join("dream-skin/theme/current.png");
+        std::fs::create_dir_all(image_path.parent().unwrap()).unwrap();
+        std::fs::write(&image_path, b"old-image").unwrap();
+        let backup = managed_dream_skin_image_backup(&image_path, state_dir).unwrap();
+        alunixa_x_core::dream_skin::clear_managed_dream_skin_image(state_dir).unwrap();
+
+        restore_managed_dream_skin_image_backup(backup).unwrap();
+
+        assert_eq!(std::fs::read(image_path).unwrap(), b"old-image");
+    }
+
+    #[test]
+    fn dream_skin_commands_are_registered_with_tauri() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();
+
+        for command in [
+            "commands::dream_skin_status",
+            "commands::import_dream_skin_image",
+            "commands::reset_dream_skin_theme",
+            "commands::apply_dream_skin",
+            "commands::restore_dream_skin",
+            "commands::verify_dream_skin",
+            "commands::list_dream_skin_themes",
+            "commands::refresh_dream_skin_market",
+            "commands::install_dream_skin_market_theme",
+            "commands::load_dream_skin_theme",
+            "commands::create_dream_skin_theme",
+            "commands::save_dream_skin_theme",
+            "commands::rename_dream_skin_theme",
+            "commands::delete_dream_skin_theme",
+            "commands::activate_dream_skin_theme",
+        ] {
+            assert!(source.contains(command), "missing Tauri command {command}");
+        }
+    }
+
+    #[test]
+    fn tray_menu_only_has_show_and_quit_in_both_languages() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs")).unwrap();
+
+        assert!(source.contains("Menu::with_items(app, &[&show_item, &quit_item])"));
+        assert!(source.contains("Menu::with_items(&app, &[&show, &quit])"));
+        assert!(!source.contains("tray_apply_dream_skin"));
+        assert!(!source.contains("apply_dream_skin_from_tray"));
+    }
+
+    #[test]
+    fn dream_skin_theme_reset_rollback_preserves_unknown_settings_fields() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands.rs"))
+                .unwrap();
+        let start = source.find("pub fn reset_dream_skin_theme").unwrap();
+        let end = source[start..]
+            .find("pub async fn verify_dream_skin")
+            .unwrap()
+            + start;
+        let reset_source = &source[start..end];
+
+        assert!(!reset_source.contains("store.save(&previous)"));
+        assert!(reset_source.contains("codexAppDreamSkinThemeConfig"));
+        assert!(reset_source.contains("codexAppDreamSkinImagePath"));
+    }
+
+    #[test]
+    fn dream_skin_theme_activation_rolls_back_image_and_settings_on_save_failure() {
+        let source =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands.rs"))
+                .unwrap();
+        let start = source
+            .find("pub async fn activate_dream_skin_theme")
+            .unwrap();
+        let end = source[start..]
+            .find("pub async fn dream_skin_status")
+            .map(|offset| start + offset)
+            .unwrap();
+        let activation = &source[start..end];
+
+        assert!(activation.contains("previous_backup"));
+        assert!(activation.contains("clear_managed_dream_skin_image"));
+        assert!(activation.contains("restore_managed_dream_skin_image_backup"));
+        assert!(activation.contains("store.save(&previous)"));
+        assert!(activation.contains("previous_runtime_signature"));
+        assert!(activation.contains("theme_changed"));
+        assert!(activation.contains("pending_restart"));
+    }
+
+    #[test]
+    fn read_tail_returns_requested_lines_from_file_end() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("alunixa-x.log");
+        std::fs::write(&path, "one\ntwo\nthree\nfour\n").unwrap();
+
+        let result = read_tail(&path, 2).unwrap();
+
+        assert_eq!(result.text, "three\nfour");
+        assert_eq!(result.file_size, 19);
+        assert!(!result.truncated);
+    }
+
+    #[test]
+    fn read_tail_does_not_load_prefix_when_log_is_large() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("alunixa-x.log");
+        let mut contents = String::from("prefix-should-not-appear\n");
+        contents.push_str(&"x".repeat((MAX_LOG_TAIL_READ_BYTES as usize) + 128));
+        contents.push_str("\nlast-1\nlast-2\n");
+        std::fs::write(&path, contents).unwrap();
+
+        let result = read_tail(&path, 2).unwrap();
+
+        assert_eq!(result.text, "last-1\nlast-2");
+        assert!(result.truncated);
+        assert!(!result.text.contains("prefix-should-not-appear"));
     }
 
     #[test]
@@ -5540,7 +7477,10 @@ mod tests {
     fn aggregate_relay_injection_writes_local_proxy_without_chatgpt_auth() {
         let temp = tempfile::tempdir().unwrap();
 
-        let result = apply_aggregate_relay_injection_to_home(temp.path());
+        let result = apply_aggregate_relay_injection_to_home(
+            temp.path(),
+            alunixa_x_core::settings::RelaySessionProvider::Custom,
+        );
         let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
 
         assert_eq!(result.status, "ok");
@@ -5548,6 +7488,339 @@ mod tests {
         assert!(!result.payload.authenticated);
         assert!(config.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
         assert!(config.contains(r#"experimental_bearer_token = "alunixa-x-aggregate""#));
+    }
+
+    fn launch_request(sync_active_relay: bool) -> LaunchRequest {
+        LaunchRequest {
+            app_path: String::new(),
+            debug_port: 9229,
+            helper_port: 57321,
+            sync_active_relay,
+        }
+    }
+
+    fn routed_pure_api_settings() -> BackendSettings {
+        BackendSettings {
+            active_relay_id: "source".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "source".to_string(),
+                name: "Source".to_string(),
+                base_url: "https://source.example/v1".to_string(),
+                upstream_base_url: "https://source.example/v1".to_string(),
+                api_key: "sk-source".to_string(),
+                protocol: alunixa_x_core::settings::RelayProtocol::Responses,
+                relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
+                config_contents: "model_provider = \"custom\"\n\n[model_providers.custom]\nname = \"custom\"\nwire_api = \"responses\"\nbase_url = \"https://source.example/v1\"\n"
+                    .to_string(),
+                auth_contents: "{\"OPENAI_API_KEY\":\"sk-source\"}\n".to_string(),
+                model_routes: vec![alunixa_x_core::settings::RelayModelRoute {
+                    model: "gpt-5.6-luna".to_string(),
+                    target_relay_id: "target".to_string(),
+                    target_model: String::new(),
+                }],
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        }
+    }
+
+    #[test]
+    fn launch_request_defaults_active_relay_sync_to_false() {
+        let request: LaunchRequest = serde_json::from_value(json!({})).unwrap();
+        let requested: LaunchRequest =
+            serde_json::from_value(json!({ "syncActiveRelay": true })).unwrap();
+
+        assert!(!request.sync_active_relay);
+        assert!(requested.sync_active_relay);
+    }
+
+    #[test]
+    fn active_routed_pure_api_sync_writes_local_proxy() {
+        let temp = tempfile::tempdir().unwrap();
+
+        sync_active_relay_to_home(&routed_pure_api_settings(), temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(config.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
+        assert!(!config.contains(r#"base_url = "https://source.example/v1""#));
+    }
+
+    #[test]
+    fn active_official_sync_clears_custom_provider_selection() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model_provider = \"custom\"\n\n[model_providers.custom]\nbase_url = \"https://old.example/v1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("auth.json"),
+            "{\"OPENAI_API_KEY\":\"sk-old\",\"auth_mode\":\"chatgpt\"}\n",
+        )
+        .unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "official".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "official".to_string(),
+                relay_mode: alunixa_x_core::settings::RelayMode::Official,
+                official_mix_api_key: false,
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        sync_active_relay_to_home(&settings, temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        let parsed = config.parse::<toml_edit::DocumentMut>().unwrap();
+        let auth = std::fs::read_to_string(temp.path().join("auth.json")).unwrap();
+        assert!(parsed.get("model_provider").is_none());
+        // 切回官方后残留的 base_url 会让请求继续发往中转站（issue #2216），
+        // 所以整段中转站 provider 都要清掉，而不是只清掉「选择」。
+        assert!(
+            parsed
+                .get("model_providers")
+                .and_then(|providers| providers.get("custom"))
+                .is_none(),
+            "leftover relay provider must be removed: {config}"
+        );
+        assert!(!config.contains("old.example/v1"));
+        assert!(!auth.contains("OPENAI_API_KEY"));
+        assert!(auth.contains("auth_mode"));
+    }
+
+    #[test]
+    fn active_aggregate_sync_writes_local_proxy() {
+        let temp = tempfile::tempdir().unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "aggregate".to_string(),
+            active_aggregate_relay_id: "aggregate".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "aggregate".to_string(),
+                relay_mode: alunixa_x_core::settings::RelayMode::Aggregate,
+                ..RelayProfile::default()
+            }],
+            aggregate_relay_profiles: vec![alunixa_x_core::settings::AggregateRelayProfile {
+                id: "aggregate".to_string(),
+                name: "Aggregate".to_string(),
+                session_provider: alunixa_x_core::settings::RelaySessionProvider::Custom,
+                strategy: alunixa_x_core::settings::AggregateRelayStrategy::Failover,
+                members: Vec::new(),
+                routes: Vec::new(),
+            }],
+            ..BackendSettings::default()
+        };
+
+        sync_active_relay_to_home(&settings, temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(config.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
+        assert!(config.contains(r#"experimental_bearer_token = "alunixa-x-aggregate""#));
+    }
+
+    #[test]
+    /// 回归（issue #1604）：用户点「重启 Codex」走的就是这条同步路径。
+    /// 现场遗留的 0 字节 auth.json 必须被修复成合法 JSON，否则仍然停在登录页。
+    fn active_aggregate_sync_repairs_empty_auth_json() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("auth.json"), "").unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "aggregate".to_string(),
+            active_aggregate_relay_id: "aggregate".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "aggregate".to_string(),
+                relay_mode: alunixa_x_core::settings::RelayMode::Aggregate,
+                ..RelayProfile::default()
+            }],
+            aggregate_relay_profiles: vec![alunixa_x_core::settings::AggregateRelayProfile {
+                id: "aggregate".to_string(),
+                name: "Aggregate".to_string(),
+                session_provider: alunixa_x_core::settings::RelaySessionProvider::Custom,
+                strategy: alunixa_x_core::settings::AggregateRelayStrategy::Failover,
+                members: Vec::new(),
+                routes: Vec::new(),
+            }],
+            ..BackendSettings::default()
+        };
+
+        sync_active_relay_to_home(&settings, temp.path()).unwrap();
+
+        let raw = std::fs::read_to_string(temp.path().join("auth.json")).unwrap();
+        let auth: serde_json::Value =
+            serde_json::from_str(&raw).expect("重启同步后 auth.json 必须是合法 JSON");
+        assert_eq!(
+            auth.get("OPENAI_API_KEY").and_then(|item| item.as_str()),
+            Some("alunixa-x-aggregate")
+        );
+    }
+
+    #[test]
+    fn failed_active_relay_sync_does_not_spawn_or_change_live_files() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("config.toml"), "model = \"old\"\n").unwrap();
+        std::fs::write(temp.path().join("auth.json"), "{\"old\":true}\n").unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "broken".to_string(),
+            relay_profiles: vec![RelayProfile {
+                id: "broken".to_string(),
+                base_url: String::new(),
+                api_key: String::new(),
+                relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+        let spawned = std::cell::Cell::new(false);
+
+        let result = restart_alunixa_x_after_stop(
+            &launch_request(true),
+            temp.path(),
+            Some(&settings),
+            |_| {
+                spawned.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!spawned.get());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("config.toml")).unwrap(),
+            "model = \"old\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("auth.json")).unwrap(),
+            "{\"old\":true}\n"
+        );
+    }
+
+    #[test]
+    fn restart_stops_codex_then_runtime_before_checking_native_cleanup() {
+        let events = std::cell::RefCell::new(Vec::new());
+        stop_alunixa_x_for_restart(
+            || {
+                events.borrow_mut().push("codex");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("runtime");
+                Ok(())
+            },
+            || {
+                events.borrow_mut().push("cleanup");
+                Ok(alunixa_x_core::native_browser::NativeBrowserShutdown::Ready)
+            },
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["codex", "runtime", "cleanup"]);
+    }
+
+    #[test]
+    fn restore_failure_is_reported_after_runtime_has_stopped() {
+        let stopped = std::cell::Cell::new(false);
+        let shutdown = stop_alunixa_x_for_restart(
+            || Ok(()),
+            || {
+                stopped.set(true);
+                Ok(())
+            },
+            || Ok(alunixa_x_core::native_browser::NativeBrowserShutdown::RestoreFailed),
+        )
+        .unwrap();
+        assert!(stopped.get());
+        assert_eq!(
+            shutdown,
+            alunixa_x_core::native_browser::NativeBrowserShutdown::RestoreFailed
+        );
+    }
+
+    #[test]
+    fn restart_stop_errors_name_the_step_that_failed() {
+        let browser = restart_stop_failure_message(&RestartStopError::NativeBrowser(
+            anyhow::Error::new(alunixa_x_core::native_browser::NativeBrowserCleanupStillRunning),
+        ));
+        let runtime = restart_stop_failure_message(&RestartStopError::Runtime(anyhow::anyhow!(
+            "runtime still exiting"
+        )));
+        assert!(browser.contains("原生浏览器文件仍在恢复"));
+        assert!(runtime.contains("后台服务尚未清理完成"));
+        assert!(!runtime.contains("原生浏览器文件仍在恢复"));
+        let codex = restart_stop_failure_message(&RestartStopError::Codex(anyhow::anyhow!(
+            "app remains running"
+        )));
+        assert!(codex.contains("Codex 进程尚未确认退出"));
+        let failed = restart_stop_failure_message(&RestartStopError::NativeBrowser(
+            anyhow::anyhow!("Invalid native cleanup receipt"),
+        ));
+        assert!(failed.contains("原生浏览器文件恢复失败"));
+    }
+
+    #[test]
+    fn restart_does_not_continue_when_runtime_cleanup_fails() {
+        let result = stop_alunixa_x_for_restart(
+            || Ok(()),
+            || anyhow::bail!("runtime still running"),
+            || panic!("must not continue before runtime cleanup"),
+        );
+        assert!(matches!(result, Err(RestartStopError::Runtime(_))));
+    }
+
+    #[test]
+    fn restart_does_not_cleanup_if_app_stop_fails() {
+        let result = stop_alunixa_x_for_restart(
+            || anyhow::bail!("app remains running"),
+            || panic!("must not stop runtime"),
+            || panic!("must not wait on cleanup"),
+        );
+        assert!(matches!(result, Err(RestartStopError::Codex(_))));
+    }
+
+    #[test]
+    fn failed_spawn_rolls_back_synced_live_files_for_retry() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("config.toml"), "model = \"old\"\n").unwrap();
+        std::fs::write(temp.path().join("auth.json"), "{\"old\":true}\n").unwrap();
+
+        let result = restart_alunixa_x_after_stop(
+            &launch_request(true),
+            temp.path(),
+            Some(&routed_pure_api_settings()),
+            |_| anyhow::bail!("synthetic spawn failure"),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("config.toml")).unwrap(),
+            "model = \"old\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("auth.json")).unwrap(),
+            "{\"old\":true}\n"
+        );
+    }
+
+    #[test]
+    fn ordinary_restart_does_not_read_or_change_live_relay_files() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("config.toml"), "model = \"old\"\n").unwrap();
+        std::fs::write(temp.path().join("auth.json"), "{\"old\":true}\n").unwrap();
+        let spawned = std::cell::Cell::new(false);
+
+        restart_alunixa_x_after_stop(&launch_request(false), temp.path(), None, |_| {
+            spawned.set(true);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(spawned.get());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("config.toml")).unwrap(),
+            "model = \"old\"\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("auth.json")).unwrap(),
+            "{\"old\":true}\n"
+        );
     }
 
     #[test]
@@ -5574,7 +7847,7 @@ mod tests {
 
     #[test]
     fn env_conflict_commands_ignore_codex_home_and_remove_openai_vars() {
-        let _env_guard = codex_home_env_guard();
+        let _codex_home_guard = lock_codex_home_for_test();
         let test_openai_name = "OPENAI_ALUNIXA_X_ENV_CONFLICT_TEST";
         let previous_openai = std::env::var_os(test_openai_name);
         let previous_codex_home = std::env::var_os("CODEX_HOME");
@@ -5626,7 +7899,7 @@ mod tests {
 
     #[test]
     fn delete_local_session_falls_back_when_requested_db_no_longer_contains_thread() {
-        let _env_guard = codex_home_env_guard();
+        let _codex_home_guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -5693,7 +7966,7 @@ mod tests {
 
     #[test]
     fn list_local_sessions_deduplicates_threads_across_current_and_legacy_dbs() {
-        let _env_guard = codex_home_env_guard();
+        let _codex_home_guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -5711,6 +7984,7 @@ mod tests {
 
         assert_eq!(result.status, "ok");
         assert_eq!(result.payload.sessions.len(), 1);
+        assert_eq!(result.payload.total_count, 1);
         assert_eq!(result.payload.sessions[0].id, "t1");
         assert_eq!(result.payload.sessions[0].title, "Legacy Copy");
         assert_eq!(
@@ -5735,6 +8009,7 @@ mod tests {
         assert_eq!(first_page.payload.sessions[0].id, "t2");
         assert_eq!(first_page.payload.sessions[1].id, "t1");
         assert!(first_page.payload.has_more);
+        assert_eq!(first_page.payload.total_count, 3);
 
         let second_page = list_local_sessions(Some(ListLocalSessionsRequest {
             offset: 2,
@@ -5745,11 +8020,12 @@ mod tests {
         assert_eq!(second_page.payload.sessions.len(), 1);
         assert_eq!(second_page.payload.sessions[0].id, "t3");
         assert!(!second_page.payload.has_more);
+        assert_eq!(second_page.payload.total_count, 3);
     }
 
     #[test]
     fn list_local_sessions_ignores_relation_only_thread_reference_dbs() {
-        let _env_guard = codex_home_env_guard();
+        let _codex_home_guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -5784,7 +8060,7 @@ mod tests {
 
     #[test]
     fn delete_local_session_removes_duplicate_threads_from_all_candidate_dbs() {
-        let _env_guard = codex_home_env_guard();
+        let _codex_home_guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let previous_codex_home = std::env::var_os("CODEX_HOME");
         let codex_home = temp.path().join("codex-home");
@@ -5886,6 +8162,116 @@ mod tests {
     }
 
     #[test]
+    fn config_save_applies_official_deepseek_responses_compatibility() {
+        let profile = RelayProfile {
+            id: "custom-deepseek".to_string(),
+            base_url: "https://api.deepseek.com/".to_string(),
+            upstream_base_url: "https://api.deepseek.com/".to_string(),
+            protocol: alunixa_x_core::settings::RelayProtocol::Responses,
+            ..RelayProfile::default()
+        };
+        let config = r#"[features]
+unified_exec = true
+code_mode_only = true
+
+[features.code_mode]
+enabled = true
+"#;
+
+        let prepared = prepare_relay_file_contents("config", config, &profile).unwrap();
+
+        assert!(prepared.contains("unified_exec = true"));
+        assert!(prepared.contains("code_mode_only = false"));
+        assert!(prepared.contains("enabled = false"));
+    }
+
+    #[test]
+    fn config_save_preserves_third_party_responses_and_deepseek_chat_completions() {
+        let config = r#"[features]
+code_mode_only = true
+
+[features.code_mode]
+enabled = true
+"#;
+        let third_party = RelayProfile {
+            base_url: "https://relay.example/v1".to_string(),
+            upstream_base_url: "https://relay.example/v1".to_string(),
+            protocol: alunixa_x_core::settings::RelayProtocol::Responses,
+            ..RelayProfile::default()
+        };
+        let chat_completions = RelayProfile {
+            base_url: "https://api.deepseek.com/".to_string(),
+            upstream_base_url: "https://api.deepseek.com/".to_string(),
+            protocol: alunixa_x_core::settings::RelayProtocol::ChatCompletions,
+            ..RelayProfile::default()
+        };
+
+        assert_eq!(
+            prepare_relay_file_contents("config", config, &third_party).unwrap(),
+            config
+        );
+        assert_eq!(
+            prepare_relay_file_contents("config", config, &chat_completions).unwrap(),
+            config
+        );
+    }
+
+    #[test]
+    /// #1972：用户误把 Alunixa X 自己的 exe 选成了「Codex 应用路径」——文件选择器
+    /// 只按 exe 扩展名过滤，拦不住。以前无效路径会原样存进 settings.json，而
+    /// launcher 拿到显式无效 --app-path 又不回退自动探测，于是启动永久失败，
+    /// 只能手改配置文件才能恢复。
+    fn normalize_settings_before_save_drops_an_invalid_codex_app_path() {
+        let alunixa_x_own_exe = if cfg!(windows) {
+            r"D:\Alunixa X\alunixa-x-plus.exe"
+        } else {
+            "/Applications/Alunixa X/alunixa-x-plus"
+        };
+        let settings = BackendSettings {
+            codex_app_path: alunixa_x_own_exe.to_string(),
+            ..BackendSettings::default()
+        };
+
+        let normalized = normalize_settings_before_save(settings);
+
+        // 清空而不是留着：留着就会被当成显式 --app-path 传下去，永久失败
+        assert!(
+            normalized.codex_app_path.is_empty(),
+            "指向 Alunixa X 自身的路径不该落库，实际是 {}",
+            normalized.codex_app_path
+        );
+    }
+
+    #[test]
+    fn normalize_settings_before_save_keeps_an_empty_codex_app_path_empty() {
+        let settings = BackendSettings {
+            codex_app_path: "   ".to_string(),
+            ..BackendSettings::default()
+        };
+
+        assert!(
+            normalize_settings_before_save(settings)
+                .codex_app_path
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn backfill_request_preserves_identity_unless_explicitly_adopted() {
+        let settings = serde_json::to_value(BackendSettings::default()).unwrap();
+        let request: BackfillRelayProfileRequest = serde_json::from_value(json!({
+            "settings": settings, "profileId": "profile-a"
+        }))
+        .unwrap();
+        assert!(!request.adopt_provider_identity);
+        let request: BackfillRelayProfileRequest = serde_json::from_value(json!({
+            "settings": settings, "profileId": "profile-a", "adoptProviderIdentity": true
+        }))
+        .unwrap();
+        assert!(request.adopt_provider_identity);
+    }
+
+    #[test]
     fn normalize_settings_before_save_preserves_profile_context_until_manual_extract() {
         let settings = BackendSettings {
             relay_common_config_contents: "[mcp_servers.context7]\ncommand = \"npx\"\n".to_string(),
@@ -5898,7 +8284,7 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let normalized = normalize_settings_before_save(settings);
 
         assert!(
             normalized.relay_profiles[0]
@@ -5923,28 +8309,197 @@ mod tests {
     }
 
     #[test]
-    fn normalize_settings_before_save_preserves_manual_relay_mode_for_pure_api_profile() {
+    fn normalize_settings_before_save_ignores_legacy_launch_mode_and_preserves_provider_mode() {
+        let settings: BackendSettings = serde_json::from_value(json!({
+            "activeRelayId": "api", "launchMode": "relay",
+            "relayProfiles": [{ "id": "api", "name": "API", "relayMode": "pureApi" }],
+        }))
+        .unwrap();
+        let normalized = normalize_settings_before_save(settings);
+        assert_eq!(
+            normalized.relay_profiles[0].relay_mode,
+            alunixa_x_core::settings::RelayMode::PureApi
+        );
+        assert!(
+            serde_json::to_value(&normalized)
+                .unwrap()
+                .get("launchMode")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn list_tools_reports_each_tool_with_its_own_provider_state() {
+        let _guard = lock_codex_home_for_test();
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
+
         let settings = BackendSettings {
-            active_relay_id: "api".to_string(),
-            launch_mode: alunixa_x_core::settings::LaunchMode::Relay,
+            active_relay_id: "supplier-a".to_string(),
             relay_profiles: vec![RelayProfile {
-                id: "api".to_string(),
+                id: "supplier-a".to_string(),
+                name: "供应商 A".to_string(),
                 relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
                 ..RelayProfile::default()
             }],
+            active_tool: alunixa_x_core::tools::ToolId::Grok,
+            tools: [(
+                alunixa_x_core::tools::ToolId::Grok,
+                alunixa_x_core::tools::ToolConfig {
+                    relay_profiles: vec![RelayProfile {
+                        id: "grok-a".to_string(),
+                        name: "Grok 供应商".to_string(),
+                        ..RelayProfile::default()
+                    }],
+                    active_relay_id: "grok-a".to_string(),
+                    ..alunixa_x_core::tools::ToolConfig::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..BackendSettings::default()
+        };
+        SettingsStore::default().save(&settings).unwrap();
+
+        let result = list_tools();
+        alunixa_x_core::paths::set_settings_path_for_tests(previous);
+
+        assert_eq!(result.status, "ok");
+        assert_eq!(result.payload.active_tool, "grok");
+
+        let codex = result
+            .payload
+            .tools
+            .iter()
+            .find(|tool| tool.id == "codex")
+            .expect("codex 必须在工具列表里");
+        assert!(codex.switchable);
+        assert!(!codex.active);
+        assert_eq!(codex.active_relay_name.as_deref(), Some("供应商 A"));
+        assert_eq!(codex.relay_count, 1);
+
+        // 两个工具各读各的分片，互不串 —— 这是分区的核心契约。
+        let grok = result
+            .payload
+            .tools
+            .iter()
+            .find(|tool| tool.id == "grok")
+            .expect("grok 必须在工具列表里");
+        assert!(grok.switchable);
+        assert!(grok.active);
+        assert_eq!(grok.active_relay_name.as_deref(), Some("Grok 供应商"));
+        assert_eq!(grok.relay_count, 1);
+        assert!(grok.home_dir.ends_with(".grok"));
+
+        // Claude Code 已注册展示，可进入本地化管理页。
+        let claude = result
+            .payload
+            .tools
+            .iter()
+            .find(|tool| tool.id == "claude")
+            .expect("claude 必须在工具列表里");
+        assert!(claude.switchable);
+        assert!(!claude.active);
+        assert!(claude.home_dir.ends_with(".claude"));
+    }
+
+    /// 走一遍真实的命令链路：Grok 分区里配一个供应商 → apply 写进 config.toml。
+    ///
+    /// 全程用临时的 `GROK_HOME` / settings 路径，不碰用户真实的 ~/.grok。
+    #[test]
+    fn apply_grok_relay_profile_writes_the_selected_provider_to_disk() {
+        let _guard = lock_codex_home_for_test();
+        let previous_grok_home = std::env::var_os("GROK_HOME");
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        let previous_settings =
+            alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
+        let grok_home = temp.path().join("grok-home");
+        std::fs::create_dir_all(&grok_home).unwrap();
+        // 用户已有配置：未管理字段必须活下来。
+        std::fs::write(
+            grok_home.join("config.toml"),
+            "[ui]\nyolo = false\n\n[models]\nweb_search = \"search-model\"\n",
+        )
+        .unwrap();
+        unsafe {
+            std::env::set_var("GROK_HOME", &grok_home);
+        }
+
+        let settings = BackendSettings {
+            active_tool: alunixa_x_core::tools::ToolId::Grok,
+            tools: [(
+                alunixa_x_core::tools::ToolId::Grok,
+                alunixa_x_core::tools::ToolConfig {
+                    relay_profiles: vec![RelayProfile {
+                        id: "vendor-a".to_string(),
+                        name: "供应商 A".to_string(),
+                        relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
+                        upstream_base_url: "https://vendor-a.example/v1".to_string(),
+                        api_key: "sk-vendor-a".to_string(),
+                        model_list: "grok-4.5[1M]\ngrok-4.1-fast".to_string(),
+                        ..RelayProfile::default()
+                    }],
+                    active_relay_id: "vendor-a".to_string(),
+                    ..alunixa_x_core::tools::ToolConfig::default()
+                },
+            )]
+            .into_iter()
+            .collect(),
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let result = apply_grok_relay_profile(settings);
+        alunixa_x_core::paths::set_settings_path_for_tests(previous_settings);
+        let written = std::fs::read_to_string(grok_home.join("config.toml"));
+        unsafe {
+            match previous_grok_home {
+                Some(value) => std::env::set_var("GROK_HOME", value),
+                None => std::env::remove_var("GROK_HOME"),
+            }
+        }
+        let written = written.unwrap();
 
-        assert_eq!(
-            normalized.launch_mode,
-            alunixa_x_core::settings::LaunchMode::Relay
+        assert_eq!(result.status, "ok");
+        assert!(
+            written.contains("[model.\"grok-4.5\"]"),
+            "实际写出：\n{written}"
+        );
+        assert!(written.contains("base_url = \"https://vendor-a.example/v1\""));
+        assert!(written.contains("api_key = \"sk-vendor-a\""));
+        assert!(written.contains("context_window = 1000000"));
+        // 未管理字段原样保留。
+        assert!(written.contains("[ui]"));
+        assert!(written.contains("web_search = \"search-model\""));
+    }
+
+    /// 还没填模型列表的供应商不允许应用。
+    ///
+    /// 这里用默认的 Grok 分区：它带着一个默认 profile，但 `model_list` 是空的。
+    /// 应用它会把 Grok 里所有受管的 `[model.*]` 表清空，所以必须被拦下来。
+    #[test]
+    fn apply_grok_relay_profile_rejects_a_provider_without_models() {
+        let _guard = lock_codex_home_for_test();
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        let previous_settings =
+            alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
+
+        let result = apply_grok_relay_profile(BackendSettings::default());
+        alunixa_x_core::paths::set_settings_path_for_tests(previous_settings);
+
+        assert_eq!(result.status, "failed");
+        assert!(
+            result.message.contains("没有配置模型列表"),
+            "实际消息：{}",
+            result.message
         );
     }
 
     #[test]
     fn reset_image_overlay_settings_preserves_supplier_settings() {
+        let _guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let settings_path = temp.path().join("settings.json");
         let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
@@ -5997,7 +8552,7 @@ mod tests {
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let normalized = normalize_settings_before_save(settings);
 
         let auth_json: serde_json::Value =
             serde_json::from_str(&normalized.relay_profiles[0].auth_contents).unwrap();
@@ -6043,13 +8598,35 @@ enabled = true
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let normalized = normalize_settings_before_save(settings);
         let config = &normalized.relay_profiles[0].config_contents;
 
         assert!(config.contains("model = \"gpt-5\""));
         assert!(!config.contains("model_reasoning_effort"));
-        assert!(!config.contains("[features]"));
+        // `goals` is an explicit per-profile override and must survive
+        // normalization even when it matches the common configuration.
+        assert!(config.contains("[features]"));
+        assert!(config.contains("goals = true"));
         assert!(!config.contains("[plugins.\"superpowers@openai-curated\"]"));
+    }
+
+    #[test]
+    fn normalize_settings_before_save_preserves_explicit_false_goals_override() {
+        let settings = BackendSettings {
+            relay_common_config_contents: "[features]\ngoals = true\nfast_mode = true\n"
+                .to_string(),
+            relay_profiles: vec![RelayProfile {
+                use_common_config: true,
+                config_contents: "model = \"gpt-5\"\n[features]\ngoals = false\n".to_string(),
+                ..RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+
+        let normalized = normalize_settings_before_save(settings);
+        let config = &normalized.relay_profiles[0].config_contents;
+        assert!(config.contains("goals = false"));
+        assert!(!config.contains("fast_mode = true"));
     }
 
     #[test]
@@ -6078,35 +8655,12 @@ last_updated = "2026-05-25T11:52:46Z"
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let normalized = normalize_settings_before_save(settings);
         let config = &normalized.relay_profiles[0].config_contents;
 
         assert!(config.contains("model = \"gpt-5\""));
         assert!(!config.contains("model_reasoning_effort"));
         assert!(!config.contains("[marketplaces.openai-bundled]"));
-    }
-
-    #[test]
-    fn normalize_settings_before_save_rejects_invalid_auto_compact_token_threshold() {
-        let settings = BackendSettings {
-            relay_profiles: vec![RelayProfile {
-                id: "invalid-token".to_string(),
-                name: "Invalid Token".to_string(),
-                relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
-                base_url: "https://relay.example/v1".to_string(),
-                api_key: "sk-test".to_string(),
-                context_window: "100000".to_string(),
-                auto_compact_enabled: true,
-                auto_compact_limit: "100001".to_string(),
-                ..RelayProfile::default()
-            }],
-            ..BackendSettings::default()
-        };
-
-        let error = normalize_settings_before_save(settings).unwrap_err();
-
-        assert!(error.to_string().contains("Invalid Token"));
-        assert!(error.to_string().contains("不能超过上下文窗口"));
     }
 
     #[test]
@@ -6120,7 +8674,7 @@ model_reasoning_effort = "high"
             ..BackendSettings::default()
         };
 
-        let normalized = normalize_settings_before_save(settings).unwrap();
+        let normalized = normalize_settings_before_save(settings);
 
         assert!(
             !normalized
@@ -6177,12 +8731,20 @@ model_reasoning_effort = "high"
     fn ads_payload_keeps_version_and_ad_items() {
         let payload = ads_payload(json!({
             "version": 1,
-            "ads": [{"id": "ad-1", "type": "normal", "title": "Ad"}]
+            "ads": [{"id": "ad-1", "type": "normal", "title": "Ad"}],
+            "topAd": {"id": "banner-1", "type": "sponsor", "title": "Banner 1"},
+            "topAds": [
+                {"id": "banner-1", "type": "sponsor", "title": "Banner 1"},
+                {"id": "banner-2", "type": "sponsor", "title": "Banner 2"}
+            ]
         }));
 
         assert_eq!(payload.version, 1);
         assert_eq!(payload.ads.len(), 1);
         assert_eq!(payload.ads[0]["id"], json!("ad-1"));
+        assert_eq!(payload.top_ad.as_ref().unwrap()["id"], json!("banner-1"));
+        assert_eq!(payload.top_ads.len(), 2);
+        assert_eq!(payload.top_ads[1]["id"], json!("banner-2"));
     }
 
     #[test]

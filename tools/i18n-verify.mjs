@@ -12,6 +12,15 @@ const appRoot = path.join(repoRoot, "apps", "alunixa-x-manager");
 const srcRoot = path.join(appRoot, "src");
 const require = createRequire(path.join(appRoot, "package.json"));
 const ts = require("typescript");
+
+const SRC_FILES = [
+  "src/App.tsx",
+  "src/agent-cache.tsx",
+  "src/components/ProviderPresetSelector.tsx",
+  "src/vlm-test-translation.ts",
+];
+
+// ── Collect the keys referenced by t()/tf() across the source. ──────────────
 const usedPlain = new Set();
 const usedTemplate = new Set();
 let ok = true;

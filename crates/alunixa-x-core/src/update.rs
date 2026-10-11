@@ -1,15 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
+
+#[cfg(any(target_os = "macos", test))]
+pub mod macos;
 
 pub const DEFAULT_REPOSITORY: &str = "Alunixa-Code/Alunixa-X";
-pub const DEFAULT_LATEST_RELEASE_API_URL: &str =
-    "https://api.github.com/repos/Alunixa-Code/Alunixa-X/releases/latest";
-pub const DEFAULT_RELEASES_PAGE_URL: &str =
-    "https://github.com/Alunixa-Code/Alunixa-X/releases/latest";
-pub const MAX_RELEASE_SUMMARY_CHARS: usize = 1200;
-pub const MAX_RELEASE_SUMMARY_LINES: usize = 12;
+pub const DEFAULT_LATEST_JSON_URL: &str =
+    "https://github.com/Alunixa-Code/Alunixa-X/releases/latest/download/latest.json";
+const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const UPDATE_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReleaseAsset {
@@ -45,23 +47,19 @@ pub struct UpdateInstall {
 
 pub fn parse_version_tag(value: &str) -> anyhow::Result<Vec<u64>> {
     let normalized = value.trim().trim_start_matches(['v', 'V']);
-    if normalized.is_empty() {
+    let mut digits = String::new();
+    for ch in normalized.chars() {
+        if ch.is_ascii_digit() || ch == '.' {
+            digits.push(ch);
+        } else {
+            break;
+        }
+    }
+    if digits.is_empty() {
         anyhow::bail!("Invalid version tag: {value}");
     }
-
-    let core_end = normalized.find(['-', '+']).unwrap_or(normalized.len());
-    let core = &normalized[..core_end];
-    let suffix = &normalized[core_end..];
-    if core.is_empty()
-        || core.starts_with('.')
-        || core.ends_with('.')
-        || !core.chars().all(|ch| ch.is_ascii_digit() || ch == '.')
-        || suffix.chars().any(char::is_whitespace)
-    {
-        anyhow::bail!("Invalid version tag: {value}");
-    }
-
-    core.split('.')
+    digits
+        .split('.')
         .map(|part| part.parse::<u64>().map_err(Into::into))
         .collect()
 }
@@ -76,12 +74,6 @@ pub fn is_newer_version(candidate: &str, current: &str) -> anyhow::Result<bool> 
 }
 
 pub fn release_from_github_payload(payload: &Value) -> anyhow::Result<Release> {
-    if payload.get("draft").and_then(Value::as_bool) == Some(true) {
-        anyhow::bail!("latest GitHub release is a draft");
-    }
-    if payload.get("prerelease").and_then(Value::as_bool) == Some(true) {
-        anyhow::bail!("latest GitHub release is a prerelease");
-    }
     let version = payload
         .get("tag_name")
         .and_then(Value::as_str)
@@ -107,12 +99,11 @@ pub fn release_from_github_payload(payload: &Value) -> anyhow::Result<Release> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        body: bounded_release_summary(
-            payload
-                .get("body")
-                .and_then(Value::as_str)
-                .unwrap_or_default(),
-        ),
+        body: payload
+            .get("body")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         asset_name: selected.as_ref().map(|asset| asset.name.clone()),
         asset_url: selected.map(|asset| asset.browser_download_url),
     })
@@ -167,9 +158,10 @@ pub fn select_update_asset(assets: &[(String, String)]) -> Option<ReleaseAsset> 
         .filter(|(name, url)| !name.trim().is_empty() && !url.trim().is_empty());
     let mut best: Option<(u8, &str, &str)> = None;
     for (name, url) in named {
-        let Some(rank) = platform_asset_rank(&name.to_ascii_lowercase()) else {
+        let rank = platform_asset_rank(&name.to_ascii_lowercase());
+        if rank >= 2 {
             continue;
-        };
+        }
         if best.map_or(true, |(r, _, _)| rank < r) {
             best = Some((rank, name.as_str(), url.as_str()));
         }
@@ -180,23 +172,21 @@ pub fn select_update_asset(assets: &[(String, String)]) -> Option<ReleaseAsset> 
     })
 }
 
-pub async fn fetch_latest_release(api_url: &str) -> anyhow::Result<Release> {
-    let client =
-        crate::http_client::proxied_client(&format!("Alunixa X/{}", crate::version::VERSION))?;
+pub async fn fetch_latest_release(latest_json_url: &str) -> anyhow::Result<Release> {
+    let client = update_http_client()?;
     let payload = client
-        .get(api_url)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
+        .get(latest_json_url)
+        .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await?
         .error_for_status()?
         .json::<Value>()
         .await?;
-    release_from_github_payload(&payload)
+    release_from_latest_json_payload(&payload)
 }
 
 pub async fn check_for_update(current_version: &str) -> anyhow::Result<UpdateCheck> {
-    let release = fetch_latest_release(DEFAULT_LATEST_RELEASE_API_URL).await?;
+    let release = fetch_latest_release(DEFAULT_LATEST_JSON_URL).await?;
     let update_available = is_newer_version(&release.version, current_version)?;
     Ok(UpdateCheck {
         current_version: current_version.to_string(),
@@ -212,32 +202,125 @@ pub async fn perform_update(
     release: &Release,
     download_dir: &Path,
 ) -> anyhow::Result<UpdateInstall> {
-    if !is_newer_version(&release.version, crate::version::VERSION)? {
-        anyhow::bail!(
-            "Release {} is not newer than the installed version {}",
-            release.version,
-            crate::version::VERSION
-        );
-    }
     let url = release
         .asset_url
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("没有可下载的 Release asset"))?;
-    let bytes =
-        crate::http_client::proxied_client(&format!("Alunixa X/{}", crate::version::VERSION))?
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
-    let installer_path = download_asset_to(release, &bytes, download_dir)?;
-    launch_installer(&installer_path)?;
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "update.perform.start",
+        json!({
+            "version": release.version,
+            "assetName": release.asset_name,
+            "assetUrl": url,
+            "downloadTimeoutSeconds": UPDATE_DOWNLOAD_TIMEOUT.as_secs()
+        }),
+    );
+    let response = match update_http_client()?.get(url).send().await {
+        Ok(response) => response,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "update.download.failed",
+                json!({ "version": release.version, "assetName": release.asset_name, "error": error.to_string() }),
+            );
+            return Err(anyhow::anyhow!("下载安装包失败：{error}"));
+        }
+    };
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "update.download.bad_status",
+                json!({ "version": release.version, "assetName": release.asset_name, "error": error.to_string() }),
+            );
+            return Err(anyhow::anyhow!("下载安装包失败：{error}"));
+        }
+    };
+    let bytes = match response.bytes().await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "update.download.body_failed",
+                json!({ "version": release.version, "assetName": release.asset_name, "error": error.to_string() }),
+            );
+            return Err(anyhow::anyhow!("读取安装包失败：{error}"));
+        }
+    };
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "update.download.completed",
+        json!({
+            "version": release.version,
+            "assetName": release.asset_name,
+            "bytes": bytes.len()
+        }),
+    );
+    let installer_path = match download_asset_to(release, &bytes, download_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "update.write.failed",
+                json!({
+                    "version": release.version,
+                    "assetName": release.asset_name,
+                    "downloadDir": download_dir.to_string_lossy(),
+                    "bytes": bytes.len(),
+                    "error": error.to_string()
+                }),
+            );
+            return Err(error);
+        }
+    };
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "update.write.completed",
+        json!({
+            "version": release.version,
+            "assetName": release.asset_name,
+            "installerPath": installer_path.to_string_lossy(),
+            "bytes": bytes.len()
+        }),
+    );
+    #[cfg(target_os = "macos")]
+    let launch_result = {
+        let path = installer_path.clone();
+        let version = release.version.clone();
+        tokio::task::spawn_blocking(move || macos::launch_update(&path, &version))
+            .await
+            .map_err(|error| anyhow::anyhow!("准备 macOS 自动更新失败：{error}"))?
+    };
+    #[cfg(not(target_os = "macos"))]
+    let launch_result = launch_installer(&installer_path);
+    if let Err(error) = launch_result {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "update.launch.failed",
+            json!({
+                "version": release.version,
+                "assetName": release.asset_name,
+                "installerPath": installer_path.to_string_lossy(),
+                "error": error.to_string()
+            }),
+        );
+        return Err(error);
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "update.launch.completed",
+        json!({
+            "version": release.version,
+            "assetName": release.asset_name,
+            "installerPath": installer_path.to_string_lossy()
+        }),
+    );
     Ok(UpdateInstall {
         release: release.clone(),
         installer_path,
         launched: true,
     })
+}
+
+fn update_http_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .user_agent(format!("Alunixa X/{}", crate::version::VERSION))
+        .connect_timeout(UPDATE_CONNECT_TIMEOUT)
+        .timeout(UPDATE_DOWNLOAD_TIMEOUT)
+        .build()?)
 }
 
 pub fn download_asset_to(
@@ -274,117 +357,67 @@ pub fn safe_asset_name(name: &str) -> anyhow::Result<String> {
     Ok(file_name.to_string())
 }
 
-pub fn bounded_release_summary(body: &str) -> String {
-    let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
-    let mut output = String::new();
-    let mut line_count = 0usize;
-    let mut char_count = 0usize;
-    let mut previous_blank = false;
-    let mut truncated = false;
-
-    for raw_line in normalized.lines() {
-        let line = raw_line.trim();
-        let blank = line.is_empty();
-        if blank && (previous_blank || output.is_empty()) {
-            continue;
-        }
-        if line_count >= MAX_RELEASE_SUMMARY_LINES {
-            truncated = true;
-            break;
-        }
-        let separator_chars = usize::from(!output.is_empty());
-        let available = MAX_RELEASE_SUMMARY_CHARS.saturating_sub(char_count + separator_chars);
-        if available == 0 {
-            truncated = true;
-            break;
-        }
-        if !output.is_empty() {
-            output.push('\n');
-            char_count += 1;
-        }
-        let line_chars = line.chars().count();
-        if line_chars > available {
-            output.extend(line.chars().take(available));
-            truncated = true;
-            break;
-        }
-        output.push_str(line);
-        char_count += line_chars;
-        line_count += 1;
-        previous_blank = blank;
-    }
-
-    let output = output.trim_end();
-    if truncated {
-        format!("{output}\n\n[Release notes truncated]")
-    } else {
-        output.to_string()
-    }
-}
-
-fn platform_asset_rank(name: &str) -> Option<u8> {
+fn platform_asset_rank(name: &str) -> u8 {
+    // 0 = exact match (current OS + native arch)
+    // 1 = same OS, other arch (acceptable fallback, e.g. x86_64 on arm64 or vice versa)
+    // 2 = wrong platform
     if cfg!(target_os = "macos") {
         if !is_macos_installer_asset(name) {
-            return None;
+            return 2;
         }
         if is_macos_native_arch_asset(name) {
-            return Some(0);
+            return 0;
         }
-        return None;
+        return 1;
     }
-    if cfg!(windows) {
-        return windows_asset_rank(name);
+    if cfg!(windows) && is_windows_installer_asset(name) {
+        return 0;
     }
-    None
+    2
 }
 
 fn is_macos_native_arch_asset(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    let has_x64 = lower.contains("x64") || lower.contains("x86_64") || lower.contains("amd64");
-    let has_arm64 = lower.contains("arm64") || lower.contains("aarch64");
-    if !has_x64 && !has_arm64 {
+    let native_arch_token = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        _ => return true, // unknown arch — accept anything
+    };
+    // Modern filename shape: `...-macos-x64.dmg` or `...-macos-arm64.dmg`
+    if lower.contains(&format!("-{native_arch_token}.")) {
         return true;
     }
-    match std::env::consts::ARCH {
-        "x86_64" => has_x64 && !has_arm64,
-        "aarch64" => has_arm64 && !has_x64,
-        _ => false,
+    // Old filename shape: `AlunixaX_1.0.9_x64.dmg`
+    if lower.contains(&format!("_{native_arch_token}.")) {
+        return true;
     }
+    // Newer but alternative shape: `..._x64.dmg` (no `macos-` token)
+    let other_token = if native_arch_token == "x64" {
+        "arm64"
+    } else {
+        "x64"
+    };
+    if lower.contains(&format!("_{other_token}.")) || lower.contains(&format!("-{other_token}.")) {
+        return false;
+    }
+    // No arch token at all — assume it matches the current arch.
+    true
 }
 
-fn windows_asset_rank(name: &str) -> Option<u8> {
-    if !is_alunixa_x_asset(name) || windows_asset_is_wrong_arch(name) {
-        return None;
-    }
-    if name.ends_with(".msi") {
-        return Some(0);
-    }
-    if name.ends_with(".exe")
-        && (name.contains("setup") || name.contains("installer") || name.contains("install"))
-    {
-        return Some(1);
-    }
-    None
+fn is_windows_installer_asset(name: &str) -> bool {
+    name.contains("codex")
+        && name.contains("plus")
+        && (name.ends_with(".msi")
+            || name.ends_with("-setup.exe")
+            || name.ends_with("_setup.exe")
+            || name.ends_with("setup.exe")
+            || name.ends_with("installer.exe"))
 }
 
 fn is_macos_installer_asset(name: &str) -> bool {
-    is_alunixa_x_asset(name) && (name.ends_with(".dmg") || name.ends_with(".pkg"))
-}
-
-fn is_alunixa_x_asset(name: &str) -> bool {
-    let compact = name
-        .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
-        .collect::<String>();
-    compact.to_ascii_lowercase().contains("alunixax")
-}
-
-fn windows_asset_is_wrong_arch(name: &str) -> bool {
-    match std::env::consts::ARCH {
-        "x86_64" => name.contains("arm64") || name.contains("aarch64"),
-        "aarch64" => name.contains("x64") || name.contains("x86_64") || name.contains("amd64"),
-        _ => true,
-    }
+    // Loose shape check; arch preference is handled by platform_asset_rank
+    // via is_macos_native_arch_asset.
+    name.contains("codex") && name.contains("plus") && name.ends_with(".dmg")
 }
 
 pub fn launch_installer(path: &Path) -> anyhow::Result<()> {

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::settings::{BackendSettings, RelayMode, RelayProfile, RelayProtocol, SettingsStore};
+use crate::settings::{RelayProfile, SettingsStore};
 use serde_json::{Map, Value, json};
 
 const BASE_URL_ENV_KEYS: &[&str] = &[
@@ -25,6 +25,8 @@ struct ModelSource {
     name: String,
     base_url: String,
     api_key: String,
+    /// 供应商自定义请求头（issue #1685）。非供应商来源为空。
+    headers: Vec<crate::settings::RelayHeaderKeyValue>,
 }
 
 #[derive(Debug, Default)]
@@ -38,13 +40,24 @@ pub async fn read_codex_model_catalog() -> Value {
     let home = codex_home_dir();
     let settings_path = crate::paths::default_settings_path();
     if settings_path.exists() {
-        if let Ok(settings) = SettingsStore::new(settings_path).load()
-            && let Some(catalog) = settings_relay_profile_model_catalog(&home, &settings)
-        {
-            return catalog;
+        if let Ok(settings) = SettingsStore::new(settings_path).load() {
+            let profile = settings.active_relay_profile();
+            let catalog = relay_profile_model_catalog_value(&home, &profile);
+            if catalog
+                .get("models")
+                .and_then(Value::as_array)
+                .map_or(false, |m| !m.is_empty())
+            {
+                return catalog;
+            }
         }
     }
-    let env = std::env::vars().collect::<HashMap<_, _>>();
+    let env = std::env::vars_os()
+        .filter_map(|(name, value)| {
+            let name = name.into_string().ok()?;
+            Some((name, value.to_string_lossy().into_owned()))
+        })
+        .collect::<HashMap<_, _>>();
     let client = match crate::http_client::proxied_client("AlunixaX/1.0") {
         Ok(client) => client,
         Err(error) => {
@@ -52,6 +65,7 @@ pub async fn read_codex_model_catalog() -> Value {
                 "status": "failed",
                 "path": home.join("config.toml").to_string_lossy(),
                 "message": error.to_string(),
+                "service_tier": config_service_tier_value(&home),
                 "model": "",
                 "model_provider": "",
                 "provider_name": "",
@@ -68,8 +82,7 @@ pub async fn read_codex_model_catalog() -> Value {
 
 fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Value {
     let models = relay_profile_model_ids(profile);
-    let model_details = relay_profile_model_details(profile);
-    let model = profile.preferred_model_name();
+    let model = profile.model.trim().to_string();
     let codex_model_provider = codex_model_provider_for_relay_profile(home, profile);
     let default_model = models.first().cloned().unwrap_or_default();
     let provider_name = if profile.name.trim().is_empty() {
@@ -78,17 +91,17 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         profile.name.trim()
     };
     let model_count = models.len();
-    let model_metadata = relay_profile_model_ui_metadata_map(profile, &models);
+    let model_metadata = model_ui_metadata_map_with_overrides(&models, &profile.model_metadata);
     json!({
         "status": if models.is_empty() { "not_configured" } else { "ok" },
         "path": home.join("config.toml").to_string_lossy(),
+        "service_tier": config_service_tier_value(home),
         "model": model,
         "model_provider": profile.id.trim(),
         "codex_model_provider": codex_model_provider,
         "provider_name": provider_name,
         "default_model": default_model,
         "models": models,
-        "model_details": model_details,
         "modelMetadata": model_metadata,
         "sources": [
             {
@@ -101,24 +114,6 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
                 "responses_api": responses_api_status("unknown", "", "")
             }
         ],
-        "responses_api": responses_api_status("unknown", "", "")
-    })
-}
-
-fn disabled_relay_profile_model_catalog_value(home: &Path) -> Value {
-    json!({
-        "status": "disabled",
-        "path": home.join("config.toml").to_string_lossy(),
-        "message": "Alunixa X relay profiles are disabled",
-        "model": "",
-        "model_provider": "",
-        "codex_model_provider": "",
-        "provider_name": "",
-        "default_model": "",
-        "models": [],
-        "model_details": [],
-        "modelMetadata": {},
-        "sources": [],
         "responses_api": responses_api_status("unknown", "", "")
     })
 }
@@ -137,59 +132,32 @@ pub fn codex_model_provider_for_relay_profile(home: &Path, profile: &RelayProfil
     string_value(live_config.root.get("model_provider"))
 }
 
-fn relay_profile_model_details(profile: &RelayProfile) -> Vec<Value> {
-    if profile.relay_mode != RelayMode::CustomModels {
-        return Vec::new();
-    }
-
-    profile
-        .custom_models
-        .iter()
-        .filter_map(|model| {
-            let slug = model.model.trim();
-            if slug.is_empty() {
-                return None;
-            }
-            let context_window =
-                crate::settings::parse_context_window_tokens(&model.context_window);
-            let auto_compact_token_limit = model
-                .auto_compact_enabled
-                .then(|| model.auto_compact_limit.trim().parse::<u64>().ok())
-                .flatten();
-            Some(json!({
-                "model": slug,
-                "slug": slug,
-                "context_window": context_window,
-                "max_context_window": context_window,
-                "effective_context_window_percent": 100,
-                "auto_compact_token_limit": auto_compact_token_limit,
-            }))
-        })
-        .collect()
-}
-
 fn relay_profile_model_ids(profile: &RelayProfile) -> Vec<String> {
-    profile.ordered_model_names()
-}
-
-fn relay_profile_model_ui_metadata_map(profile: &RelayProfile, models: &[String]) -> Value {
-    let mut metadata = Map::new();
-    for model in models {
-        metadata.insert(
-            model.clone(),
-            crate::model_suffix::model_ui_metadata_with_maximum(
-                model,
-                profile.reasoning_effort_for_model(model),
-            ),
-        );
-    }
-    Value::Object(metadata)
+    unique_strings(
+        profile
+            .model_list
+            .split(['\r', '\n', ','])
+            .chain(std::iter::once(profile.model.as_str()))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+    )
 }
 
 fn model_ui_metadata_map(models: &[String]) -> Value {
+    model_ui_metadata_map_with_overrides(models, "")
+}
+
+fn model_ui_metadata_map_with_overrides(models: &[String], user_json: &str) -> Value {
+    let user: Value = serde_json::from_str(user_json).unwrap_or(Value::Null);
     let mut metadata = Map::new();
     for model in models {
-        if let Some(value) = crate::model_suffix::model_ui_metadata(model) {
+        let slug = crate::model_suffix::parse_model_suffix(model).0;
+        let user_override = user.as_object().and_then(|entries| entries.iter()
+            .find(|(key, value)| value.is_object() && crate::model_suffix::parse_model_suffix(key).0.eq_ignore_ascii_case(&slug))
+            .map(|(_, value)| value));
+        if let Some(value) = crate::model_suffix::model_ui_metadata_with_override(model, user_override) {
             metadata.insert(model.clone(), value);
         }
     }
@@ -223,6 +191,7 @@ pub async fn read_codex_model_catalog_from_home(
             "status": "failed",
             "path": config_path.to_string_lossy(),
             "message": error,
+            "service_tier": service_tier_value(&effective),
             "model": model,
             "model_provider": model_provider,
             "provider_name": provider_name,
@@ -288,6 +257,7 @@ pub async fn read_codex_model_catalog_from_home(
     json!({
         "status": status,
         "path": config_path.to_string_lossy(),
+        "service_tier": service_tier_value(&effective),
         "model": model,
         "model_provider": model_provider,
         "provider_name": provider_name,
@@ -301,6 +271,21 @@ pub async fn read_codex_model_catalog_from_home(
 
 fn codex_home_dir() -> PathBuf {
     crate::codex_home::default_codex_home_dir()
+}
+
+// 读取 config.toml（含 profile 覆盖）里生效的 service_tier；未配置时返回 null。
+fn service_tier_value(effective: &HashMap<String, String>) -> Value {
+    let tier = string_value(effective.get("service_tier"));
+    if tier.is_empty() {
+        Value::Null
+    } else {
+        Value::String(tier)
+    }
+}
+
+fn config_service_tier_value(home: &Path) -> Value {
+    let (_, effective, _) = load_codex_config(&home.join("config.toml"));
+    service_tier_value(&effective)
 }
 
 fn load_codex_config(path: &Path) -> (CodexConfig, HashMap<String, String>, Option<String>) {
@@ -455,6 +440,7 @@ fn model_sources_from_environment(
         } else {
             api_key
         },
+        headers: Vec::new(),
     }]
 }
 
@@ -491,6 +477,7 @@ fn model_source_from_config(
         },
         base_url,
         api_key,
+        headers: Vec::new(),
     })
 }
 
@@ -534,9 +521,21 @@ fn provider_api_key(
     }
 }
 
+/// 单个模型列表请求的整体预算（发请求 + 读响应体）。模型列表是小体量非流式响应，
+/// 30 秒足够；此前请求没有任何超时，上游不响应时管理器的「获取模型」会永久挂起。
+const MODELS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 async fn fetch_models_from_source(
     client: &reqwest::Client,
     source: &ModelSource,
+) -> (Vec<String>, Value) {
+    fetch_models_from_source_with_timeout(client, source, MODELS_FETCH_TIMEOUT).await
+}
+
+async fn fetch_models_from_source_with_timeout(
+    client: &reqwest::Client,
+    source: &ModelSource,
+    timeout: std::time::Duration,
 ) -> (Vec<String>, Value) {
     let endpoint = models_endpoint(&source.base_url);
     let mut safe_source = json!({
@@ -557,23 +556,71 @@ async fn fetch_models_from_source(
     let mut request = client
         .get(&endpoint)
         .header(reqwest::header::ACCEPT, "application/json");
-    if !source.api_key.is_empty() {
+    // 与协议代理、供应商测试共用 relay_headers：显式 Authorization 优先于 API Key。
+    if !source.api_key.is_empty() && !crate::relay_headers::has_authorization(&source.headers) {
         request = request.bearer_auth(&source.api_key);
     }
+    request = crate::relay_headers::apply_headers(request, &source.headers);
 
-    match request.send().await {
-        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
-            Ok(payload) => {
-                let models = unique_strings(parse_model_payload(&payload));
-                safe_source["status"] = json!("ok");
-                safe_source["models"] = json!(models.len());
-                (models, safe_source)
-            }
-            Err(error) => failed_source(safe_source, error.to_string()),
-        },
-        Ok(response) => failed_source(safe_source, format!("HTTP {}", response.status().as_u16())),
-        Err(error) => failed_source(safe_source, error.to_string()),
+    match tokio::time::timeout(timeout, async move {
+        let response = request.send().await?;
+        let status = response.status().as_u16();
+        let body = response.text().await?;
+        Ok::<_, reqwest::Error>((status, body))
+    })
+    .await
+    {
+        Err(_elapsed) => failed_source(
+            safe_source,
+            format!(
+                "上游 {} 秒内未返回模型列表（已超时中断）",
+                timeout.as_secs()
+            ),
+        ),
+        Ok(Err(error)) => failed_source(safe_source, error.to_string()),
+        Ok(Ok((status_code, body))) => interpret_models_response(status_code, &body, safe_source),
     }
+}
+
+fn interpret_models_response(
+    status_code: u16,
+    body: &str,
+    mut safe_source: Value,
+) -> (Vec<String>, Value) {
+    let payload = serde_json::from_str::<Value>(body.trim()).ok();
+    if !(200..300).contains(&status_code) {
+        return failed_source(
+            safe_source,
+            format!("HTTP {status_code}{}", upstream_error_detail(body)),
+        );
+    }
+    let Some(payload) = payload else {
+        return failed_source(
+            safe_source,
+            format!(
+                "HTTP {status_code} 响应不是有效 JSON{}",
+                upstream_error_detail(body)
+            ),
+        );
+    };
+    // 业务错误信封优先于模型列表判定：网关在错误态下可能回一个占位或部分
+    // 列表（issue 复现：{"code":401,"success":false,"data":[{"id":"..."}]}），
+    // 先看列表会把它当成「获取成功」，用户看到成功但实际令牌已失效。
+    // 反过来不会误伤正常响应——business_error_message 只认 success=false /
+    // code∉{0,200} / error 非空，标准 OpenAI 响应三者都没有。
+    if let Some(message) = business_error_message(&payload) {
+        return failed_source(safe_source, message);
+    }
+    let models = unique_strings(parse_model_payload(&payload));
+    if !models.is_empty() {
+        safe_source["status"] = json!("ok");
+        safe_source["models"] = json!(models.len());
+        return (models, safe_source);
+    }
+    // HTTP 200 且无业务错误信封：维持既有语义，按“网关可达但 0 个模型”处理
+    safe_source["status"] = json!("ok");
+    safe_source["models"] = json!(0);
+    (Vec::new(), safe_source)
 }
 
 fn failed_source(mut source: Value, message: String) -> (Vec<String>, Value) {
@@ -582,6 +629,86 @@ fn failed_source(mut source: Value, message: String) -> (Vec<String>, Value) {
     source["models"] = json!(0);
     source["responses_api"] = responses_api_status("unknown", "", "");
     (Vec::new(), source)
+}
+
+/// 部分网关用 HTTP 200 + 业务信封承载失败。智谱 Codex 专属端点（/api/v1）在 key
+/// 缺失或无效时返回 `{"code":401,"msg":"令牌已过期或验证不正确","success":false}`，
+/// HTTP 状态仍是 200，此前只认状态码，这类失败被解析成“0 个模型”，报错完全不
+/// 指向真因（#2190）。只在模型列表解析为空时才判信封——能取到数据就优先信数据，
+/// 避免误伤非标成功响应。
+fn business_error_message(payload: &Value) -> Option<String> {
+    let object = payload.as_object()?;
+    let envelope_failed = match object.get("success").and_then(Value::as_bool) {
+        Some(success) => !success,
+        None => {
+            numeric_business_code(object.get("code")).is_some_and(|failed| failed)
+                || object.get("error").is_some_and(|error| !error.is_null())
+        }
+    };
+    if !envelope_failed {
+        return None;
+    }
+    message_from_payload(object)
+}
+
+/// `code` 字段是否落在失败档：数字（含字符串数字）且不等于 0/200 视为失败，
+/// 0 是常见的“成功”码，200 是 OpenAI 系成功码。非数字 code 不参与判定。
+fn numeric_business_code(code: Option<&Value>) -> Option<bool> {
+    let code = code?;
+    let code = code.as_i64().or_else(|| {
+        code.as_str()
+            .and_then(|code| code.trim().parse::<i64>().ok())
+    })?;
+    Some(code != 0 && code != 200)
+}
+
+/// 从错误体对象里提取人话原因，兼容 OpenAI 系 `{"error":{"message":...}}`、
+/// 智谱 `{"msg":...}`、xAI `{"error":"..."}` 等形态。
+fn message_from_payload(object: &Map<String, Value>) -> Option<String> {
+    for key in ["error", "msg", "message"] {
+        let Some(value) = object.get(key).filter(|value| !value.is_null()) else {
+            continue;
+        };
+        let text = match value {
+            Value::String(text) => Some(text.trim().to_string()),
+            Value::Object(nested) => nested
+                .get("message")
+                .and_then(Value::as_str)
+                .map(|text| text.trim().to_string()),
+            _ => None,
+        };
+        if let Some(text) = text.filter(|text| !text.is_empty()) {
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// 非 2xx（或非 JSON）时把上游错误体里的原因带进报错（如
+/// `HTTP 401：Incorrect API key provided`）。此前只报 "HTTP 401"，key 失效、
+/// 地址填错、套餐未开通全靠用户猜。
+fn upstream_error_detail(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let detail = serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .and_then(|payload| message_from_payload(payload.as_object()?))
+        .unwrap_or_else(|| truncate_for_message(trimmed));
+    format!("：{detail}")
+}
+
+/// 报错信息里附带的响应体上限，避免上游回一整页 HTML 时把 UI 提示撑爆。
+fn truncate_for_message(text: &str) -> String {
+    const MAX_CHARS: usize = 200;
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.chars().count() <= MAX_CHARS {
+        return text;
+    }
+    let mut truncated: String = text.chars().take(MAX_CHARS).collect();
+    truncated.push('…');
+    truncated
 }
 
 fn responses_api_status(status: &str, endpoint: &str, message: &str) -> Value {
@@ -609,35 +736,20 @@ pub async fn fetch_relay_profile_model_ids(
             profile.upstream_base_url.trim().to_string()
         },
         api_key: profile.api_key.trim().to_string(),
+        headers: profile.custom_headers.clone(),
     };
     if source.base_url.is_empty() {
         anyhow::bail!("Base URL 不能为空");
     }
     let endpoint = models_endpoint(&source.base_url);
     let client = crate::http_client::proxied_client(&profile.user_agent)?;
-    let mut request = client
-        .get(&endpoint)
-        .header(reqwest::header::ACCEPT, "application/json");
-    request = match profile.protocol {
-        RelayProtocol::AnthropicMessages => request
-            .header("x-api-key", &source.api_key)
-            .header("anthropic-version", "2023-06-01"),
-        RelayProtocol::GeminiGenerateContent => request.header("x-goog-api-key", &source.api_key),
-        _ => request.bearer_auth(&source.api_key),
-    };
-    let response = request.send().await?;
-    if !response.status().is_success() {
-        anyhow::bail!("HTTP {}", response.status().as_u16());
-    }
-    let payload = response.json::<Value>().await?;
-    let models = unique_strings(
-        parse_model_payload(&payload)
-            .into_iter()
-            .map(|model| model.strip_prefix("models/").unwrap_or(&model).to_string())
-            .collect(),
-    );
+    let (models, status) = fetch_models_from_source(&client, &source).await;
     if models.is_empty() {
-        anyhow::bail!("上游没有返回可用模型");
+        let message = status
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("上游没有返回可用模型");
+        anyhow::bail!("{message}");
     }
     Ok((models, endpoint))
 }
@@ -688,9 +800,15 @@ fn parse_model_payload(payload: &Value) -> Vec<String> {
                     item.as_object().and_then(|object| {
                         ["id", "model", "name"]
                             .iter()
-                            .filter_map(|key| object.get(*key).and_then(Value::as_str))
-                            .find(|value| !value.trim().is_empty())
-                            .map(|value| value.trim().to_string())
+                            .filter_map(|key| {
+                                object
+                                    .get(*key)
+                                    .and_then(Value::as_str)
+                                    .map(|value| model_id_from_field(key, value))
+                                    .filter(|value| !value.is_empty())
+                            })
+                            .next()
+                            .map(ToString::to_string)
                     })
                 })
             })
@@ -709,10 +827,27 @@ fn parse_model_payload(payload: &Value) -> Vec<String> {
     }
     ["id", "model", "name"]
         .iter()
-        .filter_map(|key| object.get(*key).and_then(Value::as_str))
-        .find(|value| !value.trim().is_empty())
-        .map(|value| vec![value.trim().to_string()])
+        .filter_map(|key| {
+            object
+                .get(*key)
+                .and_then(Value::as_str)
+                .map(|value| model_id_from_field(key, value))
+                .filter(|value| !value.is_empty())
+        })
+        .next()
+        .map(|value| vec![value.to_string()])
         .unwrap_or_default()
+}
+
+/// 模型 ID 字段取值。Gemini 的列表把 ID 放在 `name` 字段且带 `models/` 前缀
+/// （如 `models/gemini-2.5-pro`），剥掉前缀让 ID 与请求体里的 `model` 值一致。
+fn model_id_from_field<'a>(key: &str, value: &'a str) -> &'a str {
+    let value = value.trim();
+    if key == "name" {
+        value.strip_prefix("models/").unwrap_or(value)
+    } else {
+        value
+    }
 }
 
 fn models_from_config_model_catalog_json(
@@ -829,155 +964,6 @@ fn unique_strings(values: Vec<String>) -> Vec<String> {
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::settings::{CustomRelayModel, ReasoningEffort};
-
-    #[test]
-    fn custom_models_catalog_includes_every_configured_model() {
-        let model_names = [
-            "gpt-5.5",
-            "gpt-5.6-luna",
-            "gpt-5.6-terra",
-            "gpt-5.6-sol",
-            "claude-opus-4-6",
-            "gemini-3.1-pro-preview",
-            "grok-4.5",
-            "deepseek-v4-pro",
-            "glm-5.2",
-            "gpt-image-2",
-        ];
-        let profile = RelayProfile {
-            relay_mode: RelayMode::CustomModels,
-            custom_models: model_names
-                .iter()
-                .enumerate()
-                .map(|(index, model)| CustomRelayModel {
-                    id: format!("model-{index}"),
-                    model: (*model).to_string(),
-                    ..CustomRelayModel::default()
-                })
-                .collect(),
-            default_custom_model_id: "model-0".to_string(),
-            ..RelayProfile::default()
-        };
-
-        assert_eq!(relay_profile_model_ids(&profile), model_names);
-    }
-
-    #[test]
-    fn custom_models_catalog_exposes_per_model_context_metadata() {
-        let profile = RelayProfile {
-            relay_mode: RelayMode::CustomModels,
-            custom_models: vec![CustomRelayModel {
-                id: "grok".to_string(),
-                model: "grok-4.5".to_string(),
-                context_window: "500000".to_string(),
-                auto_compact_enabled: true,
-                auto_compact_limit: "400000".to_string(),
-                ..CustomRelayModel::default()
-            }],
-            default_custom_model_id: "grok".to_string(),
-            ..RelayProfile::default()
-        };
-
-        let catalog = relay_profile_model_catalog_value(Path::new("codex-home"), &profile);
-        assert_eq!(catalog["model_details"][0]["model"], "grok-4.5");
-        assert_eq!(catalog["model_details"][0]["context_window"], 500_000);
-        assert_eq!(
-            catalog["model_details"][0]["auto_compact_token_limit"],
-            400_000
-        );
-    }
-
-    #[test]
-    fn relay_catalog_exposes_the_actual_codex_provider() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            temp.path().join("config.toml"),
-            "model_provider = \"live-provider\"\n",
-        )
-        .unwrap();
-        let profile = RelayProfile {
-            id: "manager-profile".to_string(),
-            config_contents: "model_provider = \"profile-provider\"\n".to_string(),
-            ..RelayProfile::default()
-        };
-
-        let catalog = relay_profile_model_catalog_value(temp.path(), &profile);
-        assert_eq!(catalog["model_provider"], "manager-profile");
-        assert_eq!(catalog["codex_model_provider"], "profile-provider");
-
-        let profile = RelayProfile {
-            id: "manager-profile".to_string(),
-            ..RelayProfile::default()
-        };
-        let catalog = relay_profile_model_catalog_value(temp.path(), &profile);
-        assert_eq!(catalog["codex_model_provider"], "live-provider");
-    }
-
-    #[test]
-    fn custom_models_catalog_is_returned_even_when_model_list_is_empty() {
-        let profile = RelayProfile {
-            id: "custom-models".to_string(),
-            name: "Custom Models".to_string(),
-            relay_mode: RelayMode::CustomModels,
-            custom_models: Vec::new(),
-            default_custom_model_id: String::new(),
-            ..RelayProfile::default()
-        };
-        let catalog = relay_profile_model_catalog_value(Path::new("codex-home"), &profile);
-        assert_eq!(catalog["status"], "not_configured");
-        assert_eq!(catalog["model_provider"], "custom-models");
-        assert_eq!(catalog["provider_name"], "Custom Models");
-        assert!(catalog["models"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn disabled_relay_profiles_do_not_inject_archived_models() {
-        let profile = RelayProfile {
-            id: "archived-provider".to_string(),
-            model_list: "archived-model".to_string(),
-            ..RelayProfile::default()
-        };
-        let settings = BackendSettings {
-            relay_profiles_enabled: false,
-            active_relay_id: profile.id.clone(),
-            relay_profiles: vec![profile],
-            ..BackendSettings::default()
-        };
-
-        let catalog =
-            settings_relay_profile_model_catalog(Path::new("codex-home"), &settings).unwrap();
-        assert_eq!(catalog["status"], "disabled");
-        assert_eq!(catalog["model"], "");
-        assert!(catalog["models"].as_array().unwrap().is_empty());
-        assert!(catalog["sources"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn relay_model_metadata_honors_explicit_ultra_maximum() {
-        let model = "gpt-5.6-sol".to_string();
-        let profile = RelayProfile {
-            model_list: model.clone(),
-            model_reasoning_efforts: HashMap::from([(model.clone(), ReasoningEffort::Ultra)]),
-            ..RelayProfile::default()
-        };
-
-        let metadata = relay_profile_model_ui_metadata_map(&profile, &[model]);
-        assert_eq!(
-            metadata["gpt-5.6-sol"]["supportedReasoningEfforts"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter_map(|entry| entry["reasoningEffort"].as_str())
-                .collect::<Vec<_>>(),
-            ["low", "medium", "high", "xhigh", "max", "ultra"]
-        );
-    }
-}
-
 fn first_env_value(env: &HashMap<String, String>, names: &[&str]) -> String {
     names
         .iter()
@@ -1037,21 +1023,211 @@ fn unquote_toml_string(value: &str) -> String {
         .to_string()
 }
 
-fn settings_relay_profile_model_catalog(home: &Path, settings: &BackendSettings) -> Option<Value> {
-    if !settings.relay_profiles_enabled {
-        // Keep archived live config data out of the managed model catalog.
-        return Some(disabled_relay_profile_model_catalog_value(home));
+#[cfg(test)]
+mod model_fetch_tests {
+    use super::*;
+
+    #[test]
+    fn relay_model_priority_declaration_reaches_ui_without_enabling_other_models() {
+        let profile = RelayProfile {
+            model: "grok-custom".into(), model_list: "grok-custom\ngrok-unknown\ngpt-5.4".into(),
+            model_metadata: json!({
+                "GROK-CUSTOM[1M]": {"service_tiers":[{"id":"flex"}], "additional_speed_tiers":["slow"], "alunixa_x_fast_support":"supported"},
+                "gpt-5.4": {"alunixa_x_fast_support":"unsupported"}
+            }).to_string(),
+            ..RelayProfile::default()
+        };
+        let home = tempfile::tempdir().unwrap();
+        let catalog = relay_profile_model_catalog_value(home.path(), &profile);
+        let metadata = &catalog["modelMetadata"];
+        assert_eq!(metadata["grok-custom"]["prioritySupportOverride"], true);
+        assert_eq!(metadata["gpt-5.4"]["prioritySupportOverride"], false);
+        assert_eq!(metadata["grok-custom"]["serviceTiers"][0]["id"], "flex");
+        assert_eq!(metadata["grok-custom"]["serviceTiers"][1]["id"], "priority");
+        assert!(metadata.get("grok-unknown").is_none());
+        assert!(metadata["grok-custom"].get("alunixa_x_fast_support").is_none());
     }
-    let profile = settings.active_relay_profile();
-    let catalog = relay_profile_model_catalog_value(home, &profile);
-    if catalog
-        .get("models")
-        .and_then(Value::as_array)
-        .is_some_and(|models| !models.is_empty())
-        || profile.relay_mode == RelayMode::CustomModels
-    {
-        Some(catalog)
-    } else {
-        None
+
+    #[test]
+    fn business_error_message_detects_zhipu_style_envelope() {
+        // 智谱 /api/v1 Codex 专属端点在 key 缺失或无效时返回 HTTP 200 + 业务信封（#2190）
+        let payload = json!({"code": 401, "msg": "令牌已过期或验证不正确", "success": false});
+        assert_eq!(
+            business_error_message(&payload).as_deref(),
+            Some("令牌已过期或验证不正确")
+        );
+    }
+
+    #[test]
+    fn business_error_message_detects_failed_code_without_success_field() {
+        let numeric = json!({"code": 1001, "msg": "鉴权失败"});
+        assert_eq!(
+            business_error_message(&numeric).as_deref(),
+            Some("鉴权失败")
+        );
+
+        let string_code = json!({"code": "401", "message": "invalid token"});
+        assert_eq!(
+            business_error_message(&string_code).as_deref(),
+            Some("invalid token")
+        );
+
+        let error_object = json!({"error": {"code": "1001", "message": "未收到 Authorization"}});
+        assert_eq!(
+            business_error_message(&error_object).as_deref(),
+            Some("未收到 Authorization")
+        );
+    }
+
+    #[test]
+    fn business_error_message_ignores_success_envelopes() {
+        for payload in [
+            json!({"code": 200, "success": true, "data": []}),
+            json!({"code": 0, "msg": "ok", "data": []}),
+            json!({"object": "list", "data": []}),
+            json!({"code": "200", "data": []}),
+            json!([{"id": "glm-5.3"}]),
+        ] {
+            assert_eq!(business_error_message(&payload), None, "{payload}");
+        }
+    }
+
+    #[test]
+    fn interpret_models_response_keeps_ok_semantics_when_200_has_no_models() {
+        let (models, status) =
+            interpret_models_response(200, r#"{"object":"list","data":[]}"#, json!({"id": "t"}));
+        assert!(models.is_empty());
+        assert_eq!(status["status"], "ok");
+        assert_eq!(status["models"], 0);
+    }
+
+    #[test]
+    fn interpret_models_response_surfaces_business_error_on_http_200() {
+        let (models, status) = interpret_models_response(
+            200,
+            r#"{"code":401,"msg":"令牌已过期或验证不正确","success":false}"#,
+            json!({"id": "t"}),
+        );
+        assert!(models.is_empty());
+        assert_eq!(status["status"], "failed");
+        assert_eq!(status["message"], "令牌已过期或验证不正确");
+    }
+
+    #[test]
+    fn interpret_models_response_prefers_business_error_over_a_returned_model_list() {
+        // 网关在错误态下回了一个列表时，错误必须优先——否则用户看到「获取成功」
+        // 但令牌其实已失效，排查会往错误方向走。
+        let (models, status) = interpret_models_response(
+            200,
+            r#"{"code":401,"msg":"令牌已过期","success":false,"data":[{"id":"glm-5.3"}]}"#,
+            json!({"id": "t"}),
+        );
+        assert!(models.is_empty(), "错误态下的列表不应被当作可用模型");
+        assert_eq!(status["status"], "failed");
+        assert_eq!(status["message"], "令牌已过期");
+        assert_eq!(status["models"], 0);
+    }
+
+    #[test]
+    fn interpret_models_response_keeps_normal_lists_working_without_an_envelope() {
+        // 反向保护：标准 OpenAI 响应没有 success/code/error 字段，
+        // 提前检查业务错误不能把它误判成失败。
+        for body in [
+            r#"{"object":"list","data":[{"id":"gpt-5.6-sol"},{"id":"gpt-5.6-terra"}]}"#,
+            r#"{"code":200,"success":true,"data":[{"id":"glm-5.3"}]}"#,
+            r#"{"code":0,"msg":"ok","data":[{"id":"deepseek-v4"}]}"#,
+        ] {
+            let (models, status) = interpret_models_response(200, body, json!({"id": "t"}));
+            assert!(!models.is_empty(), "{body}");
+            assert_eq!(status["status"], "ok", "{body}");
+        }
+    }
+
+    #[test]
+    fn interpret_models_response_appends_upstream_reason_on_http_error() {
+        let (_, status) = interpret_models_response(
+            401,
+            r#"{"error":{"code":"1001","message":"Header中未收到Authorization参数，无法进行身份验证。"}}"#,
+            json!({"id": "t"}),
+        );
+        assert_eq!(status["status"], "failed");
+        let message = status["message"].as_str().unwrap();
+        assert!(message.starts_with("HTTP 401"), "{message}");
+        assert!(
+            message.contains("Header中未收到Authorization参数"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn interpret_models_response_reports_invalid_json_body() {
+        let (_, status) = interpret_models_response(200, "<html>502</html>", json!({"id": "t"}));
+        assert_eq!(status["status"], "failed");
+        let message = status["message"].as_str().unwrap();
+        assert!(message.contains("不是有效 JSON"), "{message}");
+        assert!(message.contains("<html>502</html>"), "{message}");
+    }
+
+    #[test]
+    fn upstream_error_detail_truncates_plain_text_bodies() {
+        assert_eq!(
+            upstream_error_detail("Authentication Fails (governor)"),
+            "：Authentication Fails (governor)"
+        );
+        assert_eq!(upstream_error_detail("   "), "");
+        let long_body = "x".repeat(500);
+        let detail = upstream_error_detail(&long_body);
+        assert!(detail.chars().count() < 260, "{}", detail.chars().count());
+    }
+
+    #[test]
+    fn parse_model_payload_strips_gemini_models_prefix() {
+        let models = parse_model_payload(&json!({
+            "models": [
+                {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+                {"name": "models/gemini-2.5-flash"}
+            ]
+        }));
+        assert_eq!(models, vec!["gemini-2.5-pro", "gemini-2.5-flash"]);
+    }
+
+    #[test]
+    fn parse_model_payload_keeps_plain_name_fields() {
+        let models = parse_model_payload(&json!({
+            "models": [{"name": "moonshot-v1"}, {"id": "kimi-k2.6"}]
+        }));
+        assert_eq!(models, vec!["moonshot-v1", "kimi-k2.6"]);
+    }
+
+    #[tokio::test]
+    async fn models_fetch_times_out_when_upstream_never_responds() {
+        // 只 bind 不 accept：TCP 握手由内核完成，send 能成功，读响应体会一直挂起
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let source = ModelSource {
+            source_id: "test".to_string(),
+            source_type: "test".to_string(),
+            name: "Test".to_string(),
+            base_url: format!("http://{address}"),
+            api_key: "key".to_string(),
+            headers: Vec::new(),
+        };
+        let (_, status) = fetch_models_from_source_with_timeout(
+            &client,
+            &source,
+            std::time::Duration::from_millis(300),
+        )
+        .await;
+        assert_eq!(status["status"], "failed");
+        assert!(
+            status["message"]
+                .as_str()
+                .unwrap()
+                .contains("未返回模型列表"),
+            "{}",
+            status["message"]
+        );
+        drop(listener);
     }
 }

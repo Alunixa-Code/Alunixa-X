@@ -21,6 +21,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
+sherpa-onnx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-std", "io-util", "net", "sync"] }
 tokio-util.workspace = true
@@ -29,6 +30,7 @@ toml.workspace = true
 toml_edit.workspace = true
 uuid.workspace = true
 zip.workspace = true
+zstd.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

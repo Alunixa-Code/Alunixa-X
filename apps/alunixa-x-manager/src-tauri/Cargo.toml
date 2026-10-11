@@ -1,5 +1,6 @@
 [package]
 name = "alunixa-x-manager"
+default-run = "alunixa-x-plus"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,14 +11,19 @@ name = "alunixa_x_manager_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "alunixa-x-manager"
+name = "alunixa-x-plus"
 path = "src/main.rs"
+
+[[bin]]
+name = "alunixa-x-legacy-shim"
+path = "src/legacy_shim.rs"
 
 [dependencies]
 anyhow.workspace = true
 async-trait = "0.1"
 alunixa-x-core = { path = "../../../crates/alunixa-x-core" }
 alunixa-x-data = { path = "../../../crates/alunixa-x-data" }
+alunixa-x-launcher = { path = "../../alunixa-x-launcher" }
 directories.workspace = true
 serde.workspace = true
 serde_json.workspace = true

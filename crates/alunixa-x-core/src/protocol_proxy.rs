@@ -2,12 +2,12 @@
 //!
 //! Codex Chat 与 Responses 协议之间的转换实现。
 
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::Context;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::relay_rotation::{RotationContext, RotationEvent};
 use crate::settings::{RelayProtocol, SettingsStore};
@@ -114,6 +114,8 @@ impl CodexPatchProxyAction {
 }
 
 impl CodexToolContext {
+ fn is_tool_search_proxy(&self, name: &str) -> bool { self.custom_tools.get(name).is_some_and(|spec| spec.openai_name == "tool_search") }
+ fn is_builtin_web_search_proxy(&self, name: &str) -> bool { self.custom_tools.get(name).is_some_and(|spec| spec.kind == CodexCustomToolKind::BuiltIn && spec.openai_name == "web_search") }
     fn is_custom_tool_proxy(&self, upstream_name: &str) -> bool {
         self.custom_tools.contains_key(upstream_name)
     }
@@ -944,7 +946,15 @@ pub struct UpstreamProxyResponse {
     pub content_type: String,
     pub is_stream: bool,
     pub wire_api: UpstreamWireApi,
-    pub response: reqwest::Response,
+    /// 仅标记需要代理重组的合成摘要兼容路径。
+    pub compaction: bool,
+    /// 原生上游已返回恰好一个 compaction 项或完整失败流时为真，
+    /// 调用方必须原样透传。
+    pub native_compaction_passthrough: bool,
+    /// 响应体已经读完。为 Some 时不要再读 response。
+    pub buffered_body: Option<Vec<u8>>,
+    pub response: Option<reqwest::Response>,
+    pub(crate) _channel_permit: Option<crate::channel_protection::ChannelPermit>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -955,6 +965,8 @@ pub enum UpstreamWireApi {
     AnthropicMessages,
     GeminiGenerateContent,
     AudioTranscriptions,
+    ImageGenerations,
+    ImageEdits,
     Transparent,
 }
 
@@ -973,6 +985,18 @@ impl UpstreamProxyResponse {
 
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status_code)
+    }
+
+    pub async fn read_body(&mut self) -> anyhow::Result<Vec<u8>> {
+        if let Some(body) = &self.buffered_body {
+            return Ok(body.clone());
+        }
+        let response = self.response.take().context("缺少上游响应")?;
+        Ok(response.bytes().await?.to_vec())
+    }
+
+    pub fn take_response(&mut self) -> anyhow::Result<reqwest::Response> {
+        self.response.take().context("缺少上游响应")
     }
 }
 
@@ -1661,6 +1685,8 @@ impl UpstreamSseToResponsesConverter {
         match wire_api {
             UpstreamWireApi::Responses
             | UpstreamWireApi::AudioTranscriptions
+            | UpstreamWireApi::ImageGenerations
+            | UpstreamWireApi::ImageEdits
             | UpstreamWireApi::Transparent => None,
             UpstreamWireApi::ChatCompletions => Some(Self::Chat(
                 ChatSseToResponsesConverter::with_request(original_request),
@@ -1931,11 +1957,15 @@ pub async fn open_transparent_proxy_request_with_settings(
         }),
     );
     Ok(UpstreamProxyResponse {
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        _channel_permit: None,
+        compaction: false,
         status_code,
         content_type,
         is_stream,
         wire_api: UpstreamWireApi::Transparent,
-        response: upstream,
+        response: Some(upstream),
     })
 }
 
@@ -2115,21 +2145,23 @@ pub async fn open_responses_proxy_request_for_path(
     original_user_agent: Option<&str>,
     request_path: &str,
 ) -> anyhow::Result<UpstreamProxyResponse> {
-    let settings = SettingsStore::default().load().unwrap_or_default();
-    open_responses_proxy_request_with_settings_and_user_agent(
-        body,
-        settings,
-        original_user_agent,
-        request_path,
-    )
-    .await
+    open_responses_proxy_request_for_path_with_beta(body, original_user_agent, request_path, None)
+        .await
 }
 
 pub async fn open_responses_proxy_request_with_settings(
     body: &str,
     settings: crate::settings::BackendSettings,
 ) -> anyhow::Result<UpstreamProxyResponse> {
-    open_responses_proxy_request_with_settings_for_path(body, settings, "/responses").await
+    open_responses_proxy_request_with_settings_and_user_agent(
+        body,
+        settings,
+        None,
+        "/responses",
+        None,
+        ProxySessionHeaders::default(),
+    )
+    .await
 }
 
 pub async fn open_responses_proxy_request_with_settings_for_path(
@@ -2137,8 +2169,15 @@ pub async fn open_responses_proxy_request_with_settings_for_path(
     settings: crate::settings::BackendSettings,
     request_path: &str,
 ) -> anyhow::Result<UpstreamProxyResponse> {
-    open_responses_proxy_request_with_settings_and_user_agent(body, settings, None, request_path)
-        .await
+    open_responses_proxy_request_with_settings_and_user_agent(
+        body,
+        settings,
+        None,
+        request_path,
+        None,
+        ProxySessionHeaders::default(),
+    )
+    .await
 }
 
 async fn open_responses_proxy_request_with_settings_and_user_agent(
@@ -2146,8 +2185,11 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
     settings: crate::settings::BackendSettings,
     original_user_agent: Option<&str>,
     request_path: &str,
+    beta_features: Option<&str>,
+    session_headers: ProxySessionHeaders<'_>,
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let mut request_json: Value = serde_json::from_str(body)?;
+    expand_local_compaction_history(&mut request_json);
     let is_stream = request_json
         .get("stream")
         .and_then(Value::as_bool)
@@ -2164,178 +2206,429 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
     {
         request_json["model"] = Value::String(route.upstream_model.clone());
     }
+    let model = (!source_model.trim().is_empty()).then(|| source_model.clone());
     let context = RotationContext {
         conversation_id: conversation_id_from_responses_request(&request_json),
+        model,
     };
-    let selected_relay = if let Some(route) = &model_route {
-        route.relay.clone()
+    let (relay, relays) = if let Some(route) = &model_route {
+        (route.relay.clone(), vec![route.relay.clone()])
     } else {
-        crate::relay_rotation::select_relay_for_request(&settings, context)?
-    };
-    if selected_relay.relay_mode == crate::settings::RelayMode::CustomModels {
-        return open_custom_models_proxy_request(
-            &selected_relay,
-            &request_json,
-            is_stream,
-            original_user_agent,
-            request_path,
-        )
-        .await;
-    }
-    let request_model_for_protocol = request_json
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let relays = if model_route.is_some() {
-        vec![relay_with_model_protocol(
-            selected_relay,
-            request_model_for_protocol,
-        )?]
-    } else {
-        let mut relays = vec![selected_relay.clone()];
+        let relay = crate::relay_rotation::select_relay_for_request(&settings, context)?;
+        let mut relays = vec![relay.clone()];
         relays.extend(crate::relay_rotation::fallback_relays_after(
-            &settings,
-            &selected_relay.id,
+            &settings, &relay.id,
         )?);
-        relays = relays
-            .into_iter()
-            .map(|relay| relay_with_model_protocol(relay, request_model_for_protocol))
-            .collect::<anyhow::Result<Vec<_>>>()?;
-        relays
+        (relay, relays)
     };
+    debug_assert_eq!(
+        relays.first().map(|item| item.id.as_str()),
+        Some(relay.id.as_str())
+    );
+    let request_model = request_json.get("model").and_then(Value::as_str).unwrap_or_default();
+    if relay.relay_mode == crate::settings::RelayMode::CustomModels {
+        return open_custom_models_proxy_request(&relay, &request_json, is_stream, original_user_agent, request_path).await;
+    }
+    let relays = relays.into_iter().map(|relay| relay_with_model_protocol(relay, request_model)).collect::<anyhow::Result<Vec<_>>>()?;
     let relay_count = relays.len();
-    for (attempt, relay) in relays.into_iter().enumerate() {
-        validate_upstream(&relay)?;
-        let (mut endpoint, upstream_body, wire_api) =
-            upstream_request_parts(&relay, request_json.clone()).await?;
-        if wire_api == UpstreamWireApi::Responses && is_responses_compact_proxy_path(request_path) {
-            endpoint = responses_compact_url(&relay.base_url);
-        } else if is_responses_compact_proxy_path(request_path) {
-            return fidelity::reject("Responses compaction requires a native Responses provider");
-        }
-        let has_more_candidates = attempt + 1 < relay_count;
-        let header_timeout = response_header_timeout(is_stream);
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "protocol_proxy.upstream_request",
-            json!({
-                "relayId": relay.id,
-                "relayName": relay.name,
-                "endpoint": sanitized_endpoint(&endpoint),
-                "wireApi": wire_api,
-                "stream": is_stream,
-                "attempt": attempt + 1,
-                "candidateCount": relay_count,
-                "headerTimeoutSeconds": header_timeout.as_secs(),
-                "requestToolSummary": response_tools_diagnostic_summary(request_json.get("tools")),
-                "upstreamToolSummary": response_tools_diagnostic_summary(upstream_body.get("tools")),
-                "modelRoute": model_route.as_ref().map(|route| json!({
-                    "sourceRelayId": route.source_relay_id,
-                    "sourceModel": route.source_model,
-                    "targetRelayId": route.relay.id,
-                    "upstreamModel": route.upstream_model
-                }))
-            }),
-        );
-        let client = crate::http_client::proxied_client(&effective_user_agent(
-            &relay.user_agent,
-            original_user_agent,
-        ))?;
-        let (upstream, connection_retried) = send_json_upstream_with_connect_retry(
-            client,
-            &endpoint,
-            relay.api_key.trim(),
-            is_stream,
-            &upstream_body,
-            wire_api,
-        )
-        .await;
-        let upstream = match upstream {
-            Ok(upstream) => upstream,
-            Err(error) => {
+    let mut cooldown_retries = 0_usize;
+    'request: loop {
+        for (attempt, relay) in relays.iter().cloned().enumerate() {
+            let has_more_candidates = attempt + 1 < relay_count;
+            validate_upstream(&relay)?;
+            let channel_key = crate::channel_protection::key_for_relay(&relay);
+            let mut channel_permit = crate::channel_protection::acquire(&channel_key, &relay).await;
+            let model_override = aggregate_upstream_model_override(&settings, &relay);
+            let preserve_native_request = relay.protocol == RelayProtocol::Responses
+                && (request_has_compaction_trigger(&request_json)
+                    || is_responses_compact_proxy_path(request_path));
+            let probe_native_compaction = request_has_compaction_trigger(&request_json)
+                && relay.protocol == RelayProtocol::Responses
+                && !is_responses_compact_proxy_path(request_path);
+            let (mut endpoint, mut upstream_body, mut wire_api, compaction) =
+                match upstream_request_parts(
+                    &relay,
+                    request_json.clone(),
+                    request_path,
+                    model_override.as_deref(),
+                    preserve_native_request,
+                )
+                .await
+                {
+                    Ok(parts) => parts,
+                    Err(error) => {
+                        drop(channel_permit);
+                        if has_more_candidates && error.is::<NativeCompactionUnsupported>() {
+                            crate::relay_rotation::record_relay_request_failure(&settings);
+                            continue;
+                        }
+                        return native_compaction_unsupported_result(error);
+                    }
+                };
+            let is_compaction_request = compaction || probe_native_compaction;
+            let header_timeout = response_header_timeout(is_stream);
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.upstream_request",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "endpoint": endpoint,
+                    "wireApi": wire_api,
+                    "stream": is_stream,
+                    "attempt": attempt + 1,
+                    "candidateCount": relay_count,
+                    "headerTimeoutSeconds": header_timeout.as_secs(),
+                    "modelRoute": model_route.as_ref().map(|route| json!({
+                        "sourceRelayId": route.source_relay_id,
+                        "sourceModel": route.source_model,
+                        "targetRelayId": route.relay.id,
+                        "upstreamModel": route.upstream_model
+                    }))
+                }),
+            );
+            let mut upstream = match send_responses_upstream_request(
+                &relay,
+                &endpoint,
+                &upstream_body,
+                wire_api,
+                is_stream,
+                original_user_agent,
+                beta_features,
+                session_headers,
+            )
+            .await
+            {
+                Ok(upstream) => upstream,
+                Err(error) => {
+                    drop(channel_permit);
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "protocol_proxy.upstream_request_failed",
+                        json!({
+                            "relayId": relay.id,
+                            "relayName": relay.name,
+                            "endpoint": endpoint,
+                            "wireApi": wire_api,
+                            "stream": is_stream,
+                            "attempt": attempt + 1,
+                            "candidateCount": relay_count,
+                            "headerTimeoutSeconds": header_timeout.as_secs(),
+                            "willFailover": has_more_candidates,
+                            "error": error.to_string()
+                        }),
+                    );
+                    crate::relay_rotation::record_relay_request_failure(&settings);
+                    if has_more_candidates {
+                        continue;
+                    }
+                    return Err(error).with_context(|| {
+                        format!(
+                            "供应商「{}」请求上游失败，endpoint: {}",
+                            relay.name, endpoint
+                        )
+                    });
+                }
+            };
+            let mut status_code = upstream.status().as_u16();
+            let mut content_type = upstream
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+
+            if probe_native_compaction {
+                let success = (200..300).contains(&status_code);
+                let retry_after =
+                    crate::channel_protection::retry_after_duration(upstream.headers());
+                if !success {
+                    // 探测不重试摘要，但同通道的后续请求仍须遵守错误冷却。
+                    // 在读取响应体/释放 permit 前记录，避免排队请求抢先通过。
+                    crate::channel_protection::mark_failure(
+                        &channel_key,
+                        &relay,
+                        status_code,
+                        retry_after,
+                    )
+                    .await;
+                }
+                let probed = match read_limited_upstream_body(
+                    &mut upstream,
+                    MAX_NATIVE_COMPACTION_PROBE_BODY_BYTES,
+                )
+                .await
+                {
+                    Ok(body) => body.to_vec(),
+                    Err(error) => {
+                        drop(channel_permit);
+                        return Err(error.into());
+                    }
+                };
+                let stream_response = response_body_is_stream(&content_type, &probed);
+                drop(channel_permit);
+
+                if success && upstream_has_terminal_failure(&probed, &content_type) {
+                    crate::relay_rotation::record_relay_request_failure(&settings);
+                    return Ok(UpstreamProxyResponse {
+                        status_code,
+                        is_stream: stream_response,
+                        content_type,
+                        wire_api,
+                        compaction: false,
+                        native_compaction_passthrough: stream_response,
+                        buffered_body: Some(probed),
+                        response: None,
+                        _channel_permit: None,
+                    });
+                }
+                if success && stream_response {
+                    match upstream_compaction_item_count(&probed, &content_type) {
+                        Some(1) => {
+                            crate::relay_rotation::record_relay_request_event(
+                                &settings,
+                                RotationEvent::Success,
+                            );
+                            return Ok(UpstreamProxyResponse {
+                                status_code,
+                                is_stream: true,
+                                content_type,
+                                wire_api,
+                                compaction: false,
+                                native_compaction_passthrough: true,
+                                buffered_body: Some(probed),
+                                response: None,
+                                _channel_permit: None,
+                            });
+                        }
+                        None => {
+                            crate::relay_rotation::record_relay_request_failure(&settings);
+                            return Ok(UpstreamProxyResponse {
+                                status_code,
+                                is_stream: true,
+                                content_type: "text/event-stream".to_string(),
+                                wire_api,
+                                compaction: false,
+                                native_compaction_passthrough: true,
+                                buffered_body: Some(incomplete_compaction_stream(&probed)),
+                                response: None,
+                                _channel_permit: None,
+                            });
+                        }
+                        Some(_) => {}
+                    }
+                } else if success
+                    && upstream_compaction_item_count(&probed, &content_type) == Some(1)
+                {
+                    crate::relay_rotation::record_relay_request_event(
+                        &settings,
+                        RotationEvent::Success,
+                    );
+                    if !is_stream {
+                        return Ok(UpstreamProxyResponse {
+                            status_code,
+                            is_stream: false,
+                            content_type,
+                            wire_api,
+                            compaction: false,
+                            native_compaction_passthrough: true,
+                            buffered_body: Some(probed),
+                            response: None,
+                            _channel_permit: None,
+                        });
+                    }
+                    if let Some(sse) = render_native_compaction_as_sse(&probed) {
+                        return Ok(UpstreamProxyResponse {
+                            status_code,
+                            is_stream: true,
+                            content_type: "text/event-stream".to_string(),
+                            wire_api,
+                            compaction: false,
+                            native_compaction_passthrough: true,
+                            buffered_body: Some(sse),
+                            response: None,
+                            _channel_permit: None,
+                        });
+                    }
+                }
+                if !success && !compaction_input_rejected(status_code, &probed) {
+                    crate::relay_rotation::record_relay_request_failure(&settings);
+                    if has_more_candidates {
+                        continue;
+                    }
+                    return Ok(UpstreamProxyResponse {
+                        status_code,
+                        is_stream: false,
+                        content_type,
+                        wire_api,
+                        compaction: false,
+                        native_compaction_passthrough: false,
+                        buffered_body: Some(probed),
+                        response: None,
+                        _channel_permit: None,
+                    });
+                }
+
                 let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "protocol_proxy.upstream_request_failed",
+                    "protocol_proxy.compaction_fallback",
                     json!({
                         "relayId": relay.id,
-                        "relayName": relay.name,
-                        "endpoint": sanitized_endpoint(&endpoint),
-                        "wireApi": wire_api,
-                        "stream": is_stream,
-                        "attempt": attempt + 1,
-                        "candidateCount": relay_count,
-                        "headerTimeoutSeconds": header_timeout.as_secs(),
-                        "willFailover": has_more_candidates && is_retryable_connection_error(&error),
-                        "connectionRetried": connection_retried,
-                        "error": sanitized_upstream_error(&error)
+                        "statusCode": status_code,
                     }),
                 );
-                crate::relay_rotation::record_relay_request_failure(&settings);
-                if has_more_candidates && is_retryable_connection_error(&error) {
-                    continue;
-                }
-                return Err(error).with_context(|| {
-                    format!(
-                        "供应商「{}」请求上游失败，endpoint: {}",
-                        relay.name, endpoint
+                let fallback = upstream_request_parts(
+                    &relay,
+                    request_json.clone(),
+                    request_path,
+                    model_override.as_deref(),
+                    false,
+                )
+                .await;
+                let (fallback_endpoint, fallback_body, fallback_wire, _) = match fallback {
+                    Ok(parts) => parts,
+                    Err(error) => {
+                        if has_more_candidates && error.is::<NativeCompactionUnsupported>() {
+                            crate::relay_rotation::record_relay_request_failure(&settings);
+                            continue;
+                        }
+                        return native_compaction_unsupported_result(error);
+                    }
+                };
+                endpoint = fallback_endpoint;
+                upstream_body = fallback_body;
+                wire_api = fallback_wire;
+                channel_permit = crate::channel_protection::acquire(&channel_key, &relay).await;
+                upstream = match send_responses_upstream_request(
+                    &relay,
+                    &endpoint,
+                    &upstream_body,
+                    wire_api,
+                    is_stream,
+                    original_user_agent,
+                    beta_features,
+                    session_headers,
+                )
+                .await
+                {
+                    Ok(upstream) => upstream,
+                    Err(error) => {
+                        drop(channel_permit);
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.upstream_request_failed",
+                            json!({
+                                "relayId": relay.id,
+                                "endpoint": endpoint,
+                                "compactionFallback": true,
+                                "error": error.to_string()
+                            }),
+                        );
+                        crate::relay_rotation::record_relay_request_failure(&settings);
+                        if has_more_candidates {
+                            continue;
+                        }
+                        return Err(error).with_context(|| {
+                            format!(
+                                "供应商「{}」请求上游失败，endpoint: {}",
+                                relay.name, endpoint
+                            )
+                        });
+                    }
+                };
+                status_code = upstream.status().as_u16();
+                content_type = upstream
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+            }
+
+            let retry_after = crate::channel_protection::retry_after_duration(upstream.headers());
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.upstream_response",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "endpoint": endpoint,
+                    "wireApi": wire_api,
+                    "stream": is_stream,
+                    "statusCode": status_code,
+                    "attempt": attempt + 1,
+                    "candidateCount": relay_count,
+                    "headerTimeoutSeconds": header_timeout.as_secs(),
+                    "willFailover": has_more_candidates && !(200..300).contains(&status_code)
+                }),
+            );
+            crate::relay_rotation::record_relay_request_event(
+                &settings,
+                if (200..300).contains(&status_code) {
+                    RotationEvent::Success
+                } else {
+                    RotationEvent::Failure
+                },
+            );
+            if (200..300).contains(&status_code) || !has_more_candidates {
+                if !(200..300).contains(&status_code) {
+                    let cooldown_started = crate::channel_protection::mark_failure(
+                        &channel_key,
+                        &relay,
+                        status_code,
+                        retry_after,
                     )
+                    .await;
+                    if cooldown_started && should_retry_after_cooldown(cooldown_retries) {
+                        cooldown_retries = cooldown_retries.saturating_add(1);
+                        drop(channel_permit);
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "protocol_proxy.channel_cooldown_retry",
+                            json!({
+                                "relayId": relay.id,
+                                "relayName": relay.name,
+                                "statusCode": status_code,
+                                "retryAfterSeconds": retry_after.map(|value| value.as_secs()),
+                                "retry": cooldown_retries
+                            }),
+                        );
+                        continue 'request;
+                    }
+                }
+                // 请求了 SSE 的兼容上游也可能返回 JSON 摘要；让调用方选择 JSON 包装器。
+                let json_compaction = is_compaction_request
+                    && content_type
+                        .split(';')
+                        .next()
+                        .is_some_and(|mime| mime.trim().eq_ignore_ascii_case("application/json"));
+                return Ok(UpstreamProxyResponse {
+                    status_code,
+                    is_stream: (is_stream && !json_compaction)
+                        || content_type.contains("text/event-stream"),
+                    content_type,
+                    wire_api,
+                    compaction: is_compaction_request,
+                    native_compaction_passthrough: false,
+                    buffered_body: None,
+                    response: Some(upstream),
+                    _channel_permit: Some(channel_permit),
                 });
             }
-        };
-        let status_code = upstream.status().as_u16();
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "protocol_proxy.upstream_response",
-            json!({
-                "relayId": relay.id,
-                "relayName": relay.name,
-                "endpoint": sanitized_endpoint(&endpoint),
-                "wireApi": wire_api,
-                "stream": is_stream,
-                "statusCode": status_code,
-                "attempt": attempt + 1,
-                "candidateCount": relay_count,
-                "headerTimeoutSeconds": header_timeout.as_secs(),
-                "willFailover": has_more_candidates && matches!(status_code, 401 | 403 | 429)
-            }),
-        );
-        crate::relay_rotation::record_relay_request_event(
-            &settings,
-            if (200..300).contains(&status_code) {
-                RotationEvent::Success
-            } else {
-                RotationEvent::Failure
-            },
-        );
-        let content_type = upstream
-            .headers()
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        if !matches!(status_code, 401 | 403 | 429) || !has_more_candidates {
-            return Ok(UpstreamProxyResponse {
-                status_code,
-                is_stream: content_type.contains("text/event-stream")
-                    || (is_stream && !content_type.contains("application/json")),
-                content_type,
-                wire_api,
-                response: upstream,
-            });
+            crate::channel_protection::mark_failure(&channel_key, &relay, status_code, retry_after)
+                .await;
+            drop(channel_permit);
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "protocol_proxy.upstream_failover",
+                json!({
+                    "relayId": relay.id,
+                    "relayName": relay.name,
+                    "endpoint": endpoint,
+                    "wireApi": wire_api,
+                    "stream": is_stream,
+                    "statusCode": status_code,
+                    "attempt": attempt + 1,
+                    "candidateCount": relay_count,
+                    "headerTimeoutSeconds": header_timeout.as_secs()
+                }),
+            );
         }
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "protocol_proxy.upstream_failover",
-            json!({
-                "relayId": relay.id,
-                "relayName": relay.name,
-                "endpoint": sanitized_endpoint(&endpoint),
-                "wireApi": wire_api,
-                "stream": is_stream,
-                "statusCode": status_code,
-                "attempt": attempt + 1,
-                "candidateCount": relay_count,
-                "headerTimeoutSeconds": header_timeout.as_secs()
-            }),
-        );
+        anyhow::bail!("未找到可用的聚合供应商成员")
     }
-    anyhow::bail!("未找到可用的聚合供应商成员")
 }
 
 fn relay_with_model_protocol(
@@ -2454,6 +2747,10 @@ pub async fn open_models_proxy_request(
         .to_string();
 
     Ok(UpstreamProxyResponse {
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        _channel_permit: None,
+        compaction: false,
         status_code,
         is_stream: false,
         content_type,
@@ -2464,7 +2761,7 @@ pub async fn open_models_proxy_request(
             RelayProtocol::AnthropicMessages => UpstreamWireApi::AnthropicMessages,
             RelayProtocol::GeminiGenerateContent => UpstreamWireApi::GeminiGenerateContent,
         },
-        response: upstream,
+        response: Some(upstream),
     })
 }
 
@@ -2529,11 +2826,15 @@ pub async fn open_audio_transcriptions_proxy_request(
         .to_string();
 
     Ok(UpstreamProxyResponse {
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        _channel_permit: None,
+        compaction: false,
         status_code,
         is_stream: false,
         content_type,
         wire_api: UpstreamWireApi::AudioTranscriptions,
-        response: upstream,
+        response: Some(upstream),
     })
 }
 
@@ -2608,18 +2909,26 @@ pub async fn open_chat_completions_proxy_request(
         .to_string();
 
     Ok(UpstreamProxyResponse {
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        _channel_permit: None,
+        compaction: false,
         status_code,
         is_stream: is_stream || content_type.contains("text/event-stream"),
         content_type,
         wire_api: UpstreamWireApi::ChatCompletions,
-        response: upstream,
+        response: Some(upstream),
     })
 }
 
 async fn upstream_request_parts(
     relay: &crate::settings::RelayProfile,
     mut request_json: Value,
-) -> anyhow::Result<(String, Value, UpstreamWireApi)> {
+    request_path: &str,
+    model_override: Option<&str>,
+    preserve_native_request: bool,
+) -> anyhow::Result<(String, Value, UpstreamWireApi, bool)> {
+    if let Some(model) = model_override { request_json["model"] = json!(model); }
     let model = request_json["model"].as_str().unwrap_or("").trim();
     if relay.reasoning_effort_for_model(model) == crate::settings::ReasoningEffort::Adaptive {
         if !is_claude_model(model)
@@ -2652,6 +2961,7 @@ async fn upstream_request_parts(
                 responses_url(&relay.base_url),
                 body,
                 UpstreamWireApi::Responses,
+                false,
             ))
         }
         RelayProtocol::ChatCompletions => {
@@ -2661,6 +2971,7 @@ async fn upstream_request_parts(
                 chat_completions_url(&relay.base_url),
                 body,
                 UpstreamWireApi::ChatCompletions,
+                false,
             ))
         }
         RelayProtocol::Completions => {
@@ -2670,6 +2981,7 @@ async fn upstream_request_parts(
                 completions_url(&relay.base_url),
                 responses_to_completions(source)?,
                 UpstreamWireApi::Completions,
+                false,
             ))
         }
         RelayProtocol::AnthropicMessages => {
@@ -2679,6 +2991,7 @@ async fn upstream_request_parts(
                 anthropic_messages_url(&relay.base_url),
                 responses_to_anthropic_messages(source)?,
                 UpstreamWireApi::AnthropicMessages,
+                false,
             ))
         }
         RelayProtocol::GeminiGenerateContent => {
@@ -2697,6 +3010,7 @@ async fn upstream_request_parts(
                 gemini_generate_content_url(&relay.base_url, &model, is_stream),
                 responses_to_gemini_generate_content(source)?,
                 UpstreamWireApi::GeminiGenerateContent,
+                false,
             ))
         }
     }
@@ -2894,7 +3208,7 @@ async fn send_json_upstream_with_connect_retry(
     wire_api: UpstreamWireApi,
 ) -> (anyhow::Result<reqwest::Response>, bool) {
     let first = send_upstream_request_for_responses(
-        upstream_request_builder(
+        upstream_request_builder_for_wire(
             client.clone(),
             endpoint,
             api_key,
@@ -2910,7 +3224,7 @@ async fn send_json_upstream_with_connect_retry(
             tokio::time::sleep(UPSTREAM_CONNECT_RETRY_DELAY).await;
             (
                 send_upstream_request_for_responses(
-                    upstream_request_builder(
+                    upstream_request_builder_for_wire(
                         client,
                         endpoint,
                         api_key,
@@ -2979,21 +3293,14 @@ async fn apply_relay_image_handling(relay: &crate::settings::RelayProfile, body:
 fn upstream_request_builder(
     client: reqwest::Client,
     endpoint: &str,
-    api_key: &str,
+    relay: &crate::settings::RelayProfile,
     is_stream: bool,
     upstream_body: &Value,
-    wire_api: UpstreamWireApi,
 ) -> reqwest::RequestBuilder {
     let mut builder = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
-    builder = match wire_api {
-        UpstreamWireApi::AnthropicMessages => builder
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01"),
-        UpstreamWireApi::GeminiGenerateContent => builder.header("x-goog-api-key", api_key),
-        _ => builder.bearer_auth(api_key),
-    };
+    builder = with_relay_auth(builder, relay);
     if is_stream {
         builder = builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -3006,7 +3313,7 @@ fn validate_upstream(relay: &crate::settings::RelayProfile) -> anyhow::Result<()
     if relay.base_url.trim().is_empty() {
         anyhow::bail!("上游 Base URL 不能为空");
     }
-    if relay.api_key.trim().is_empty() {
+    if relay.api_key.trim().is_empty() && !relay.uses_no_auth() {
         anyhow::bail!("上游 Key 不能为空");
     }
     Ok(())
@@ -3109,8 +3416,8 @@ async fn open_custom_models_proxy_request(
     synthetic.model = model.model.clone();
     let mut request_json = request_json.clone();
     request_json["model"] = json!(model.model.trim());
-    let (mut endpoint, upstream_body, wire_api) =
-        upstream_request_parts(&synthetic, request_json.clone()).await?;
+    let (mut endpoint, upstream_body, wire_api, compaction) =
+        upstream_request_parts(&synthetic, request_json.clone(), request_path, None, true).await?;
     // Native compact state must pass through untouched, not become a normal
     // generation request (CodexPlusPlus v1.5.0 compaction compatibility).
     if is_responses_compact_proxy_path(request_path) {
@@ -3177,12 +3484,16 @@ async fn open_custom_models_proxy_request(
         .unwrap_or("")
         .to_string();
     Ok(UpstreamProxyResponse {
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        _channel_permit: None,
+        compaction: false,
         status_code,
         is_stream: content_type.contains("text/event-stream")
             || (is_stream && !content_type.contains("application/json")),
         content_type,
         wire_api,
-        response: upstream,
+        response: Some(upstream),
     })
 }
 
@@ -3212,12 +3523,13 @@ fn effective_user_agent(configured_user_agent: &str, original_user_agent: Option
 
 pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyHttpResponse> {
     let request_json: Value = serde_json::from_str(body)?;
-    let upstream = open_responses_proxy_request(body, None).await?;
+    let mut upstream = open_responses_proxy_request(body, None).await?;
+    let is_compaction = upstream.compaction;
     let status_code = upstream.status_code;
     let upstream_content_type = upstream.content_type.clone();
     let is_stream = upstream.is_stream;
     let wire_api = upstream.wire_api;
-    let upstream_body = upstream.response.bytes().await?;
+    let upstream_body = upstream.read_body().await?;
 
     if !(200..300).contains(&status_code) {
         let error =
@@ -3226,6 +3538,48 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
             status: http_status_line(status_code),
             content_type: "application/json; charset=utf-8".to_string(),
             body: serde_json::to_vec(&error)?,
+        });
+    }
+
+    if upstream.native_compaction_passthrough {
+        return Ok(ProxyHttpResponse {
+            status: "200 OK".to_string(),
+            content_type: if upstream_content_type.is_empty() {
+                if is_stream {
+                    "text/event-stream; charset=utf-8".to_string()
+                } else {
+                    "application/json; charset=utf-8".to_string()
+                }
+            } else {
+                upstream_content_type
+            },
+            body: upstream_body,
+        });
+    }
+
+    if is_compaction {
+        // v2 压缩：无论上游协议/是否流式，都重组为单个 compaction 输出项。
+        let model = request_json
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !is_stream {
+            return Ok(ProxyHttpResponse {
+                status: "200 OK".to_string(),
+                content_type: "text/event-stream; charset=utf-8".to_string(),
+                body: wrap_non_stream_response_as_compaction(&upstream_body, model)?,
+            });
+        }
+        let mut converter = CompactionSseConverter::new(model);
+        if wire_api != UpstreamWireApi::Responses {
+            converter = converter.with_chat_upstream();
+        }
+        // 整包已收齐，直接喂给有状态 SSE 解析器（与 launcher 逐 chunk 路径同逻辑）。
+        converter.push_upstream_bytes(&upstream_body);
+        return Ok(ProxyHttpResponse {
+            status: "200 OK".to_string(),
+            content_type: "text/event-stream; charset=utf-8".to_string(),
+            body: converter.finish(),
         });
     }
 
@@ -3242,49 +3596,16 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
     }
 
     if is_stream {
-        let body = match wire_api {
-            UpstreamWireApi::ChatCompletions => {
-                let text = String::from_utf8_lossy(&upstream_body);
-                chat_sse_to_responses_sse_with_request(&text, &request_json).into_bytes()
-            }
-            UpstreamWireApi::Completions
-            | UpstreamWireApi::AnthropicMessages
-            | UpstreamWireApi::GeminiGenerateContent => {
-                let mut converter =
-                    NativeSseToResponsesConverter::with_request(wire_api, &request_json);
-                let mut converted = converter.push_bytes(&upstream_body);
-                converted.extend(converter.finish());
-                converted
-            }
-            UpstreamWireApi::Responses
-            | UpstreamWireApi::AudioTranscriptions
-            | UpstreamWireApi::Transparent => upstream_body.to_vec(),
-        };
+        let text = String::from_utf8_lossy(&upstream_body);
         return Ok(ProxyHttpResponse {
             status: "200 OK".to_string(),
             content_type: "text/event-stream; charset=utf-8".to_string(),
-            body,
+            body: chat_sse_to_responses_sse_with_request(&text, &request_json).into_bytes(),
         });
     }
 
-    let upstream_json: Value = serde_json::from_slice(&upstream_body)?;
-    let response_json = match wire_api {
-        UpstreamWireApi::ChatCompletions => {
-            chat_completion_to_response_with_request(upstream_json, &request_json)?
-        }
-        UpstreamWireApi::Completions => {
-            completion_to_response_with_request(upstream_json, &request_json)?
-        }
-        UpstreamWireApi::AnthropicMessages => {
-            anthropic_message_to_response_with_request(upstream_json, &request_json)?
-        }
-        UpstreamWireApi::GeminiGenerateContent => {
-            gemini_generate_content_to_response_with_request(upstream_json, &request_json)?
-        }
-        UpstreamWireApi::Responses
-        | UpstreamWireApi::AudioTranscriptions
-        | UpstreamWireApi::Transparent => upstream_json,
-    };
+    let chat_json: Value = serde_json::from_slice(&upstream_body)?;
+    let response_json = chat_completion_to_response_with_request(chat_json, &request_json)?;
     Ok(ProxyHttpResponse {
         status: "200 OK".to_string(),
         content_type: "application/json; charset=utf-8".to_string(),
@@ -7496,4 +7817,2436 @@ fn is_openai_o_series(model: &str) -> bool {
             .as_bytes()
             .get(1)
             .is_some_and(|byte| byte.is_ascii_digit())
+}
+
+async fn send_responses_upstream_request(
+    relay: &crate::settings::RelayProfile,
+    endpoint: &str,
+    upstream_body: &Value,
+    wire_api: UpstreamWireApi,
+    is_stream: bool,
+    original_user_agent: Option<&str>,
+    beta_features: Option<&str>,
+    session_headers: ProxySessionHeaders<'_>,
+) -> anyhow::Result<reqwest::Response> {
+    let mut builder = upstream_request_builder(
+        crate::http_client::proxied_client(&effective_user_agent(
+            &relay.user_agent,
+            original_user_agent,
+        ))?,
+        endpoint,
+        relay,
+        is_stream,
+        upstream_body,
+    );
+    builder = with_client_session_headers(builder, relay, session_headers);
+    if wire_api == UpstreamWireApi::Responses {
+        if let Some(value) = beta_features.filter(|value| !value.is_empty()) {
+            builder = builder.header("x-codex-beta-features", value);
+        }
+    }
+    send_upstream_request_for_responses(builder, is_stream).await
+}
+
+fn tool_call_extra_content_cache() -> &'static Mutex<ExtraContentCache> {
+    static CACHE: OnceLock<Mutex<ExtraContentCache>> = OnceLock::new();
+    // 缓存上限：一次会话里同时活跃的工具调用远小于此数；超出后按插入序淘汰最旧的，
+    // 避免长时间运行时无界增长。
+    CACHE.get_or_init(|| Mutex::new(ExtraContentCache::new(256)))
+}
+
+fn tool_call_extra_content(tool_call: &Value) -> Option<Value> {
+    if let Some(value) = tool_call.get("extra_content") {
+        if value.is_object() && !value.as_object().is_some_and(Map::is_empty) {
+            return Some(value.clone());
+        }
+    }
+    for key in ["thought_signature", "thoughtSignature"] {
+        if let Some(value) = tool_call.get(key) {
+            if !value.is_null() {
+                return Some(json!({ "google": { "thought_signature": value } }));
+            }
+        }
+    }
+    None
+}
+
+fn remember_tool_call_extra_content(call_id: &str, tool_call: &Value) {
+    let Some(extra) = tool_call_extra_content(tool_call) else {
+        return;
+    };
+    if let Ok(mut cache) = tool_call_extra_content_cache().lock() {
+        cache.remember(call_id, extra);
+    }
+}
+
+fn recall_tool_call_extra_content(call_id: &str) -> Option<Value> {
+    tool_call_extra_content_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.recall(call_id))
+}
+
+pub fn protocol_proxy_port() -> u16 {
+    std::env::var("ALUNIXA_X_PROTOCOL_PROXY_PORT")
+        .ok()
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(DEFAULT_PROTOCOL_PROXY_PORT)
+}
+
+fn should_retry_after_cooldown(retries: usize) -> bool {
+    retries < MAX_COOLDOWN_RETRIES
+}
+
+pub fn request_has_compaction_trigger(body: &Value) -> bool {
+    body.get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|items| {
+            items.iter().any(|item| {
+                item.get("type").and_then(Value::as_str) == Some(COMPACTION_TRIGGER_TYPE)
+            })
+        })
+}
+
+fn strip_compaction_trigger(mut body: Value) -> Value {
+    if let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) {
+        items.retain(|item| {
+            item.get("type").and_then(Value::as_str) != Some(COMPACTION_TRIGGER_TYPE)
+        });
+    }
+    body
+}
+
+fn rewrite_request_for_compaction(mut body: Value) -> Value {
+    if let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) {
+        items.push(json!({
+            "type": "message",
+            "role": "user",
+            "content": [{ "type": "input_text", "text": COMPACTION_SUMMARY_INSTRUCTION }]
+        }));
+    }
+    body["tools"] = json!([]);
+    body["tool_choice"] = json!("none");
+    body["parallel_tool_calls"] = json!(false);
+    body
+}
+
+fn input_has_encrypted_agent_content(input: &Value) -> bool {
+    fn item_has_encrypted_content(item: &Value) -> bool {
+        item.get("type").and_then(Value::as_str) == Some("encrypted_content")
+            || item.get("content").is_some_and(|content| match content {
+                Value::Array(parts) => parts.iter().any(|part| {
+                    part.get("type").and_then(Value::as_str) == Some("encrypted_content")
+                }),
+                Value::Object(_) => content.get("type").and_then(Value::as_str) == Some("encrypted_content"),
+                _ => false,
+            })
+    }
+    match input {
+        Value::Array(items) => items.iter().any(item_has_encrypted_content),
+        Value::Object(_) => item_has_encrypted_content(input),
+        _ => false,
+    }
+}
+
+pub fn responses_to_chat_completions_with_options(
+    mut body: Value,
+    standard: bool,
+) -> anyhow::Result<Value> {
+    expand_local_compaction_history(&mut body);
+    if input_has_native_compaction(&body) {
+        return Err(NativeCompactionUnsupported::history().into());
+    }
+    // agent 加密内容没有 Chat 文本映射。发送前明确拒绝；不按字段名猜测明文，
+    // 也不遍历工具参数/输出里的用户 JSON。reasoning 和 compaction 保持原契约。
+    if body.get("input").is_some_and(input_has_encrypted_agent_content) {
+        return Err(UnsupportedEncryptedAgentContent.into());
+    }
+    let mut result = json!({});
+
+    if let Some(model) = body.get("model") {
+        result["model"] = model.clone();
+    }
+
+    let mut messages = Vec::new();
+    if let Some(instructions) = body.get("instructions") {
+        let text = instruction_text(instructions);
+        if !text.is_empty() {
+            messages.push(json!({ "role": "system", "content": text }));
+        }
+    }
+
+    if let Some(input) = body.get("input") {
+        append_responses_input(input, &mut messages);
+    }
+    // 必须在 enforce_tool_call_pairing 之前：配对一旦被错误摘除就无法恢复。
+    relocate_interleaved_non_tool_messages(&mut messages);
+    enforce_tool_call_pairing(&mut messages);
+    // 配对判定之后仍有无主 tool 消息（上游会直接 400），降级成 user 保住内容。
+    degrade_unpaired_tool_messages(&mut messages);
+    // 必须在 enforce_tool_call_pairing 之后：它依赖 tool 消息的连续性，
+    // 而这一步会往中间插入 user 消息。
+    relocate_tool_output_images(&mut messages);
+    ensure_tool_call_reasoning_content(&mut messages);
+    normalize_chat_messages(&mut messages);
+    let model = body.get("model").and_then(Value::as_str).unwrap_or("");
+    normalize_image_data_urls_for_model(&mut messages, model);
+    let messages = collapse_system_messages_to_head(messages);
+    result["messages"] = json!(messages);
+    if let Some(value) = body.get("max_output_tokens") {
+        if is_openai_o_series(model) {
+            result["max_completion_tokens"] = value.clone();
+        } else {
+            result["max_tokens"] = value.clone();
+        }
+    }
+    if let Some(value) = body.get("max_tokens") {
+        result["max_tokens"] = value.clone();
+    }
+    if let Some(value) = body.get("max_completion_tokens") {
+        result["max_completion_tokens"] = value.clone();
+    }
+
+    for key in ["temperature", "top_p", "stream"] {
+        if let Some(value) = body.get(key) {
+            result[key] = value.clone();
+        }
+    }
+    if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
+        let mut stream_options = body
+            .get("stream_options")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        stream_options["include_usage"] = json!(true);
+        result["stream_options"] = stream_options;
+    }
+
+    apply_chat_reasoning_options(&mut result, &body, model);
+
+    let mut tool_context = build_codex_tool_context(body.get("tools"));
+    // Codex 客户端把 tool_search 命中的 MCP 命名空间挂在历史里的 tool_search_output
+    // item 上，却不会把它们提升进下一轮请求的 tools 数组。这里补上这一跳：先登记进
+    // tool context（模型调用回来时才能还原 namespace），再用既有 namespace 链路展开
+    // 成 mcp__<server>__<tool>，否则上游只看到命名空间外壳，调不到内层工具。
+    let harvested_namespaces = collect_tool_search_output_namespaces(&body);
+    for namespace_tool in &harvested_namespaces {
+        add_namespace_tools_to_context(&mut tool_context, namespace_tool);
+    }
+    let mut has_chat_tools = false;
+    let mut converted = Vec::new();
+    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
+        converted = responses_tools_to_chat_tools(tools, &tool_context);
+    }
+    for namespace_tool in &harvested_namespaces {
+        converted.extend(namespace_tool_to_chat_tools(namespace_tool, &tool_context));
+    }
+    dedup_chat_tools_by_name(&mut converted);
+    if !converted.is_empty() {
+        has_chat_tools = true;
+        result["tools"] = json!(converted);
+    }
+
+    if has_chat_tools {
+        if let Some(tool_choice) = body
+            .get("tool_choice")
+            .and_then(|value| responses_tool_choice_to_chat(value, &tool_context))
+        {
+            result["tool_choice"] = tool_choice;
+        }
+        if let Some(value) = body.get("parallel_tool_calls") {
+            result["parallel_tool_calls"] = value.clone();
+        }
+    }
+
+    for key in EXTRA_CHAT_PASSTHROUGH_FIELDS {
+        if *key == "stream_options" && result.get("stream_options").is_some() {
+            continue;
+        }
+        if let Some(value) = body.get(*key) {
+            result[*key] = value.clone();
+        }
+    }
+
+    Ok(result)
+}
+
+fn chrono_now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+pub fn wrap_non_stream_response_as_compaction(
+    upstream_body: &[u8],
+    model: &str,
+) -> anyhow::Result<Vec<u8>> {
+    let upstream_json: Value = serde_json::from_slice(upstream_body)?;
+    let mut converter = CompactionSseConverter::new(model);
+    if let Some(error) = upstream_json.get("error").filter(|value| !value.is_null()) {
+        converter.fail(
+            error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("compaction upstream error")
+                .to_string(),
+            None,
+        );
+        return Ok(converter.finish());
+    }
+    let responses_text = extract_summary_text_from_responses(&upstream_json);
+    let text = if responses_text.is_empty() {
+        extract_summary_text_from_chat(&upstream_json)
+    } else {
+        responses_text
+    };
+    if text.is_empty() {
+        converter.fail(
+            "上游返回了空摘要，无法完成压缩".to_string(),
+            Some("compaction_empty_summary".to_string()),
+        );
+        return Ok(converter.finish());
+    }
+    converter.push_summary_text(&text);
+    Ok(converter.finish())
+}
+
+fn extract_summary_text_from_responses(response: &Value) -> String {
+    let Some(items) = response.get("output").and_then(Value::as_array) else {
+        return String::new();
+    };
+    let mut texts = Vec::new();
+    for item in items {
+        let text = extract_summary_text_from_response_item(item);
+        if !text.is_empty() {
+            texts.push(text);
+        }
+    }
+    texts.join("\n")
+}
+
+fn extract_summary_text_from_response_item(item: &Value) -> String {
+    match item.get("type").and_then(Value::as_str) {
+        Some("message") => item
+            .get("content")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+fn extract_summary_text_from_chat(response: &Value) -> String {
+    response
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn response_body_is_stream(content_type: &str, body: &[u8]) -> bool {
+    if content_type.contains("text/event-stream") {
+        return true;
+    }
+    let trimmed = body
+        .iter()
+        .copied()
+        .skip_while(|byte| byte.is_ascii_whitespace())
+        .take(6)
+        .collect::<Vec<_>>();
+    trimmed.starts_with(b"data:") || trimmed.starts_with(b"event:")
+}
+
+fn output_compaction_count(output: Option<&Value>) -> Option<usize> {
+    let items = output?.as_array()?;
+    let compactions = items
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some(COMPACTION_OUTPUT_TYPE));
+    if compactions
+        .clone()
+        .any(|item| usable_compaction_content(item).is_none())
+    {
+        return Some(0);
+    }
+    Some(compactions.count())
+}
+
+async fn read_limited_upstream_body(
+    response: &mut reqwest::Response,
+    limit: usize,
+) -> anyhow::Result<Vec<u8>> {
+    if let Some(content_length) = response.content_length()
+        && content_length > limit as u64
+    {
+        anyhow::bail!("上游响应体超过 {limit} 字节限制");
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len().saturating_add(chunk.len()) > limit {
+            anyhow::bail!("上游响应体超过 {limit} 字节限制");
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
+}
+
+fn usable_compaction_content(item: &Value) -> Option<&str> {
+    item.get("encrypted_content")?
+        .as_str()
+        .filter(|content| !content.is_empty())
+}
+
+fn json_compaction_count(value: &Value) -> Option<usize> {
+    if let Some(count) = output_compaction_count(value.get("output")) {
+        return Some(count);
+    }
+    value
+        .get("response")
+        .and_then(|response| output_compaction_count(response.get("output")))
+}
+
+fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usize> {
+    if response_body_is_stream(content_type, body) {
+        let text = String::from_utf8_lossy(body).replace("\r\n", "\n");
+        let mut count = 0;
+        for block in text.split("\n\n") {
+            let mut event_name = None;
+            let mut data_parts = Vec::new();
+            for line in block.lines() {
+                if let Some(event) = strip_sse_field(line, "event") {
+                    event_name = Some(event.trim());
+                }
+                if let Some(data) = strip_sse_field(line.trim_end_matches('\r'), "data") {
+                    data_parts.push(data);
+                }
+            }
+            if data_parts.is_empty() {
+                continue;
+            }
+            let data = data_parts.join("\n");
+            if data.trim() == "[DONE]" {
+                continue;
+            }
+            let Ok(json) = serde_json::from_str::<Value>(&data) else {
+                continue;
+            };
+            let event = event_name.or_else(|| json.get("type").and_then(Value::as_str));
+            match event {
+                Some("response.output_item.done")
+                    if json
+                        .get("item")
+                        .and_then(|item| item.get("type"))
+                        .and_then(Value::as_str)
+                        == Some(COMPACTION_OUTPUT_TYPE) =>
+                {
+                    if usable_compaction_content(json.get("item")?).is_none() {
+                        return Some(0);
+                    }
+                    count += 1;
+                }
+                Some("response.completed") => {
+                    json.get("response")?.get("id")?.as_str()?;
+                    return Some(count);
+                }
+                Some("response.failed" | "response.incomplete" | "error") => return None,
+                _ => {}
+            }
+        }
+        return None;
+    }
+    let Ok(json) = serde_json::from_slice::<Value>(body) else {
+        return None;
+    };
+    json_compaction_count(&json)
+}
+
+fn compaction_input_rejected(status_code: u16, body: &[u8]) -> bool {
+    if status_code != 400 && status_code != 422 {
+        return false;
+    }
+    // 只读取错误本身，避免回显请求中的 trigger 让无关参数错误触发降级。
+    let text = match serde_json::from_slice::<Value>(body) {
+        Ok(json) => {
+            let error = json.get("error").unwrap_or(&json);
+            [
+                error.as_str(),
+                error.get("message").and_then(Value::as_str),
+                error.get("code").and_then(Value::as_str),
+                error.get("param").and_then(Value::as_str),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" ")
+        }
+        Err(_) => String::from_utf8_lossy(body).into_owned(),
+    }
+    .to_ascii_lowercase();
+    let unrecognized = text.contains("unknown")
+        || text.contains("unrecognized")
+        || text.contains("unsupported")
+        || text.contains("unexpected")
+        || text.contains("not supported")
+        || text.contains("invalid type")
+        || text.contains("invalid_type")
+        || text.contains("additional propert");
+    text.contains(COMPACTION_TRIGGER_TYPE) && unrecognized
+}
+
+fn sse_block_type(block: &str) -> Option<String> {
+    let mut event_name = None;
+    let mut data_parts = Vec::new();
+    for line in block.lines() {
+        if let Some(event) = strip_sse_field(line, "event") {
+            event_name = Some(event.trim().to_string());
+        }
+        if let Some(data) = strip_sse_field(line.trim_end_matches('\r'), "data") {
+            data_parts.push(data);
+        }
+    }
+    if let Some(name) = event_name.filter(|name| !name.is_empty()) {
+        return Some(name);
+    }
+    let data = data_parts.join("\n");
+    let data = data.trim();
+    if data.is_empty() || data == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str::<Value>(data).ok().and_then(|json| {
+        json.get("type")
+            .and_then(Value::as_str)
+            .map(ToString::to_string)
+    })
+}
+
+fn upstream_has_terminal_failure(body: &[u8], content_type: &str) -> bool {
+    if response_body_is_stream(content_type, body) {
+        let text = String::from_utf8_lossy(body).replace("\r\n", "\n");
+        return text.split("\n\n").any(|block| {
+            matches!(
+                sse_block_type(block).as_deref(),
+                Some("response.failed" | "response.incomplete" | "error")
+            )
+        });
+    }
+    serde_json::from_slice::<Value>(body).is_ok_and(|json| {
+        json.get("error").is_some_and(|error| !error.is_null())
+            || matches!(
+                json.get("status").and_then(Value::as_str),
+                Some("failed" | "incomplete")
+            )
+    })
+}
+
+fn render_native_compaction_as_sse(body: &[u8]) -> Option<Vec<u8>> {
+    let json = serde_json::from_slice::<Value>(body).ok()?;
+    let response = if json.get("output").is_some() {
+        json
+    } else {
+        json.get("response")?.clone()
+    };
+    let output = response.get("output")?.as_array()?;
+    let mut compaction_items = output.iter().filter(|item| {
+        item.get("type").and_then(Value::as_str) == Some(COMPACTION_OUTPUT_TYPE)
+            && usable_compaction_content(item).is_some()
+    });
+    let item = compaction_items.next()?.clone();
+    if compaction_items.next().is_some() {
+        return None;
+    }
+    let mut sse = String::new();
+    let mut created_response = response.clone();
+    created_response["status"] = json!("in_progress");
+    created_response["output"] = json!([]);
+    push_sse(
+        &mut sse,
+        "response.created",
+        json!({
+            "type": "response.created",
+            "sequence_number": 0,
+            "response": created_response
+        }),
+    );
+    push_sse(
+        &mut sse,
+        "response.output_item.added",
+        json!({
+            "type": "response.output_item.added",
+            "sequence_number": 1,
+            "output_index": 0,
+            "item": item
+        }),
+    );
+    push_sse(
+        &mut sse,
+        "response.output_item.done",
+        json!({
+            "type": "response.output_item.done",
+            "sequence_number": 2,
+            "output_index": 0,
+            "item": item
+        }),
+    );
+    push_sse(
+        &mut sse,
+        "response.completed",
+        json!({
+            "type": "response.completed",
+            "sequence_number": 3,
+            "response": response
+        }),
+    );
+    sse.push_str("data: [DONE]\n\n");
+    Some(sse.into_bytes())
+}
+
+fn incomplete_compaction_stream(body: &[u8]) -> Vec<u8> {
+    let mut output = String::from_utf8_lossy(body)
+        .into_owned()
+        .replace("\r\n", "\n");
+    if !output.is_empty() && !output.ends_with("\n\n") {
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push('\n');
+    }
+    push_sse(
+        &mut output,
+        "response.failed",
+        json!({
+            "type": "response.failed",
+            "response": {
+                "id": "resp_compact_incomplete",
+                "status": "failed",
+                "error": {
+                    "message": "remote compaction v2 stream closed before response.completed",
+                    "type": "stream_error"
+                }
+            }
+        }),
+    );
+    output.into_bytes()
+}
+
+fn native_compaction_unsupported_result(
+    error: anyhow::Error,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    if error
+        .downcast_ref::<NativeCompactionUnsupported>()
+        .is_some()
+    {
+        let body = json!({
+            "error": {
+                "message": error.to_string(),
+                "type": "compaction_incompatible",
+                "code": "native_compaction_unsupported"
+            }
+        });
+        Ok(UpstreamProxyResponse {
+            status_code: 400,
+            content_type: "application/json".to_string(),
+            is_stream: false,
+            wire_api: UpstreamWireApi::Responses,
+            compaction: false,
+            native_compaction_passthrough: false,
+            buffered_body: Some(serde_json::to_vec(&body).unwrap_or_default()),
+            response: None,
+            _channel_permit: None,
+        })
+    } else {
+        Err(error)
+    }
+}
+
+fn input_has_native_compaction(body: &Value) -> bool {
+    let is_native =
+        |item: &Value| item.get("type").and_then(Value::as_str) == Some(COMPACTION_OUTPUT_TYPE);
+    match body.get("input") {
+        Some(Value::Array(items)) => items.iter().any(is_native),
+        Some(Value::Object(_)) => is_native(&body["input"]),
+        _ => false,
+    }
+}
+
+fn expand_compaction_item(item: &Value) -> Option<Value> {
+    if item.get("type").and_then(Value::as_str) != Some(COMPACTION_OUTPUT_TYPE) {
+        return None;
+    }
+    let encoded = item
+        .get("encrypted_content")?
+        .as_str()?
+        .strip_prefix(LOCAL_COMPACTION_PREFIX)?;
+    let summary: String = serde_json::from_str(encoded).ok()?;
+    if summary.trim().is_empty() {
+        return None;
+    }
+    let mut text = COMPACTION_REPLAY_PREFIX.to_string();
+    text.push_str(&summary);
+    Some(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{ "type": "input_text", "text": text }]
+    }))
+}
+
+fn expand_local_compaction_history(body: &mut Value) {
+    match body.get_mut("input") {
+        Some(Value::Array(items)) => {
+            for item in items {
+                if let Some(message) = expand_compaction_item(item) {
+                    *item = message;
+                }
+            }
+        }
+        Some(input @ Value::Object(_)) => {
+            if let Some(message) = expand_compaction_item(input) {
+                *input = json!([message]);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn is_image_generations_proxy_path(path: &str) -> bool {
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    matches!(
+        path,
+        "/images/generations"
+            | "/v1/images/generations"
+            | "/v1/v1/images/generations"
+            | "/codex/v1/images/generations"
+    )
+}
+
+pub fn is_image_edits_proxy_path(path: &str) -> bool {
+    let path = path.split_once('?').map_or(path, |(path, _)| path);
+    matches!(
+        path,
+        "/images/edits" | "/v1/images/edits" | "/v1/v1/images/edits" | "/codex/v1/images/edits"
+    )
+}
+
+pub async fn open_responses_proxy_request_for_path_with_beta(
+    body: &str,
+    original_user_agent: Option<&str>,
+    request_path: &str,
+    beta_features: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_responses_proxy_request_for_path_with_session_headers(
+        body,
+        original_user_agent,
+        request_path,
+        beta_features,
+        ProxySessionHeaders::default(),
+    )
+    .await
+}
+
+pub async fn open_responses_proxy_request_for_path_with_session_headers(
+    body: &str,
+    original_user_agent: Option<&str>,
+    request_path: &str,
+    beta_features: Option<&str>,
+    session_headers: ProxySessionHeaders<'_>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    open_responses_proxy_request_with_settings_and_user_agent(
+        body,
+        settings,
+        original_user_agent,
+        request_path,
+        beta_features,
+        session_headers,
+    )
+    .await
+}
+
+pub async fn open_responses_proxy_request_with_settings_for_path_and_beta(
+    body: &str,
+    settings: crate::settings::BackendSettings,
+    request_path: &str,
+    beta_features: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_responses_proxy_request_with_settings_for_path_and_session_headers(
+        body,
+        settings,
+        request_path,
+        beta_features,
+        ProxySessionHeaders::default(),
+    )
+    .await
+}
+
+pub async fn open_responses_proxy_request_with_settings_for_path_and_session_headers(
+    body: &str,
+    settings: crate::settings::BackendSettings,
+    request_path: &str,
+    beta_features: Option<&str>,
+    session_headers: ProxySessionHeaders<'_>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_responses_proxy_request_with_settings_and_user_agent(
+        body,
+        settings,
+        None,
+        request_path,
+        beta_features,
+        session_headers,
+    )
+    .await
+}
+
+fn aggregate_upstream_model_override(
+    settings: &crate::settings::BackendSettings,
+    relay: &crate::settings::RelayProfile,
+) -> Option<String> {
+    settings.active_aggregate_relay_profile()?;
+    let model = crate::relay_config::relay_profile_model(relay);
+    let model = model.trim();
+    (!model.is_empty()).then(|| model.to_string())
+}
+
+pub async fn open_image_generations_proxy_request(
+    body: &[u8],
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_image_proxy_request(
+        body,
+        "application/json",
+        original_user_agent,
+        ImageProxyEndpoint::Generations,
+    )
+    .await
+}
+
+pub async fn open_image_edits_proxy_request(
+    body: &[u8],
+    content_type: &str,
+    original_user_agent: Option<&str>,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    open_image_proxy_request(
+        body,
+        content_type,
+        original_user_agent,
+        ImageProxyEndpoint::Edits,
+    )
+    .await
+}
+
+async fn open_image_proxy_request(
+    body: &[u8],
+    content_type: &str,
+    original_user_agent: Option<&str>,
+    endpoint_kind: ImageProxyEndpoint,
+) -> anyhow::Result<UpstreamProxyResponse> {
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let relay = crate::relay_rotation::select_relay_for_probe(&settings)?;
+    let base_url = if relay.upstream_base_url.trim().is_empty() {
+        crate::relay_config::relay_profile_base_url(&relay)
+    } else {
+        relay.upstream_base_url.trim().to_string()
+    };
+    if is_local_protocol_proxy_base_url(&base_url) {
+        anyhow::bail!("图片上游 Base URL 不能指向本地协议代理");
+    }
+    if base_url.trim().is_empty() {
+        anyhow::bail!("图片上游 Base URL 不能为空");
+    }
+    if relay.api_key.trim().is_empty() && !relay.uses_no_auth() {
+        anyhow::bail!("图片上游 Key 不能为空");
+    }
+    let content_type = content_type.trim();
+    let content_type = if content_type.is_empty() {
+        match endpoint_kind {
+            ImageProxyEndpoint::Generations => "application/json",
+            ImageProxyEndpoint::Edits => {
+                anyhow::bail!("图片 edits 请求缺少 Content-Type");
+            }
+        }
+    } else {
+        content_type
+    };
+    let endpoint = endpoint_kind.url(&base_url);
+    let wire_api = endpoint_kind.wire_api();
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "protocol_proxy.image_request",
+        json!({
+            "relayId": relay.id,
+            "relayName": relay.name,
+            "endpoint": endpoint,
+            "wireApi": wire_api,
+            "bodyBytes": body.len(),
+            "endpointKind": endpoint_kind.name()
+        }),
+    );
+    let request = crate::http_client::proxied_client(&effective_user_agent(
+        &relay.user_agent,
+        original_user_agent,
+    ))?
+    .post(endpoint)
+    .header(reqwest::header::CONTENT_TYPE, content_type)
+    .body(body.to_vec());
+    let upstream = send_upstream_request_with_header_timeout(
+        with_relay_auth(request, &relay),
+        UPSTREAM_IMAGE_HEADER_TIMEOUT,
+    )
+    .await?;
+    let status_code = upstream.status().as_u16();
+    let content_type = upstream
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/json; charset=utf-8")
+        .to_string();
+
+    Ok(UpstreamProxyResponse {
+        status_code,
+        is_stream: false,
+        content_type,
+        wire_api,
+        compaction: false,
+        native_compaction_passthrough: false,
+        buffered_body: None,
+        response: Some(upstream),
+        _channel_permit: None,
+    })
+}
+
+fn with_relay_auth(
+    request: reqwest::RequestBuilder,
+    relay: &crate::settings::RelayProfile,
+) -> reqwest::RequestBuilder {
+    // 认证（API Key / 无认证）+ 供应商自定义请求头，统一在 relay_headers 里决定优先级。
+    crate::relay_headers::apply(request, relay)
+}
+
+fn with_client_session_headers(
+    mut builder: reqwest::RequestBuilder,
+    relay: &crate::settings::RelayProfile,
+    headers: ProxySessionHeaders<'_>,
+) -> reqwest::RequestBuilder {
+    for (name, value) in [
+        ("session-id", headers.session_id),
+        ("thread-id", headers.thread_id),
+        ("x-opencode-session", headers.opencode_session),
+    ] {
+        // 显式供应商配置优先，避免 reqwest 追加出两个同名头。
+        if relay
+            .custom_headers
+            .iter()
+            .any(|header| header.key.trim().eq_ignore_ascii_case(name))
+        {
+            continue;
+        }
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            continue;
+        };
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(value) {
+            builder = builder.header(name, value);
+        }
+    }
+    builder
+}
+
+pub fn image_generations_url(base_url: &str) -> String {
+    image_endpoint_url(base_url, "generations")
+}
+
+pub fn image_edits_url(base_url: &str) -> String {
+    image_endpoint_url(base_url, "edits")
+}
+
+fn image_endpoint_url(base_url: &str, endpoint: &str) -> String {
+    let skip_version_prefix = base_url.trim().ends_with('#');
+    let base = base_url.trim().trim_end_matches('#').trim_end_matches('/');
+    if base
+        .to_ascii_lowercase()
+        .ends_with(&format!("/images/{endpoint}"))
+    {
+        return base.to_string();
+    }
+    let origin_only = base
+        .split_once("://")
+        .map_or(!base.contains('/'), |(_, rest)| !rest.contains('/'));
+    let mut url = if skip_version_prefix || has_version_suffix(base) || !origin_only {
+        format!("{base}/images/{endpoint}")
+    } else {
+        format!("{base}/v1/images/{endpoint}")
+    };
+    while url.contains("/v1/v1") {
+        url = url.replace("/v1/v1", "/v1");
+    }
+    url
+}
+
+fn is_local_protocol_proxy_base_url(base_url: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(base_url.trim()) else {
+        return false;
+    };
+    if !url.scheme().eq_ignore_ascii_case("http") || url.port() != Some(protocol_proxy_port()) {
+        return false;
+    }
+    matches!(
+        url.host_str(),
+        Some("127.0.0.1" | "localhost" | "::1" | "[::1]")
+    )
+}
+
+fn response_id_body(response_id: &str) -> &str {
+    response_id
+        .strip_prefix("resp_")
+        .filter(|value| !value.is_empty())
+        .unwrap_or(response_id)
+}
+
+pub fn normalize_responses_item_ids_for_test(body: &mut Value) {
+    normalize_responses_item_ids(body);
+}
+
+fn normalize_responses_item_ids(body: &mut Value) {
+    let Some(input) = body.get_mut("input") else {
+        return;
+    };
+    match input {
+        Value::Array(items) => {
+            for item in items {
+                normalize_responses_item_id(item);
+            }
+        }
+        Value::Object(_) => normalize_responses_item_id(input),
+        _ => {}
+    }
+}
+
+fn normalize_responses_item_id(item: &mut Value) {
+    let Some(item_type) = item.get("type").and_then(Value::as_str) else {
+        return;
+    };
+    let Some((_, prefix)) = RESPONSES_ITEM_ID_PREFIXES
+        .iter()
+        .find(|(kind, _)| *kind == item_type)
+    else {
+        return;
+    };
+    let Some(id) = item.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    // 只有「前缀 + 非空后缀」才算已经合规。id 恰好等于前缀本身（`fc_`）是空壳，
+    // 放它过去会直接触发上游的 invalid_id_prefix，所以落到下面按 call_id 重建。
+    if id.len() > prefix.len() && id.starts_with(prefix) {
+        return;
+    }
+    // 剥掉 id 上现有的前缀再换新的。取**最长**匹配：`fc_` 是 `fco_` 的前缀，
+    // 先撞上短的会把 `fco_call_a` 剥成 `call_a` 再换成 `fc_call_a`，
+    // 把 function_call_output 错改成 function_call。
+    // `item_` 是历史版本 Alunixa X 自己造的前缀；`cp_` 来自压缩项错误使用
+    // `cp_{response_id}` 的版本；`resp_` 来自历史版本把 message item 命名成
+    // `{response_id}_msg`（#1431 / #1781），都要一并剥掉。
+    let suffix = ["item_", "cp_", "resp_"]
+        .into_iter()
+        .chain(RESPONSES_ITEM_ID_PREFIXES.iter().map(|(_, known)| *known))
+        .filter_map(|known| id.strip_prefix(known).map(|rest| (known.len(), rest)))
+        .max_by_key(|(len, _)| *len)
+        .map(|(_, rest)| rest)
+        .unwrap_or(id);
+    // 剥完是空串说明 id 恰好只由某个前缀组成，退回 call_id，再退回原 id。
+    let suffix = if suffix.is_empty() {
+        item.get("call_id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(id)
+    } else {
+        suffix
+    };
+    item["id"] = json!(format!("{prefix}{suffix}"));
+}
+
+fn orphan_tool_output_message(call_id: &str, output: &Value) -> Value {
+    // 这条已经是 user 消息，multi-part 图片可以直接内联，不必走 relocate。
+    if let Value::Array(parts) = tool_output_content(output) {
+        let mut content = vec![json!({
+            "type": "text",
+            "text": format!("Function call output ({call_id}):")
+        })];
+        content.extend(parts);
+        return json!({ "role": "user", "content": content });
+    }
+    json!({
+        "role": "user",
+        "content": format!(
+            "Function call output ({call_id}): {}",
+            response_output_text(output)
+        )
+    })
+}
+
+fn relocate_interleaved_non_tool_messages(messages: &mut Vec<Value>) {
+    let mut index = 0;
+    while index < messages.len() {
+        let Some(tool_calls) = messages[index].get("tool_calls").and_then(Value::as_array) else {
+            index += 1;
+            continue;
+        };
+        let mut unanswered: BTreeSet<String> = tool_calls
+            .iter()
+            .filter_map(|tool_call| tool_call.get("id").and_then(Value::as_str))
+            .map(str::to_string)
+            .collect();
+        if unanswered.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        // 从本条 assistant 往后扫，收集本轮的所有 tool 结果与夹在其中的非 tool 消息，
+        // 直到 tool_call 集合配齐、撞上下一条 assistant（新轮次，不能越界）、或到底。
+        let mut tool_messages: Vec<Value> = Vec::new();
+        let mut interleaved: Vec<Value> = Vec::new();
+        let mut scan = index + 1;
+        while scan < messages.len() {
+            let role = messages[scan].get("role").and_then(Value::as_str);
+            if role == Some("assistant") {
+                break;
+            }
+            if role == Some("tool") {
+                if let Some(id) = messages[scan].get("tool_call_id").and_then(Value::as_str) {
+                    unanswered.remove(id);
+                }
+                tool_messages.push(messages[scan].clone());
+            } else if !tool_messages.is_empty() {
+                // 只有已经收到过 tool 结果之后的夹心才值得搬：
+                // 本条 assistant 尚未收到任何结果时，中间的消息是正常历史，不是夹心。
+                interleaved.push(messages[scan].clone());
+            }
+            scan += 1;
+            if unanswered.is_empty() {
+                break;
+            }
+        }
+
+        if interleaved.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        // 重建这段区间：tool 结果。配齐时）在前、夹心消息在后。
+        let rebuilt: Vec<Value> = tool_messages.into_iter().chain(interleaved).collect();
+        let rebuilt_len = rebuilt.len();
+        messages.splice(index + 1..scan, rebuilt);
+        // 跳过刚重建的区间，避免在搬动过的消息上重复扫描导致死循环。
+        index += 1 + rebuilt_len;
+    }
+}
+
+fn degrade_unpaired_tool_messages(messages: &mut [Value]) {
+    let mut known: BTreeSet<String> = BTreeSet::new();
+    for message in messages.iter() {
+        if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
+            for tool_call in tool_calls {
+                if let Some(id) = tool_call.get("id").and_then(Value::as_str) {
+                    known.insert(id.to_string());
+                }
+            }
+        }
+    }
+
+    for message in messages.iter_mut() {
+        if message.get("role").and_then(Value::as_str) != Some("tool") {
+            continue;
+        }
+        let paired = message
+            .get("tool_call_id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| known.contains(id));
+        if paired {
+            continue;
+        }
+        let content = message.get("content").cloned().unwrap_or(Value::Null);
+        *message = json!({
+            "role": "user",
+            "content": content
+        });
+    }
+}
+
+fn enforce_tool_call_pairing(messages: &mut [Value]) {
+    let mut index = 0;
+    while index < messages.len() {
+        if messages[index].get("role").and_then(Value::as_str) != Some("assistant") {
+            index += 1;
+            continue;
+        }
+        let Some(tool_calls) = messages[index].get("tool_calls").and_then(Value::as_array) else {
+            index += 1;
+            continue;
+        };
+        if tool_calls.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        // 收集紧跟其后的 tool 消息所应答的 id
+        let mut answered = BTreeSet::new();
+        let mut followers = 0;
+        for message in messages[index + 1..]
+            .iter()
+            .take_while(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+        {
+            followers += 1;
+            if let Some(id) = message.get("tool_call_id").and_then(Value::as_str) {
+                answered.insert(id.to_string());
+            }
+        }
+
+        // 位于历史尾部的 tool_call 是「刚发起、output 还没回来」的正常形态，
+        // 上游本就期待它；只有序列越过了它却没应答才是非法的。
+        if index + 1 + followers >= messages.len() {
+            index += 1;
+            continue;
+        }
+
+        let (kept, orphaned): (Vec<Value>, Vec<Value>) =
+            tool_calls.iter().cloned().partition(|tool_call| {
+                tool_call
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| answered.contains(id))
+            });
+        if orphaned.is_empty() {
+            index += 1;
+            continue;
+        }
+
+        let notes = orphaned
+            .iter()
+            .map(|tool_call| {
+                let name = tool_call
+                    .get("function")
+                    .and_then(|function| function.get("name"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                let id = tool_call.get("id").and_then(Value::as_str).unwrap_or("");
+                format!("Abandoned function call ({id}): {name}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if kept.is_empty() {
+            if let Some(message) = messages[index].as_object_mut() {
+                message.remove("tool_calls");
+            }
+        } else {
+            messages[index]["tool_calls"] = json!(kept);
+        }
+        append_text_to_assistant_message(&mut messages[index], &notes);
+        index += 1;
+    }
+}
+
+fn relocate_tool_output_images(messages: &mut Vec<Value>) {
+    let mut index = 0;
+    while index < messages.len() {
+        if messages[index].get("role").and_then(Value::as_str) != Some("tool") {
+            index += 1;
+            continue;
+        }
+        let mut images = Vec::new();
+        let mut end = index;
+        while end < messages.len()
+            && messages[end].get("role").and_then(Value::as_str) == Some("tool")
+        {
+            take_images_from_tool_message(&mut messages[end], &mut images);
+            end += 1;
+        }
+        if !images.is_empty() {
+            let mut content = vec![json!({
+                "type": "text",
+                "text": "Images returned by the tool call(s) above:"
+            })];
+            content.append(&mut images);
+            messages.insert(end, json!({ "role": "user", "content": content }));
+            end += 1;
+        }
+        index = end;
+    }
+}
+
+fn take_images_from_tool_message(message: &mut Value, images: &mut Vec<Value>) {
+    let Some(parts) = message.get("content").and_then(Value::as_array) else {
+        return;
+    };
+
+    let mut texts = Vec::new();
+    let mut found = Vec::new();
+    for part in parts {
+        if is_image_part(part) {
+            if let Some(image) = image_part_to_chat(part) {
+                found.push(image);
+            }
+            continue;
+        }
+        if let Some(text) = part.get("text").and_then(Value::as_str)
+            && !text.is_empty()
+        {
+            texts.push(text.to_string());
+        }
+    }
+    if found.is_empty() {
+        return;
+    }
+
+    let placeholder = if found.len() == 1 {
+        "[image]".to_string()
+    } else {
+        format!("[{} images]", found.len())
+    };
+    message["content"] = json!(if texts.is_empty() {
+        placeholder
+    } else {
+        format!("{}\n{placeholder}", texts.join("\n"))
+    });
+    images.append(&mut found);
+}
+
+fn append_text_to_assistant_message(message: &mut Value, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let existing = match message.get("content") {
+        Some(Value::String(content)) => content.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.as_str())
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    };
+    message["content"] = if existing.trim().is_empty() {
+        json!(text)
+    } else {
+        json!(format!("{existing}\n{text}"))
+    };
+}
+
+fn ensure_tool_call_reasoning_content(messages: &mut [Value]) {
+    for message in messages {
+        if message.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let has_tool_calls = message
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .is_some_and(|tool_calls| !tool_calls.is_empty());
+        if !has_tool_calls {
+            continue;
+        }
+        let has_content = message
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| !content.trim().is_empty());
+        let has_reasoning = message
+            .get("reasoning_content")
+            .and_then(Value::as_str)
+            .is_some_and(|reasoning| !reasoning.trim().is_empty());
+        if has_content || has_reasoning {
+            continue;
+        }
+        message["reasoning_content"] = json!("Calling the requested tool.");
+    }
+}
+
+fn system_message_text(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|part| {
+                part.get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| part.as_str())
+            })
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        _ => String::new(),
+    }
+}
+
+fn is_image_part(part: &Value) -> bool {
+    matches!(
+        part.get("type").and_then(Value::as_str),
+        Some("input_image") | Some("image_url")
+    )
+}
+
+fn image_part_to_chat(part: &Value) -> Option<Value> {
+    if !is_image_part(part) {
+        return None;
+    }
+    let raw = part.get("image_url")?;
+    let image_url = if raw.is_object() {
+        raw.clone()
+    } else {
+        json!({ "url": raw.as_str().unwrap_or_default() })
+    };
+    if image_url
+        .get("url")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return None;
+    }
+    Some(json!({ "type": "image_url", "image_url": image_url }))
+}
+
+fn flatten_top_level_combinators(schema: Value) -> Value {
+    let Some(object) = schema.as_object() else {
+        return schema;
+    };
+    let Some((key, branches)) = SCHEMA_COMBINATOR_KEYS
+        .iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_array).map(|a| (*key, a)))
+    else {
+        return schema;
+    };
+    if branches.is_empty() {
+        return schema;
+    }
+
+    // 分支常是裸 `$ref`（`{ "$ref": "#/$defs/__schema0" }`），它自己不带 `$defs`，
+    // 所以必须拿**父级**的 $defs 来解析——只对分支单独调 inline_ref_siblings
+    // 永远解析不出来（实测：分支落进降级路径，properties 为空）。
+    let defs = object.get("$defs").and_then(Value::as_object);
+
+    let mut properties = Map::new();
+    let mut required: Option<BTreeSet<String>> = None;
+    let mut flattenable = true;
+
+    for branch in branches {
+        let normalized = match resolve_local_definition(
+            branch
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(local_definition_name)
+                .unwrap_or(""),
+            defs,
+            &mut Vec::new(),
+        ) {
+            // 分支是裸 $ref：用父级 $defs 解析出真实 schema。
+            Ok(Some(resolved)) if branch.as_object().is_some_and(|o| o.len() == 1) => {
+                normalize_schema_value(&resolved, defs, &mut Vec::new()).unwrap_or(resolved)
+            }
+            _ => inline_ref_siblings(branch),
+        };
+        let Some(branch_object) = normalized.as_object() else {
+            flattenable = false;
+            break;
+        };
+        let branch_properties = branch_object.get("properties").and_then(Value::as_object);
+        let branch_required: BTreeSet<String> = branch_object
+            .get("required")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // 分支没有 properties 时（例如 type:"string"）无法并入对象 schema。
+        if branch_properties.is_none() && !branch_required.is_empty() {
+            flattenable = false;
+            break;
+        }
+        for (name, value) in branch_properties.into_iter().flatten() {
+            merge_schema_property(&mut properties, name, value);
+        }
+        required = Some(match required {
+            None => branch_required,
+            Some(current) => current.intersection(&branch_required).cloned().collect(),
+        });
+    }
+
+    if !flattenable || properties.is_empty() {
+        // 降级：把分支原样塞进一个带说明的字段，schema 依然合法。
+        let mut fallback = object.clone();
+        fallback.insert(
+            "type".to_string(),
+            json!("object"),
+        );
+        fallback.insert("properties".to_string(), json!({}));
+        let mut description: Vec<String> = Vec::new();
+        for branch in branches {
+            if let Some(text) = branch.get("description").and_then(Value::as_str) {
+                if !text.trim().is_empty() {
+                    description.push(text.trim().to_string());
+                }
+            }
+        }
+        fallback.insert(
+            "x-merged-combinator".to_string(),
+            json!({
+                "kind": key,
+                "branches": branches,
+                "description": description.join("\n")
+            }),
+        );
+        for combinator in SCHEMA_COMBINATOR_KEYS {
+            fallback.remove(combinator);
+        }
+        return Value::Object(fallback);
+    }
+
+    let mut flattened = object.clone();
+    for combinator in SCHEMA_COMBINATOR_KEYS {
+        flattened.remove(combinator);
+    }
+    flattened.insert("type".to_string(), json!("object"));
+    flattened.insert("properties".to_string(), Value::Object(properties));
+    flattened.insert(
+        "required".to_string(),
+        json!(required
+            .unwrap_or_default()
+            .into_iter()
+            .collect::<Vec<_>>()),
+    );
+    Value::Object(flattened)
+}
+
+fn merge_schema_property(properties: &mut Map<String, Value>, name: &str, value: &Value) {
+    let Some(existing) = properties.get_mut(name) else {
+        properties.insert(name.to_string(), value.clone());
+        return;
+    };
+    let (Some(left), Some(right)) = (existing.as_object(), value.as_object()) else {
+        return;
+    };
+    if left.get("properties").is_none() || right.get("properties").is_none() {
+        return;
+    }
+    let mut merged = left.clone();
+    let mut merged_properties = left
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    for (child_name, child_value) in right.get("properties").and_then(Value::as_object).into_iter().flatten() {
+        merge_schema_property(&mut merged_properties, child_name, child_value);
+    }
+    merged.insert("properties".to_string(), Value::Object(merged_properties));
+
+    let left_required: BTreeSet<String> = left
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    let right_required: BTreeSet<String> = right
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    merged.insert(
+        "required".to_string(),
+        json!(left_required
+            .intersection(&right_required)
+            .cloned()
+            .collect::<Vec<_>>()),
+    );
+    *existing = Value::Object(merged);
+}
+
+fn inline_ref_siblings(root: &Value) -> Value {
+    let defs = root.get("$defs").and_then(Value::as_object);
+    let mut resolving = Vec::new();
+    normalize_schema_value(root, defs, &mut resolving).unwrap_or_else(|_| root.clone())
+}
+
+fn normalize_schema_value(
+    node: &Value,
+    defs: Option<&Map<String, Value>>,
+    resolving: &mut Vec<String>,
+) -> Result<Value, LocalRefNormalizationError> {
+    match node {
+        Value::Array(items) => Ok(Value::Array(
+            items
+                .iter()
+                .map(|item| normalize_schema_value(item, defs, resolving))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        Value::Object(object) => normalize_schema_object(object, defs, resolving),
+        _ => Ok(node.clone()),
+    }
+}
+
+fn normalize_schema_object(
+    object: &Map<String, Value>,
+    defs: Option<&Map<String, Value>>,
+    resolving: &mut Vec<String>,
+) -> Result<Value, LocalRefNormalizationError> {
+    if object.len() > 1
+        && let Some(reference) = object.get("$ref").and_then(Value::as_str)
+        && let Some(name) = local_definition_name(reference)
+    {
+        match resolve_local_definition(name, defs, resolving)? {
+            Some(Value::Object(mut merged)) if merged.get("$ref").is_none() => {
+                for (key, value) in object {
+                    if key != "$ref" {
+                        merged.insert(key.clone(), normalize_schema_value(value, defs, resolving)?);
+                    }
+                }
+                return Ok(Value::Object(merged));
+            }
+            Some(_) | None => {}
+        }
+    }
+
+    let mut normalized = Map::new();
+    for (key, value) in object {
+        // JSON Schema 的 type 必须是字符串，null 恒非法，剥掉等价于未声明。
+        if key == "type" && value.is_null() {
+            continue;
+        }
+        normalized.insert(key.clone(), normalize_schema_value(value, defs, resolving)?);
+    }
+    Ok(Value::Object(normalized))
+}
+
+fn resolve_local_definition(
+    name: &str,
+    defs: Option<&Map<String, Value>>,
+    resolving: &mut Vec<String>,
+) -> Result<Option<Value>, LocalRefNormalizationError> {
+    let Some(defs) = defs else {
+        return Ok(None);
+    };
+    let Some(target) = defs.get(name) else {
+        return Ok(None);
+    };
+    if resolving.iter().any(|current| current == name) {
+        return Err(LocalRefNormalizationError::Cycle);
+    }
+
+    resolving.push(name.to_string());
+    let resolved = if let Some(alias) = bare_local_ref_name(target) {
+        resolve_local_definition(alias, Some(defs), resolving)
+    } else {
+        normalize_schema_value(target, Some(defs), resolving).map(Some)
+    };
+    resolving.pop();
+    resolved
+}
+
+fn bare_local_ref_name(node: &Value) -> Option<&str> {
+    let object = node.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    local_definition_name(object.get("$ref")?.as_str()?)
+}
+
+fn local_definition_name(reference: &str) -> Option<&str> {
+    let name = reference.strip_prefix("#/$defs/")?;
+    if name.is_empty() || name.contains('/') {
+        return None;
+    }
+    Some(name)
+}
+
+fn collect_tool_search_output_namespaces(body: &Value) -> Vec<Value> {
+    let mut collected: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let Some(items) = body.get("input").and_then(Value::as_array) else {
+        return collected;
+    };
+
+    for item in items {
+        if item.get("type").and_then(Value::as_str) != Some("tool_search_output") {
+            continue;
+        }
+        let Some(tools) = item.get("tools").and_then(Value::as_array) else {
+            continue;
+        };
+        for tool in tools {
+            let Some(name) = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+            else {
+                continue;
+            };
+            if seen.insert(name.to_string()) {
+                collected.push(tool.clone());
+            }
+        }
+    }
+
+    collected
+}
+
+fn dedup_chat_tools_by_name(tools: &mut Vec<Value>) {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    tools.retain(|tool| {
+        match tool
+            .get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+        {
+            Some(name) => seen.insert(name.to_string()),
+            None => true,
+        }
+    });
+}
+
+fn web_search_item_id(call_id: &str) -> String {
+    format!("ws_{call_id}")
+}
+
+fn web_search_action_from_arguments(arguments: &str) -> Value {
+    let parsed = responses_arguments_to_chat_parse(arguments);
+    let query = parsed
+        .get("query")
+        .and_then(Value::as_str)
+        .or_else(|| parsed.get("input").and_then(Value::as_str))
+        .filter(|value| !value.trim().is_empty());
+    let url = parsed
+        .get("url")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty());
+    if let Some(url) = url {
+        return json!({ "type": "open_page", "url": url });
+    }
+    let queries = parsed
+        .get("queries")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|value| json!(value))
+                .collect::<Vec<_>>()
+        })
+        .filter(|items| !items.is_empty());
+    match (query, queries) {
+        (Some(query), Some(queries)) => {
+            json!({ "type": "search", "query": query, "queries": queries })
+        }
+        (Some(query), None) => json!({ "type": "search", "query": query }),
+        (None, Some(queries)) => {
+            let first = queries
+                .first()
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            json!({ "type": "search", "query": first, "queries": queries })
+        }
+        (None, None) => json!({ "type": "search" }),
+    }
+}
+
+fn web_search_action_has_target(action: &Value) -> bool {
+    action
+        .get("query")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        || action
+            .get("queries")
+            .and_then(Value::as_array)
+            .is_some_and(|queries| {
+                queries.iter().any(|query| {
+                    query
+                        .as_str()
+                        .is_some_and(|value| !value.trim().is_empty())
+                })
+            })
+        || action
+            .get("url")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn invalid_web_search_output_item(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_str) == Some("web_search_call")
+        && item.get("status").and_then(Value::as_str) == Some("completed")
+        && !item
+            .get("action")
+            .is_some_and(web_search_action_has_target)
+}
+
+fn tool_call_item_id(call_id: &str, name: &str, tool_context: &CodexToolContext) -> String {
+    if tool_context.is_builtin_web_search_proxy(name) {
+        return web_search_item_id(call_id);
+    }
+    let prefix = if tool_context.is_custom_tool_proxy(name) {
+        if tool_context.is_tool_search_proxy(name) {
+            // 官方客户端给 tool_search_call 分配的 item id 前缀（见 codex id_prefix）。
+            return format!("tsc_{call_id}");
+        }
+        "ctc_"
+    } else {
+        "fc_"
+    };
+    format!("{prefix}{call_id}")
+}
+
+fn upstream_needs_bare_base64(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.starts_with("glm-") || model.starts_with("zhipu") || model.contains("/glm-")
+}
+
+fn normalize_image_data_urls_for_model(messages: &mut [Value], model: &str) {
+    if !upstream_needs_bare_base64(model) {
+        return;
+    }
+    for message in messages.iter_mut() {
+        let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for part in parts.iter_mut() {
+            if !is_image_part(part) {
+                continue;
+            }
+            let Some(url) = part
+                .get_mut("image_url")
+                .and_then(|value| {
+                    if value.is_object() {
+                        value.get_mut("url")
+                    } else {
+                        Some(value)
+                    }
+                })
+                .and_then(|value| value.as_str().map(str::to_string))
+            else {
+                continue;
+            };
+            let Some(bare) = strip_data_url_prefix(&url) else {
+                continue;
+            };
+            let target = part.get_mut("image_url").expect("checked above");
+            if target.is_object() {
+                target["url"] = json!(bare);
+            } else {
+                *target = json!(bare);
+            }
+        }
+    }
+}
+
+fn strip_data_url_prefix(url: &str) -> Option<String> {
+    let rest = url.strip_prefix(IMAGE_DATA_URL_PREFIX)?;
+    let (_, payload) = rest.split_once(";base64,")?;
+    Some(payload.to_string())
+}
+
+fn redact_image_data_urls(text: &str) -> Option<String> {
+    if !text.contains(IMAGE_DATA_URL_PREFIX) {
+        return None;
+    }
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(IMAGE_DATA_URL_PREFIX) {
+        out.push_str(&rest[..start]);
+        out.push_str("[image omitted]");
+        let tail = &rest[start..];
+        // data URL 由 base64 字母表加少量分隔符组成，遇到其它字符即结束。
+        let end = tail
+            .find(|c: char| {
+                !(c.is_ascii_alphanumeric()
+                    || matches!(c, '+' | '/' | '=' | ':' | ';' | ',' | '.' | '-' | '_'))
+            })
+            .unwrap_or(tail.len());
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+fn guard_inline_image_data_urls(value: &mut Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            let mut hit = false;
+            for (key, child) in map.iter_mut() {
+                // image_url 子树是图片的合法归宿，跳过。
+                if key == "image_url" {
+                    continue;
+                }
+                hit |= guard_inline_image_data_urls(child);
+            }
+            hit
+        }
+        Value::Array(items) => {
+            let mut hit = false;
+            for item in items {
+                hit |= guard_inline_image_data_urls(item);
+            }
+            hit
+        }
+        Value::String(text) => match redact_image_data_urls(text) {
+            Some(cleaned) => {
+                *text = cleaned;
+                true
+            }
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+fn responses_arguments_to_chat_parse(arguments: &str) -> Value {
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return json!({});
+    }
+    serde_json::from_str(trimmed).unwrap_or_else(|_| json!({}))
+}
+
+fn normalize_chat_tool_arguments_string(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return "{}".to_string();
+    }
+    match serde_json::from_str::<Value>(trimmed) {
+        Ok(Value::Object(_)) => trimmed.to_string(),
+        Ok(value) => canonical_json_string(&json!({ "input": value })),
+        Err(_) => canonical_json_string(&json!({ "input": text })),
+    }
+}
+
+fn is_kimi_coding_model(model: &str) -> bool {
+    let model = model.to_ascii_lowercase();
+    model.starts_with("k3") || model.contains("kimi-k3") || model.contains("for-coding")
+}
+
+fn kimi_thinking_enabled_type(model: &str) -> &'static str {
+    if is_kimi_coding_model(model) {
+        "adaptive"
+    } else {
+        "enabled"
+    }
+}
+
+pub struct CompactionSseConverter {
+    response_id: String,
+    compaction_id: String,
+    model: String,
+    summary: String,
+    final_summary: Option<String>,
+    failed: Option<(String, Option<String>)>,
+    /// 跨网络 chunk 攒 SSE 事件的缓冲（见 push_upstream_bytes）。
+    sse_buffer: String,
+    sse_utf8_remainder: Vec<u8>,
+    responses_wire: bool,
+}
+
+impl CompactionSseConverter {
+    pub fn new(model: &str) -> Self {
+        Self {
+            response_id: format!("resp_compact_{}", chrono_now_millis()),
+            compaction_id: format!("cmp_{}", uuid::Uuid::new_v4().simple()),
+            model: model.to_string(),
+            summary: String::new(),
+            final_summary: None,
+            failed: None,
+            sse_buffer: String::new(),
+            sse_utf8_remainder: Vec::new(),
+            responses_wire: true,
+        }
+    }
+
+    /// 标记上游是 Chat Completions（SSE chunk 的增量在 `choices[].delta.content`）。
+    /// Responses 上游默认，增量在 `response.output_text.delta` 事件里。
+    pub fn with_chat_upstream(mut self) -> Self {
+        self.responses_wire = false;
+        self
+    }
+
+    /// 追加上游输出的一块文本内容（非流式路径直接喂完整摘要）。
+    pub fn push_summary_text(&mut self, text: &str) {
+        self.summary.push_str(text);
+    }
+
+    /// 当前已收集的原始摘要文本（剥 think 之前），供空摘要判定。
+    pub fn summary_text(&self) -> &str {
+        &self.summary
+    }
+
+    /// 喂入上游流式响应的一个网络 chunk。SSE 事件可能被 TCP 拆开，
+    /// 内部按 `\n\n` 边界缓冲；残缺块留在缓冲区等下一个 chunk。
+    pub fn push_upstream_bytes(&mut self, bytes: &[u8]) {
+        append_utf8_safe(&mut self.sse_buffer, &mut self.sse_utf8_remainder, bytes);
+        while let Some(block) = take_sse_block(&mut self.sse_buffer) {
+            if block.trim().is_empty() {
+                continue;
+            }
+            self.handle_upstream_sse_block(&block);
+        }
+    }
+
+    fn handle_upstream_sse_block(&mut self, block: &str) {
+        let mut event_name = "";
+        let mut data_parts: Vec<&str> = Vec::new();
+        for line in block.lines() {
+            if let Some(event) = strip_sse_field(line, "event") {
+                event_name = event.trim();
+            }
+            if let Some(data) = strip_sse_field(line, "data") {
+                data_parts.push(data);
+            }
+        }
+        if data_parts.is_empty() {
+            return;
+        }
+        let data = data_parts.join("\n");
+        if data.trim() == "[DONE]" {
+            return;
+        }
+        let Ok(chunk) = serde_json::from_str::<Value>(&data) else {
+            return;
+        };
+        let event_type = chunk
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or(event_name);
+        if matches!(
+            event_type,
+            "response.failed" | "response.incomplete" | "error"
+        ) || chunk.get("error").is_some_and(|error| !error.is_null())
+        {
+            let error = chunk
+                .pointer("/response/error")
+                .or_else(|| chunk.get("error"));
+            self.fail(
+                error
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("Compaction upstream stream failed or was incomplete")
+                    .to_string(),
+                error
+                    .and_then(|error| error.get("code"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            );
+            return;
+        }
+        if self.responses_wire {
+            match event_type {
+                // Responses 流优先读取正文增量，排除携带同名 delta 字段的推理事件。
+                "response.output_text.delta" => {
+                    if let Some(delta) = chunk.get("delta").and_then(Value::as_str) {
+                        self.summary.push_str(delta);
+                    }
+                }
+                // 部分兼容实现不发送 delta，只在完成事件里携带完整正文。
+                "response.output_text.done" => {
+                    self.capture_final_summary(chunk.get("text"));
+                }
+                "response.content_part.done" => {
+                    self.capture_final_summary(chunk.pointer("/part/text"));
+                }
+                "response.output_item.done" => {
+                    let text = chunk
+                        .get("item")
+                        .map(extract_summary_text_from_response_item)
+                        .unwrap_or_default();
+                    self.capture_final_summary(Some(&json!(text)));
+                }
+                "response.completed" => {
+                    let text = chunk
+                        .get("response")
+                        .map(extract_summary_text_from_responses)
+                        .unwrap_or_default();
+                    self.capture_final_summary(Some(&json!(text)));
+                }
+                _ => {}
+            }
+        } else if let Some(choice) = chunk
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+        {
+            if let Some(content) = choice
+                .get("delta")
+                .and_then(|delta| delta.get("content"))
+                .and_then(Value::as_str)
+            {
+                self.summary.push_str(content);
+            }
+            self.capture_final_summary(
+                choice
+                    .get("message")
+                    .and_then(|message| message.get("content")),
+            );
+        }
+    }
+
+    fn capture_final_summary(&mut self, text: Option<&Value>) {
+        let Some(text) = text
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+        else {
+            return;
+        };
+        self.final_summary = Some(text.to_string());
+    }
+
+    pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
+        self.failed = Some((message, error_type));
+        Vec::new()
+    }
+
+    /// 收尾：产出完整的 compaction 响应 SSE。
+    /// 链式推理上游（DeepSeek thinking 等）会把推理过程以 `<think>` 块
+    /// 混进正文，这里统一剥掉首部完整 think 块，只保留真正的摘要答案；
+    /// think 块未闭合（上游截断）时整个丢弃——剩下的只有推理残片。
+    pub fn finish(mut self) -> Vec<u8> {
+        if let Some(final_summary) = self.final_summary.take() {
+            self.summary = final_summary;
+        }
+        if let Some((_reasoning, answer)) = split_leading_think_block(&self.summary) {
+            self.summary = answer;
+        } else if self.summary.trim_start().starts_with(THINK_OPEN_TAG) {
+            self.summary = String::new();
+        }
+        self.summary = self.summary.trim().to_string();
+        // 剥掉 think 块后为空（上游空输出、纯推理文本、截断导致块未闭合），
+        // 一律按失败返回，避免向 codex 交付 `completed + 空 encrypted_content`
+        // 的空 checkpoint 静默清空会话。
+        if self.failed.is_none() && self.summary.is_empty() {
+            self.failed = Some((
+                "上游返回了空摘要，无法完成压缩".to_string(),
+                Some("compaction_empty_summary".to_string()),
+            ));
+        }
+        let mut output = String::new();
+        let mut response = json!({
+            "id": self.response_id,
+            "object": "response",
+            "created_at": chrono_now_millis() / 1000,
+            "status": "in_progress",
+            "model": self.model,
+            "output": [],
+            "usage": default_responses_usage()
+        });
+        push_sse(
+            &mut output,
+            "response.created",
+            json!({"type": "response.created", "sequence_number": 0, "response": response}),
+        );
+        if let Some((message, error_type)) = self.failed {
+            response["status"] = json!("failed");
+            response["error"] = json!({
+                "code": error_type.unwrap_or_else(|| "compaction_failed".to_string()),
+                "message": message
+            });
+            push_sse(
+                &mut output,
+                "response.failed",
+                json!({"type": "response.failed", "sequence_number": 1, "response": response}),
+            );
+            output.push_str("data: [DONE]\n\n");
+            return output.into_bytes();
+        }
+        let compaction_item = json!({
+            "id": self.compaction_id,
+            "type": COMPACTION_OUTPUT_TYPE,
+            "encrypted_content": format!("{LOCAL_COMPACTION_PREFIX}{}", json!(self.summary))
+        });
+        for (sequence_number, event_type) in [
+            (1, "response.output_item.added"),
+            (2, "response.output_item.done"),
+        ] {
+            push_sse(
+                &mut output,
+                event_type,
+                json!({
+                    "type": event_type,
+                    "sequence_number": sequence_number,
+                    "output_index": 0,
+                    "item": compaction_item
+                }),
+            );
+        }
+        response["status"] = json!("completed");
+        response["output"] = json!([compaction_item]);
+        push_sse(
+            &mut output,
+            "response.completed",
+            json!({
+                "type": "response.completed",
+                "sequence_number": 3,
+                "response": response
+            }),
+        );
+        output.push_str("data: [DONE]\n\n");
+        output.into_bytes()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+
+pub struct ProxySessionHeaders<'a> {
+    pub session_id: Option<&'a str>,
+    pub thread_id: Option<&'a str>,
+    pub opencode_session: Option<&'a str>,
+}
+
+#[derive(Debug)]
+
+struct ExtraContentCache {
+    entries: BTreeMap<String, Value>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl ExtraContentCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            order: VecDeque::new(),
+            capacity,
+        }
+    }
+
+    fn remember(&mut self, call_id: &str, extra_content: Value) {
+        if call_id.is_empty() {
+            return;
+        }
+        if self.entries.insert(call_id.to_string(), extra_content).is_none() {
+            self.order.push_back(call_id.to_string());
+        }
+        while self.order.len() > self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                // 只有仍是最旧那一条时才删，避免把刚更新过的键误删。
+                if !self.order.contains(&oldest) {
+                    self.entries.remove(&oldest);
+                }
+            }
+        }
+    }
+
+    fn recall(&self, call_id: &str) -> Option<Value> {
+        self.entries.get(call_id).cloned()
+    }
+}
+
+#[derive(Default)]
+
+pub(crate) struct NativeResponsesSseObserver {
+    event_prefix: Vec<u8>,
+    event_tail: [u8; 4],
+    event_too_large: bool,
+    unclassified_large_event: bool,
+    completed: bool,
+    failure: Option<&'static str>,
+}
+
+impl NativeResponsesSseObserver {
+    pub(crate) fn push_bytes(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            if self.event_prefix.len() < NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT {
+                self.event_prefix.push(*byte);
+            } else {
+                self.event_too_large = true;
+            }
+            self.event_tail.rotate_left(1);
+            self.event_tail[3] = *byte;
+            if self.event_tail.ends_with(b"\n\n") || self.event_tail == *b"\r\n\r\n" {
+                self.observe_event();
+                self.event_prefix.clear();
+                self.event_tail = [0; 4];
+                self.event_too_large = false;
+            }
+        }
+    }
+
+    fn observe_event(&mut self) {
+        let prefix = String::from_utf8_lossy(&self.event_prefix);
+        let event_name = prefix.lines().find_map(|line| strip_sse_field(line, "event"));
+        let data = prefix.lines().filter_map(|line| strip_sse_field(line, "data"))
+            .collect::<Vec<_>>().join("\n");
+        // 只观察已完整解析的顶层 type；后续大 payload 超过前缀上限时，
+        // 忽略其解析错误，保留此前读到的类型。它不是原生响应的有效性校验器。
+        struct EventType<'a>(&'a mut Option<String>);
+        impl<'de> serde::de::Visitor<'de> for EventType<'_> {
+            type Value = ();
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("an SSE event object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "type" {
+                        *self.0 = Some(map.next_value::<String>()?);
+                    } else {
+                        map.next_value::<serde::de::IgnoredAny>()?;
+                    }
+                }
+                Ok(())
+            }
+        }
+        let mut deserializer = serde_json::Deserializer::from_str(&data);
+        let mut event_type = None;
+        let _ = serde::Deserializer::deserialize_map(&mut deserializer, EventType(&mut event_type));
+        match event_type.as_deref().or(event_name.map(str::trim)) {
+            Some("response.completed") => self.completed = true,
+            Some("response.failed") => self.failure = Some("原生 Responses 上游返回 response.failed"),
+            Some("response.incomplete") => self.failure = Some("原生 Responses 上游返回 response.incomplete"),
+            Some("error") => self.failure = Some("原生 Responses 上游返回 error 事件"),
+            None if self.event_too_large => self.unclassified_large_event = true,
+            _ => {}
+        }
+    }
+
+    pub(crate) fn finish(self) -> Option<String> {
+        // failed/incomplete 优先于 completed；[DONE] 或 HTTP EOF 都不能证明成功。
+        self.failure.or_else(|| {
+            if self.completed {
+                None
+            } else if self.unclassified_large_event {
+                Some("原生 Responses 流终止状态未知（诊断事件超限），未观察到完成事件")
+            } else {
+                Some("原生 Responses 上游在完成事件前结束了响应流")
+            }
+        }).map(str::to_string)
+    }
+}
+
+#[derive(Debug)]
+
+pub(crate) struct UnsupportedEncryptedAgentContent;
+
+impl std::fmt::Display for UnsupportedEncryptedAgentContent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "unsupported_encrypted_agent_content: Chat Completions 上游无法处理加密的 agent 消息内容，请使用支持该协议的 Responses 上游")
+    }
+}
+
+impl UnsupportedEncryptedAgentContent {
+    pub(crate) fn response_body(&self) -> Value {
+        json!({"error":{
+            "type":"invalid_request_error",
+            "code":"unsupported_encrypted_agent_content",
+            "param":"input",
+            "message":self.to_string()
+        }})
+    }
+}
+
+impl std::error::Error for UnsupportedEncryptedAgentContent {}
+
+#[derive(Debug)]
+
+struct NativeCompactionUnsupported {
+    message: &'static str,
+}
+
+impl NativeCompactionUnsupported {
+    fn history() -> Self {
+        Self {
+            message: "This compaction checkpoint cannot be converted to a text summary. Use a compatible Responses upstream or start a new conversation.",
+        }
+    }
+}
+
+impl std::fmt::Display for NativeCompactionUnsupported {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.message)
+    }
+}
+
+impl std::error::Error for NativeCompactionUnsupported {}
+
+#[derive(Debug, Clone, Copy)]
+
+enum ImageProxyEndpoint {
+    Generations,
+    Edits,
+}
+
+impl ImageProxyEndpoint {
+    fn url(self, base_url: &str) -> String {
+        match self {
+            Self::Generations => image_generations_url(base_url),
+            Self::Edits => image_edits_url(base_url),
+        }
+    }
+
+    fn wire_api(self) -> UpstreamWireApi {
+        match self {
+            Self::Generations => UpstreamWireApi::ImageGenerations,
+            Self::Edits => UpstreamWireApi::ImageEdits,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Generations => "image_generations",
+            Self::Edits => "image_edits",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+
+enum LocalRefNormalizationError {
+    Cycle,
+}
+
+pub const NO_AUTH_PROXY_BEARER_TOKEN: &str = "alunixa-x-no-auth";
+
+const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+const UPSTREAM_IMAGE_HEADER_TIMEOUT: Duration = Duration::from_secs(600);
+
+const MAX_COOLDOWN_RETRIES: usize = 3;
+
+const MAX_NATIVE_COMPACTION_PROBE_BODY_BYTES: usize = 32 * 1024 * 1024;
+
+const COMPACTION_TRIGGER_TYPE: &str = "compaction_trigger";
+
+const COMPACTION_OUTPUT_TYPE: &str = "compaction";
+
+const LOCAL_COMPACTION_PREFIX: &str = "codexplusplus:summary:v1:";
+
+const COMPACTION_SUMMARY_INSTRUCTION: &str = "You are performing a CONTEXT CHECKPOINT COMPACTION. Create a handoff summary for another LLM that will resume the task.\n\nInclude:\n- Current progress and key decisions made\n- Important context, constraints, or user preferences\n- What remains to be done (clear next steps)\n- Any critical data, examples, or references needed to continue\n\nBe concise, structured, and focused on helping the next LLM seamlessly continue the work.";
+
+const COMPACTION_REPLAY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. Here is the summary produced by the other language model:\n";
+
+const NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT: usize = 64 * 1024;
+
+const RESPONSES_ITEM_ID_PREFIXES: &[(&str, &str)] = &[
+    ("message", "msg_"),
+    ("reasoning", "rs_"),
+    ("compaction", "cmp_"),
+    ("function_call", "fc_"),
+    ("function_call_output", "fco_"),
+    ("custom_tool_call", "ctc_"),
+    ("custom_tool_call_output", "ctco_"),
+];
+
+const SCHEMA_COMBINATOR_KEYS: [&str; 3] = ["oneOf", "anyOf", "allOf"];
+
+const IMAGE_DATA_URL_PREFIX: &str = "data:image/";
+
+impl ChatSseToResponsesConverter {
+ pub fn has_failed(&self) -> bool { self.failed }
+ pub fn has_terminal_event(&self) -> bool { self.failed || self.state.completed }
+}
+
+fn upstream_request_builder_for_wire(client: reqwest::Client, endpoint: &str, key: &str, stream: bool, body: &Value, wire: UpstreamWireApi) -> reqwest::RequestBuilder {
+ let protocol=match wire { UpstreamWireApi::AnthropicMessages => RelayProtocol::AnthropicMessages, UpstreamWireApi::GeminiGenerateContent => RelayProtocol::GeminiGenerateContent, _ => RelayProtocol::ChatCompletions };
+ let relay=crate::settings::RelayProfile { api_key:key.into(), protocol, ..Default::default() };
+ upstream_request_builder(client, endpoint, &relay, stream, body)
 }

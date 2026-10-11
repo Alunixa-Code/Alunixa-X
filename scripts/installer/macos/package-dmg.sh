@@ -53,6 +53,20 @@ create_app() {
   cp "$ICON_ICNS" "$app_dir/Contents/Resources/$ICON_NAME"
   chmod +x "$app_dir/Contents/MacOS/$executable_name"
   printf 'APPL????' > "$app_dir/Contents/PkgInfo"
+  if [ "$executable_name" = "AlunixaX" ]; then
+    url_types='  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Alunixa X Links</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>codexplusplus</string>
+        <string>dreamskin</string>
+      </array>
+    </dict>
+  </array>'
+  fi
   cat > "$app_dir/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -72,6 +86,8 @@ create_app() {
   <string>6.0</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CodexPlusUnifiedApp</key>
+  <true/>
   <key>CFBundleSignature</key>
   <string>????</string>
   <key>CFBundleExecutable</key>
@@ -89,15 +105,73 @@ create_app() {
 PLIST
 }
 
+# 签名身份。设了 MACOS_SIGNING_IDENTITY 就走 Developer ID 正式签名，
+# 没设则退回 ad-hoc——贡献者本地和 PR 构建没有证书，不能因此构建失败。
+SIGNING_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
+# 公证凭据 profile（notarytool store-credentials 存的那个名字）。
+# 设为空则跳过公证，只签名。
+NOTARY_PROFILE="${MACOS_NOTARY_PROFILE:-}"
+ENTITLEMENTS="$ROOT/scripts/installer/macos/entitlements.plist"
+
+# 签名参数必须用数组装：身份串里含空格
+# （"Developer ID Application: Xxx (TEAMID)"），用字符串拼接会在空格处断词。
+SIGN_ARGS=()
+if [ -n "$SIGNING_IDENTITY" ]; then
+  # hardened runtime 与安全时间戳是公证的前置条件，ad-hoc 下无意义。
+  SIGN_ARGS=(--options runtime --timestamp --sign "$SIGNING_IDENTITY")
+else
+  SIGN_ARGS=(--sign -)
+fi
+
 sign_app() {
   local app_dir="$1"
-  local binary_path
-  for binary_path in "$app_dir/Contents/MacOS/"*; do
-    if [ -f "$binary_path" ]; then
-      codesign --force --sign - "$binary_path"
-    fi
-  done
-  codesign --force --sign - "$app_dir"
+  local executable
+  executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_dir/Contents/Info.plist")"
+  # 二进制先签、bundle 后签：签 bundle 时会把二进制纳入密封清单，
+  # 顺序反了会报 "code object is not signed at all"。
+  # 注意：macOS 自带 bash 3.2，set -u 下展开空数组会报 unbound variable，
+  # 所以空数组必须用 "${arr[@]+"${arr[@]}"}" 这种形式，不能直接 "${arr[@]}"。
+  local extra=()
+  if [ -n "$SIGNING_IDENTITY" ] && [ -f "$ENTITLEMENTS" ]; then
+    extra=(--entitlements "$ENTITLEMENTS")
+  fi
+  codesign --force "${SIGN_ARGS[@]}" ${extra[@]+"${extra[@]}"} "$app_dir/Contents/MacOS/$executable"
+  codesign --force "${SIGN_ARGS[@]}" "$app_dir"
+}
+
+sign_dmg() {
+  local dmg="$1"
+  if [ -z "$SIGNING_IDENTITY" ]; then
+    return 0
+  fi
+  codesign --force --timestamp --sign "$SIGNING_IDENTITY" "$dmg"
+}
+
+notarize_dmg() {
+  local dmg="$1"
+  if [ -z "$SIGNING_IDENTITY" ] || [ -z "$NOTARY_PROFILE" ]; then
+    echo "note: 跳过公证（未同时提供 MACOS_SIGNING_IDENTITY 与 MACOS_NOTARY_PROFILE）" >&2
+    return 0
+  fi
+
+  echo "==> 提交公证，等待 Apple 扫描结果…" >&2
+  # --wait 会阻塞到 Apple 返回结果；失败时只给 submission id，日志要另外取。
+  # 输出必须先收进变量再 grep：直接管道给 grep -q 时，grep 一命中就退出，
+  # 上游 tee 收到 SIGPIPE，在 set -o pipefail 下会把整条管道判为失败。
+  local output
+  output="$(xcrun notarytool submit "$dmg" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1)" || true
+  printf '%s\n' "$output" >&2
+  if ! printf '%s\n' "$output" | grep -q "status: Accepted"; then
+    echo "error: 公证未通过。" >&2
+    echo "       用 'xcrun notarytool log <submission-id> --keychain-profile $NOTARY_PROFILE' 看详情，" >&2
+    echo "       最常见原因是签名漏了 --options runtime。" >&2
+    return 1
+  fi
+
+  # 装订票据后，用户离线也能通过 Gatekeeper 校验。
+  xcrun stapler staple "$dmg" >/dev/null
+  xcrun stapler validate "$dmg" >/dev/null
+  echo "==> 公证通过，票据已装订" >&2
 }
 
 verify_app() {
@@ -114,27 +188,37 @@ verify_app() {
     echo "error: missing PkgInfo in $app_dir" >&2
     return 1
   fi
-  codesign -dv "$app_dir" >/dev/null 2>&1 || {
-    echo "error: codesign verification failed for $app_dir" >&2
-    return 1
-  }
+  # 正式签名时用 --verify --deep --strict 真正校验签名有效性（含资源密封、
+  # 信任链、时间戳）；仅 codesign -dv 只能证明"有签名"，证明不了"签名有效"。
+  if [ -n "$SIGNING_IDENTITY" ]; then
+    codesign --verify --deep --strict --verbose=2 "$app_dir" || {
+      echo "error: codesign --verify failed for $app_dir" >&2
+      return 1
+    }
+  else
+    codesign -dv "$app_dir" >/dev/null 2>&1 || {
+      echo "error: codesign verification failed for $app_dir" >&2
+      return 1
+    }
+  fi
 }
 
 prepare_icon
-create_app "Alunixa X Launch (AX)" "AlunixaXLauncher" "$BINARY_DIR/alunixa-x" "io.github.alunixacode.alunixax.launcher" "true"
-create_app "Alunixa X (AX)" "AlunixaX" "$BINARY_DIR/alunixa-x-manager" "io.github.alunixacode.alunixax" "false"
-if [ ! -x "$BINARY_DIR/alunixa-x-imagegen-mcp" ]; then
-  echo "error: imagegen MCP companion not found or not executable: $BINARY_DIR/alunixa-x-imagegen-mcp" >&2
-  exit 1
-fi
-cp "$BINARY_DIR/alunixa-x-imagegen-mcp" "$STAGE/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
-chmod +x "$STAGE/Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"
+prepare_background
+create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-plus" "com.bigpizzav3.codexplusplus" "false"
+# 旧版 1.7.x 更新器要求第二个 manager bundle。它使用独立的小型兼容壳，
+# 启动后立即退出；新版启动主 app 后会把这个壳归档到 legacy-migrations。
+create_app "Alunixa X 管理工具" "AlunixaXManager" "$BINARY_DIR/alunixa-x-legacy-shim" "com.bigpizzav3.codexplusplus.manager" "true"
 
 sign_app "$STAGE/Alunixa X Launch (AX).app"
 sign_app "$STAGE/Alunixa X (AX).app"
 
 verify_app "$STAGE/Alunixa X Launch (AX).app"
 verify_app "$STAGE/Alunixa X (AX).app"
+
+# Finder 隐藏兼容壳；旧更新器按精确路径读取它，不能改名或放入子目录。
+printf '%s\n' "Alunixa X 管理工具.app" > "$STAGE/.hidden"
+chflags hidden "$STAGE/Alunixa X 管理工具.app"
 
 ln -s /Applications "$STAGE/Applications"
 
@@ -162,8 +246,96 @@ for attempt in 1 2 3; do
 done
 
 if [ "$DMG_CREATED" != true ]; then
-  echo "error: failed to create DMG after 3 attempts" >&2
+  echo "error: failed to create writable DMG after 5 attempts" >&2
   exit 1
 fi
+
+MOUNT_OUTPUT="$(hdiutil attach "$DMG_WORK_PATH" -readwrite -noverify -noautoopen -nobrowse)"
+MOUNT_DEVICE="$(printf '%s\n' "$MOUNT_OUTPUT" | awk '/^\/dev\/disk/ {print $1; exit}')"
+MOUNT_POINT="$(printf '%s\n' "$MOUNT_OUTPUT" | awk 'match($0, /\/Volumes\//) {print substr($0, RSTART)}' | tail -1)"
+if [ -z "$MOUNT_POINT" ] || [ -z "$MOUNT_DEVICE" ]; then
+  echo "error: failed to find mounted DMG device and volume" >&2
+  exit 1
+fi
+VOLUME_NAME="$(basename "$MOUNT_POINT")"
+
+if ! MOUNT_POINT="$MOUNT_POINT" VOLUME_NAME="$VOLUME_NAME" osascript <<'APPLESCRIPT'
+with timeout of 30 seconds
+  tell application "Finder"
+    set dmgDisk to disk (system attribute "VOLUME_NAME")
+    open dmgDisk
+    delay 1
+    set dmgWindow to container window of dmgDisk
+    set current view of dmgWindow to icon view
+    set toolbar visible of dmgWindow to false
+    set statusbar visible of dmgWindow to false
+    set bounds of dmgWindow to {100, 100, 1300, 850}
+
+    set viewOptions to icon view options of dmgWindow
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 96
+    set text size of viewOptions to 14
+    set color of viewOptions to {65535, 65535, 65535}
+    set backgroundFile to (POSIX file ((system attribute "MOUNT_POINT") & "/.background/background.png")) as alias
+    set background picture of viewOptions to backgroundFile
+
+    tell dmgDisk
+      set position of item "Applications" to {1000, 390}
+      set position of item "Alunixa X.app" to {460, 390}
+      set visible of item "Alunixa X 管理工具.app" to false
+    end tell
+
+    close dmgWindow
+    delay 1
+  end tell
+end timeout
+APPLESCRIPT
+then
+  echo "warning: unable to persist Finder DMG window layout; the background is still included" >&2
+fi
+
+# A disappeared mount directory does not prove the backing device was ejected.
+if ! detach_dmg "$MOUNT_DEVICE"; then
+  echo "error: failed to detach DMG device $MOUNT_DEVICE" >&2
+  exit 1
+fi
+MOUNT_POINT=""
+MOUNT_DEVICE=""
+
+# 上一步 detach 可能触发延迟弹出：卷目录已消失但磁盘镜像仍在弹出中，
+# convert 会暂时报 Resource temporarily unavailable——退避重试等它完成。
+# macOS x64 runner 上镜像可能忙碌超过一分钟，所以重试窗口给得比较宽。
+DMG_CREATED=false
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  if hdiutil convert "$DMG_WORK_PATH" -format UDZO -ov -o "$DMG"; then
+    DMG_CREATED=true
+    break
+  fi
+
+  if [ "$attempt" -lt 12 ]; then
+    sleep 5
+  fi
+done
+
+if [ "$DMG_CREATED" != true ]; then
+  echo "error: failed to create DMG after 12 attempts" >&2
+  exit 1
+fi
+
+# Wait briefly for a nonempty output before reporting successful packaging.
+for attempt in 1 2 3 4 5; do
+  [ -s "$DMG" ] && break
+  sleep "$attempt"
+done
+if [ ! -s "$DMG" ]; then
+  echo "error: DMG output is missing or empty after conversion: $DMG" >&2
+  find "$DIST" -maxdepth 2 -type f -print >&2 || true
+  exit 1
+fi
+
+# 顺序不能变：先签 app（已在上面完成）→ 打 DMG → 签 DMG → 公证 DMG → 装订票据。
+# DMG 本身也要签名，Apple 才知道这个容器是谁做的。
+sign_dmg "$DMG"
+notarize_dmg "$DMG"
 
 echo "$DMG"

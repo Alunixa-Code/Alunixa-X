@@ -1,201 +1,730 @@
-#![cfg_attr(windows, windows_subsystem = "windows")]
-
+use anyhow::{Context, Result};
+pub use alunixa_x_core::launcher::LaunchOptions;
 use alunixa_x_core::launcher::{
-    DefaultLaunchHooks, LaunchHooks, LaunchOptions, launch_and_inject_with_hooks,
+    BridgeReinjector, DefaultLaunchHooks, LaunchHandle, LaunchHooks, launch_and_inject_with_hooks,
 };
 use alunixa_x_core::models::{DeleteResult, ExportResult, SessionRef};
 use alunixa_x_core::routes::{BridgeContext, BridgeDataService, BridgeRuntimeService};
+use alunixa_x_core::status::LaunchStatus;
 use alunixa_x_core::user_scripts::UserScriptManager;
-use anyhow::{Context, Result};
 use serde_json::{Value, json};
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
+
+type NavigationHandler = Arc<dyn Fn(Value) -> Result<()> + Send + Sync>;
+static NAVIGATION_HANDLER: OnceLock<Mutex<Option<NavigationHandler>>> = OnceLock::new();
+
+/// 显示同一进程中的主窗口；宿主可消费 pending navigation 后通知前端。
+pub fn set_navigation_handler(handler: impl Fn(Value) -> Result<()> + Send + Sync + 'static) {
+    *NAVIGATION_HANDLER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = Some(Arc::new(handler));
+}
+
+fn show_gui(payload: Value) -> Result<()> {
+    let handler = NAVIGATION_HANDLER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+        .context("Alunixa X 界面尚未初始化")?;
+    handler(payload)
+}
+
+type SessionReply = mpsc::Sender<Result<()>>;
+type SessionFuture = Pin<Box<dyn Future<Output = ()>>>;
+#[derive(Clone)]
+struct StartupReply {
+    reply: SessionReply,
+    state: Arc<Mutex<SessionState>>,
+}
+
+impl StartupReply {
+    fn send(self, result: Result<()>) -> std::result::Result<(), mpsc::SendError<Result<()>>> {
+        if result.is_ok() {
+            self.state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .ready = true;
+        }
+        self.reply.send(result)
+    }
+}
+
+struct SessionState {
+    ready: bool,
+    attach_only: bool,
+    options: LaunchOptions,
+    requested_at_ms: u64,
+    status_started_at_ms: u64,
+}
+
+type SessionRunner = Arc<
+    dyn Fn(LaunchOptions, tokio::sync::oneshot::Receiver<()>, StartupReply) -> SessionFuture
+        + Send
+        + Sync,
+>;
+type ActivationRunner =
+    Arc<dyn Fn(LaunchOptions, u64) -> Pin<Box<dyn Future<Output = Result<()>>>> + Send + Sync>;
+
+#[derive(Debug)]
+struct StartupBusy;
+
+impl std::fmt::Display for StartupBusy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Codex 正在启动，请稍候再试")
+    }
+}
+
+impl std::error::Error for StartupBusy {}
+
+#[derive(Debug)]
+struct ReportedLaunchFailure(anyhow::Error);
+
+impl std::fmt::Display for ReportedLaunchFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, formatter)
+    }
+}
+
+impl std::error::Error for ReportedLaunchFailure {}
+
+enum RuntimeCommand {
+    Start(LaunchOptions, u64, bool, SessionReply),
+    Stop(SessionReply),
+    Shutdown(SessionReply),
+}
+
+struct EmbeddedSession {
+    stop: tokio::sync::oneshot::Sender<()>,
+    thread: std::thread::JoinHandle<()>,
+    finished: tokio::sync::oneshot::Receiver<()>,
+    state: Arc<Mutex<SessionState>>,
+}
+
+impl EmbeddedSession {
+    fn is_finished(&mut self) -> bool {
+        self.thread.is_finished()
+            || !matches!(
+                self.finished.try_recv(),
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+            )
+    }
+
+    fn spawn(
+        options: LaunchOptions,
+        requested_at_ms: u64,
+        attach_only: bool,
+        ready: SessionReply,
+        runner: SessionRunner,
+    ) -> Result<Self> {
+        let state = Arc::new(Mutex::new(SessionState {
+            ready: false,
+            attach_only,
+            options: options.clone(),
+            requested_at_ms,
+            status_started_at_ms: requested_at_ms,
+        }));
+        let ready = StartupReply {
+            reply: ready,
+            state: state.clone(),
+        };
+        let (stop, cancelled) = tokio::sync::oneshot::channel();
+        let (done, finished) = tokio::sync::oneshot::channel();
+        let thread = std::thread::Builder::new()
+            .name("alunixa-x-session".into())
+            .spawn(move || {
+                match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => {
+                        tokio::task::LocalSet::new()
+                            .block_on(&runtime, runner(options, cancelled, ready));
+                        // 核心 helper/CDP 会 spawn 附属任务。销毁 session runtime 后再通知完成，
+                        // 避免它们在 GUI 留存期间跨到下次启动。
+                        drop(runtime);
+                    }
+                    Err(error) => {
+                        let _ = ready.send(Err(error.into()));
+                    }
+                }
+                let _ = done.send(());
+            })?;
+        Ok(Self {
+            stop,
+            thread,
+            finished,
+            state,
+        })
+    }
+
+    async fn join(self) -> Result<()> {
+        tokio::task::spawn_blocking(move || self.thread.join())
+            .await?
+            .map_err(|_| anyhow::anyhow!("Codex session 运行时异常退出"))
+    }
+
+    async fn stop(self) -> Result<()> {
+        let _ = self.stop.send(());
+        tokio::task::spawn_blocking(move || self.thread.join())
+            .await?
+            .map_err(|_| anyhow::anyhow!("Codex session 运行时异常退出"))
+    }
+}
+
+struct RuntimeWorker {
+    commands: tokio::sync::mpsc::UnboundedSender<RuntimeCommand>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl RuntimeWorker {
+    fn spawn(runner: SessionRunner, activate: ActivationRunner) -> Result<Self> {
+        let (commands, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (ready, initialized) = mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("alunixa-x-runtime".into())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        let _ = ready.send(Err(anyhow::Error::from(error)));
+                        return;
+                    }
+                };
+                let _ = ready.send(Ok(()));
+                // LaunchHooks 的 future 不要求 Send，始终留在专用线程的 LocalSet。
+                tokio::task::LocalSet::new()
+                    .block_on(&runtime, runtime_commands(receiver, runner, activate));
+            })?;
+        if let Err(error) = initialized.recv().context("Alunixa X 后台运行时初始化失败")? {
+            let _ = thread.join();
+            return Err(error);
+        }
+        Ok(Self { commands, thread })
+    }
+}
+
+enum RuntimeState {
+    Idle,
+    Running(RuntimeWorker),
+    ShuttingDown,
+}
+
+impl RuntimeState {
+    fn commands_or_start(
+        &mut self,
+        create: impl FnOnce() -> Result<RuntimeWorker>,
+    ) -> Result<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>> {
+        if matches!(self, Self::ShuttingDown) {
+            anyhow::bail!("Alunixa X 正在退出，无法启动新的运行时");
+        }
+        if matches!(self, Self::Idle) {
+            *self = Self::Running(create()?);
+        }
+        match self {
+            Self::Running(worker) => Ok(worker.commands.clone()),
+            _ => unreachable!("runtime was initialized above"),
+        }
+    }
+
+    fn begin_shutdown(&mut self) -> Option<RuntimeWorker> {
+        // 与 commands_or_start 使用同一把锁。退出后保持终态，阻止已进入 start
+        // 但仍在等锁的宿主工作线程重新初始化浏览器兼容事务。
+        match std::mem::replace(self, Self::ShuttingDown) {
+            Self::Running(worker) => Some(worker),
+            Self::Idle | Self::ShuttingDown => None,
+        }
+    }
+}
+
+static RUNTIME_WORKER: OnceLock<Mutex<RuntimeState>> = OnceLock::new();
+
+fn runtime_commands_sender() -> Result<tokio::sync::mpsc::UnboundedSender<RuntimeCommand>> {
+    let mut worker = RUNTIME_WORKER
+        .get_or_init(|| Mutex::new(RuntimeState::Idle))
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Alunixa X 后台运行时锁已损坏"))?;
+    worker.commands_or_start(|| {
+        RuntimeWorker::spawn(
+            Arc::new(|options, stop, ready| Box::pin(run_embedded_session(options, stop, ready))),
+            Arc::new(|options, started_at_ms| {
+                Box::pin(
+                    async move { activate_and_write_running_status(&options, started_at_ms).await },
+                )
+            }),
+        )
+    })
+}
+
+fn send_runtime_command(command: impl FnOnce(SessionReply) -> RuntimeCommand) -> Result<()> {
+    let (reply, result) = mpsc::channel();
+    runtime_commands_sender()?
+        .send(command(reply))
+        .map_err(|_| anyhow::anyhow!("Alunixa X 后台运行时已退出"))?;
+    result.recv().context("Alunixa X 后台运行时未返回结果")?
+}
+
+/// 启动官方 Codex 并等待增强初始化完成；宿主应从 blocking 工作线程调用。
+/// 连续点击启动时复用当前 session，不创建第二套 helper 或 watchdog。
+pub fn start(options: LaunchOptions) -> Result<()> {
+    let status_options = options.clone();
+    let requested_at_ms = requested_launch_timestamp(&status_options);
+    let result =
+        send_runtime_command(|reply| RuntimeCommand::Start(options, requested_at_ms, false, reply));
+    if let Err(error) = &result
+        && !error.is::<StartupBusy>()
+        && !error.is::<ReportedLaunchFailure>()
+    {
+        record_launch_failure(&status_options, requested_at_ms, error);
+    }
+    result
+}
+
+/// 只恢复已有 Codex 的后台服务。调试端点不存在时不启动或重启官方应用。
+pub fn resume_if_running(options: LaunchOptions) -> Result<bool> {
+    if !alunixa_x_core::cdp::endpoint_available(options.debug_port) {
+        return Ok(false);
+    }
+    let requested_at_ms = requested_launch_timestamp(&options);
+    send_runtime_command(|reply| RuntimeCommand::Start(options, requested_at_ms, true, reply))?;
+    Ok(true)
+}
+
+/// 释放当前 session 的 helper、watchdog 和浏览器兼容状态，保留官方 Codex。
+pub fn stop() -> Result<()> {
+    send_runtime_command(RuntimeCommand::Stop)
+}
+
+/// 退出 Alunixa X 时清理所有自有服务并等待专用线程退出，保留官方 Codex。
+pub fn shutdown() -> Result<()> {
+    let mut worker = RUNTIME_WORKER
+        .get_or_init(|| Mutex::new(RuntimeState::Idle))
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Alunixa X 后台运行时锁已损坏"))?;
+    let Some(current) = worker.begin_shutdown() else {
+        return Ok(());
+    };
+    shutdown_worker(current)
+}
+
+fn shutdown_worker(current: RuntimeWorker) -> Result<()> {
+    let (reply, result) = mpsc::channel();
+    let sent = current
+        .commands
+        .send(RuntimeCommand::Shutdown(reply))
+        .is_ok();
+    let cleanup = if sent {
+        result.recv().context("Alunixa X 后台运行时未返回退出结果")?
+    } else {
+        Ok(())
+    };
+    current
+        .thread
+        .join()
+        .map_err(|_| anyhow::anyhow!("Alunixa X 后台运行时异常退出"))?;
+    cleanup
+}
+
+async fn runtime_commands(
+    mut commands: tokio::sync::mpsc::UnboundedReceiver<RuntimeCommand>,
+    runner: SessionRunner,
+    activate: ActivationRunner,
+) {
+    let mut session: Option<EmbeddedSession> = None;
+    loop {
+        tokio::select! {
+            biased;
+            command = commands.recv() => {
+                match command {
+                    Some(RuntimeCommand::Start(options, requested_at_ms, attach_only, ready)) => {
+                        if session.as_mut().is_some_and(EmbeddedSession::is_finished) {
+                            if let Some(previous) = session.take() { let _ = previous.join().await; }
+                        }
+                        if let Some(current) = &session {
+                            let current_options = {
+                                let state = current.state.lock().unwrap_or_else(|error| error.into_inner());
+                                state.ready.then(|| (state.options.clone(), state.status_started_at_ms))
+                            };
+                            let result = match current_options {
+                                Some(_) if attach_only => Ok(()),
+                                Some((current_options, started_at_ms)) => activate(current_options, started_at_ms).await,
+                                None => Err(StartupBusy.into()),
+                            };
+                            let _ = ready.send(result);
+                            continue;
+                        }
+                        match EmbeddedSession::spawn(options, requested_at_ms, attach_only, ready.clone(), runner.clone()) {
+                            Ok(current) => session = Some(current),
+                            Err(error) => { let _ = ready.send(Err(error)); }
+                        }
+                    }
+                    Some(RuntimeCommand::Stop(reply)) => {
+                        let result = match session.take() { Some(current) => current.stop().await, None => Ok(()) };
+                        let _ = reply.send(result);
+                    }
+                    Some(RuntimeCommand::Shutdown(reply)) => {
+                        let result = match session.take() { Some(current) => current.stop().await, None => Ok(()) };
+                        let _ = reply.send(result);
+                        break;
+                    }
+                    None => {
+                        if let Some(current) = session.take() { let _ = current.stop().await; }
+                        break;
+                    }
+                }
+            }
+            _ = async {
+                if let Some(current) = &mut session { let _ = (&mut current.finished).await; }
+                else { std::future::pending::<()>().await; }
+            } => { if let Some(current) = session.take() { let _ = current.join().await; } }
+        }
+    }
+}
 
 #[derive(Clone)]
 struct LauncherHooks {
+    attach_only: bool,
     core: Arc<DefaultLaunchHooks>,
     data: Arc<LauncherDataService>,
     runtime: Arc<LauncherRuntimeService>,
     bridge_context: Arc<Mutex<Option<BridgeContext>>>,
+    browser_monitor: Arc<Mutex<Option<alunixa_x_core::native_browser::BrowserMonitor>>>,
+    session_state: Option<Arc<Mutex<SessionState>>>,
 }
 
 impl Default for LauncherHooks {
     fn default() -> Self {
-        let core = Arc::new(DefaultLaunchHooks::default());
-        let shared_terminal = core.shared_terminal_broker();
         Self {
-            core,
+            attach_only: false,
+            core: Arc::new(DefaultLaunchHooks::default()),
             data: Arc::new(LauncherDataService::default()),
             runtime: Arc::new(LauncherRuntimeService::new(
                 9229,
                 default_user_script_manager(),
-                shared_terminal,
             )),
             bridge_context: Arc::new(Mutex::new(None)),
+            browser_monitor: Arc::new(Mutex::new(None)),
+            session_state: None,
         }
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.first().map(String::as_str) == Some("--alunixa-x-proxy-probe") {
-        let path = args.get(1).context("proxy_probe_request_missing")?;
-        return alunixa_x_core::packaged_proxy::run_probe_request(Path::new(path));
-    }
-    if args.iter().any(|arg| arg == "--alunixa-x-hook") {
-        return alunixa_x_core::codex_hooks::run_hook_from_stdio().await;
-    }
-    if args.iter().any(|arg| arg == "--alunixa-x-shared-terminal") {
-        return run_shared_terminal_proxy(args).await;
-    }
-    let helper_only = args.iter().any(|arg| arg == "--helper-only");
-    let options = parse_launch_options(args.iter());
-    if helper_only {
-        let hooks = LauncherHooks::default();
-        hooks.start_helper(options.helper_port).await?;
-        std::future::pending::<()>().await;
-        hooks.shutdown_helper(options.helper_port).await;
-        return Ok(());
-    }
-    let Some(_guard) = acquire_single_instance_guard(options.debug_port)? else {
-        activate_existing_codex_app(&options).await?;
-        return Ok(());
-    };
-    spawn_rollout_image_cleanup_nonfatal();
-    if let Ok(settings) = alunixa_x_core::settings::SettingsStore::default().load() {
-        ensure_alunixa_x_hooks(&settings).await;
-    }
-    tokio::spawn(async {
-        let _ = notify_manager_when_update_available().await;
-    });
-    let hooks = LauncherHooks::default();
-    let handle = launch_and_inject_with_hooks(options, &hooks).await?;
-    handle.wait_for_codex_exit().await?;
-    Ok(())
-}
-
-async fn run_shared_terminal_proxy(args: Vec<String>) -> Result<()> {
-    use std::io::Write;
-
-    let request = alunixa_x_core::shared_terminal::parse_proxy_request(args.iter())?;
-    match alunixa_x_core::shared_terminal::run_proxy(request).await {
-        Ok(result) => {
-            let mut stdout = std::io::stdout().lock();
-            stdout.write_all(result.output.as_bytes())?;
-            if !result.error.is_empty() {
-                let mut stderr = std::io::stderr().lock();
-                stderr.write_all(result.error.as_bytes())?;
-                if !result.error.ends_with('\n') {
-                    stderr.write_all(b"\n")?;
-                }
-            }
-            stdout.flush()?;
-            std::process::exit(result.exit_code.clamp(0, 255));
-        }
-        Err(error) => {
-            eprintln!("Alunixa X shared terminal failed: {error:#}");
-            std::process::exit(1);
-        }
+impl LauncherHooks {
+    fn watchdog_bridge_context(&self) -> anyhow::Result<BridgeContext> {
+        self.bridge_context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge context lock poisoned"))?
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("bridge context is not initialized"))
     }
 }
 
-fn spawn_rollout_image_cleanup_nonfatal() {
-    tokio::spawn(async {
-        let result = tokio::task::spawn_blocking(|| {
-            let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
-            alunixa_x_data::rollout_image_cleanup::run_rollout_image_cleanup_in_home(&home, false)
-        })
-        .await;
-        log_rollout_image_cleanup_result(result);
+fn requested_launch_timestamp(options: &LaunchOptions) -> u64 {
+    options
+        .status_store
+        .load_latest()
+        .ok()
+        .flatten()
+        .filter(|latest| latest.status == "starting")
+        .map(|latest| latest.started_at_ms)
+        .unwrap_or_else(current_timestamp_ms)
+}
+
+fn record_launch_failure(options: &LaunchOptions, requested_at_ms: u64, error: &anyhow::Error) {
+    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+        "launcher.failed",
+        json!({ "message": error.to_string() }),
+    );
+    if options
+        .status_store
+        .load_latest()
+        .ok()
+        .flatten()
+        .is_some_and(|latest| latest.started_at_ms > requested_at_ms && latest.status != "failed")
+    {
+        // 旧启动取消后的返回不得把已经保存的新请求覆盖为 failed。
+        return;
+    }
+    let _ = options.status_store.save_latest(&LaunchStatus {
+        status: "failed".to_string(),
+        message: error.to_string(),
+        started_at_ms: requested_at_ms,
+        debug_port: Some(options.debug_port),
+        helper_port: Some(options.helper_port),
+        codex_app: options
+            .app_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
+        aumid: None,
+        ..LaunchStatus::default()
     });
 }
 
-fn log_rollout_image_cleanup_result(
-    result: std::result::Result<
-        anyhow::Result<alunixa_x_data::RolloutImageCleanupResult>,
-        tokio::task::JoinError,
-    >,
+async fn run_embedded_session(
+    options: LaunchOptions,
+    mut stop: tokio::sync::oneshot::Receiver<()>,
+    ready: StartupReply,
 ) {
-    match result {
-        Ok(Ok(cleanup)) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.rollout_image_cleanup.completed",
-                json!({
-                    "status": cleanup.status,
-                    "scanned_files": cleanup.scanned_files,
-                    "changed_files": cleanup.changed_files,
-                    "image_copies": cleanup.image_copies,
-                    "bytes_reclaimed": cleanup.bytes_reclaimed,
-                    "skipped_active_sessions": cleanup.skipped_active_sessions,
-                    "rollback_protected_files": cleanup.rollback_protected_files,
-                    "invalid_files": cleanup.invalid_files
-                }),
-            );
-        }
-        Ok(Err(error)) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.rollout_image_cleanup.failed",
-                json!({ "error": error.to_string() }),
-            );
-        }
+    let requested_at_ms = ready
+        .state
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .requested_at_ms;
+    let hooks = LauncherHooks {
+        attach_only: ready
+            .state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .attach_only,
+        session_state: Some(ready.state.clone()),
+        ..LauncherHooks::default()
+    };
+    let mut stopped_by_host = false;
+    let mut ready = Some(ready);
+    let guard = match acquire_single_instance_guard(options.debug_port) {
+        Ok(guard) => guard,
         Err(error) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.rollout_image_cleanup.task_failed",
-                json!({ "error": error.to_string() }),
-            );
-        }
-    }
-}
-
-async fn ensure_alunixa_x_hooks(settings: &alunixa_x_core::settings::BackendSettings) {
-    let launcher_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("alunixa-x"));
-    match alunixa_x_core::codex_hooks::apply_alunixa_x_hooks(settings, &launcher_path) {
-        Ok(result) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.codex_hooks.applied",
-                json!({
-                    "path": result.path,
-                    "installed": result.installed,
-                    "removed": result.removed
-                }),
-            );
-        }
-        Err(error) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.codex_hooks.apply_failed",
-                json!({ "error": error.to_string() }),
-            );
+            record_launch_failure(&options, requested_at_ms, &error);
+            if let Some(ready) = ready.take() {
+                let _ = ready.send(Err(ReportedLaunchFailure(error).into()));
+            }
             return;
         }
-    }
-    match alunixa_x_core::codex_hooks::trust_alunixa_x_hooks(Some(settings.codex_app_path.as_str()))
-        .await
+    };
+    // 启动包含 spawn_blocking 的数据库/系统浏览器事务；停止请求要等它们完成，
+    // 再销毁 monitor owner，不能直接取消 future 让已开始的系统改写失去恢复句柄。
+    let result = match launcher_session(options.clone(), &hooks, &mut ready, guard.is_some()).await
     {
-        Ok(result) => {
-            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.codex_hooks.trusted",
-                json!({ "trusted": result.trusted }),
-            );
+        Ok(Some(handle)) => {
+            tokio::select! {
+                biased;
+                _ = &mut stop => {
+                    stopped_by_host = true;
+                    Ok(())
+                },
+                result = run_periodic_until_exit(
+                    handle.wait_for_codex_exit(),
+                    std::time::Duration::from_secs(30 * 60),
+                    || repair_session_index_automatically(true),
+                ) => result,
+            }
         }
-        Err(error) => {
+        Ok(None) => Ok(()),
+        Err(error) => Err(error),
+    };
+    // 启动中取消也要显式清理。不能依赖进程退出，否则 GUI 仍在时端口和系统浏览器会残留。
+    hooks.shutdown_helper(options.helper_port).await;
+    hooks.stop_native_browser_compatibility().await;
+    if stopped_by_host {
+        let started_at_ms = hooks
+            .session_state
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .status_started_at_ms;
+        if let Err(error) =
+            save_stopped_service_status_if_current(&options.status_store, started_at_ms)
+        {
             let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-                "launcher.codex_hooks.trust_failed",
-                json!({ "error": error.to_string() }),
+                "launcher.stop_status_failed",
+                json!({ "message": error.to_string() }),
             );
         }
     }
+    drop(guard);
+    if let Err(error) = result {
+        record_launch_failure(&options, requested_at_ms, &error);
+        if let Some(ready) = ready.take() {
+            let _ = ready.send(Err(ReportedLaunchFailure(error).into()));
+        }
+    }
+}
+
+fn save_stopped_service_status_if_current(
+    store: &alunixa_x_core::status::StatusStore,
+    started_at_ms: u64,
+) -> Result<bool> {
+    let Some(mut latest) = store.load_latest()? else {
+        return Ok(false);
+    };
+    if latest.started_at_ms != started_at_ms || latest.status == "stopped" {
+        // 新的重启请求和自然退出终态都由它们自己的生命周期管理。
+        return Ok(false);
+    }
+    latest.status = "stopped".to_string();
+    latest.message = "Alunixa X 后台增强服务已停止，未关闭官方 Codex。".to_string();
+    latest.phase = None;
+    latest.progress = None;
+    store.save_latest(&latest)?;
+    Ok(true)
+}
+
+async fn launcher_session(
+    options: LaunchOptions,
+    hooks: &LauncherHooks,
+    ready: &mut Option<StartupReply>,
+    owns_guard: bool,
+) -> Result<Option<LaunchHandle>> {
+    if !owns_guard {
+        anyhow::ensure!(
+            !hooks.attach_only,
+            "已有 Alunixa X 后台服务正在运行，不能重复恢复"
+        );
+        if alunixa_x_core::watcher::find_codex_processes().is_empty()
+            && !alunixa_x_core::watcher::cdp_listening(options.debug_port)
+        {
+            anyhow::bail!("已有 Alunixa X 启动服务正在运行，请退出旧版本后再启动 Codex");
+        }
+        let started_at_ms = ready
+            .as_ref()
+            .map(|reply| {
+                reply
+                    .state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .requested_at_ms
+            })
+            .unwrap_or_else(current_timestamp_ms);
+        activate_and_write_running_status(&options, started_at_ms).await?;
+        if let Some(ready) = ready.take() {
+            let _ = ready.send(Ok(()));
+        }
+        return Ok(None);
+    }
+    let handle = launch_and_inject_with_hooks(options, hooks).await?;
+    if let Some(ready) = ready.take() {
+        {
+            let mut state = ready
+                .state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            state.options.app_dir = Some(handle.app_dir.clone());
+            state.options.debug_port = handle.debug_port;
+            state.options.helper_port = handle.helper_port;
+            state.status_started_at_ms = handle
+                .status_store
+                .load_latest()
+                .ok()
+                .flatten()
+                .map(|status| status.started_at_ms)
+                .unwrap_or(state.requested_at_ms);
+        }
+        let _ = ready.send(Ok(()));
+    }
+    Ok(Some(handle))
+}
+
+async fn activate_and_write_running_status(
+    options: &LaunchOptions,
+    started_at_ms: u64,
+) -> Result<()> {
+    activate_existing_codex_app(options).await?;
+    options.status_store.save_latest(&LaunchStatus {
+        status: "running".to_string(),
+        message: "Existing Codex instance activated".to_string(),
+        started_at_ms,
+        debug_port: Some(options.debug_port),
+        helper_port: Some(options.helper_port),
+        codex_app: options
+            .app_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().to_string()),
+        aumid: None,
+        ..LaunchStatus::default()
+    })
+}
+
+// 退出时不再安排下一次检查；已开始的数据库事务先完成，避免脱离启动器生命周期。
+async fn run_periodic_until_exit<F, T, C, W>(
+    exit: F,
+    interval: std::time::Duration,
+    mut check: C,
+) -> T
+where
+    F: std::future::Future<Output = T>,
+    C: FnMut() -> W,
+    W: std::future::Future<Output = ()>,
+{
+    tokio::pin!(exit);
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut exit => return result,
+            _ = tokio::time::sleep(interval) => check().await,
+        }
+    }
+}
+
+async fn repair_session_index_automatically(check_setting: bool) {
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        if check_setting
+            && !alunixa_x_core::settings::SettingsStore::default()
+                .load()?
+                .provider_sync_enabled
+        {
+            return Ok(());
+        }
+        alunixa_x_data::repair_session_index(None)?;
+        Ok(())
+    })
+    .await
+    .map_err(anyhow::Error::from)
+    .and_then(|result| result);
+    if let Err(error) = result {
+        let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+            "launcher.session_index_repair.failed",
+            json!({ "message": error.to_string() }),
+        );
+    }
+}
+
+/// 「激活已有实例」路径上的供应商同步。
+///
+/// 与完整启动流程保持一致：仅在设置里启用了供应商同步时执行，
+/// 前后各取一次 app state 快照；会话索引修复由 run_provider_sync 本身串联
+/// （见 LauncherHooks::run_provider_sync）。同步失败只记日志——用户这次点击
+/// 的诉求是把已有窗口拉到前台，不能因为同步失败就整个中止。
+async fn run_activation_provider_sync(
+    hooks: &LauncherHooks,
+    settings: &alunixa_x_core::settings::BackendSettings,
+) {
+    if !settings.provider_sync_enabled {
+        return;
+    }
+    let home = alunixa_x_core::relay_config::default_codex_home_dir();
+    alunixa_x_core::codex_app_state::capture_app_state_snapshot_nonfatal(
+        &home,
+        "launcher.activate_existing.before",
+    );
+    if let Err(error) = hooks.run_provider_sync().await {
+        let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+            "launcher.activate_existing_provider_sync.failed",
+            json!({ "message": error.to_string() }),
+        );
+    }
+    alunixa_x_core::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
+        &home,
+        "launcher.activate_existing.after_provider_sync",
+    );
+}
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn acquire_single_instance_guard(
     debug_port: u16,
-) -> anyhow::Result<Option<alunixa_x_core::ports::LoopbackPortGuard>> {
-    acquire_single_instance_guard_with_retry(debug_port, true)
-}
-
-fn acquire_single_instance_guard_with_retry(
-    debug_port: u16,
-    allow_stale_recovery: bool,
 ) -> anyhow::Result<Option<alunixa_x_core::ports::LoopbackPortGuard>> {
     match try_acquire_single_instance_guard() {
         Ok(guard) => {
@@ -204,17 +733,14 @@ fn acquire_single_instance_guard_with_retry(
             }
             Ok(Some(guard))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::AddrInUse
+            ) =>
+        {
             log_launcher_already_running(debug_port);
-            Ok(None)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
-            log_launcher_already_running(debug_port);
-            if allow_stale_recovery && should_recover_stale_launcher(debug_port) {
-                alunixa_x_core::watcher::stop_launcher_processes();
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                return acquire_single_instance_guard_with_retry(debug_port, false);
-            }
+            // 锁可能属于另一个 Alunixa X 主进程；绝不能按旧 launcher 名称终止它。
             Ok(None)
         }
         Err(error) => Err(error)
@@ -245,62 +771,70 @@ fn log_launcher_guard_fallback(fallback_lock_path: &Path) {
     );
 }
 
-fn should_recover_stale_launcher(debug_port: u16) -> bool {
-    let has_codex_process = !alunixa_x_core::watcher::find_codex_processes().is_empty();
-    let cdp_listening = alunixa_x_core::watcher::cdp_listening(debug_port);
-    let recover =
-        alunixa_x_core::watcher::should_recover_stale_launcher(has_codex_process, cdp_listening);
-    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
-        "launcher.stale_recovery_check",
-        json!({
-            "debug_port": debug_port,
-            "has_codex_process": has_codex_process,
-            "cdp_listening": cdp_listening,
-            "recover": recover
-        }),
-    );
-    recover
-}
-
 async fn activate_existing_codex_app(options: &LaunchOptions) -> anyhow::Result<()> {
-    // Another launcher owns the helper, bridge and startup transaction. A second
-    // invocation may focus its window, but must not rewrite configuration, bind
-    // its port, inject a second bridge or publish a fabricated "running" status.
+    let hooks = LauncherHooks::default();
+    let settings = hooks.load_settings().await?;
+    let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
+    let has_pending_recovery = hooks.has_pending_remote_control_session_recoveries();
+    let blocking_process_ids = if has_pending_recovery {
+        alunixa_x_core::watcher::find_session_index_cleanup_blocking_processes()
+    } else {
+        Vec::new()
+    };
+    if should_finalize_pending_remote_control_recovery(has_pending_recovery, &blocking_process_ids)
+    {
+        hooks.run_remote_control_session_recovery().await?;
+    } else if has_pending_recovery {
+        let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+            "launcher.remote_control_session_finalization_deferred_existing_app",
+            json!({"blocking_process_ids": blocking_process_ids}),
+        );
+    }
+    // 快捷方式启动且 Codex 已在运行时，这里会走到「激活已有实例」的早退分支。
+    // 过去该分支直接返回，跳过了完整启动流程里的供应商同步与会话索引修复，
+    // 于是「切换登录方式后 model_provider 没跟着切换」「历史会话没被自动修复」，
+    // 只有管理工具的「重启」才生效（issue #2080）。失败不阻断激活，只记日志。
+    run_activation_provider_sync(&hooks, &settings).await;
+    let launch_result = hooks
+        .launch_codex(
+            &app_dir,
+            options.debug_port,
+            &settings,
+            &settings.codex_extra_args,
+        )
+        .await;
+    let process_ids = alunixa_x_core::watcher::find_codex_processes();
     #[cfg(windows)]
-    let activated = alunixa_x_core::watcher::find_codex_processes()
-        .into_iter()
+    let activated = process_ids
+        .iter()
+        .copied()
         .any(alunixa_x_core::windows_activate_process_window);
     #[cfg(not(windows))]
-    let activated = {
-        let settings = alunixa_x_core::settings::SettingsStore::default().load()?;
-        let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
-            options.app_dir.as_deref(),
-            Some(&settings.codex_app_path),
-        )
-        .context("Codex App directory not found")?;
-        #[cfg(target_os = "macos")]
-        {
-            tokio::process::Command::new("/usr/bin/open")
-                .arg("-a")
-                .arg(app_dir)
-                .status()
-                .await?
-                .success()
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = app_dir;
-            false
-        }
-    };
+    let activated = false;
+    let helper_available = !settings.enhancements_enabled
+        || alunixa_x_core::ports::can_connect_loopback_port(options.helper_port);
     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
         "launcher.activate_existing_codex",
-        json!({"activated": activated, "debug_port": options.debug_port, "reusedOwner": true}),
+        json!({
+            "app_dir": app_dir.to_string_lossy(),
+            "debug_port": options.debug_port,
+            "helper_port": options.helper_port,
+            "requested_helper_port": options.helper_port,
+            "process_ids": process_ids,
+            "activated": activated,
+            "helper_available": helper_available,
+            "launch_ok": launch_result.is_ok(),
+            "launch_error": launch_result.as_ref().err().map(|error| error.to_string())
+        }),
     );
-    if !activated {
-        anyhow::bail!("现有启动器仍占用运行环境，尚未找到可激活窗口；请查看启动状态后重试");
-    }
-    Ok(())
+    launch_result.map(|_| ())
+}
+
+fn should_finalize_pending_remote_control_recovery(
+    has_pending_recovery: bool,
+    blocking_process_ids: &[u32],
+) -> bool {
+    has_pending_recovery && blocking_process_ids.is_empty()
 }
 
 fn log_launcher_already_running(debug_port: u16) {
@@ -313,71 +847,8 @@ fn log_launcher_already_running(debug_port: u16) {
     );
 }
 
-async fn notify_manager_when_update_available() -> anyhow::Result<bool> {
-    let update = alunixa_x_core::update::check_for_update(alunixa_x_core::version::VERSION).await?;
-    if !update.update_available {
-        return Ok(false);
-    }
-    open_manager_with_update_prompt()?;
-    Ok(true)
-}
-
-fn open_manager_with_update_prompt() -> anyhow::Result<()> {
-    alunixa_x_core::install::spawn_companion(
-        alunixa_x_core::install::MANAGER_BINARY,
-        ["--show-update"],
-    )
-    .map(|_| ())
-    .map_err(|error| anyhow::anyhow!("启动管理工具失败：{error}"))
-}
-
-fn parse_launch_options<I, S>(args: I) -> LaunchOptions
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    let mut options = LaunchOptions::default();
-    let mut iter = args.into_iter();
-    while let Some(arg) = iter.next() {
-        match arg.as_ref() {
-            "--app-path" => {
-                if let Some(value) = iter.next() {
-                    let value = value.as_ref().trim();
-                    if !value.is_empty() {
-                        options.app_dir = Some(PathBuf::from(value));
-                    }
-                }
-            }
-            "--debug-port" => {
-                if let Some(value) = iter.next() {
-                    if let Ok(port) = value.as_ref().parse::<u16>() {
-                        options.debug_port = port;
-                    }
-                }
-            }
-            "--helper-port" => {
-                if let Some(value) = iter.next() {
-                    if let Ok(port) = value.as_ref().parse::<u16>() {
-                        options.helper_port = port;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    options
-}
-
 #[async_trait::async_trait(?Send)]
 impl LaunchHooks for LauncherHooks {
-    async fn ensure_active_protocol_proxy_config(
-        &self,
-        settings: &alunixa_x_core::settings::BackendSettings,
-    ) -> anyhow::Result<()> {
-        self.core
-            .ensure_active_protocol_proxy_config(settings)
-            .await
-    }
     fn resolve_app_dir(
         &self,
         app_dir: Option<&std::path::Path>,
@@ -387,21 +858,84 @@ impl LaunchHooks for LauncherHooks {
     }
 
     fn select_debug_port(&self, requested: u16) -> u16 {
-        self.core.select_debug_port(requested)
+        if self.attach_only {
+            requested
+        } else {
+            self.core.select_debug_port(requested)
+        }
     }
 
     fn select_helper_port(&self, requested: u16) -> u16 {
-        self.core.select_helper_port(requested)
+        if self.attach_only {
+            requested
+        } else {
+            self.core.select_helper_port(requested)
+        }
     }
 
     async fn load_settings(&self) -> anyhow::Result<alunixa_x_core::settings::BackendSettings> {
         self.core.load_settings().await
     }
 
+    async fn start_native_browser_compatibility(
+        &self,
+        settings: &alunixa_x_core::settings::BackendSettings,
+    ) {
+        let monitor = alunixa_x_core::native_browser::start_monitor(
+            settings.enhancements_enabled
+                && settings.codex_app_native_browser_require_identification,
+        )
+        .await;
+        *self
+            .browser_monitor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = monitor;
+    }
+
+    async fn stop_native_browser_compatibility(&self) {
+        let monitor = self
+            .browser_monitor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(monitor) = monitor {
+            monitor.stop().await;
+        }
+    }
+
+    fn cleanup_unsupported_config(&self) -> anyhow::Result<()> {
+        self.core.cleanup_unsupported_config()
+    }
+
     async fn run_provider_sync(&self) -> anyhow::Result<()> {
-        let _ = tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None))
-            .await
-            .map_err(|error| anyhow::anyhow!("provider sync task failed: {error}"))?;
+        // issue #2160：同步失败不再中断启动。前置读取（典型是 .codex-global-state.json
+        // 为空或被截断）失败时，provider sync 返回 Skipped 并带上底层 serde_json 原文；
+        // 以前这里用 `?` 把它变成致命的，用户看到一句无从下手的英文就直接退出了。
+        // 口径与 run_activation_provider_sync 一致：失败只记诊断日志，不阻断启动。
+        let outcome =
+            tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None)).await;
+        match outcome {
+            Ok(result) => {
+                if let Err(error) = require_completed_provider_sync(&result.status, &result.message)
+                {
+                    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                        "launcher.provider_sync.degraded",
+                        json!({
+                            "status": format!("{:?}", result.status),
+                            "message": error.to_string(),
+                        }),
+                    );
+                }
+            }
+            Err(error) => {
+                let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                    "launcher.provider_sync.degraded",
+                    json!({ "message": format!("provider sync task failed: {error}") }),
+                );
+            }
+        }
+        // 同步没做成，索引该修的还是要修——它们各自独立，不能因为一路失败连坐。
+        repair_session_index_automatically(false).await;
         Ok(())
     }
 
@@ -415,24 +949,62 @@ impl LaunchHooks for LauncherHooks {
 
     async fn run_remote_control_session_recovery(&self) -> anyhow::Result<()> {
         let outcomes = tokio::task::spawn_blocking(|| {
-            let requests =
-                alunixa_x_core::remote_control_recovery::load_pending_remote_control_recoveries(
-                    None,
-                )?;
-            let settings = alunixa_x_core::settings::SettingsStore::default().load()?;
+            let requests = alunixa_x_core::remote_control_recovery::load_pending_remote_control_recoveries(None)?;
+            let settings = alunixa_x_core::settings::SettingsStore::default()
+                .load()?;
             let mut outcomes = Vec::with_capacity(requests.len());
             for request in requests {
                 let current_profile = settings
                     .relay_profiles
                     .iter()
                     .find(|profile| profile.id == request.profile_id);
+                if remote_control_recovery_is_superseded_by_openai(&settings, &request) {
+                    let completion_error =
+                        alunixa_x_core::remote_control_recovery::complete_pending_remote_control_recovery(
+                            None,
+                            &request.thread_id,
+                        )
+                        .err()
+                        .map(|error| error.to_string());
+                    let completed = completion_error.is_none();
+                    outcomes.push((
+                        request,
+                        alunixa_x_data::ProviderSyncResult {
+                            status: if completed {
+                                alunixa_x_data::ProviderSyncStatus::Synced
+                            } else {
+                                alunixa_x_data::ProviderSyncStatus::Skipped
+                            },
+                            message: if completed {
+                                "Remote Control session finalization discarded after switching to OpenAI session identity".to_string()
+                            } else {
+                                "Remote Control session finalization could not discard the superseded recovery request".to_string()
+                            },
+                            target_provider: "openai".to_string(),
+                            backup_dir: None,
+                            changed_session_files: 0,
+                            sqlite_rows_updated: 0,
+                            sqlite_provider_rows_updated: 0,
+                            sqlite_user_event_rows_updated: 0,
+                            sqlite_cwd_rows_updated: 0,
+                            sqlite_catalog_rows_inserted: 0,
+                            sqlite_catalog_rows_removed: 0,
+                            updated_workspace_roots: 0,
+                            skipped_locked_rollout_files: Vec::new(),
+                            encrypted_content_warning: None,
+                            repair_audit: alunixa_x_data::ProviderSyncAudit::default(),
+                        },
+                        completion_error,
+                    ));
+                    continue;
+                }
                 let request_is_current = settings.active_relay_id == request.profile_id
                     && current_profile.is_some_and(|profile| {
-                        alunixa_x_core::remote_control_recovery::config_generation(
-                            profile,
-                            &request.target_provider,
-                        ) == request.config_generation
-                    });
+                    alunixa_x_core::remote_control_recovery::config_generation(
+                        profile,
+                        &request.target_provider,
+                    ) == request.config_generation
+                });
                 if !request_is_current {
                     outcomes.push((
                         request,
@@ -451,6 +1023,7 @@ impl LaunchHooks for LauncherHooks {
                             updated_workspace_roots: 0,
                             skipped_locked_rollout_files: Vec::new(),
                             encrypted_content_warning: None,
+                            repair_audit: alunixa_x_data::ProviderSyncAudit::default(),
                         },
                         None,
                     ));
@@ -512,42 +1085,17 @@ impl LaunchHooks for LauncherHooks {
         self.core.apply_active_relay_profile(settings).await
     }
 
-    async fn ensure_computer_use_config(
+    async fn ensure_active_protocol_proxy_config(
         &self,
         settings: &alunixa_x_core::settings::BackendSettings,
-    ) -> anyhow::Result<()> {
-        self.core.ensure_computer_use_config(settings).await
-    }
-
-    async fn ensure_plugin_marketplace_config(
-        &self,
-        settings: &alunixa_x_core::settings::BackendSettings,
-    ) -> anyhow::Result<()> {
-        self.core.ensure_plugin_marketplace_config(settings).await
-    }
-
-    async fn ensure_imagegen_mcp_config(
-        &self,
-        settings: &alunixa_x_core::settings::BackendSettings,
-        helper_port: u16,
     ) -> anyhow::Result<()> {
         self.core
-            .ensure_imagegen_mcp_config(settings, helper_port)
+            .ensure_active_protocol_proxy_config(settings)
             .await
     }
 
-    async fn audit_startup_config(
-        &self,
-        settings: &alunixa_x_core::settings::BackendSettings,
-        helper_port: u16,
-    ) -> anyhow::Result<()> {
-        self.core.audit_startup_config(settings, helper_port).await
-    }
-
     async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
-        self.core.start_helper(helper_port).await?;
-        self.runtime.set_helper_port(helper_port);
-        Ok(())
+        self.core.start_helper(helper_port).await
     }
 
     async fn launch_codex(
@@ -557,6 +1105,19 @@ impl LaunchHooks for LauncherHooks {
         settings: &alunixa_x_core::settings::BackendSettings,
         extra_args: &[String],
     ) -> anyhow::Result<alunixa_x_core::launcher::CodexLaunch> {
+        if self.attach_only {
+            anyhow::ensure!(
+                alunixa_x_core::cdp::endpoint_available(debug_port),
+                "恢复后台服务时 Codex 调试连接已断开"
+            );
+            return Ok(alunixa_x_core::launcher::CodexLaunch::Process {
+                command: Vec::new(),
+                wait_strategy: alunixa_x_core::launcher::ProcessWaitStrategy::ExternalWaitCommand,
+                macos_cleanup_policy: Some(
+                    alunixa_x_core::launcher::MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning,
+                ),
+            });
+        }
         self.core
             .launch_codex(app_dir, debug_port, settings, extra_args)
             .await
@@ -568,11 +1129,16 @@ impl LaunchHooks for LauncherHooks {
         app_dir: &Path,
     ) -> anyhow::Result<Option<BridgeContext>> {
         self.runtime.set_debug_port(debug_port);
-        Ok(Some(BridgeContext::core_with_data_and_app_dir(
+        let ctx = BridgeContext::core_with_data_and_app_dir(
             self.runtime.clone(),
             self.data.clone(),
             app_dir.to_path_buf(),
-        )))
+        );
+        *self
+            .bridge_context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("bridge context lock poisoned"))? = Some(ctx.clone());
+        Ok(Some(ctx))
     }
 
     async fn inject_bridge(
@@ -581,57 +1147,31 @@ impl LaunchHooks for LauncherHooks {
         helper_port: u16,
         ctx: BridgeContext,
     ) -> anyhow::Result<()> {
-        *self.bridge_context.lock().unwrap() = Some(ctx.clone());
-        let disconnect =
-            inject_with_context(debug_port, helper_port, ctx, self.runtime.clone()).await?;
-        self.core.set_bridge_disconnect(disconnect).await;
-        Ok(())
+        inject_with_context(debug_port, helper_port, ctx, self.runtime.clone()).await
     }
 
     async fn inject(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         self.core.inject(debug_port, helper_port).await
     }
 
-    async fn verify_startup_injection(
-        &self,
-        debug_port: u16,
-        helper_port: u16,
-        settings: &alunixa_x_core::settings::BackendSettings,
-    ) -> anyhow::Result<()> {
-        self.core
-            .verify_startup_injection(debug_port, helper_port, settings)
-            .await
-    }
-
-    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
-        self.core.wait_for_native_ui(debug_port).await
+    async fn capture_injected_launch_identity(&self, debug_port: u16) {
+        self.core.capture_injected_launch_identity(debug_port).await;
     }
 
     async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
-        let bridge_context = self
-            .bridge_context
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("bridge context is unavailable for reconnect"))?;
+        let ctx = self.watchdog_bridge_context()?;
         let runtime = self.runtime.clone();
-        let reconnect: alunixa_x_core::launcher::BridgeReconnectHandler = Arc::new(move || {
-            let bridge_context = bridge_context.clone();
+        let reinjector: BridgeReinjector = Arc::new(move || {
+            let ctx = ctx.clone();
             let runtime = runtime.clone();
-            Box::pin(async move {
-                inject_with_context(debug_port, helper_port, bridge_context, runtime).await
-            })
+            Box::pin(
+                async move { inject_with_context(debug_port, helper_port, ctx, runtime).await },
+            )
         });
+        self.core.set_bridge_reinjector(reinjector).await;
         self.core
-            .start_bridge_connection_watchdog(debug_port, helper_port, reconnect)
+            .start_bridge_watchdog(debug_port, helper_port)
             .await
-    }
-
-    async fn start_computer_use_guard_watchdog(
-        &self,
-        settings: &alunixa_x_core::settings::BackendSettings,
-    ) -> anyhow::Result<()> {
-        self.core.start_computer_use_guard_watchdog(settings).await
     }
 
     async fn write_status(&self, status: &str) {
@@ -643,7 +1183,14 @@ impl LaunchHooks for LauncherHooks {
         launch: &alunixa_x_core::launcher::CodexLaunch,
         debug_port: u16,
     ) -> anyhow::Result<()> {
-        self.core.wait_for_codex_exit(launch, debug_port).await
+        let result = self.core.wait_for_codex_exit(launch, debug_port).await;
+        if let Some(state) = &self.session_state {
+            state
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .ready = false;
+        }
+        result
     }
 
     async fn shutdown_helper(&self, helper_port: u16) {
@@ -651,8 +1198,20 @@ impl LaunchHooks for LauncherHooks {
     }
 
     async fn terminate_codex(&self, launch: &alunixa_x_core::launcher::CodexLaunch) {
-        self.core.terminate_codex(launch).await;
+        if !self.attach_only {
+            self.core.terminate_codex(launch).await;
+        }
     }
+}
+
+fn require_completed_provider_sync(
+    status: &alunixa_x_data::ProviderSyncStatus,
+    message: &str,
+) -> anyhow::Result<()> {
+    if *status == alunixa_x_data::ProviderSyncStatus::Synced {
+        return Ok(());
+    }
+    anyhow::bail!("provider sync did not complete ({status:?}): {message}")
 }
 
 #[derive(Debug, Clone)]
@@ -673,15 +1232,16 @@ impl Default for LauncherDataService {
 #[async_trait::async_trait]
 impl BridgeDataService for LauncherDataService {
     async fn delete(&self, session: SessionRef) -> anyhow::Result<DeleteResult> {
+        // 只读本地 SQLite 的实现不能接收远端/未知来源；同 ID 不代表同一主机。
+        session.require_local_delete()?;
         let db_paths = self.candidate_db_paths();
         let backup_store = alunixa_x_data::BackupStore::new(self.backup_dir.clone());
-        let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
         tokio::task::spawn_blocking(move || {
             alunixa_x_data::delete_local_from_paths_with_home(
                 db_paths,
                 backup_store,
                 &session,
-                &home,
+                &alunixa_x_core::codex_sqlite::default_codex_home_dir(),
             )
         })
         .await
@@ -711,6 +1271,24 @@ impl BridgeDataService for LauncherDataService {
             .map_err(|error| anyhow::anyhow!("thread usage history task failed: {error}"))
     }
 
+    async fn whale_session(&self, session: SessionRef) -> anyhow::Result<Value> {
+        let adapter = self.storage_adapter();
+        tokio::task::spawn_blocking(move || {
+            alunixa_x_data::whale_usage::session_summary(&adapter, &session)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("whale session task failed: {error}"))
+    }
+
+    async fn whale_history(&self, query: Value) -> anyhow::Result<Value> {
+        let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
+        tokio::task::spawn_blocking(move || {
+            alunixa_x_data::whale_history::query_history(&home, &query)
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("whale history task failed: {error}"))
+    }
+
     async fn find_archived_thread_by_title(
         &self,
         title: String,
@@ -719,39 +1297,6 @@ impl BridgeDataService for LauncherDataService {
         tokio::task::spawn_blocking(move || adapter.find_archived_thread_by_title(&title))
             .await
             .map_err(|error| anyhow::anyhow!("archived lookup task failed: {error}"))
-    }
-
-    async fn move_thread_workspace(
-        &self,
-        session: SessionRef,
-        target_cwd: String,
-    ) -> anyhow::Result<Value> {
-        let db_paths = self.candidate_db_paths();
-        let backup_store = alunixa_x_data::BackupStore::new(self.backup_dir.clone());
-        tokio::task::spawn_blocking(move || {
-            alunixa_x_data::move_codex_thread_workspace_from_paths(
-                db_paths,
-                backup_store,
-                &session,
-                &target_cwd,
-            )
-        })
-        .await
-        .map_err(|error| anyhow::anyhow!("move thread workspace task failed: {error}"))
-    }
-
-    async fn thread_sort_key(&self, session: SessionRef) -> anyhow::Result<Value> {
-        let adapter = self.storage_adapter();
-        tokio::task::spawn_blocking(move || adapter.codex_thread_sort_key(&session))
-            .await
-            .map_err(|error| anyhow::anyhow!("thread sort key task failed: {error}"))
-    }
-
-    async fn thread_sort_keys(&self, sessions: Vec<SessionRef>) -> anyhow::Result<Value> {
-        let adapter = self.storage_adapter();
-        tokio::task::spawn_blocking(move || adapter.codex_thread_sort_keys(&sessions))
-            .await
-            .map_err(|error| anyhow::anyhow!("thread sort keys task failed: {error}"))
     }
 
     async fn recover_remote_control_session(&self, thread_id: String) -> anyhow::Result<Value> {
@@ -821,6 +1366,7 @@ impl BridgeDataService for LauncherDataService {
         .await
         .map_err(|error| anyhow::anyhow!("Remote Control session recovery task failed: {error}"))?
     }
+
 }
 
 impl LauncherDataService {
@@ -845,28 +1391,21 @@ impl LauncherDataService {
         .with_allowed_db_paths(allowed_db_paths)
         .with_codex_home(alunixa_x_core::codex_sqlite::default_codex_home_dir())
     }
+
 }
 
 struct LauncherRuntimeService {
     debug_port: Mutex<u16>,
-    helper_port: Mutex<Option<u16>>,
     websocket_url: Mutex<Option<String>>,
     user_scripts: UserScriptManager,
-    shared_terminal: Arc<alunixa_x_core::shared_terminal::SharedTerminalBroker>,
 }
 
 impl LauncherRuntimeService {
-    fn new(
-        debug_port: u16,
-        user_scripts: UserScriptManager,
-        shared_terminal: Arc<alunixa_x_core::shared_terminal::SharedTerminalBroker>,
-    ) -> Self {
+    fn new(debug_port: u16, user_scripts: UserScriptManager) -> Self {
         Self {
             debug_port: Mutex::new(debug_port),
-            helper_port: Mutex::new(None),
             websocket_url: Mutex::new(None),
             user_scripts,
-            shared_terminal,
         }
     }
 
@@ -877,16 +1416,20 @@ impl LauncherRuntimeService {
     fn set_websocket_url(&self, websocket_url: &str) {
         *self.websocket_url.lock().unwrap() = Some(websocket_url.to_string());
     }
-
-    fn set_helper_port(&self, helper_port: u16) {
-        *self.helper_port.lock().unwrap() = Some(helper_port);
-    }
 }
 
 #[async_trait::async_trait]
 impl BridgeRuntimeService for LauncherRuntimeService {
     async fn user_script_inventory(&self) -> anyhow::Result<Value> {
         self.user_scripts.inventory()
+    }
+
+    async fn user_script_inventory_with_runtime_status(
+        &self,
+        payload: Value,
+    ) -> anyhow::Result<Value> {
+        self.user_scripts
+            .inventory_with_runtime_status(payload.get("runtime_status"))
     }
 
     async fn set_user_scripts_enabled(&self, enabled: bool) -> anyhow::Result<Value> {
@@ -904,13 +1447,40 @@ impl BridgeRuntimeService for LauncherRuntimeService {
         self.user_scripts.inventory()
     }
 
+    async fn load_user_scripts(&self) -> anyhow::Result<Value> {
+        let websocket_url = self
+            .websocket_url
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Codex 页面尚未连接"))?;
+        alunixa_x_core::user_scripts::load_scripts_at(&websocket_url, &self.user_scripts).await
+    }
+
     async fn reload_user_scripts(&self) -> anyhow::Result<Value> {
-        let bundle = self.user_scripts.build_enabled_bundle()?;
-        let websocket_url = self.websocket_url.lock().unwrap().clone();
-        if let Some(websocket_url) = websocket_url.filter(|_| !bundle.trim().is_empty()) {
-            alunixa_x_core::bridge::evaluate_script(&websocket_url, &bundle).await?;
+        let websocket_url = self
+            .websocket_url
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Codex 页面尚未连接"))?;
+        alunixa_x_core::user_scripts::reload_scripts_at(&websocket_url, &self.user_scripts).await
+    }
+
+    async fn script_market_list(&self) -> anyhow::Result<Value> {
+        alunixa_x_core::script_market::list_market_scripts(&self.user_scripts).await
+    }
+
+    async fn script_market_install(&self, payload: Value) -> anyhow::Result<Value> {
+        let id = payload
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .unwrap_or_default();
+        if id.is_empty() {
+            anyhow::bail!("脚本 id 不能为空");
         }
-        self.user_scripts.inventory()
+        alunixa_x_core::script_market::install_market_script_by_id(&self.user_scripts, id).await
     }
 
     async fn open_devtools(&self) -> anyhow::Result<Value> {
@@ -926,35 +1496,34 @@ impl BridgeRuntimeService for LauncherRuntimeService {
         }))
     }
 
-    async fn open_manager(&self) -> anyhow::Result<Value> {
-        let target = alunixa_x_core::install::spawn_companion(
-            alunixa_x_core::install::MANAGER_BINARY,
-            std::iter::empty::<&str>(),
-        )
-        .map_err(|error| anyhow::anyhow!("启动管理工具失败：{error}"))?;
+    async fn open_manager(&self, payload: Value) -> anyhow::Result<Value> {
+        let navigation =
+            alunixa_x_core::manager_navigation::save_pending_manager_navigation_from_payload(
+                &payload,
+            )?;
+        show_gui(payload)
+            .map_err(|error| anyhow::anyhow!("打开 Alunixa X 界面失败：{error}"))
+            .map_err(|error| {
+                alunixa_x_core::manager_navigation::rollback_pending_manager_navigation_after_launch_failure(
+                    navigation.as_ref(),
+                    error,
+                )
+            })?;
         Ok(json!({
             "status": "ok",
-            "path": target
+            "path": std::env::current_exe().ok(),
+            "navigation": navigation
         }))
     }
 
+    async fn open_transient_manager(&self, payload: Value) -> anyhow::Result<Value> {
+        self.open_manager(payload).await
+    }
+
     async fn backend_status(&self) -> anyhow::Result<Value> {
-        let helper_port = *self.helper_port.lock().unwrap();
-        let Some(helper_port) = helper_port else {
-            return Ok(backend_status_failed("本地 Helper 尚未启动"));
-        };
-        match probe_owned_helper(helper_port).await {
-            Ok(helper_status) => Ok(json!({
-                "status": "ok",
-                "message": "后端已连接",
-                "version": alunixa_x_core::version::VERSION,
-                "transport": "verified",
-                "processId": std::process::id(),
-                "bridgeTransport": "cdp-bridge",
-                "helperTransport": helper_status.get("transport").and_then(Value::as_str).unwrap_or("http-helper")
-            })),
-            Err(error) => Ok(backend_status_failed(&error.to_string())),
-        }
+        Ok(
+            json!({"status": "ok", "message": "后端已连接", "version": alunixa_x_core::version::VERSION}),
+        )
     }
 
     async fn codex_model_catalog(&self) -> anyhow::Result<Value> {
@@ -964,154 +1533,6 @@ impl BridgeRuntimeService for LauncherRuntimeService {
     async fn ads(&self) -> anyhow::Result<Value> {
         alunixa_x_core::ads::fetch_ad_list().await
     }
-
-    async fn zed_remote_status(&self) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::zed_remote_status())
-    }
-
-    async fn resolve_zed_remote_host(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::resolve_ssh_target_response(
-            &payload,
-        ))
-    }
-
-    async fn fallback_zed_remote_request(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::fallback_open_request_response(
-            &payload,
-        ))
-    }
-
-    async fn open_zed_remote(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::open_zed_remote(&payload))
-    }
-
-    async fn list_zed_remote_projects(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::list_zed_remote_projects_response(&payload))
-    }
-
-    async fn remember_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::remember_zed_remote_project_response(&payload))
-    }
-
-    async fn forget_zed_remote_project(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::zed_remote::forget_zed_remote_project_response(&payload))
-    }
-
-    async fn upstream_worktree_status(&self) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::upstream_worktree::status_response())
-    }
-
-    async fn upstream_worktree_defaults(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::upstream_worktree::defaults_response(
-            &payload,
-        ))
-    }
-
-    async fn upstream_worktree_prepare(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::upstream_worktree::prepare_response(
-            &payload,
-        ))
-    }
-
-    async fn upstream_worktree_create(&self, payload: Value) -> anyhow::Result<Value> {
-        Ok(alunixa_x_core::upstream_worktree::create_response(&payload))
-    }
-
-    async fn shared_terminal_next(&self) -> anyhow::Result<Value> {
-        Ok(match self.shared_terminal.next().await {
-            Some(work) => serde_json::to_value(work)?,
-            None => json!({ "status": "idle" }),
-        })
-    }
-
-    async fn shared_terminal_started(&self, payload: Value) -> anyhow::Result<Value> {
-        let request_id = required_payload_string(&payload, "requestId")?;
-        let terminal_session_id = required_payload_string(&payload, "terminalSessionId")?;
-        self.shared_terminal
-            .started(request_id, terminal_session_id)
-            .await?;
-        Ok(json!({ "status": "ok" }))
-    }
-
-    async fn shared_terminal_heartbeat(&self, payload: Value) -> anyhow::Result<Value> {
-        let request_id = required_payload_string(&payload, "requestId")?;
-        self.shared_terminal.heartbeat(request_id).await?;
-        Ok(json!({ "status": "ok" }))
-    }
-
-    async fn shared_terminal_complete(&self, payload: Value) -> anyhow::Result<Value> {
-        let result =
-            serde_json::from_value::<alunixa_x_core::shared_terminal::SharedTerminalResult>(
-                payload,
-            )
-            .context("共享终端完成载荷无效")?;
-        self.shared_terminal.complete(result).await?;
-        Ok(json!({ "status": "ok" }))
-    }
-}
-
-fn required_payload_string<'a>(payload: &'a Value, key: &str) -> anyhow::Result<&'a str> {
-    payload
-        .get(key)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("共享终端载荷缺少 {key}"))
-}
-
-fn backend_status_failed(message: &str) -> Value {
-    json!({
-        "status": "failed",
-        "message": message,
-        "version": alunixa_x_core::version::VERSION,
-        "transport": "verification",
-        "processId": std::process::id()
-    })
-}
-
-async fn probe_owned_helper(helper_port: u16) -> anyhow::Result<Value> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    let address = ("127.0.0.1", helper_port);
-    let mut stream = tokio::time::timeout(
-        std::time::Duration::from_millis(750),
-        tokio::net::TcpStream::connect(address),
-    )
-    .await
-    .context("本地 Helper 检查超时")?
-    .context("本地 Helper 未连接")?;
-    let request = format!(
-        "GET /backend/status HTTP/1.1\r\nHost: 127.0.0.1:{helper_port}\r\nConnection: close\r\n\r\n"
-    );
-    tokio::time::timeout(
-        std::time::Duration::from_millis(750),
-        stream.write_all(request.as_bytes()),
-    )
-    .await
-    .context("本地 Helper 写入超时")??;
-    let mut response = Vec::new();
-    tokio::time::timeout(
-        std::time::Duration::from_millis(750),
-        stream.read_to_end(&mut response),
-    )
-    .await
-    .context("本地 Helper 响应超时")??;
-    let body_offset = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|offset| offset + 4)
-        .context("本地 Helper 响应无效")?;
-    let status = serde_json::from_slice::<Value>(&response[body_offset..])
-        .context("本地 Helper 状态无效")?;
-    let expected_process_id = u64::from(std::process::id());
-    let matches_owner = status.get("status").and_then(Value::as_str) == Some("ok")
-        && status.get("version").and_then(Value::as_str) == Some(alunixa_x_core::version::VERSION)
-        && status.get("transport").and_then(Value::as_str) == Some("http-helper")
-        && status.get("processId").and_then(Value::as_u64) == Some(expected_process_id);
-    if !matches_owner {
-        anyhow::bail!("本地 Helper 与当前启动器不一致，请重启 Codex")
-    }
-    Ok(status)
 }
 
 async fn inject_with_context(
@@ -1119,18 +1540,28 @@ async fn inject_with_context(
     helper_port: u16,
     ctx: BridgeContext,
     runtime: Arc<LauncherRuntimeService>,
-) -> anyhow::Result<alunixa_x_core::bridge::BridgeDisconnect> {
+) -> anyhow::Result<()> {
     let mut last_error = None;
     for _ in 0..20 {
         match try_inject_with_context(debug_port, helper_port, ctx.clone(), runtime.clone()).await {
-            Ok(disconnect) => return Ok(disconnect),
+            Ok(()) => return Ok(()),
             Err(error) => {
                 last_error = Some(error);
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         }
     }
+
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Codex injection failed")))
+}
+
+fn remote_control_recovery_is_superseded_by_openai(
+    settings: &alunixa_x_core::settings::BackendSettings,
+    request: &alunixa_x_core::remote_control_recovery::PendingRemoteControlRecovery,
+) -> bool {
+    settings.active_relay_id == request.profile_id
+        && settings.active_relay_session_provider()
+            == alunixa_x_core::settings::RelaySessionProvider::Openai
 }
 
 async fn try_inject_with_context(
@@ -1138,7 +1569,7 @@ async fn try_inject_with_context(
     helper_port: u16,
     ctx: BridgeContext,
     runtime: Arc<LauncherRuntimeService>,
-) -> anyhow::Result<alunixa_x_core::bridge::BridgeDisconnect> {
+) -> anyhow::Result<()> {
     let targets = alunixa_x_core::cdp::list_targets(debug_port).await?;
     let target = alunixa_x_core::cdp::pick_injectable_codex_page_target(&targets)?;
     let websocket_url = target
@@ -1148,20 +1579,15 @@ async fn try_inject_with_context(
     runtime.set_websocket_url(websocket_url);
     let settings = alunixa_x_core::settings::SettingsStore::default()
         .load()
-        .context("failed to load settings for Alunixa X startup injection")?;
-    let script =
-        alunixa_x_core::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
-    let user_bundle = runtime
-        .user_scripts
-        .build_enabled_bundle()
         .unwrap_or_default();
-    let new_document_scripts = if user_bundle.is_empty() {
-        vec![script]
-    } else {
-        vec![script, user_bundle]
-    };
-    alunixa_x_core::bridge::install_renderer_bridge_with_disconnect(
+    let script = alunixa_x_core::assets::injection_script_with_settings(helper_port, &settings);
+    let new_document_scripts = vec![
+        script,
+        alunixa_x_core::user_scripts::BOOTSTRAP_SCRIPT.to_string(),
+    ];
+    alunixa_x_core::bridge::install_bridge(
         websocket_url,
+        alunixa_x_core::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
             Box::pin(async move {
@@ -1169,7 +1595,6 @@ async fn try_inject_with_context(
             })
         }),
         &new_document_scripts,
-        &settings,
     )
     .await
 }
@@ -1239,106 +1664,693 @@ fn default_user_scripts_config_dir() -> PathBuf {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parse_launch_options_accepts_manager_forwarded_ports_and_app_path() {
-        let options = parse_launch_options([
-            "--app-path",
-            "C:/Codex/App",
-            "--debug-port",
-            "9333",
-            "--helper-port",
-            "57322",
-        ]);
-
-        assert_eq!(options.app_dir, Some(PathBuf::from("C:/Codex/App")));
-        assert_eq!(options.debug_port, 9333);
-        assert_eq!(options.helper_port, 57322);
-    }
-
-    #[test]
-    fn parse_launch_options_ignores_invalid_ports() {
-        let options = parse_launch_options(["--debug-port", "nope", "--helper-port", "70000"]);
-
-        assert_eq!(options.debug_port, LaunchOptions::default().debug_port);
-        assert_eq!(options.helper_port, LaunchOptions::default().helper_port);
+    #[tokio::test]
+    async fn session_index_monitor_does_not_start_after_exit() {
+        let checks = std::cell::Cell::new(0);
+        let result = run_periodic_until_exit(async { 42 }, std::time::Duration::ZERO, || {
+            checks.set(checks.get() + 1);
+            std::future::ready(())
+        })
+        .await;
+        assert_eq!(result, 42);
+        assert_eq!(checks.get(), 0);
     }
 
     #[tokio::test]
-    async fn bridge_status_checks_the_helper_owned_by_the_same_launcher() {
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let helper_port = listener.local_addr().unwrap().port();
-        drop(listener);
-        let hooks = LauncherHooks::default();
+    async fn session_index_monitor_finishes_current_check_before_exit() {
+        let (done, exit) = tokio::sync::oneshot::channel::<()>();
+        let mut done = Some(done);
+        let finished = std::cell::Cell::new(false);
+        run_periodic_until_exit(exit, std::time::Duration::from_millis(1), || {
+            done.take().expect("only one check").send(()).unwrap();
+            let finished = &finished;
+            async move {
+                tokio::task::yield_now().await;
+                finished.set(true);
+            }
+        })
+        .await
+        .unwrap();
+        assert!(finished.get());
+    }
 
-        hooks.start_helper(helper_port).await.unwrap();
-        let connected = hooks.runtime.backend_status().await.unwrap();
-        assert_eq!(connected["status"], "ok");
-        assert_eq!(connected["transport"], "verified");
-        assert_eq!(connected["processId"], std::process::id());
+    #[test]
+    fn launcher_accepts_only_a_completed_provider_sync() {
+        assert!(
+            require_completed_provider_sync(
+                &alunixa_x_data::ProviderSyncStatus::Synced,
+                "Provider sync complete",
+            )
+            .is_ok()
+        );
 
-        hooks.shutdown_helper(helper_port).await;
-        let disconnected = hooks.runtime.backend_status().await.unwrap();
-        assert_eq!(disconnected["status"], "failed");
+        for status in [
+            alunixa_x_data::ProviderSyncStatus::Disabled,
+            alunixa_x_data::ProviderSyncStatus::Skipped,
+        ] {
+            let error = require_completed_provider_sync(&status, "target is unresolved")
+                .expect_err("an incomplete provider sync must stop launch");
+            assert!(error.to_string().contains("target is unresolved"));
+        }
+    }
+
+    /// issue #2160：判定函数仍然把不完整同步视作失败，但启动路径必须把它降级成
+    /// 一条诊断日志——.codex-global-state.json 坏掉不能把整次启动带下去。
+    #[test]
+    fn startup_provider_sync_failure_is_non_fatal() {
+        let source = include_str!("main.rs");
+        let start = source
+            .find("async fn run_provider_sync(&self)")
+            .expect("provider sync hook");
+        let end = source[start..]
+            .find("fn has_pending_remote_control_session_recoveries")
+            .map(|offset| start + offset)
+            .expect("next method after the hook");
+        let body = &source[start..end];
+
+        // 不再用 `?` 把同步失败变成致命错误。
+        assert!(
+            !body.contains("require_completed_provider_sync(&result.status, &result.message)?"),
+            "provider sync 失败不得中断启动"
+        );
+        assert!(
+            body.contains("launcher.provider_sync.degraded"),
+            "降级要留下诊断日志"
+        );
+        // 同步失败不连坐：索引修复照常执行。
+        assert!(body.contains("repair_session_index_automatically(false).await"));
+        assert!(body.trim_end().ends_with("Ok(())\n    }"));
     }
 
     #[test]
     fn launcher_uses_single_instance_guard_before_launching() {
         let source = include_str!("main.rs");
 
-        assert!(source.contains("acquire_single_instance_guard(options.debug_port)?"));
+        assert!(source.contains("acquire_single_instance_guard(options.debug_port)"));
         assert!(source.contains("launcher_guard_port"));
         assert!(source.contains("launcher.already_running"));
+        assert!(source.contains("Existing Codex instance activated"));
+        assert!(source.contains("status: \"failed\".to_string()"));
     }
 
     #[test]
-    fn repeated_launch_only_focuses_the_existing_owner() {
+    fn occupied_session_guard_does_not_terminate_another_gui_process() {
         let source = include_str!("main.rs");
-        let start = source
-            .find("async fn activate_existing_codex_app(")
-            .unwrap();
+        let start = source.find("fn acquire_single_instance_guard(").unwrap();
         let end = source[start..]
-            .find("fn log_launcher_already_running(")
+            .find("fn try_acquire_single_instance_guard()")
             .unwrap()
             + start;
-        let activation = &source[start..end];
-        for forbidden in [
-            ".start_helper(",
-            ".launch_codex(",
-            ".ensure_injection(",
-            ".apply_active_relay_profile(",
-            ".save_latest(",
-            "ensure_alunixa_x_hooks(",
-        ] {
-            assert!(!activation.contains(forbidden), "{forbidden}");
-        }
-        assert!(activation.contains("windows_activate_process_window"));
+        let body = &source[start..end];
+        assert!(body.contains("std::io::ErrorKind::WouldBlock | std::io::ErrorKind::AddrInUse"));
+        assert!(!body.contains("stop_launcher_processes"));
+        assert!(body.contains("Ok(None)"));
+    }
+
+    fn send_test_command(
+        worker: &RuntimeWorker,
+        command: impl FnOnce(SessionReply) -> RuntimeCommand,
+    ) -> Result<()> {
+        let (reply, result) = mpsc::channel();
+        worker.commands.send(command(reply)).unwrap();
+        result
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("runtime command timed out")
+    }
+
+    fn test_start_command(options: LaunchOptions, reply: SessionReply) -> RuntimeCommand {
+        RuntimeCommand::Start(options, 100, false, reply)
+    }
+
+    #[tokio::test]
+    async fn restore_attaches_without_launching_and_preserves_requested_ports() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 1024];
+            stream.read(&mut request).unwrap();
+            let body = format!(
+                r#"[{{"id":"codex","type":"page","title":"Codex","url":"app://-/index.html","webSocketDebuggerUrl":"ws://127.0.0.1:{port}/devtools/page/1"}}]"#
+            );
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let hooks = LauncherHooks {
+            attach_only: true,
+            ..Default::default()
+        };
+        assert_eq!(hooks.select_debug_port(port), port);
+        assert_eq!(hooks.select_helper_port(port), port);
+        // 路径不可执行也能附着，证明恢复不会走启动官方应用的分支。
+        let launch = hooks
+            .launch_codex(
+                Path::new("/missing-codex"),
+                port,
+                &alunixa_x_core::settings::BackendSettings::default(),
+                &[],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            launch,
+            alunixa_x_core::launcher::CodexLaunch::Process {
+                command: Vec::new(),
+                wait_strategy: alunixa_x_core::launcher::ProcessWaitStrategy::ExternalWaitCommand,
+                macos_cleanup_policy: Some(
+                    alunixa_x_core::launcher::MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning
+                ),
+            }
+        );
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_does_not_launch_if_the_debugger_disappears() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let hooks = LauncherHooks {
+            attach_only: true,
+            ..Default::default()
+        };
+        let error = hooks
+            .launch_codex(
+                Path::new("/missing-codex"),
+                port,
+                &alunixa_x_core::settings::BackendSettings::default(),
+                &[],
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("调试连接已断开"));
+        assert!(
+            !resume_if_running(LaunchOptions {
+                debug_port: port,
+                ..Default::default()
+            })
+            .unwrap()
+        );
     }
 
     #[test]
-    fn launcher_hooks_forward_runtime_watchdogs_and_computer_use_guard_methods() {
+    fn restore_mode_reaches_the_session_and_repeated_restore_does_not_activate_codex() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let restored = Arc::new(AtomicUsize::new(0));
+        let count = restored.clone();
+        let worker = RuntimeWorker::spawn(
+            Arc::new(move |_, stop, ready| {
+                assert!(ready.state.lock().unwrap().attach_only);
+                count.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async move {
+                    ready.send(Ok(())).unwrap();
+                    let _ = stop.await;
+                })
+            }),
+            Arc::new(|_, _| panic!("restoration must not activate or restart Codex")),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            send_test_command(&worker, |reply| {
+                RuntimeCommand::Start(LaunchOptions::default(), 100, true, reply)
+            })
+            .unwrap();
+        }
+        assert_eq!(restored.load(Ordering::SeqCst), 1);
+        send_test_command(&worker, RuntimeCommand::Shutdown).unwrap();
+        worker.thread.join().unwrap();
+    }
+
+    #[test]
+    fn shutdown_rejects_a_concurrent_start_waiting_for_the_worker_lock() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let creations = Arc::new(AtomicUsize::new(0));
+        let state = Arc::new(Mutex::new(RuntimeState::Idle));
+        let mut exiting = state.lock().unwrap();
+        exiting
+            .commands_or_start(|| {
+                creations.fetch_add(1, Ordering::SeqCst);
+                RuntimeWorker::spawn(
+                    Arc::new(|_, stop, ready| {
+                        Box::pin(async move {
+                            let _ = ready.send(Ok(()));
+                            let _ = stop.await;
+                        })
+                    }),
+                    Arc::new(|_, _| Box::pin(async { Ok(()) })),
+                )
+            })
+            .unwrap();
+
+        let (entered, waiting) = mpsc::channel();
+        let caller_state = state.clone();
+        let caller_creations = creations.clone();
+        let pending_start = std::thread::spawn(move || {
+            // 模拟已通过宿主退出预检查、正在等待 worker 锁的启动任务。
+            entered.send(()).unwrap();
+            caller_state.lock().unwrap().commands_or_start(|| {
+                caller_creations.fetch_add(1, Ordering::SeqCst);
+                anyhow::bail!("unexpected runtime creation after shutdown")
+            })
+        });
+        waiting
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        shutdown_worker(exiting.begin_shutdown().unwrap()).unwrap();
+        drop(exiting);
+        let rejected = pending_start.join().unwrap().unwrap_err();
+        assert!(rejected.to_string().contains("正在退出"));
+        assert_eq!(creations.load(Ordering::SeqCst), 1);
+        assert!(matches!(*state.lock().unwrap(), RuntimeState::ShuttingDown));
+    }
+
+    #[test]
+    fn shutdown_of_an_idle_runtime_is_permanent_without_spawning_a_worker() {
+        let mut state = RuntimeState::Idle;
+        assert!(state.begin_shutdown().is_none());
+        assert!(state.begin_shutdown().is_none());
+        let rejected = state.commands_or_start(|| panic!("shutdown must not initialize a runtime"));
+        assert!(rejected.unwrap_err().to_string().contains("正在退出"));
+    }
+
+    #[test]
+    fn embedded_runtime_deduplicates_start_and_waits_for_cleanup_before_restarting() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let launched = Arc::new(AtomicUsize::new(0));
+        let cleaned = Arc::new(AtomicUsize::new(0));
+        let activations = Arc::new(AtomicUsize::new(0));
+        let connections_dropped = Arc::new(AtomicUsize::new(0));
+        struct ConnectionGuard(Arc<AtomicUsize>);
+        impl Drop for ConnectionGuard {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        let runner: SessionRunner = {
+            let launched = launched.clone();
+            let cleaned = cleaned.clone();
+            let connections_dropped = connections_dropped.clone();
+            Arc::new(move |_, stop, ready| {
+                let launched = launched.clone();
+                let cleaned = cleaned.clone();
+                let connections_dropped = connections_dropped.clone();
+                Box::pin(async move {
+                    // Rc 横跨 await，验证宿主无需把 ?Send hook future 送进多线程 executor。
+                    let local = std::rc::Rc::new(1);
+                    launched.fetch_add(*local, Ordering::SeqCst);
+                    tokio::spawn(async move {
+                        let _connection = ConnectionGuard(connections_dropped);
+                        std::future::pending::<()>().await;
+                    });
+                    tokio::task::yield_now().await;
+                    ready.send(Ok(())).unwrap();
+                    let _ = stop.await;
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    cleaned.fetch_add(*local, Ordering::SeqCst);
+                })
+            })
+        };
+        let activated = activations.clone();
+        let worker = RuntimeWorker::spawn(
+            runner,
+            Arc::new(move |options, started_at_ms| {
+                assert_eq!(options.debug_port, LaunchOptions::default().debug_port);
+                assert_eq!(started_at_ms, 100);
+                activated.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            }),
+        )
+        .unwrap();
+        send_test_command(&worker, |reply| {
+            test_start_command(LaunchOptions::default(), reply)
+        })
+        .unwrap();
+        send_test_command(&worker, |reply| {
+            test_start_command(
+                LaunchOptions {
+                    debug_port: 9999,
+                    ..LaunchOptions::default()
+                },
+                reply,
+            )
+        })
+        .unwrap();
+        assert_eq!(launched.load(Ordering::SeqCst), 1);
+        assert_eq!(activations.load(Ordering::SeqCst), 1);
+        send_test_command(&worker, RuntimeCommand::Stop).unwrap();
+        assert_eq!(cleaned.load(Ordering::SeqCst), 1);
+        assert_eq!(connections_dropped.load(Ordering::SeqCst), 1);
+        send_test_command(&worker, |reply| {
+            test_start_command(LaunchOptions::default(), reply)
+        })
+        .unwrap();
+        assert_eq!(launched.load(Ordering::SeqCst), 2);
+        send_test_command(&worker, RuntimeCommand::Shutdown).unwrap();
+        worker.thread.join().unwrap();
+        assert_eq!(cleaned.load(Ordering::SeqCst), 2);
+        assert_eq!(connections_dropped.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn embedded_runtime_can_stop_a_pending_session_without_exiting_the_gui_runtime() {
+        let runner: SessionRunner = Arc::new(|_, stop, ready| {
+            Box::pin(async move {
+                let _ = stop.await;
+                let _ = ready.send(Err(anyhow::anyhow!("cancelled")));
+            })
+        });
+        let worker =
+            RuntimeWorker::spawn(runner, Arc::new(|_, _| Box::pin(async { Ok(()) }))).unwrap();
+        let (ready, pending) = mpsc::channel();
+        worker
+            .commands
+            .send(test_start_command(LaunchOptions::default(), ready))
+            .unwrap();
+        send_test_command(&worker, RuntimeCommand::Stop).unwrap();
+        assert_eq!(
+            pending.recv().unwrap().unwrap_err().to_string(),
+            "cancelled"
+        );
+        // 同一条命令通道仍可服务，不随 Codex session 生命周期退出。
+        send_test_command(&worker, RuntimeCommand::Stop).unwrap();
+        send_test_command(&worker, RuntimeCommand::Shutdown).unwrap();
+        worker.thread.join().unwrap();
+    }
+
+    #[test]
+    fn stop_waits_for_started_initialization_and_busy_does_not_start_another_session() {
+        let (finish_initialization, initialization) = tokio::sync::oneshot::channel();
+        let initialization = Arc::new(Mutex::new(Some(initialization)));
+        let (entered, initializations) = mpsc::channel();
+        let runner: SessionRunner = Arc::new(move |_, stop, ready| {
+            let initialization = initialization.lock().unwrap().take().expect("one session");
+            let entered = entered.clone();
+            Box::pin(async move {
+                entered.send(()).unwrap();
+                initialization.await.unwrap();
+                let _ = ready.send(Ok(()));
+                let _ = stop.await;
+            })
+        });
+        let worker =
+            RuntimeWorker::spawn(runner, Arc::new(|_, _| Box::pin(async { Ok(()) }))).unwrap();
+        let (ready, pending) = mpsc::channel();
+        worker
+            .commands
+            .send(test_start_command(LaunchOptions::default(), ready))
+            .unwrap();
+        initializations
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let busy = send_test_command(&worker, |reply| {
+            test_start_command(LaunchOptions::default(), reply)
+        })
+        .unwrap_err();
+        assert!(busy.is::<StartupBusy>());
+        let (stopped, cleanup) = mpsc::channel();
+        worker.commands.send(RuntimeCommand::Stop(stopped)).unwrap();
+        assert!(matches!(cleanup.try_recv(), Err(mpsc::TryRecvError::Empty)));
+        finish_initialization.send(()).unwrap();
+        pending
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        cleanup
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        send_test_command(&worker, RuntimeCommand::Shutdown).unwrap();
+        worker.thread.join().unwrap();
+    }
+
+    #[test]
+    fn launch_failure_keeps_request_identity_and_does_not_overwrite_a_newer_start() {
+        let temp = tempfile::tempdir().unwrap();
+        let options = LaunchOptions {
+            app_dir: Some(PathBuf::from("/test/Codex.app")),
+            debug_port: 9333,
+            helper_port: 57322,
+            status_store: alunixa_x_core::status::StatusStore::new(
+                temp.path().join("latest.json"),
+            ),
+        };
+        let request = LaunchStatus {
+            status: "starting".into(),
+            started_at_ms: 100,
+            ..LaunchStatus::default()
+        };
+        options.status_store.save_latest(&request).unwrap();
+        record_launch_failure(&options, 99, &anyhow::anyhow!("old failure"));
+        assert_eq!(
+            options.status_store.load_latest().unwrap().unwrap(),
+            request
+        );
+        record_launch_failure(&options, 100, &anyhow::anyhow!("launch failed"));
+        let failed = options.status_store.load_latest().unwrap().unwrap();
+        assert_eq!(failed.status, "failed");
+        assert_eq!(failed.started_at_ms, 100);
+        assert_eq!(failed.debug_port, Some(9333));
+        assert_eq!(failed.helper_port, Some(57322));
+        assert_eq!(failed.codex_app, Some("/test/Codex.app".into()));
+    }
+
+    #[test]
+    fn manual_service_stop_marks_its_session_stopped_without_overwriting_new_requests() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = alunixa_x_core::status::StatusStore::new(temp.path().join("latest.json"));
+        let running = LaunchStatus {
+            status: "running".into(),
+            started_at_ms: 100,
+            debug_port: Some(9333),
+            helper_port: Some(57322),
+            phase: Some("ready".into()),
+            progress: Some(100),
+            ..LaunchStatus::default()
+        };
+        store.save_latest(&running).unwrap();
+        assert!(save_stopped_service_status_if_current(&store, 100).unwrap());
+        let stopped = store.load_latest().unwrap().unwrap();
+        assert_eq!(stopped.status, "stopped");
+        assert_eq!(stopped.started_at_ms, 100);
+        assert_eq!(stopped.debug_port, Some(9333));
+        assert_eq!(stopped.helper_port, Some(57322));
+        assert!(stopped.message.contains("后台增强服务已停止"));
+        assert!(stopped.message.contains("未关闭官方 Codex"));
+        assert_eq!(stopped.phase, None);
+        assert_eq!(stopped.progress, None);
+        assert!(!save_stopped_service_status_if_current(&store, 100).unwrap());
+        assert_eq!(store.load_latest().unwrap().unwrap(), stopped);
+
+        for status in ["starting", "stopping"] {
+            let next_request = LaunchStatus {
+                status: status.into(),
+                started_at_ms: 200,
+                phase: Some("stop_processes".into()),
+                ..LaunchStatus::default()
+            };
+            store.save_latest(&next_request).unwrap();
+            assert!(!save_stopped_service_status_if_current(&store, 100).unwrap());
+            assert_eq!(store.load_latest().unwrap().unwrap(), next_request);
+        }
+    }
+
+    #[tokio::test]
+    async fn navigation_routes_show_the_same_embedded_gui_window() {
+        let navigations = Arc::new(Mutex::new(Vec::new()));
+        let received = navigations.clone();
+        set_navigation_handler(move |payload| {
+            received.lock().unwrap().push(payload);
+            Ok(())
+        });
+        let runtime = LauncherRuntimeService::new(9229, default_user_script_manager());
+        runtime.open_manager(json!({})).await.unwrap();
+        runtime.open_transient_manager(json!({})).await.unwrap();
+        assert_eq!(*navigations.lock().unwrap(), vec![json!({}), json!({})]);
+        *NAVIGATION_HANDLER.get().unwrap().lock().unwrap() = None;
+    }
+
+    #[test]
+    fn existing_launcher_path_drains_pending_remote_control_recovery_before_activation() {
         let source = include_str!("main.rs");
+        let start = source
+            .find("async fn activate_existing_codex_app")
+            .expect("existing launcher activation function");
+        let body = &source[start..];
+        let recovery = body
+            .find(
+                "let has_pending_recovery = hooks.has_pending_remote_control_session_recoveries()",
+            )
+            .expect("pending recovery guard");
+        let launch = body
+            .find("let launch_result = hooks")
+            .expect("Codex activation");
+
+        assert!(recovery < launch);
+        assert!(body[recovery..launch].contains("find_session_index_cleanup_blocking_processes"));
+        assert!(body[recovery..launch].contains("should_finalize_pending_remote_control_recovery"));
+        assert!(
+            body[recovery..launch].contains("hooks.run_remote_control_session_recovery().await?")
+        );
+    }
+
+    #[test]
+    fn existing_launcher_path_reuses_the_primary_launcher_runtime() {
+        let source = include_str!("main.rs");
+        let start = source
+            .find("async fn activate_existing_codex_app")
+            .expect("existing launcher activation function");
+        let end = source[start..]
+            .find("fn should_finalize_pending_remote_control_recovery")
+            .map(|offset| start + offset)
+            .expect("next function after existing launcher activation");
+        let body = &source[start..end];
+
+        assert!(!body.contains("hooks.start_helper"));
+        assert!(!body.contains("hooks.ensure_injection"));
+        assert!(!body.contains("hooks.start_bridge_watchdog"));
+        assert!(body.contains("can_connect_loopback_port(options.helper_port)"));
+    }
+
+    #[test]
+    fn existing_launcher_path_runs_provider_sync_before_activation() {
+        // issue #2080：快捷方式启动且 Codex 已在运行时走早退分支，过去直接返回，
+        // 跳过了供应商同步与会话索引修复，只有管理工具的「重启」才生效。
+        let source = include_str!("main.rs");
+        let start = source
+            .find("async fn activate_existing_codex_app")
+            .expect("existing launcher activation function");
+        let end = source[start..]
+            .find("fn should_finalize_pending_remote_control_recovery")
+            .map(|offset| start + offset)
+            .expect("next function after existing launcher activation");
+        let body = &source[start..end];
+
+        let sync = body
+            .find("run_activation_provider_sync(&hooks, &settings)")
+            .expect("provider sync on the activation path");
+        let launch = body
+            .find("let launch_result = hooks")
+            .expect("Codex activation");
+        assert!(sync < launch, "provider sync must run before activation");
+    }
+
+    #[test]
+    fn activation_provider_sync_respects_the_setting_and_is_non_fatal() {
+        let source = include_str!("main.rs");
+        let start = source
+            .find("async fn run_activation_provider_sync")
+            .expect("activation provider sync helper");
+        let end = source[start..]
+            .find("fn should_finalize_pending_remote_control_recovery")
+            .map(|offset| start + offset)
+            .expect("next function after the helper");
+        let body = &source[start..end];
+
+        // 只在设置启用时同步，与完整启动流程一致。
+        assert!(body.contains("if !settings.provider_sync_enabled"));
+        // 同步失败只记日志，不能把用户这次「激活已有窗口」的诉求一起弄失败。
+        assert!(!body.contains("hooks.run_provider_sync().await?"));
+        assert!(body.contains("launcher.activate_existing_provider_sync.failed"));
+    }
+
+    #[test]
+    fn pending_remote_control_finalization_requires_an_idle_desktop() {
+        assert!(should_finalize_pending_remote_control_recovery(true, &[]));
+        assert!(!should_finalize_pending_remote_control_recovery(false, &[]));
+        assert!(!should_finalize_pending_remote_control_recovery(
+            true,
+            &[42]
+        ));
+    }
+
+    #[test]
+    fn openai_session_identity_supersedes_only_its_active_pending_recovery() {
+        let request = alunixa_x_core::remote_control_recovery::PendingRemoteControlRecovery {
+            thread_id: "mobile".to_string(),
+            profile_id: "relay".to_string(),
+            target_provider: "custom".to_string(),
+            config_generation: "old-generation".to_string(),
+            created_at: 1,
+        };
+        let mut settings = alunixa_x_core::settings::BackendSettings {
+            active_relay_id: "relay".to_string(),
+            relay_profiles: vec![alunixa_x_core::settings::RelayProfile {
+                id: "relay".to_string(),
+                config_contents: "model_provider = \"openai\"\n".to_string(),
+                ..alunixa_x_core::settings::RelayProfile::default()
+            }],
+            ..alunixa_x_core::settings::BackendSettings::default()
+        };
+
+        assert!(remote_control_recovery_is_superseded_by_openai(
+            &settings, &request
+        ));
+
+        settings.relay_profiles[0].config_contents = "model_provider = \"custom\"\n".to_string();
+        assert!(!remote_control_recovery_is_superseded_by_openai(
+            &settings, &request
+        ));
+
+        settings.relay_profiles[0].config_contents = "model_provider = \"openai\"\n".to_string();
+        settings.active_relay_id = "other".to_string();
+        assert!(!remote_control_recovery_is_superseded_by_openai(
+            &settings, &request
+        ));
+    }
+
+    #[test]
+    fn launcher_hooks_forward_runtime_watchdog_and_protocol_proxy_methods() {
+        let source = include_str!("main.rs");
+        let compact_source = source.split_whitespace().collect::<String>();
 
         assert!(source.contains("async fn start_bridge_watchdog"));
+        assert!(source.contains("self.watchdog_bridge_context()?"));
+        assert!(source.contains("set_bridge_reinjector(reinjector)"));
+        assert!(source.contains("inject_with_context(debug_port, helper_port, ctx, runtime)"));
+        assert!(source.contains("async fn ensure_active_protocol_proxy_config"));
         assert!(
-            source
-                .contains(".start_bridge_connection_watchdog(debug_port, helper_port, reconnect)")
+            compact_source
+                .contains("self.core.ensure_active_protocol_proxy_config(settings).await")
         );
-        assert!(
-            source
-                .contains("inject_with_context(debug_port, helper_port, bridge_context, runtime)")
-        );
-        assert!(source.contains("async fn ensure_computer_use_config"));
-        assert!(source.contains("self.core.ensure_computer_use_config(settings).await"));
-        assert!(source.contains("async fn ensure_plugin_marketplace_config"));
-        assert!(source.contains("self.core.ensure_plugin_marketplace_config(settings).await"));
-        assert!(include_str!("../Cargo.toml").contains("name = \"alunixa-x-imagegen-mcp\""));
-        assert!(source.contains("async fn ensure_imagegen_mcp_config"));
-        assert!(source.contains(".ensure_imagegen_mcp_config(settings, helper_port)"));
-        assert!(source.contains("async fn audit_startup_config"));
-        assert!(source.contains("self.core.audit_startup_config(settings, helper_port).await"));
-        assert!(source.contains("async fn start_computer_use_guard_watchdog"));
-        assert!(source.contains("self.core"));
-        assert!(source.contains(".start_computer_use_guard_watchdog(settings)"));
+    }
+
+    #[tokio::test]
+    async fn watchdog_reuses_bridge_context_with_data_service() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "alunixa-x-launcher-watchdog-test-{}",
+            std::process::id()
+        ));
+        let hooks = LauncherHooks {
+            attach_only: false,
+            core: Arc::new(DefaultLaunchHooks::default()),
+            data: Arc::new(LauncherDataService {
+                db_path: test_dir.join("state.sqlite"),
+                backup_dir: test_dir.join("backups"),
+            }),
+            runtime: Arc::new(LauncherRuntimeService::new(
+                9229,
+                UserScriptManager::new(
+                    test_dir.join("builtin"),
+                    test_dir.join("user"),
+                    test_dir.join("settings.json"),
+                ),
+            )),
+            bridge_context: Arc::new(Mutex::new(None)),
+            browser_monitor: Arc::new(Mutex::new(None)),
+            session_state: None,
+        };
+
+        hooks.bridge_context(9229, &test_dir).await.unwrap();
+        let ctx = hooks.watchdog_bridge_context().unwrap();
+        let result =
+            alunixa_x_core::routes::handle_bridge_request(ctx, "/backend/status", json!({})).await;
+
+        assert_ne!(result["message"], "Unknown bridge path");
     }
 }
 

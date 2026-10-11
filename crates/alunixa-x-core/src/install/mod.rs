@@ -7,16 +7,18 @@ use serde::{Deserialize, Serialize};
 pub mod macos;
 pub mod windows;
 
-pub const SILENT_NAME: &str = "Alunixa X Launch";
-pub const MANAGER_NAME: &str = "Alunixa X";
-pub const MACOS_SILENT_NAME: &str = "Alunixa X Launch (AX)";
-pub const MACOS_MANAGER_NAME: &str = "Alunixa X (AX)";
-pub const AX_SILENT_SHORTCUT: &str = "AX Launch - Alunixa X.lnk";
-pub const AX_MANAGER_SHORTCUT: &str = "AX - Alunixa X.lnk";
-pub const SILENT_BINARY: &str = "alunixa-x";
-pub const MANAGER_BINARY: &str = "alunixa-x-manager";
-pub const SILENT_BUNDLE_ID: &str = "io.github.alunixacode.alunixax.launcher";
-pub const MANAGER_BUNDLE_ID: &str = "io.github.alunixacode.alunixax";
+// 保留旧名称供存量安装识别；新入口统一使用 APP_*。
+pub const APP_NAME: &str = "Alunixa X";
+pub const APP_BINARY: &str = "alunixa-x-plus";
+pub const APP_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus";
+pub const MACOS_APP_EXECUTABLE: &str = "AlunixaX";
+pub const SILENT_NAME: &str = "Alunixa X";
+pub const MANAGER_NAME: &str = "Alunixa X 管理工具";
+pub const SILENT_BINARY: &str = "alunixa-x-plus";
+pub const MACOS_SILENT_EXECUTABLE: &str = "AlunixaX";
+pub const MANAGER_BINARY: &str = "alunixa-x-plus-manager";
+pub const SILENT_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus";
+pub const MANAGER_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus.manager";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -80,18 +82,31 @@ impl ShortcutState {
 }
 
 pub fn shortcut_names() -> (&'static str, &'static str) {
-    ("Alunixa X Launch.lnk", "Alunixa X.lnk")
+    ("Alunixa X.lnk", "Alunixa X.lnk")
 }
 
 pub fn app_bundle_names() -> (&'static str, &'static str) {
-    ("Alunixa X Launch (AX).app", "Alunixa X (AX).app")
+    ("Alunixa X.app", "Alunixa X.app")
 }
 
 pub fn inspect_entrypoints() -> EntryPointState {
     let root = default_install_root();
+    let candidates = entrypoint_candidates(&root);
+    #[cfg(target_os = "macos")]
+    let shortcut = candidates
+        .iter()
+        .find(|path| macos::validate_native_bundle(path).is_ok())
+        .map(|path| ShortcutState {
+            installed: true,
+            path: Some(path.to_string_lossy().to_string()),
+        })
+        .unwrap_or_else(|| ShortcutState::missing(candidates.into_iter().next()));
+    #[cfg(not(target_os = "macos"))]
+    let shortcut = ShortcutState::from_candidates(candidates);
+    // 字段名保留给旧 API 消费方，两者现在表示同一个界面入口。
     EntryPointState {
-        silent_shortcut: ShortcutState::from_candidates(entrypoint_candidates(&root, false)),
-        management_shortcut: ShortcutState::from_candidates(entrypoint_candidates(&root, true)),
+        silent_shortcut: shortcut.clone(),
+        management_shortcut: shortcut,
     }
 }
 
@@ -152,14 +167,8 @@ pub fn default_install_root() -> Option<PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let sys_apps = PathBuf::from("/Applications");
-        if [
-            MACOS_SILENT_NAME,
-            MACOS_MANAGER_NAME,
-            SILENT_NAME,
-            MANAGER_NAME,
-        ]
-        .iter()
-        .any(|name| sys_apps.join(format!("{name}.app")).exists())
+        if sys_apps.join(format!("{APP_NAME}.app")).exists()
+            || sys_apps.join(format!("{MANAGER_NAME}.app")).exists()
         {
             return Some(sys_apps);
         }
@@ -243,26 +252,34 @@ fn action_result(result: anyhow::Result<()>, success_message: &str) -> InstallAc
     }
 }
 
-fn entrypoint_candidates(root: &Option<PathBuf>, manager: bool) -> Vec<PathBuf> {
+fn entrypoint_candidates(root: &Option<PathBuf>) -> Vec<PathBuf> {
     let Some(root) = root else {
         return Vec::new();
     };
-    let name = if manager { MANAGER_NAME } else { SILENT_NAME };
+    let name = APP_NAME;
     if cfg!(windows) {
         vec![root.join(format!("{name}.lnk"))]
     } else if cfg!(target_os = "macos") {
-        let searchable = if manager {
-            MACOS_MANAGER_NAME
-        } else {
-            MACOS_SILENT_NAME
-        };
-        vec![
-            root.join(format!("{searchable}.app")),
-            root.join(format!("{name}.app")),
-        ]
+        vec![root.join(format!("{name}.app"))]
     } else {
         vec![root.join(format!("{name}.desktop"))]
     }
+}
+
+pub(crate) fn application_source(options: &InstallOptions) -> PathBuf {
+    if let Some(source) = &options.launcher_path {
+        return source.clone();
+    }
+    if let Some(source) = &options.manager_path {
+        if matches!(
+            source.file_stem().and_then(|name| name.to_str()),
+            Some(MANAGER_BINARY | "AlunixaXManager")
+        ) {
+            return companion_binary_path_from_exe(source, APP_BINARY);
+        }
+        return source.clone();
+    }
+    option_or_current_exe(&None, APP_BINARY)
 }
 
 pub fn option_or_current_exe(value: &Option<PathBuf>, binary: &str) -> PathBuf {
@@ -291,29 +308,28 @@ where
     #[cfg(target_os = "macos")]
     {
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
-        if let Some(bundle_id) = macos_companion_bundle_identifier_from_exe(&exe, binary) {
+        if matches!(binary, APP_BINARY | MANAGER_BINARY)
+            && macos_applications_dir_and_app_name_from_exe(&exe).is_some()
+        {
             let fallback = companion_binary_path_from_exe(&exe, binary);
-            let sibling_app = fallback.ancestors().find(|path| {
-                path.extension().and_then(OsStr::to_str) == Some("app") && path.is_dir()
-            });
-            let mut command = Command::new("/usr/bin/open");
-            command.arg("-n");
-            // Prefer the resolved sibling; Launch Services may still know an older bundle ID.
-            if let Some(app) = sibling_app {
-                command.arg(app);
-            } else {
-                command.args(["-b", bundle_id]);
-            }
-            let launch_result = command.arg("--args").args(&args).status();
+            // 当前原生界面包可以被 Finder 改名；先按 marker 验证当前包，再尝试安装位置。
+            let app = macos::native_application_bundle_from_executable(&exe)
+                .or_else(|_| macos::native_application_bundle_from_executable(&fallback))?;
+            let executable = app.join("Contents/MacOS").join(MACOS_APP_EXECUTABLE);
+            let launch_result = Command::new("/usr/bin/open")
+                .arg(&app)
+                .arg("--args")
+                .args(&args)
+                .status();
             if launch_result.as_ref().is_ok_and(|status| status.success()) {
-                return Ok(format!("bundle:{bundle_id}"));
+                return Ok(format!("bundle:{}", app.display()));
             }
-            if !fallback.exists() {
-                let detail = launch_result
-                    .map(|status| status.to_string())
-                    .unwrap_or_else(|error| error.to_string());
-                anyhow::bail!("macOS Launch Services 无法启动 bundle {bundle_id}：{detail}");
-            }
+            let mut command = Command::new(&executable);
+            command.args(&args);
+            command
+                .spawn()
+                .map_err(|error| anyhow::anyhow!("无法启动 {}：{error}", executable.display()))?;
+            return Ok(executable.to_string_lossy().to_string());
         }
     }
 
@@ -331,122 +347,52 @@ where
     Ok(path.to_string_lossy().to_string())
 }
 
+pub fn open_or_activate_manager() -> anyhow::Result<String> {
+    // 空参数仅打开界面；启动 Codex 必须由界面中的按钮触发。
+    spawn_companion(MANAGER_BINARY, std::iter::empty::<&str>())
+}
+
 pub fn macos_companion_bundle_identifier_from_exe(
     exe: &Path,
     binary: &str,
 ) -> Option<&'static str> {
     let (_, app_name) = macos_applications_dir_and_app_name_from_exe(exe)?;
-    let known_bundle = [
-        MACOS_SILENT_NAME,
-        MACOS_MANAGER_NAME,
-        SILENT_NAME,
-        MANAGER_NAME,
-    ]
-    .iter()
-    .any(|name| app_name == format!("{name}.app"));
-    if !known_bundle {
-        return None;
-    }
-    match binary {
-        SILENT_BINARY => Some(SILENT_BUNDLE_ID),
-        MANAGER_BINARY => Some(MANAGER_BUNDLE_ID),
-        _ => None,
+    let known_bundle = [APP_NAME, MANAGER_NAME]
+        .iter()
+        .any(|name| app_name.eq_ignore_ascii_case(&format!("{name}.app")));
+    if known_bundle && matches!(binary, APP_BINARY | MANAGER_BINARY) {
+        Some(APP_BUNDLE_ID)
+    } else {
+        None
     }
 }
 
 pub fn companion_binary_path_from_exe(exe: &Path, binary: &str) -> PathBuf {
     let dir = exe.parent().unwrap_or_else(|| Path::new("."));
+    if matches!(binary, APP_BINARY | MANAGER_BINARY) {
+        #[cfg(target_os = "macos")]
+        if macos::native_application_bundle_from_executable(exe).is_ok() {
+            return exe.to_path_buf();
+        }
+        if let Some((applications_dir, app_name)) =
+            macos_applications_dir_and_app_name_from_exe(exe)
+        {
+            if app_name.eq_ignore_ascii_case(&format!("{APP_NAME}.app")) {
+                return exe.to_path_buf();
+            }
+            return applications_dir
+                .join(format!("{APP_NAME}.app"))
+                .join("Contents/MacOS")
+                .join(MACOS_APP_EXECUTABLE);
+        }
+        if exe.file_stem().and_then(|name| name.to_str()) == Some(APP_BINARY) {
+            return exe.to_path_buf();
+        }
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        return dir.join(format!("{APP_BINARY}{suffix}"));
+    }
     let suffix = if cfg!(windows) { ".exe" } else { "" };
-    if let Some(bundle_binary) = macos_companion_binary_from_exe(exe, binary) {
-        return bundle_binary;
-    }
-    let same_bundle = dir.join(binary);
-    if same_bundle.exists() {
-        return same_bundle;
-    }
     dir.join(format!("{binary}{suffix}"))
-}
-
-fn macos_companion_binary_from_exe(exe: &Path, binary: &str) -> Option<PathBuf> {
-    let (applications_dir, app_name) = macos_applications_dir_and_app_name_from_exe(exe)?;
-    if binary == SILENT_BINARY {
-        if app_name == format!("{SILENT_NAME}.app")
-            || app_name == format!("{MACOS_SILENT_NAME}.app")
-        {
-            return Some(macos_preferred_bundle_binary(
-                exe,
-                SILENT_BINARY,
-                "AlunixaXLauncher",
-            ));
-        }
-        let macos =
-            macos_companion_app_path(&applications_dir, &app_name, MACOS_SILENT_NAME, SILENT_NAME)
-                .join("Contents")
-                .join("MacOS");
-        return Some(
-            macos
-                .join(SILENT_BINARY)
-                .exists()
-                .then(|| macos.join(SILENT_BINARY))
-                .unwrap_or_else(|| macos.join("AlunixaXLauncher")),
-        );
-    }
-    if binary == MANAGER_BINARY {
-        if app_name == format!("{MANAGER_NAME}.app")
-            || app_name == format!("{MACOS_MANAGER_NAME}.app")
-        {
-            return Some(macos_preferred_bundle_binary(
-                exe,
-                MANAGER_BINARY,
-                "AlunixaX",
-            ));
-        }
-        let macos = macos_companion_app_path(
-            &applications_dir,
-            &app_name,
-            MACOS_MANAGER_NAME,
-            MANAGER_NAME,
-        )
-        .join("Contents")
-        .join("MacOS");
-        return Some(
-            macos
-                .join(MANAGER_BINARY)
-                .exists()
-                .then(|| macos.join(MANAGER_BINARY))
-                .unwrap_or_else(|| macos.join("AlunixaX")),
-        );
-    }
-    None
-}
-
-fn macos_companion_app_path(dir: &Path, source_name: &str, current: &str, legacy: &str) -> PathBuf {
-    let current_path = dir.join(format!("{current}.app"));
-    let legacy_path = dir.join(format!("{legacy}.app"));
-    if current_path.exists() {
-        current_path
-    } else if legacy_path.exists() || !source_name.contains("(AX)") {
-        legacy_path
-    } else {
-        current_path
-    }
-}
-
-fn macos_preferred_bundle_binary(
-    exe: &Path,
-    sidecar_name: &str,
-    bundle_executable_name: &str,
-) -> PathBuf {
-    let macos = exe.parent().unwrap_or_else(|| Path::new("."));
-    let sidecar = macos.join(sidecar_name);
-    if sidecar.exists() {
-        return sidecar;
-    }
-    let bundle_executable = macos.join(bundle_executable_name);
-    if bundle_executable.exists() {
-        return bundle_executable;
-    }
-    exe.to_path_buf()
 }
 
 #[cfg(target_os = "macos")]

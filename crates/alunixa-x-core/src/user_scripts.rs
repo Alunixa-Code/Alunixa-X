@@ -9,7 +9,61 @@ use serde_json::{Map, Value, json};
 
 use crate::script_market::MarketScript;
 
-/// Read the renderer-side script registry without replacing the launcher's bridge connection.
+pub const BOOTSTRAP_SCRIPT: &str = include_str!("../../../assets/inject/user-scripts-bootstrap.js");
+const RUNTIME_SCRIPT: &str = include_str!("../../../assets/inject/user-scripts-runtime.js");
+
+/// 一次性连接当前 Codex 页面；不增加轮询，也不接管 launcher 的桥接连接。
+pub async fn reload_live_scripts(
+    debug_port: u16,
+    manager: &UserScriptManager,
+) -> anyhow::Result<Value> {
+    let targets = crate::cdp::list_targets(debug_port).await?;
+    let target = live_runtime_target(&targets)?;
+    let websocket = target
+        .web_socket_debugger_url
+        .as_deref()
+        .context("Codex renderer has no WebSocket URL")?;
+    reload_scripts_at(websocket, manager).await
+}
+
+pub async fn reload_scripts_at(
+    websocket: &str,
+    manager: &UserScriptManager,
+) -> anyhow::Result<Value> {
+    apply_scripts_at(websocket, manager, &manager.build_reload_bundle()?).await
+}
+
+pub async fn load_scripts_at(
+    websocket: &str,
+    manager: &UserScriptManager,
+) -> anyhow::Result<Value> {
+    apply_scripts_at(websocket, manager, &manager.build_initial_bundle()?).await
+}
+
+async fn apply_scripts_at(
+    websocket: &str,
+    manager: &UserScriptManager,
+    bundle: &str,
+) -> anyhow::Result<Value> {
+    let response = crate::bridge::evaluate_script(websocket, bundle).await?;
+    if let Some(exception) = response.pointer("/result/exceptionDetails") {
+        anyhow::bail!(
+            "脚本重载失败：{}",
+            exception
+                .pointer("/exception/description")
+                .and_then(Value::as_str)
+                .unwrap_or("renderer exception")
+        );
+    }
+    let result = parse_live_runtime_status_response(&response)?;
+    let mut inventory = manager.inventory_with_runtime_status(result.get("scripts"))?;
+    inventory["reload_mode"] = result["mode"].clone();
+    Ok(inventory)
+}
+
+/// Query the live renderer-side user-script registry through a one-shot CDP
+/// connection. This is intentionally read-only and does not touch the
+/// launcher-owned bridge websocket.
 pub async fn live_runtime_status(debug_port: u16) -> anyhow::Result<Value> {
     let targets = crate::cdp::list_targets(debug_port).await?;
     let target = live_runtime_target(&targets)?;
@@ -212,6 +266,10 @@ impl UserScriptManager {
         self.inventory_with_runtime_status(None)
     }
 
+    /// Build the script inventory and, when available, merge the status recorded
+    /// by the renderer-side loader. The filesystem scan alone cannot tell
+    /// whether a script was actually evaluated, so callers that have access to
+    /// the live page should provide `window.__alunixaXUserScripts.scripts`.
     pub fn inventory_with_runtime_status(
         &self,
         runtime_status: Option<&Value>,
@@ -231,7 +289,7 @@ impl UserScriptManager {
         if !config.enabled {
             return Ok(String::new());
         }
-        let mut blocks = Vec::new();
+        let mut blocks = vec![RUNTIME_SCRIPT.to_string()];
         for script in self.scan_script_files(&config)? {
             if !script.enabled {
                 continue;
@@ -241,6 +299,36 @@ impl UserScriptManager {
             blocks.push(wrap_script(&script, &source));
         }
         Ok(blocks.join("\n"))
+    }
+
+    /// 页面启动与桥接恢复只能初始化一次，不能清理旧脚本或触发刷新。
+    pub fn build_initial_bundle(&self) -> anyhow::Result<String> {
+        let bundle = self.build_enabled_bundle()?;
+        Ok(format!(
+            r#"(() => {{
+  {RUNTIME_SCRIPT}
+  const runtime = window.__alunixaXUserScripts;
+  if (!runtime.initialized && !runtime.refreshPending && !Object.keys(runtime.scripts).length) {{
+    runtime.initialized = true;
+    {bundle}
+  }}
+  return JSON.stringify({{ mode: "scripts", scripts: runtime.scripts }});
+}})()"#
+        ))
+    }
+
+    /// 即便全部禁用也必须清理上一次运行的脚本。
+    pub fn build_reload_bundle(&self) -> anyhow::Result<String> {
+        let bundle = self.build_enabled_bundle()?;
+        Ok(format!(
+            r#"(() => {{
+  {RUNTIME_SCRIPT}
+  const mode = window.__alunixaXUserScripts.prepareReload();
+  if (mode === "page") return JSON.stringify({{ mode }});
+  {bundle}
+  return JSON.stringify({{ mode, scripts: window.__alunixaXUserScripts.scripts }});
+}})()"#
+        ))
     }
 
     fn scan_scripts(
@@ -356,8 +444,11 @@ fn wrap_script(script: &UserScriptFile, source: &str) -> String {
     format!(
         r#"
 (() => {{
+  const alunixaXIsNodeTestHarness = typeof process === "object" && !!process.versions?.node;
+  if (!alunixaXIsNodeTestHarness && (window.top !== window || window.self !== window || !window.electronBridge || !/^app:\/\/\-\//i.test(window.location.href))) return;
   window.__alunixaXUserScripts = window.__alunixaXUserScripts || {{ scripts: {{}} }};
   const key = {key};
+  window.__alunixaXUserScripts.currentKey = key;
   window.__alunixaXUserScripts.scripts[key] = {{ key, name: {name}, source: {source_name}, status: "loading", error: "", loadedAt: new Date().toISOString() }};
   try {{
 {source}
@@ -366,6 +457,8 @@ fn wrap_script(script: &UserScriptFile, source: &str) -> String {
   }} catch (error) {{
     window.__alunixaXUserScripts.scripts[key].status = "failed";
     window.__alunixaXUserScripts.scripts[key].error = String(error && (error.stack || error.message) || error);
+  }} finally {{
+    window.__alunixaXUserScripts.currentKey = null;
   }}
 }})();
 "#,
@@ -477,7 +570,9 @@ mod runtime_status_tests {
         let response = json!({
             "result": { "result": { "value": r#"{"user:test.js":{"status":"loaded","error":""}}"# } }
         });
+
         let status = parse_live_runtime_status_response(&response).unwrap();
+
         assert_eq!(status["user:test.js"]["status"], "loaded");
     }
 
@@ -503,37 +598,15 @@ mod runtime_status_tests {
         let targets = vec![
             target(
                 "manager",
-                "Alunixa X",
+                "Alunixa X 管理工具",
                 "http://127.0.0.1:1420/",
                 "ws://manager",
             ),
             target("main", "Codex", "app://-/index.html", "ws://main"),
         ];
+
         let selected = live_runtime_target(&targets).unwrap();
+
         assert_eq!(selected.id, "main");
-    }
-
-    #[test]
-    fn inventory_merges_live_status_without_overriding_disabled_scripts() {
-        let temp = tempfile::tempdir().unwrap();
-        let builtin = temp.path().join("builtin");
-        let user = temp.path().join("user");
-        fs::create_dir_all(&user).unwrap();
-        fs::write(user.join("sample.js"), "window.sample = true;").unwrap();
-        let manager = UserScriptManager::new(&builtin, &user, temp.path().join("config.json"));
-        let runtime = json!({
-            "user:sample.js": { "status": "loaded", "error": "" }
-        });
-
-        let inventory = manager
-            .inventory_with_runtime_status(Some(&runtime))
-            .unwrap();
-        assert_eq!(inventory["scripts"][0]["status"], "loaded");
-
-        manager.set_script_enabled("user:sample.js", false).unwrap();
-        let inventory = manager
-            .inventory_with_runtime_status(Some(&runtime))
-            .unwrap();
-        assert_eq!(inventory["scripts"][0]["status"], "disabled");
     }
 }

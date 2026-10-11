@@ -2,6 +2,11 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 const APP_STATE_DIR: &str = ".codex-session-delete";
+const PENDING_SESSION_SHARE_FILE: &str = "pending-session-share.txt";
+const SKILLS_STATE_FILE: &str = "skills.json";
+const SKILLS_DIR: &str = "skills";
+const SKILL_BACKUPS_DIR: &str = "skill-backups";
+const PENDING_MANAGER_NAVIGATION_FILE: &str = "pending-manager-navigation.json";
 const SETTINGS_FILE: &str = "settings.json";
 const LATEST_STATUS_FILE: &str = "latest-status.json";
 const DIAGNOSTIC_LOG_FILE: &str = "alunixa-x.log";
@@ -107,4 +112,24 @@ mod tests {
 
         assert!(path.ends_with(".codex-session-delete/pending-remote-control-recovery.json"));
     }
+}
+
+pub fn default_pending_session_share_path() -> PathBuf {
+    default_app_state_dir().join(PENDING_SESSION_SHARE_FILE)
+}
+
+pub fn default_skills_source_dir() -> PathBuf {
+    default_app_state_dir().join(SKILLS_DIR)
+}
+
+pub fn default_skills_state_path() -> PathBuf {
+    default_app_state_dir().join(SKILLS_STATE_FILE)
+}
+
+pub fn default_skill_backups_dir() -> PathBuf {
+    default_app_state_dir().join(SKILL_BACKUPS_DIR)
+}
+
+pub fn default_pending_manager_navigation_path() -> PathBuf {
+    default_app_state_dir().join(PENDING_MANAGER_NAVIGATION_FILE)
 }

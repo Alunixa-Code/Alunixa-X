@@ -1,5 +1,6 @@
-use std::collections::HashMap;
-use std::fs;
+use std::collections::{BTreeMap, HashMap};
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,6 +11,7 @@ use serde_json::{Map, Value, json};
 use toml_edit::{DocumentMut, Item};
 
 use crate::zed_remote::ZedOpenStrategy;
+use crate::tools::{ToolConfig, ToolId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -215,7 +217,68 @@ pub struct RelayProfile {
         skip_serializing_if = "String::is_empty"
     )]
     pub model_protocols: String,
-}
+    #[serde(rename = "noAuth", default)]
+    pub no_auth: bool,
+    #[serde(rename = "hideOfficialUsageAlert", default)]
+    pub hide_official_usage_alert: bool,
+    /// 每模型自动压缩百分比（JSON map: slug -> 百分比字符串，如 "90" 或 "90%"）。
+    /// 为空时保持 Codex 原有的默认自动压缩行为，不向 catalog 写入覆盖值。
+    #[serde(
+        rename = "modelAutoCompact",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub model_auto_compact: String,
+    /// 每模型元数据覆盖（JSON map: slug -> 字段覆盖）。
+    #[serde(
+        rename = "modelMetadata",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub model_metadata: String,
+    #[serde(rename = "sub2apiEnabled", default)]
+    pub sub2api_enabled: bool,
+    #[serde(
+        rename = "sub2apiMultiplier",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub sub2api_multiplier: String,
+    /// 自定义上游请求头（有序列表，保住用户写的顺序）。
+    /// 传输头（Host / Content-Length 等）与跳头由协议层掌控，写入前会被校验拦下。
+    #[serde(
+        rename = "customHeaders",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub custom_headers: Vec<RelayHeaderKeyValue>,
+    // 上游审查要求：导出 round-trip 不改变既有 provider；为 false 时不写出该字段。
+    #[serde(
+        rename = "standardOpenaiProtocol",
+        default,
+        skip_serializing_if = "is_false"
+    )]
+    pub standard_openai_protocol: bool,
+    #[serde(
+        rename = "webSearchHistoryCompat",
+        default,
+        skip_serializing_if = "is_false"
+    )]
+    pub web_search_history_compat: bool,
+    #[serde(rename = "rateLimitCooldownEnabled", default)]
+    pub rate_limit_cooldown_enabled: bool,
+    #[serde(rename = "channelQueueEnabled", default)]
+    pub channel_queue_enabled: bool,
+    #[serde(
+        rename = "channelRequestsPerMinute",
+        default = "default_channel_requests_per_minute"
+    )]
+    pub channel_requests_per_minute: u32,
+    #[serde(
+        rename = "cooldownErrorStatuses",
+        default = "default_cooldown_error_statuses"
+    )]
+    pub cooldown_error_statuses: Vec<u16>,}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -253,6 +316,10 @@ pub struct AggregateRelayMember {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AggregateRelayProfile {
+    #[serde(default)]
+    pub session_provider: RelaySessionProvider,
+    #[serde(default)]
+    pub routes: Vec<AggregateRelayRoute>,
     pub id: String,
     pub name: String,
     #[serde(default)]
@@ -297,6 +364,19 @@ impl Default for RelayProfile {
             default_custom_model_id: String::new(),
             model_routes: Vec::new(),
             model_protocols: String::new(),
+            no_auth: false,
+            hide_official_usage_alert: false,
+            model_auto_compact: String::new(),
+            model_metadata: String::new(),
+            sub2api_enabled: false,
+            sub2api_multiplier: String::new(),
+            custom_headers: Vec::new(),
+            standard_openai_protocol: false,
+            web_search_history_compat: false,
+            rate_limit_cooldown_enabled: false,
+            channel_queue_enabled: false,
+            channel_requests_per_minute: default_channel_requests_per_minute(),
+            cooldown_error_statuses: default_cooldown_error_statuses(),
         }
     }
 }
@@ -459,7 +539,7 @@ impl Default for DreamSkinThemeConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BackendSettings {
     #[serde(rename = "imageModels", default)]
     pub image_models: Vec<crate::image_models::ImageModel>,
@@ -692,7 +772,62 @@ pub struct BackendSettings {
     pub active_aggregate_relay_id: String,
     #[serde(rename = "relayTestModel", default = "default_relay_test_model")]
     pub relay_test_model: String,
-}
+    #[serde(default)]
+    pub dictation: DictationSettings,
+    #[serde(rename = "ccsDbPath", default)]
+    pub ccs_db_path: String,
+    #[serde(rename = "codexAppSessionShare", default = "default_true")]
+    pub codex_app_session_share: bool,
+    #[serde(
+        rename = "codexAppTypingEffect",
+        default = "default_typing_effect",
+        deserialize_with = "deserialize_typing_effect"
+    )]
+    pub codex_app_typing_effect: String,
+    #[serde(rename = "codexAppNativeBrowserRequireIdentification", default)]
+    pub codex_app_native_browser_require_identification: bool,
+    #[serde(rename = "codexAppWhaleWidgetEnabled", default)]
+    pub codex_app_whale_widget_enabled: bool,
+    #[serde(
+        rename = "codexAppWhaleBalanceProtocol",
+        default = "default_whale_balance_protocol"
+    )]
+    pub codex_app_whale_balance_protocol: String,
+    #[serde(rename = "codexAppWhaleBalancePath", default)]
+    pub codex_app_whale_balance_path: String,
+    #[serde(rename = "codexAppWhaleBalanceField", default)]
+    pub codex_app_whale_balance_field: String,
+    #[serde(
+        rename = "codexAppWhaleBalanceCurrency",
+        default = "default_whale_balance_currency"
+    )]
+    pub codex_app_whale_balance_currency: String,
+    #[serde(
+        rename = "codexAppWhaleBalanceScale",
+        default = "default_whale_balance_scale"
+    )]
+    pub codex_app_whale_balance_scale: f64,
+    #[serde(
+        rename = "codexAppStepwiseGenerationMode",
+        default = "default_stepwise_generation_mode",
+        deserialize_with = "deserialize_stepwise_generation_mode"
+    )]
+    pub codex_app_stepwise_generation_mode: String,
+    #[serde(rename = "codexAppAnswerOutlineEnabled", default)]
+    pub codex_app_answer_outline_enabled: bool,
+    #[serde(
+        rename = "codexAppStepwiseProtocol",
+        default = "default_stepwise_protocol",
+        deserialize_with = "deserialize_stepwise_protocol"
+    )]
+    pub codex_app_stepwise_protocol: String,
+    /// 按工具分区的配置。`tools.codex` 是上面那批扁平字段的镜像（写盘时同步），
+    /// 其它工具（Grok / 后续工具）只存在这里。见 `crate::tools`。
+    #[serde(rename = "tools", default)]
+    pub tools: BTreeMap<ToolId, ToolConfig>,
+    /// UI 顶栏当前聚焦的工具。只影响管理器的展示，不影响 Codex 的启动配置。
+    #[serde(rename = "activeTool", default)]
+    pub active_tool: ToolId,}
 
 impl Default for BackendSettings {
     fn default() -> Self {
@@ -788,6 +923,22 @@ impl Default for BackendSettings {
             aggregate_relay_profiles: Vec::new(),
             active_aggregate_relay_id: String::new(),
             relay_test_model: default_relay_test_model(),
+            dictation: DictationSettings::default(),
+            ccs_db_path: String::new(),
+            codex_app_session_share: true,
+            codex_app_typing_effect: default_typing_effect(),
+            codex_app_native_browser_require_identification: false,
+            codex_app_whale_widget_enabled: false,
+            codex_app_whale_balance_protocol: default_whale_balance_protocol(),
+            codex_app_whale_balance_path: String::new(),
+            codex_app_whale_balance_field: String::new(),
+            codex_app_whale_balance_currency: default_whale_balance_currency(),
+            codex_app_whale_balance_scale: default_whale_balance_scale(),
+            codex_app_stepwise_generation_mode: default_stepwise_generation_mode(),
+            codex_app_answer_outline_enabled: false,
+            codex_app_stepwise_protocol: default_stepwise_protocol(),
+            tools: BTreeMap::new(),
+            active_tool: ToolId::Codex,
         }
     }
 }
@@ -841,6 +992,7 @@ impl BackendSettings {
                 default_custom_model_id: String::new(),
                 model_routes: Vec::new(),
                 model_protocols: String::new(),
+                ..RelayProfile::default()
             };
         }
 
@@ -898,6 +1050,7 @@ impl BackendSettings {
             default_custom_model_id: String::new(),
             model_routes: Vec::new(),
             model_protocols: String::new(),
+            ..RelayProfile::default()
         }
     }
 
@@ -2204,6 +2357,13 @@ fn normalize_settings_config_sections(
     mut settings: BackendSettings,
 ) -> anyhow::Result<BackendSettings> {
     crate::image_models::normalize_models(&mut settings.image_models)?;
+    settings.dictation.normalize();
+    settings.codex_app_typing_effect = normalize_typing_effect(&settings.codex_app_typing_effect);
+    for profile in &mut settings.relay_profiles {
+        profile.channel_requests_per_minute = normalize_channel_requests_per_minute(profile.channel_requests_per_minute);
+        profile.cooldown_error_statuses = normalize_channel_cooldown_statuses(&profile.cooldown_error_statuses);
+    }
+    settings.sync_tool_shards();
     settings.relay_common_config_contents =
         crate::retired_context::strip_config(&settings.relay_common_config_contents)?;
     settings.relay_context_config_contents =
@@ -3774,3 +3934,334 @@ where
 pub fn atomic_replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
     replace_file(source, target)
 }
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DictationSettings {
+    pub enabled: bool,
+    pub provider: DictationProvider,
+    pub base_url: String,
+    pub api_key: String,
+    pub api_key_env: String,
+    pub model: String,
+    pub language: String,
+    pub timeout_seconds: u64,
+}
+
+pub fn default_typing_effect() -> String {
+    "off".to_string()
+}
+
+pub fn normalize_typing_effect(value: &str) -> String {
+    match value {
+        "off" | "rainbow" | "fireworks" | "stars" => value.to_string(),
+        _ => default_typing_effect(),
+    }
+}
+
+pub fn default_stepwise_protocol() -> String {
+    "chat_completions".to_string()
+}
+
+pub fn normalize_stepwise_protocol(value: &str) -> String {
+    match value.trim() {
+        "chat_completions" | "responses" | "anthropic_messages" | "auto" => {
+            value.trim().to_string()
+        }
+        _ => default_stepwise_protocol(),
+    }
+}
+
+pub fn default_stepwise_generation_mode() -> String {
+    "auto".to_string()
+}
+
+pub fn normalize_stepwise_generation_mode(value: &str) -> String {
+    match value.trim() {
+        "manual" => "manual".to_string(),
+        _ => default_stepwise_generation_mode(),
+    }
+}
+
+fn default_whale_balance_protocol() -> String {
+    "auto".to_string()
+}
+
+fn default_whale_balance_currency() -> String {
+    "USD".to_string()
+}
+
+fn default_whale_balance_scale() -> f64 {
+    1.0
+}
+
+pub fn default_channel_requests_per_minute() -> u32 {
+    20
+}
+
+pub fn default_cooldown_error_statuses() -> Vec<u16> {
+    vec![429, 500]
+}
+
+pub fn normalize_channel_requests_per_minute(value: u32) -> u32 {
+    value.clamp(1, 10_000)
+}
+
+pub fn normalize_channel_cooldown_statuses(value: &[u16]) -> Vec<u16> {
+    let mut statuses = value
+        .iter()
+        .copied()
+        .filter(|status| (100..=599).contains(status))
+        .collect::<Vec<_>>();
+    statuses.sort_unstable();
+    statuses.dedup();
+    statuses.truncate(20);
+    statuses
+}
+
+pub fn is_default_single_profile(profiles: &[RelayProfile]) -> bool {
+    profiles.len() == 1 && profiles[0] == RelayProfile::default()
+}
+
+fn deserialize_typing_effect<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .map(normalize_typing_effect)
+        .unwrap_or_else(default_typing_effect))
+}
+
+fn deserialize_stepwise_protocol<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .map(|value| normalize_stepwise_protocol(&value))
+        .unwrap_or_else(default_stepwise_protocol))
+}
+
+fn deserialize_stepwise_generation_mode<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .map(|value| normalize_stepwise_generation_mode(&value))
+        .unwrap_or_else(default_stepwise_generation_mode))
+}
+
+fn serialize_settings_bounded(value: &impl serde::Serialize) -> anyhow::Result<Vec<u8>> {
+    struct BoundedWriter(Vec<u8>);
+    impl Write for BoundedWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() > MAX_SETTINGS_FILE_BYTES.saturating_sub(self.0.len()) {
+                return Err(std::io::Error::other(
+                    "settings 超过 16 MiB 上限，原文件未修改",
+                ));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = BoundedWriter(Vec::new());
+    serde_json::to_writer_pretty(&mut writer, value)?;
+    Ok(writer.0)
+}
+
+fn validate_settings_snapshot(bytes: &[u8]) -> anyhow::Result<()> {
+    if bytes.len() > MAX_SETTINGS_FILE_BYTES {
+        anyhow::bail!("settings 快照超过 16 MiB 上限，原文件未修改");
+    }
+    if !serde_json::from_slice::<Value>(bytes)
+        .context("settings 快照不是有效 JSON，原文件未修改")?
+        .is_object()
+    {
+        anyhow::bail!("settings 快照顶层不是 JSON 对象，原文件未修改");
+    }
+    Ok(())
+}
+
+pub fn atomic_write_with(
+    path: &Path,
+    write_contents: impl FnOnce(&mut File) -> std::io::Result<()>,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+
+    // 保留原文件权限：临时文件默认权限不一定和它一致。
+    let existing_permissions = match fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read permissions for {}", path.display()));
+        }
+    };
+    let temp_path = temp_path_for(path);
+    let write_result = (|| -> std::io::Result<()> {
+        let mut temp_file = File::create(&temp_path)?;
+        write_contents(&mut temp_file)?;
+        temp_file.flush()?;
+        if let Some(permissions) = existing_permissions {
+            temp_file.set_permissions(permissions)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error)
+            .with_context(|| format!("failed to write temp file {}", temp_path.display()));
+    }
+    if let Err(error) = replace_file(&temp_path, path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error).with_context(|| {
+            format!(
+                "failed to replace {} with {}",
+                path.display(),
+                temp_path.display()
+            )
+        });
+    }
+    Ok(())
+}
+
+fn temp_path_for(path: &Path) -> PathBuf {
+    let mut temp_path = path.to_path_buf();
+    let extension = path.extension().and_then(|value| value.to_str());
+    temp_path.set_extension(match extension {
+        Some(extension) => format!("{extension}.tmp"),
+        None => "tmp".to_string(),
+    });
+    temp_path
+}
+
+impl Default for DictationSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: DictationProvider::Api,
+            base_url: "https://api.groq.com/openai/v1".to_string(),
+            api_key: String::new(),
+            api_key_env: String::new(),
+            model: "whisper-large-v3-turbo".to_string(),
+            language: String::new(),
+            timeout_seconds: 120,
+        }
+    }
+}
+
+impl DictationSettings {
+    pub fn normalize(&mut self) {
+        self.base_url = self.base_url.trim().trim_end_matches('/').to_string();
+        self.api_key = self.api_key.trim().to_string();
+        self.api_key_env = self.api_key_env.trim().to_string();
+        self.model = self.model.trim().to_string();
+        self.language = self.language.trim().to_string();
+        self.timeout_seconds = self.timeout_seconds.clamp(1, 600);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum DictationProvider {
+    /// OpenAI 兼容的远程转写服务。
+    #[default]
+    Api,
+    /// 本机 SenseVoiceSmall ONNX 模型。
+    #[serde(rename = "sensevoice")]
+    SenseVoice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayHeaderKeyValue {
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub value: String,
+}
+
+impl RelayProfile {
+    pub fn uses_no_auth(&self) -> bool {
+        self.relay_mode == RelayMode::PureApi && self.no_auth
+    }
+}
+
+impl RelayProfile {
+    pub fn web_search_history_compat_enabled(&self) -> bool {
+        self.web_search_history_compat
+            && self.protocol == RelayProtocol::Responses
+            && self.relay_mode != RelayMode::Aggregate
+            && (self.relay_mode != RelayMode::Official || self.official_mix_api_key)
+    }
+}
+
+pub const MAX_SETTINGS_FILE_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RelaySessionProvider {
+    #[default]
+    Custom,
+    Openai,
+}
+
+impl RelaySessionProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Custom => "custom",
+            Self::Openai => "openai",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AggregateRelayRoute {
+    /// 模型匹配模式，如 "deepseek-*" / "gpt-*" / "*"；仅支持 * 通配符
+    pub pattern: String,
+    /// 目标聚合成员 relayId（必须是本聚合 members 之一）
+    #[serde(rename = "relayId")]
+    pub relay_id: String,
+    /// 数字越大越优先，缺省 0；同 priority 按数组顺序（稳定优先）
+    #[serde(default)]
+    pub priority: u32,
+}
+
+impl BackendSettings {
+    pub fn active_relay_session_provider(&self) -> RelaySessionProvider {
+        if let Some(profile) = self.active_aggregate_relay_profile() {
+            return profile.session_provider;
+        }
+        if self
+            .active_relay_profile()
+            .config_contents
+            .parse::<DocumentMut>()
+            .ok()
+            .is_some_and(|doc| {
+                doc.get("model_provider")
+                    .and_then(Item::as_str)
+                    .map(str::trim)
+                    .is_some_and(|provider| provider == "openai")
+            })
+        {
+            RelaySessionProvider::Openai
+        } else {
+            RelaySessionProvider::Custom
+        }
+    }
+}
+
+pub const MAX_RELAY_CUSTOM_HEADERS: usize = 32;

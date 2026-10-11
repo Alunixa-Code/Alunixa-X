@@ -180,7 +180,7 @@ pub async fn generate(
     headers.insert(
         AUTHORIZATION,
         HeaderValue::from_str(&format!("Bearer {api_key}"))
-            .context("failed to build Stepwise authorization header")?,
+            .context("构建下一步建议认证请求头失败")?,
     );
 
     let response = client
@@ -219,9 +219,9 @@ pub async fn generate(
 pub async fn test_connection(settings: &BackendSettings) -> anyhow::Result<Value> {
     generate(
         StepwiseRequest {
-            last_user_message: "测试 Stepwise 配置。".to_string(),
-            last_assistant_message: "Stepwise 应返回 0 到 6 条可直接发送的后续建议。".to_string(),
-            thread_title: "Alunixa X Stepwise test".to_string(),
+            last_user_message: "测试下一步建议配置。".to_string(),
+            last_assistant_message: "下一步建议应返回 0 到 6 条可直接发送的后续建议。".to_string(),
+            thread_title: "Alunixa X 下一步建议测试".to_string(),
             page_url: String::new(),
         },
         settings,
@@ -242,7 +242,7 @@ pub fn build_messages(request: &StepwiseRequest, settings: &BackendSettings) -> 
         last_user_message.clone()
     };
     let system_content = [
-        "You generate concise Codex Stepwise actions.",
+        "You generate concise Codex next-step suggestions.",
         "Return strict JSON only, no markdown.",
         "Schema: {\"items\":[{\"prompt\":\"...\",\"label\":\"optional short label\"}]}",
         &format!(

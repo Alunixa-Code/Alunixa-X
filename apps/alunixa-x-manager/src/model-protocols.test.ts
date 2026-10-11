@@ -13,14 +13,14 @@ test("per-model protocols preserve inheritance and explicit Responses under a Ch
   assert.equal(modelProtocolForName(saved.modelProtocols, "a", "chatCompletions"), "responses");
   assert.equal(modelProtocolForName(saved.modelProtocols, "b", "responses"), "anthropicMessages");
   assert.equal(modelProtocolForName(saved.modelProtocols, "c", "chatCompletions"), "chatCompletions");
-  assert.deepEqual(modelWindowRowsFromProfile(saved.modelList, saved.modelWindows, saved.modelVlm, saved.modelProtocols), legacy);
+  assert.deepEqual(modelWindowRowsFromProfile(saved.modelList, saved.modelWindows, saved.modelVlm, saved.modelAutoCompact, saved.modelProtocols), legacy);
 });
 
 test("model rename, reorder, suffix and fetched model merge retain each protocol", () => {
-  const rows = modelWindowRowsFromProfile("Claude[1M]\ngpt", "{}", "{}", '{"claude":"chatCompletions","gpt":"responses"}');
+  const rows = modelWindowRowsFromProfile("Claude[1M]\ngpt", "{}", "{}", undefined, '{"claude":"chatCompletions","gpt":"responses"}');
   assert.equal(rows[0].protocol, "chatCompletions");
   rows[0].model = "renamed";
-  const merged = mergeModelWindowRows(rows.reverse(), [{model:"gpt",window:"",imageHandling:"",protocol:"anthropicMessages"}]);
+  const merged = mergeModelWindowRows(rows.reverse(), [{model:"gpt",window:"",autoCompact:"",imageHandling:"",protocol:"anthropicMessages"}]);
   const saved = parseModelProtocols(serializeModelWindowRows(merged).modelProtocols);
   assert.equal(saved.renamed, "chatCompletions");
   assert.equal(saved.gpt, "responses");

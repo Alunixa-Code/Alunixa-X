@@ -7,7 +7,7 @@ use crate::relay_config::{
 };
 use crate::settings::{BackendSettings, RelayMode, SettingsStore};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RelaySwitchResult {
     pub settings: BackendSettings,
     pub configured: bool,
@@ -62,17 +62,35 @@ fn backfill_profile_before_switch(
     settings: &mut BackendSettings,
     previous_active_relay_id: &str,
 ) -> anyhow::Result<()> {
+    // 确认属于另一个已保存供应商的 live 配置，不回填到旧 profile（共享 Key 也适用）。
+    if crate::relay_config::live_config_matches_other_profile_in_home(
+        home,
+        settings,
+        previous_active_relay_id,
+    )? {
+        return Ok(());
+    }
+    // 找不到上一个供应商是用户能自助处理的一类原因（它已被删除或 id 变了），
+    // 单独给一条能直接照做的话；下面回填失败则属于另一类，见那里的写法。
     let profile = settings
         .relay_profiles
         .iter_mut()
         .find(|profile| profile.id == previous_active_relay_id)
-        .with_context(|| "当前供应商已不在配置列表中，已停止切换以避免覆盖用户改动。")?;
+        .with_context(|| {
+            format!(
+                "当前供应商（{previous_active_relay_id}）已不在配置列表中，已停止切换以避免覆盖用户改动。"
+            )
+        })?;
+    // issue #1888：管理器把本函数返回的错误拼成「回填当前供应商配置失败：{error}」，
+    // 而 `{error}` 只打印最外层 context，底层原因（读 home 失败等）会被丢掉，
+    // 用户看到的就是一句没有信息量的报错。这里把 context 链完整拼进消息里。
     backfill_relay_profile_from_home_with_common(
         home,
         profile,
         &mut settings.relay_context_config_contents,
     )
-    .with_context(|| "回填当前供应商配置失败")
+    .with_context(|| format!("回填当前供应商配置失败（供应商：{previous_active_relay_id}）"))
+    .map_err(|error| anyhow::anyhow!("{error:#}"))
 }
 
 fn apply_selected_relay_profile(
@@ -82,9 +100,7 @@ fn apply_selected_relay_profile(
     let relay = settings.active_relay_profile();
     let common_config = relay_combined_common_config(settings);
     let result = if relay.relay_mode == RelayMode::Official && !relay.official_mix_api_key {
-        let auth_contents =
-            (!relay.auth_contents.trim().is_empty()).then_some(relay.auth_contents.as_str());
-        crate::relay_config::clear_relay_config_to_home_with_auth(home, auth_contents)?
+        crate::relay_config::apply_official_profile_to_home(home, &relay, &common_config)?
     } else {
         validate_switch_profile_files(&relay)?;
         crate::relay_config::apply_relay_profile_to_home_with_switch_rules(

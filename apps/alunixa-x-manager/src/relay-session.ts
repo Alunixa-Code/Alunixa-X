@@ -1,4 +1,4 @@
-export type CodexRelayProtocol = "responses" | "chatCompletions";
+export type CodexRelayProtocol = "responses" | "chatCompletions" | "completions" | "anthropicMessages" | "geminiGenerateContent";
 export type CodexRelaySessionProvider = "custom" | "openai";
 
 /** Chat Completions cannot keep an OpenAI session, so return to Custom. */

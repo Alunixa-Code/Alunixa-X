@@ -19,10 +19,6 @@ fn manager_release_binary_uses_embedded_frontend_assets() {
         cargo_toml.contains("custom-protocol"),
         "release manager binary should use Tauri custom protocol instead of devUrl localhost"
     );
-    assert!(
-        cargo_toml.contains("protocol-asset"),
-        "DreamSkin local assets require Tauri's asset protocol feature"
-    );
 }
 
 #[test]
@@ -33,7 +29,14 @@ fn manager_uses_single_instance_guard_before_starting_tauri() {
     assert!(lib_rs.contains("acquire_single_instance_guard()"));
     assert!(lib_rs.contains("manager_guard_port"));
     assert!(lib_rs.contains("manager.already_running"));
-    assert!(lib_rs.contains("focus_existing_manager_window()"));
+}
+
+#[test]
+fn manager_repeated_launch_activates_existing_window() {
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+
+    assert!(lib_rs.contains("focus_existing_manager_window();"));
     assert!(lib_rs.contains("windows_activate_process_window"));
 }
 
@@ -59,17 +62,54 @@ fn manager_close_minimizes_to_tray_without_confirmation() {
     assert!(!lib_rs.contains(".dialog()"));
     assert!(!lib_rs.contains("manager://close-requested"));
     assert!(lib_rs.contains("let _ = close_event_window.hide();"));
+    assert!(!lib_rs.contains("startup_is_transient()"));
+    assert!(lib_rs.contains(".visible(true)"));
+    assert!(lib_rs.contains("alunixa_x_launcher::shutdown()"));
     assert!(!app_tsx.contains("CloseConfirmDialog"));
     assert!(app_tsx.contains("manager_exit_app"));
     assert!(app_tsx.contains("manager_hide_to_tray"));
 }
 
 #[test]
-fn manager_queues_alunixax_and_legacy_provider_urls_for_confirmation_on_startup() {
+fn manager_keeps_a_visible_brand_tray_and_click_menu_when_hiding_the_macos_dock_icon() {
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+
+    assert!(lib_rs.contains("tauri::ActivationPolicy::Accessory"));
+    assert!(lib_rs.contains("tauri::ActivationPolicy::Regular"));
+    assert!(lib_rs.contains("set_manager_activation_policy(&close_event_app, false)"));
+    assert!(lib_rs.contains("set_manager_activation_policy(app_handle, true)"));
+    assert!(lib_rs.contains("set_manager_activation_policy(&app_handle, false)"));
+    assert!(lib_rs.contains(".icon_as_template(false)"));
+    assert!(lib_rs.contains("tauri::include_image!(\"icons/icon.png\")"));
+    assert!(lib_rs.contains(".show_menu_on_left_click(true)"));
+    assert!(lib_rs.contains(".tooltip(\"Alunixa X\")"));
+}
+
+#[test]
+fn manager_reopens_hidden_window_when_macos_dock_requests_reopen() {
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+
+    assert!(lib_rs.contains("tauri::RunEvent::Reopen"));
+    assert!(lib_rs.contains("show_main_window(app_handle);"));
+}
+
+#[test]
+fn manager_second_instance_activates_existing_macos_bundle() {
+    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
+        .expect("read manager lib.rs");
+
+    assert!(lib_rs.contains("native_application_bundle_from_executable"));
+    assert!(!lib_rs.contains("alunixa_x_core::install::MANAGER_BUNDLE_ID"));
+    assert!(lib_rs.contains("std::process::Command::new(\"/usr/bin/open\")"));
+}
+
+#[test]
+fn manager_queues_codexplusplus_provider_urls_for_confirmation_on_startup() {
     let main_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
         .expect("read manager main.rs");
 
-    assert!(main_rs.contains("alunixax://"));
     assert!(main_rs.contains("codexplusplus://"));
     assert!(main_rs.contains("provider_import::save_pending_provider_import_from_url"));
     assert!(!main_rs.contains("provider_import::import_provider_from_url"));
@@ -77,49 +117,25 @@ fn manager_queues_alunixax_and_legacy_provider_urls_for_confirmation_on_startup(
 }
 
 #[test]
-fn manager_handles_dreamskin_urls_on_windows_and_running_macos_instances() {
-    let main_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/main.rs"))
-        .expect("read manager main.rs");
-    let lib_rs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"))
-        .expect("read manager lib.rs");
+fn only_the_gui_binary_is_built_with_the_codex_icon() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let core_root = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .and_then(std::path::Path::parent)
-        .unwrap();
-    let windows_install =
-        std::fs::read_to_string(core_root.join("crates/alunixa-x-core/src/install/windows.rs"))
-            .expect("read Windows install source");
-    let macos_install =
-        std::fs::read_to_string(core_root.join("crates/alunixa-x-core/src/install/macos.rs"))
-            .expect("read macOS install source");
-
-    assert!(main_rs.contains("handle_dream_skin_url(arg)"));
-    assert!(lib_rs.contains("tauri::RunEvent::Opened { urls }"));
-    assert!(lib_rs.contains("handle_dream_skin_url(url.as_str())"));
-    assert!(windows_install.contains("Software\\Classes\\dreamskin"));
-    assert!(windows_install.contains("URL:DreamSkin Community Theme Protocol"));
-    assert!(macos_install.contains("<array><string>dreamskin</string></array>"));
-    assert!(macos_install.contains("DreamSkin Community Theme"));
-}
-
-#[test]
-fn launcher_binary_embeds_codex_icon_resource() {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let launcher_build = manifest_dir
+    let launcher_manifest = manifest_dir
         .parent()
         .and_then(std::path::Path::parent)
         .unwrap()
-        .join("alunixa-x-launcher/build.rs");
-    let build_rs = std::fs::read_to_string(&launcher_build).expect("read launcher build.rs");
-
-    assert!(build_rs.contains("WindowsResource"));
-    assert!(build_rs.contains("icons/icon.ico"));
+        .join("alunixa-x-launcher/Cargo.toml");
+    let launcher = std::fs::read_to_string(&launcher_manifest).expect("read runtime manifest");
+    let manager = std::fs::read_to_string(manifest_dir.join("Cargo.toml")).unwrap();
+    let config = std::fs::read_to_string(manifest_dir.join("tauri.conf.json")).unwrap();
+    assert!(launcher.contains("autobins = false"));
+    assert!(launcher.contains("build = false"));
+    assert!(!launcher.contains("[[bin]]"));
+    assert!(manager.contains("name = \"alunixa-x-plus\""));
+    assert!(config.contains("icons/icon.ico"));
 }
 
 #[test]
-fn windows_binaries_run_as_invoker_while_installer_can_elevate() {
+fn windows_binaries_run_as_invoker_without_administrator_privileges() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let manager_build =
         std::fs::read_to_string(manifest_dir.join("build.rs")).expect("read manager build.rs");
@@ -142,13 +158,16 @@ fn windows_binaries_run_as_invoker_while_installer_can_elevate() {
 
     assert!(manager_build.contains("windows-app-manifest.xml"));
     assert!(launcher_build.contains("windows-app-manifest.xml"));
+    // Elevated launcher processes also elevate Codex, so Explorer file drops are blocked by UIPI.
     assert!(windows_manifest.contains("asInvoker"));
+    assert!(!windows_manifest.contains("requireAdministrator"));
     assert!(windows_manifest.contains("Microsoft.Windows.Common-Controls"));
-    assert!(windows_installer.contains("RequestExecutionLevel admin"));
+    assert!(windows_installer.contains("RequestExecutionLevel user"));
+    assert!(!windows_installer.contains("RequestExecutionLevel admin"));
 }
 
 #[test]
-fn windows_entrypoints_register_alunixax_url_protocol_and_remove_legacy_registration() {
+fn windows_entrypoints_register_codexplusplus_url_protocol() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let windows_install = manifest_dir
         .parent()
@@ -159,26 +178,31 @@ fn windows_entrypoints_register_alunixax_url_protocol_and_remove_legacy_registra
     let windows_install =
         std::fs::read_to_string(&windows_install).expect("read windows install source");
 
-    assert!(windows_install.contains("Software\\Classes\\alunixax"));
     assert!(windows_install.contains("Software\\Classes\\codexplusplus"));
-    assert!(windows_install.contains("Software\\Classes\\dreamskin"));
     assert!(windows_install.contains("URL Protocol"));
     assert!(windows_install.contains("%1"));
 }
 
 #[test]
-fn manager_launch_button_spawns_silent_launcher_binary() {
+fn manager_launch_button_uses_the_embedded_runtime() {
     let commands_rs =
         std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/commands.rs"))
             .expect("read manager commands.rs");
 
-    assert!(commands_rs.contains("SILENT_BINARY"));
-    assert!(commands_rs.contains("std::process::Command::new"));
-    assert!(!commands_rs.contains("launch_and_inject_with_hooks(options"));
+    let body = commands_rs
+        .split("fn start_embedded_launcher(")
+        .nth(1)
+        .unwrap()
+        .split("pub fn start_weixin_connect_from_saved_settings")
+        .next()
+        .unwrap();
+    assert!(body.contains("alunixa_x_launcher::start"));
+    assert!(!body.contains("spawn_companion"));
+    assert!(!body.contains("Command::new"));
 }
 
 #[test]
-fn macos_packager_hides_silent_launcher_but_not_manager() {
+fn macos_packager_builds_one_visible_native_gui_with_legacy_update_shim() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let packager = manifest_dir
         .parent()
@@ -191,19 +215,21 @@ fn macos_packager_hides_silent_launcher_but_not_manager() {
     assert!(script.contains("<key>LSUIElement</key>"));
     assert!(script.contains("ARCH=\"${2:-$(uname -m)}\""));
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
-    assert!(script.contains("Alunixa-X-${VERSION}-macos-${ARCH}.dmg"));
+    assert!(script.contains("AlunixaX-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"Alunixa X Launch (AX)\" \"AlunixaXLauncher\" \"$BINARY_DIR/alunixa-x\" \"io.github.alunixacode.alunixax.launcher\" \"true\""
+        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-plus\" \"com.bigpizzav3.codexplusplus\" \"false\""
     ));
     assert!(script.contains(
-        "create_app \"Alunixa X (AX)\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-manager\" \"io.github.alunixacode.alunixax\" \"false\""
+        "create_app \"Alunixa X 管理工具\" \"AlunixaXManager\" \"$BINARY_DIR/alunixa-x-legacy-shim\" \"com.bigpizzav3.codexplusplus.manager\" \"true\""
     ));
-    assert!(script.contains("$BINARY_DIR/alunixa-x-imagegen-mcp"));
-    assert!(script.contains("Alunixa X Launch (AX).app/Contents/MacOS/alunixa-x-imagegen-mcp"));
+    assert!(script.contains("printf '%s\\n' \"Alunixa X 管理工具.app\" > \"$STAGE/.hidden\""));
+    assert!(script.contains("chflags hidden \"$STAGE/Alunixa X 管理工具.app\""));
+    assert!(script.contains("set visible of item \"Alunixa X 管理工具.app\" to false"));
+    assert!(script.contains("<key>CodexPlusUnifiedApp</key>"));
 }
 
 #[test]
-fn github_release_workflow_builds_separate_macos_x64_and_arm64_dmgs() {
+fn github_release_workflow_builds_one_universal_macos_dmg() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let workflow = manifest_dir
         .parent()
@@ -213,38 +239,19 @@ fn github_release_workflow_builds_separate_macos_x64_and_arm64_dmgs() {
         .join(".github/workflows/release-assets.yml");
     let workflow = std::fs::read_to_string(&workflow).expect("read release assets workflow");
 
-    assert!(workflow.contains("macos-15-intel"));
-    assert!(workflow.contains("x86_64-apple-darwin"));
+    // 通用包：单个 job 在两个 target 上各编一遍，由 build-universal.sh
+    // 用 lipo 合并。两个架构的 std 都要装。
     assert!(workflow.contains("macos-14"));
-    assert!(workflow.contains("aarch64-apple-darwin"));
-    assert!(workflow.contains("package-dmg.sh \"$VERSION\" \"${{ matrix.arch }}\""));
-    assert!(workflow.contains("target/${{ matrix.target }}/release"));
-    assert!(workflow.contains("target/release/alunixa-x-imagegen-mcp.exe"));
-    assert!(workflow.contains("target/${{ matrix.target }}/release/alunixa-x-imagegen-mcp"));
+    assert!(workflow.contains("x86_64-apple-darwin,aarch64-apple-darwin"));
+    assert!(workflow.contains("build-universal.sh \"$VERSION\""));
+
+    // 分架构的 matrix 形态不应再出现，否则会回到「用户自己挑架构」的老问题。
+    assert!(!workflow.contains("matrix.arch"));
+    assert!(!workflow.contains("macos-15-intel"));
 }
 
 #[test]
-fn imagegen_mcp_companion_uses_a_console_subsystem_entrypoint() {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest_dir
-        .parent()
-        .and_then(std::path::Path::parent)
-        .and_then(std::path::Path::parent)
-        .unwrap();
-    let manifest = std::fs::read_to_string(root.join("apps/alunixa-x-launcher/Cargo.toml"))
-        .expect("read launcher manifest");
-    let entrypoint =
-        std::fs::read_to_string(root.join("apps/alunixa-x-launcher/src/imagegen_mcp_main.rs"))
-            .expect("read imagegen MCP entrypoint");
-
-    assert!(manifest.contains("name = \"alunixa-x-imagegen-mcp\""));
-    assert!(manifest.contains("path = \"src/imagegen_mcp_main.rs\""));
-    assert!(!entrypoint.contains("windows_subsystem"));
-    assert!(entrypoint.contains("run_imagegen_mcp_from_stdio"));
-}
-
-#[test]
-fn github_release_workflow_verifies_versions_and_publishes_after_all_builds() {
+fn github_release_workflow_uploads_static_latest_json() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let workflow = manifest_dir
         .parent()
@@ -254,12 +261,9 @@ fn github_release_workflow_verifies_versions_and_publishes_after_all_builds() {
         .join(".github/workflows/release-assets.yml");
     let workflow = std::fs::read_to_string(&workflow).expect("read release assets workflow");
 
-    assert!(workflow.contains("verify-version:"));
-    assert!(workflow.contains("tags:"));
-    assert!(workflow.contains("cargo metadata --no-deps"));
-    assert!(workflow.contains("Publish GitHub Release"));
-    assert!(workflow.contains("gh release create \"$RELEASE_TAG\" dist/release/*"));
-    assert!(!workflow.contains("latest.json"));
+    assert!(workflow.contains("latest-json:"));
+    assert!(workflow.contains("latest.json"));
+    assert!(workflow.contains("gh release upload \"$TAG\" latest.json --clobber"));
 }
 
 #[test]
@@ -281,6 +285,14 @@ fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
     assert!(app_tsx.contains("const createNewAggregateProfile = () =>"));
     assert!(app_tsx.contains("onClick={createNewAggregateProfile}"));
     assert!(app_tsx.contains("已打开聚合供应商详情"));
+    assert!(app_tsx.contains(
+        "buildRelayConfigToml(profile, { includeBearerToken: !profile.noAuth, requiresOpenAiAuth: false })"
+    ));
+    assert!(
+        app_tsx.contains(
+            "`requires_openai_auth = ${options.requiresOpenAiAuth ? \"true\" : \"false\"}`"
+        )
+    );
     assert!(!commands_rs.contains("缺少独立 auth.json"));
     assert!(commands_rs.contains("backfill_relay_profile_from_live"));
     assert!(commands_rs.contains("apply_relay_profile_to_home_with_switch_rules"));
@@ -295,12 +307,10 @@ fn relay_context_management_is_global_not_supplier_scoped() {
     let styles = std::fs::read_to_string(&styles).expect("read manager styles.css");
 
     assert!(app_tsx.contains("作为全局配置独立管理"));
+    assert!(app_tsx.contains("label: t(\"MCP&插件\")") || app_tsx.contains("label: \"MCP&插件\""));
     assert!(
-        app_tsx.contains("label: t(\"工具与插件\")") || app_tsx.contains("label: \"工具与插件\"")
-    );
-    assert!(
-        app_tsx.contains("title={t(\"Codex 工具与插件\")}")
-            || app_tsx.contains("title=\"Codex 工具与插件\"")
+        app_tsx.contains("title={t(\"Codex MCP&插件\")}")
+            || app_tsx.contains("title=\"Codex MCP&插件\"")
     );
     assert!(!app_tsx.contains("label: \"上下文配置\""));
     assert!(!app_tsx.contains("title=\"上下文配置\""));
@@ -316,10 +326,18 @@ fn relay_context_management_is_global_not_supplier_scoped() {
     assert!(app_tsx.contains("sync_live_context_entries"));
     assert!(app_tsx.contains("refreshLiveContextEntries"));
     assert!(app_tsx.contains("syncLiveContextEntries(next, true)"));
+    assert!(app_tsx.contains("const syncContextEntries = async (next: BackendSettings) =>"));
+    // 保存 / 启停 / 删除 / JSON 导入，四条写入路径都要把改动同步进 live 配置
+    assert_eq!(app_tsx.matches("await syncContextEntries(next)").count(), 4);
+    assert!(app_tsx.contains("if (!(await syncContextEntries(next))) return;"));
     assert!(app_tsx.contains("function contextEntriesWithLiveEntries"));
     assert!(app_tsx.contains("liveByKind"));
     assert!(app_tsx.contains("mergeLiveContextEntries"));
     assert!(app_tsx.contains("withLiveEntryState"));
+    // live 里没有该条目时必须保留它自身的启停意图，不能强制 false——否则供应商
+    // 关掉「应用通用配置」或条目刚新增时，面板会把所有 MCP 显示成已停用（#1928）。
+    // 后端 context_entry_enabled 的默认同样是「没有 enabled 键即启用」。
+    assert!(!app_tsx.contains("live.enabled } : { ...entry, enabled: false }"));
     assert!(app_tsx.contains("contextEnabledSwitch"));
     assert!(!app_tsx.contains("entry.enabled ? \"已启用\" : \"已禁用\""));
     assert!(!app_tsx.contains("空配置体"));
@@ -336,38 +354,6 @@ fn relay_context_management_is_global_not_supplier_scoped() {
 }
 
 #[test]
-fn retired_context_is_removed_on_save_import_switch_and_before_launch() {
-    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let commands = std::fs::read_to_string(manifest_dir.join("src/commands.rs")).unwrap();
-    let root = manifest_dir.join("../../..");
-    let launcher =
-        std::fs::read_to_string(root.join("crates/alunixa-x-core/src/launcher.rs")).unwrap();
-    let switch =
-        std::fs::read_to_string(root.join("crates/alunixa-x-core/src/relay_switch.rs")).unwrap();
-    assert!(commands.contains(".and_then(|_| remove_retired_context_config())"));
-    let import = commands
-        .split("pub fn import_full_config(")
-        .nth(1)
-        .unwrap()
-        .split("#[tauri::command]")
-        .next()
-        .unwrap();
-    assert!(import.contains("remove_retired_context_config()?"));
-    assert!(switch.contains("retired_context::remove_from_home(home)?"));
-    let policy = launcher
-        .find("retired_context::remove_from_home(&home)")
-        .unwrap();
-    let provider = launcher
-        .find("hooks.apply_active_relay_profile(&settings).await?")
-        .unwrap();
-    let launch = launcher
-        .find(".launch_codex(&app_dir, debug_port, &settings, &settings.codex_extra_args)")
-        .unwrap();
-    assert!(provider < policy && policy < launch);
-    assert!(!launcher[policy..launch].contains("relay_profiles_enabled"));
-}
-
-#[test]
 fn manager_window_and_relay_detail_header_stay_usable() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let app_tsx = manifest_dir.parent().unwrap().join("src/App.tsx");
@@ -379,12 +365,18 @@ fn manager_window_and_relay_detail_header_stay_usable() {
     let tauri_conf =
         std::fs::read_to_string(manifest_dir.join("tauri.conf.json")).expect("read tauri config");
 
-    assert!(app_tsx.contains("relay-detail-sticky"));
+    // 供应商详情的头部要始终可见、正文自己滚动。
+    //
+    // cb3c7fa 把原来的 .relay-detail-sticky（position: sticky）重构成了 flex 布局：
+    // 头部 flex-shrink: 0 不被压缩，正文 flex: 1 + overflow-y: auto 吃掉剩余空间。
+    // 效果一样且比 sticky 可靠，但当时守卫测试没跟着改，CI 一直红着。
+    // 这里改成断言真正保证该行为的属性，而不是已经废弃的实现细节。
+    assert!(app_tsx.contains("relay-detail-header"));
     assert!(!app_tsx.contains("CardHead title=\"供应商详情\""));
-    assert!(styles.contains(".relay-detail-sticky"));
-    assert!(styles.contains("position: sticky"));
-    assert!(styles.contains("top: 0"));
-    assert!(styles.contains("margin: 0"));
+    assert!(styles.contains(".relay-detail-header"));
+    assert!(styles.contains(".relay-detail-body"));
+    assert!(styles.contains("flex-shrink: 0"));
+    assert!(styles.contains("overflow-y: auto"));
     assert!(lib_rs.contains(".inner_size(1180.0, 820.0)"));
     assert!(lib_rs.contains(".min_inner_size(960.0, 720.0)"));
     assert!(tauri_conf.contains("\"width\": 1180"));
@@ -413,7 +405,7 @@ fn provider_presets_include_runapi() {
     assert!(presets.contains("id: \"runapi\""));
     assert!(presets.contains("name: \"RunAPI\""));
     assert!(presets.contains("category: \"aggregator\""));
-    assert!(presets.contains("baseUrl: \"https://runapi.co/v1\""));
+    assert!(presets.contains("baseUrl: \"https://runapi.host/v1\""));
 }
 
 #[test]
@@ -451,4 +443,6 @@ fn manager_update_install_keeps_visible_progress_bar() {
     assert!(app_tsx.contains("安装包更新进度"));
     assert!(app_tsx.contains("completedTitle={t(\"上次更新结果\")}"));
     assert!(app_tsx.contains("progress={updateInstallProgress}"));
+    assert!(app_tsx.contains("current.percent + 0.2"));
+    assert!(app_tsx.contains("下载或启动耗时较长"));
 }

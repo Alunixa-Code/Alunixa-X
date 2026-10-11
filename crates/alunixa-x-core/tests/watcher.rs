@@ -1,13 +1,13 @@
 use alunixa_x_core::watcher::{
     build_spawn_launcher_command, build_watcher_install_plan, cdp_listening, codex_process_ids,
     disable_watcher_at, enable_watcher_at, filter_killable_launcher_processes,
-    macos_codex_process_ids_for_debug_port, process_id_is_running, process_ids_still_running,
+    macos_launcher_process_names, process_id_is_running, process_ids_still_running,
     should_recover_stale_launcher, watcher_disabled_flag,
 };
 
 #[cfg(windows)]
 use alunixa_x_core::watcher::{
-    WindowsProcessInfo, find_codex_process_tree_from_snapshot, find_codex_processes_from_snapshot,
+    WindowsProcessInfo, find_codex_processes_from_snapshot,
     find_session_index_cleanup_blocking_processes_from_snapshot,
 };
 
@@ -29,9 +29,12 @@ fn cdp_listening_returns_true_for_bound_ipv6_loopback_port() {
 
 #[test]
 fn cdp_listening_returns_false_for_closed_port() {
-    // Port zero is never a connectable endpoint and avoids racing an unrelated
-    // process that may claim an ephemeral port after the test listener closes.
-    assert!(!cdp_listening(0));
+    let port = {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    assert!(!cdp_listening(port));
 }
 
 #[test]
@@ -47,26 +50,25 @@ fn watcher_enable_and_disable_toggle_flag() {
 }
 
 #[test]
-fn watcher_install_plan_registers_rust_launcher_at_logon() {
-    let plan = build_watcher_install_plan("C:/Tools/alunixa-x.exe".into(), 9333);
+fn watcher_install_plan_opens_the_gui_at_logon() {
+    let plan = build_watcher_install_plan("C:/Tools/alunixa-x-plus.exe".into(), 9333);
 
     assert_eq!(plan.run_value_name, "AlunixaXWatcher");
     assert_eq!(
         plan.run_value,
-        "\"C:/Tools/alunixa-x.exe\" --debug-port 9333"
+        "\"C:/Tools/alunixa-x-plus.exe\" --autostart"
     );
     assert_eq!(plan.shortcut_name, "AlunixaXWatcher.lnk");
-    assert_eq!(plan.shortcut_target, "C:/Tools/alunixa-x.exe");
-    assert_eq!(plan.shortcut_arguments, "--debug-port 9333");
+    assert_eq!(plan.shortcut_target, "C:/Tools/alunixa-x-plus.exe");
+    assert_eq!(plan.shortcut_arguments, "--autostart");
 }
 
 #[test]
-fn spawn_launcher_command_points_to_silent_binary_only() {
-    let command = build_spawn_launcher_command("C:/Tools/alunixa-x.exe", 9444);
+fn startup_command_opens_only_the_unified_gui() {
+    let command = build_spawn_launcher_command("C:/Tools/alunixa-x-plus.exe", 9444);
 
-    assert_eq!(command[0], "C:/Tools/alunixa-x.exe");
-    assert!(command.contains(&"--debug-port".to_string()));
-    assert!(command.contains(&"9444".to_string()));
+    assert_eq!(command[0], "C:/Tools/alunixa-x-plus.exe");
+    assert_eq!(command, ["C:/Tools/alunixa-x-plus.exe", "--autostart"]);
     assert!(!command.iter().any(|part| part.contains("manager")));
 }
 
@@ -106,26 +108,30 @@ fn codex_process_filter_keeps_chatgpt_desktop_package_processes() {
             24,
             r"C:\Program Files\WindowsApps\Other.ChatGPT_1.0.0.0_x64__abc\app\ChatGPT.exe",
         ),
-        (
-            25,
-            r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
-        ),
     ];
 
-    assert_eq!(codex_process_ids(processes), vec![21, 22, 25]);
+    assert_eq!(codex_process_ids(processes), vec![21, 22]);
 }
 
 #[test]
 fn launcher_process_filter_protects_current_process_ancestry() {
     let processes = [
-        (10, 0, "alunixa-x.exe"),
-        (20, 10, "alunixa-x.exe"),
-        (30, 20, "alunixa-x.exe"),
-        (40, 10, "alunixa-x.exe"),
-        (50, 10, "alunixa-x-manager.exe"),
+        (10, 0, "alunixa-x-plus.exe"),
+        (20, 10, "alunixa-x-plus.exe"),
+        (30, 20, "alunixa-x-plus.exe"),
+        (40, 10, "alunixa-x-plus.exe"),
+        (50, 10, "alunixa-x-plus-manager.exe"),
     ];
 
     assert_eq!(filter_killable_launcher_processes(processes, 30), vec![40]);
+}
+
+#[test]
+fn macos_launcher_process_names_cover_development_and_packaged_binaries() {
+    assert_eq!(
+        macos_launcher_process_names(),
+        ["alunixa-x-plus", "AlunixaX"]
+    );
 }
 
 #[test]
@@ -141,24 +147,6 @@ fn stop_wait_tracks_only_expected_process_ids() {
     assert_eq!(
         process_ids_still_running(&[10, 20, 30], [5, 20, 40, 30]),
         vec![20, 30]
-    );
-}
-
-#[test]
-fn macos_restart_targets_only_desktop_main_process_on_requested_cdp_port() {
-    let process_lines = [
-        "101 /Applications/Codex.app/Contents/MacOS/Codex --remote-debugging-port=9229",
-        "102 /Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --remote-debugging-port=9229",
-        "103 /usr/local/bin/codex app-server --remote-debugging-port=9229",
-        "104 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9333",
-        "105 /Applications/ChatGPT.app/Contents/MacOS/ChatGPT --remote-debugging-port=9229",
-        "106 /Applications/Codex.app/Contents/MacOS/Codex --remote-debugging-port=92290",
-        "107 /Applications/Codex.app/Contents/Frameworks/Codex Helper (Renderer).app/Contents/MacOS/Codex Helper (Renderer) --remote-debugging-port=9229",
-    ];
-
-    assert_eq!(
-        macos_codex_process_ids_for_debug_port(process_lines, 9229),
-        vec![101, 105]
     );
 }
 
@@ -256,43 +244,6 @@ fn find_codex_processes_combines_store_and_local_installs() {
 
 #[cfg(windows)]
 #[test]
-fn find_codex_processes_finds_beta_package_process_tree() {
-    let processes = [
-        WindowsProcessInfo {
-            process_id: 51,
-            parent_process_id: 0,
-            exe_file: "ChatGPT (Beta).exe".to_string(),
-            executable_path: Some(std::path::PathBuf::from(
-                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
-            )),
-        },
-        WindowsProcessInfo {
-            process_id: 52,
-            parent_process_id: 51,
-            exe_file: "ChatGPT (Beta).exe".to_string(),
-            executable_path: Some(std::path::PathBuf::from(
-                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
-            )),
-        },
-        WindowsProcessInfo {
-            process_id: 53,
-            parent_process_id: 51,
-            exe_file: "codex.exe".to_string(),
-            executable_path: Some(std::path::PathBuf::from(
-                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\resources\codex.exe",
-            )),
-        },
-    ];
-
-    assert_eq!(find_codex_processes_from_snapshot(&processes), vec![51, 52]);
-    assert_eq!(
-        find_codex_process_tree_from_snapshot(&processes),
-        vec![53, 52, 51]
-    );
-}
-
-#[cfg(windows)]
-#[test]
 fn session_index_cleanup_process_guard_blocks_desktop_apps_but_not_cli() {
     let processes = [
         WindowsProcessInfo {
@@ -323,24 +274,13 @@ fn session_index_cleanup_process_guard_blocks_desktop_apps_but_not_cli() {
                 r"C:\Users\me\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.exe",
             )),
         },
-        WindowsProcessInfo {
-            process_id: 15,
-            parent_process_id: 0,
-            exe_file: "ChatGPT (Beta).exe".to_string(),
-            executable_path: Some(std::path::PathBuf::from(
-                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
-            )),
-        },
     ];
 
     assert_eq!(
         find_session_index_cleanup_blocking_processes_from_snapshot(&processes),
-        vec![11, 12, 13, 15]
+        vec![11, 12, 13]
     );
-    assert_eq!(
-        find_codex_processes_from_snapshot(&processes),
-        vec![11, 13, 15]
-    );
+    assert_eq!(find_codex_processes_from_snapshot(&processes), vec![11, 13]);
 }
 
 #[cfg(windows)]
@@ -356,9 +296,9 @@ fn find_codex_processes_ignores_unrelated_processes() {
         WindowsProcessInfo {
             process_id: 20,
             parent_process_id: 0,
-            exe_file: "alunixa-x.exe".to_string(),
+            exe_file: "alunixa-x-plus.exe".to_string(),
             executable_path: Some(std::path::PathBuf::from(
-                r"D:\Programs\Alunixa X\alunixa-x.exe",
+                r"D:\Programs\Alunixa X\alunixa-x-plus.exe",
             )),
         },
     ];

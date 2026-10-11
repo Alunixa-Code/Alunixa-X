@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::io::{Seek, SeekFrom, Write as _};
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -10,22 +10,99 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
-use tokio_util::io::ReaderStream;
 
 use crate::settings::{BackendSettings, SettingsStore, normalize_codex_extra_args};
 use crate::status::{LaunchStatus, StatusStore};
 
-#[cfg(windows)]
-const POST_LAUNCH_COMPUTER_USE_GUARD_SECONDS: &[u64] = &[0, 5, 15, 30, 60, 120, 180, 240, 300];
-#[cfg_attr(not(windows), allow(dead_code))]
-const POST_LAUNCH_COMPUTER_USE_GUARD_STABLE_ATTEMPTS: usize = 3;
 static PET_OVERLAY_SYNC_FAILED: AtomicBool = AtomicBool::new(false);
 static PET_CURSOR_DRIVER_FAILED: AtomicBool = AtomicBool::new(false);
+const BRIDGE_HEALTH_FAILURE_THRESHOLD: u8 = 2;
+/// 重注入退避：首次重注入立即执行，此后若桥仍不健康，重注入间隔按
+/// 10s → 20s → 40s … 指数增长并封顶。对重注入修不好的失效（如应用更新
+/// 改变了页面上下文），避免每 10~15 秒重发一次完整注入脚本（issue #2169）。
+const BRIDGE_REINJECT_BACKOFF_BASE_SECS: u64 = 10;
+const BRIDGE_REINJECT_BACKOFF_CAP_SECS: u64 = 300;
+/// 重注入后紧接着的那次健康检查必然通过（`lastInjectionAt` 还在 5 秒窗口内），
+/// 若一见健康就清零，退避会永远停在第一档、根本挡不住周期性重注入（issue #2330）。
+/// 必须持续健康满这么久才清零。
+const BRIDGE_REINJECT_BACKOFF_RESET_AFTER_SECS: u64 = 60;
+
+/// 看门狗内跟踪重注入退避状态；持续健康一段时间或应用实例更换时重置。
+#[derive(Debug, Default)]
+struct BridgeReinjectBackoff {
+    consecutive_attempts: u32,
+    next_allowed_at: Option<std::time::Instant>,
+    healthy_since: Option<std::time::Instant>,
+}
+
+fn reinject_backoff_delay(consecutive_attempts: u32) -> std::time::Duration {
+    let factor = 1u64
+        .checked_shl(consecutive_attempts.min(u64::BITS - 1))
+        .unwrap_or(u64::MAX);
+    std::time::Duration::from_secs(
+        BRIDGE_REINJECT_BACKOFF_BASE_SECS
+            .saturating_mul(factor)
+            .min(BRIDGE_REINJECT_BACKOFF_CAP_SECS),
+    )
+}
+
+impl BridgeReinjectBackoff {
+    fn ready(&self, now: std::time::Instant) -> bool {
+        self.next_allowed_at.is_none_or(|deadline| now >= deadline)
+    }
+
+    fn record_attempt(&mut self, now: std::time::Instant) {
+        let delay = reinject_backoff_delay(self.consecutive_attempts);
+        self.next_allowed_at = Some(now + delay);
+        self.consecutive_attempts = self.consecutive_attempts.saturating_add(1);
+    }
+
+    fn reset(&mut self) {
+        self.consecutive_attempts = 0;
+        self.next_allowed_at = None;
+        self.healthy_since = None;
+    }
+
+    /// 观测到一次健康：持续健康满 `BRIDGE_REINJECT_BACKOFF_RESET_AFTER_SECS` 才清零。
+    fn observe_healthy(&mut self, now: std::time::Instant) {
+        let since = *self.healthy_since.get_or_insert(now);
+        if now.saturating_duration_since(since)
+            >= std::time::Duration::from_secs(BRIDGE_REINJECT_BACKOFF_RESET_AFTER_SECS)
+        {
+            self.reset();
+        }
+    }
+
+    /// 观测到一次不健康：重新计时。
+    fn observe_unhealthy(&mut self) {
+        self.healthy_since = None;
+    }
+}
+const MACOS_DEBUG_TAKEOVER_WAIT_MS: u64 = 5_000;
+const MACOS_DEBUG_TAKEOVER_INTERVAL_MS: u64 = 100;
+
+/// 协议代理的端口写死在 `config.toml` 的 `base_url = "http://127.0.0.1:57321/v1"` 里，
+/// 不能像普通 helper 端口那样临时换一个空闲的，否则 Codex CLI 会连到没人监听的地址。
+/// 而管理器的「重启」是先强杀旧 launcher 再拉新的，旧 helper 交还监听要一小会儿；
+/// 过去这里一次 bind 失败就整个启动中止，用户侧就是重启必失败、直接双击 exe 反而正常（issue #1933）。
+/// 所以固定端口下给前任一个让位的窗口。端口被占用，以及 Windows 在旧进程
+/// 退出瞬间暂时返回的 10013，都放在这一段里重试。窗口结束仍是 10013，
+/// 才当成端口被系统永久保留。
+const HELPER_BIND_RETRY_TIMEOUT_MS: u64 = 6_000;
+const PROTOCOL_PROXY_BIND_RETRY_TIMEOUT_MS: u64 = 10_000;
+const HELPER_BIND_RETRY_INTERVAL_MS: u64 = 200;
+
+/// Asynchronous callback used by the bridge watchdog to restore a launcher-specific bridge.
+///
+/// Callers that install a custom [`crate::routes::BridgeContext`] should configure this callback
+/// before starting the watchdog. Without one, the watchdog falls back to the core bridge injector.
+pub type BridgeReinjector =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>> + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CodexLaunch {
@@ -51,6 +128,13 @@ pub enum ProcessWaitStrategy {
 pub enum MacosCleanupPolicy {
     QuitIfNotPreviouslyRunning,
     SkipQuitBecauseAlreadyRunning,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MacosDebugLaunchAction {
+    LaunchNew,
+    ReuseRunningDebugApp,
+    RestartRunningApp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +182,7 @@ pub struct LaunchHandle {
     pub app_dir: PathBuf,
     pub launch: CodexLaunch,
     pub status_store: StatusStore,
+    status_started_at_ms: u64,
     helper_started: bool,
     hooks: Arc<dyn LaunchHooks>,
 }
@@ -117,28 +202,66 @@ impl std::fmt::Debug for LaunchHandle {
 
 impl LaunchHandle {
     pub async fn wait_for_codex_exit(&self) -> anyhow::Result<()> {
-        loop {
-            if self
-                .hooks
-                .wait_for_codex_exit(&self.launch, self.debug_port)
-                .await
-                .is_ok()
-            {
-                break;
-            }
-            // A failed wait is not proof of process exit. Keep the launcher and
-            // its protocol helper alive and retry instead of tearing them down.
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.process_wait_retry",
-                serde_json::json!({"processExitConfirmed": false}),
-            );
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        }
+        let result = self
+            .hooks
+            .wait_for_codex_exit(&self.launch, self.debug_port)
+            .await;
         if self.helper_started {
             self.hooks.shutdown_helper(self.helper_port).await;
         }
-        Ok(())
+        self.hooks.stop_native_browser_compatibility().await;
+        let (status, message) = match &result {
+            Ok(()) => (
+                "stopped",
+                "Codex target is no longer available; launcher stopped.".to_string(),
+            ),
+            Err(error) => (
+                "failed",
+                format!("Codex process monitoring failed: {error:#}"),
+            ),
+        };
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "launcher.exited",
+            serde_json::json!({
+                "debug_port": self.debug_port,
+                "helper_port": self.helper_port,
+                "status": status,
+                "message": message,
+            }),
+        );
+        if let Err(error) = save_terminal_launch_status(
+            &self.status_store,
+            self.status_started_at_ms,
+            status,
+            &message,
+        ) {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.exit_status_failed",
+                serde_json::json!({ "message": format!("{error:#}") }),
+            );
+        }
+        result
     }
+}
+
+fn save_terminal_launch_status(
+    store: &StatusStore,
+    started_at_ms: u64,
+    status: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    let Some(mut latest) = store.load_latest()? else {
+        return Ok(());
+    };
+    // 重启过程中管理器可能已写入新请求；旧 launcher 不能把它覆盖成 stopped。
+    if latest.started_at_ms != started_at_ms {
+        return Ok(());
+    }
+    latest.status = status.to_string();
+    latest.message = message.to_string();
+    latest.phase = None;
+    latest.progress = Some(100);
+    store.save_latest(&latest)
 }
 
 #[async_trait(?Send)]
@@ -151,6 +274,11 @@ pub trait LaunchHooks: Send + Sync {
     fn select_debug_port(&self, requested: u16) -> u16;
     fn select_helper_port(&self, requested: u16) -> u16;
     async fn load_settings(&self) -> anyhow::Result<BackendSettings>;
+    async fn start_native_browser_compatibility(&self, _settings: &BackendSettings) {}
+    async fn stop_native_browser_compatibility(&self) {}
+    fn cleanup_unsupported_config(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn run_provider_sync(&self) -> anyhow::Result<()>;
     fn has_pending_remote_control_session_recoveries(&self) -> bool {
         false
@@ -158,38 +286,13 @@ pub trait LaunchHooks: Send + Sync {
     fn remote_control_session_recovery_is_safe_to_run(&self) -> bool {
         true
     }
-    async fn run_remote_control_session_recovery(&self) -> anyhow::Result<()> {
-        Ok(())
-    }
+    async fn run_remote_control_session_recovery(&self) -> anyhow::Result<()>;
     async fn apply_active_relay_profile(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
     async fn ensure_active_protocol_proxy_config(
         &self,
         _settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn ensure_computer_use_config(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn ensure_plugin_marketplace_config(
-        &self,
-        _settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn ensure_imagegen_mcp_config(
-        &self,
-        _settings: &BackendSettings,
-        _helper_port: u16,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn audit_startup_config(
-        &self,
-        _settings: &BackendSettings,
-        _helper_port: u16,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -218,27 +321,15 @@ pub trait LaunchHooks: Send + Sync {
         self.inject(debug_port, helper_port).await
     }
     async fn ensure_injection(&self, debug_port: u16, helper_port: u16, app_dir: &Path) -> bool {
-        // The inner injectors also retry. Bound the whole phase, not only the outer loop.
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(45);
         for attempt in 1..=120 {
-            let result = tokio::time::timeout_at(deadline, async {
-                match self.bridge_context(debug_port, app_dir).await {
-                    Ok(Some(ctx)) => self.inject_bridge(debug_port, helper_port, ctx).await,
-                    Ok(None) => self.inject(debug_port, helper_port).await,
-                    Err(error) => Err(error),
-                }
-            })
-            .await;
+            let result = match self.bridge_context(debug_port, app_dir).await {
+                Ok(Some(ctx)) => self.inject_bridge(debug_port, helper_port, ctx).await,
+                Ok(None) => self.inject(debug_port, helper_port).await,
+                Err(error) => Err(error),
+            };
             match result {
-                Ok(Ok(())) => return true,
-                Err(_) => {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.injection_deadline_exceeded",
-                        serde_json::json!({"stage": "renderer_bridge", "attempt": attempt, "timeoutSeconds": 45}),
-                    );
-                    return false;
-                }
-                Ok(Err(error)) => {
+                Ok(()) => return true,
+                Err(error) => {
                     let _ = crate::diagnostic_log::append_diagnostic_log(
                         "launcher.ensure_injection_retry_failed",
                         serde_json::json!({
@@ -254,27 +345,12 @@ pub trait LaunchHooks: Send + Sync {
         }
         false
     }
-    async fn verify_startup_injection(
-        &self,
-        _debug_port: u16,
-        _helper_port: u16,
-        _settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> {
-        Ok(())
-    }
+    /// 初次启动初始化结束时固定身份（包含注入降级）；watchdog 不能重新绑定实例。
+    async fn capture_injected_launch_identity(&self, _debug_port: u16) {}
     async fn start_bridge_watchdog(
         &self,
         _debug_port: u16,
         _helper_port: u16,
-    ) -> anyhow::Result<()> {
-        Ok(())
-    }
-    async fn start_computer_use_guard_watchdog(
-        &self,
-        _settings: &BackendSettings,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -292,16 +368,25 @@ pub trait LaunchHooks: Send + Sync {
 pub struct DefaultLaunchHooks {
     child: Mutex<Option<Child>>,
     helper: Mutex<Option<HelperRuntime>>,
-    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
-    bridge_disconnect: Mutex<Option<crate::bridge::BridgeDisconnect>>,
     bridge_watchdog: Mutex<Option<BridgeWatchdogRuntime>>,
-    computer_use_guard_watchdog: Mutex<Option<ComputerUseGuardWatchdogRuntime>>,
-    computer_use_guard_artifacts: Mutex<Option<crate::computer_use_guard::GuardArtifacts>>,
+    bridge_reinjector: Mutex<Option<BridgeReinjector>>,
+    #[cfg(windows)]
+    packaged_executable: Mutex<Option<PathBuf>>,
+    #[cfg(windows)]
+    packaged_activation_process: Mutex<Option<crate::windows_integration::TrackedWindowsProcess>>,
+    #[cfg(windows)]
+    packaged_launch_identity: Mutex<Option<PackagedLaunchIdentity>>,
+}
+
+#[cfg(windows)]
+#[derive(Default)]
+struct PackagedLaunchIdentity {
+    browser_id: Option<String>,
+    process: Option<crate::windows_integration::TrackedWindowsProcess>,
 }
 
 struct HelperRuntime {
     shutdown: tokio::sync::oneshot::Sender<()>,
-    connection_shutdown: tokio::sync::broadcast::Sender<()>,
     task: tokio::task::JoinHandle<()>,
 }
 
@@ -310,17 +395,173 @@ struct BridgeWatchdogRuntime {
     task: tokio::task::JoinHandle<()>,
 }
 
-struct ComputerUseGuardWatchdogRuntime {
-    shutdown: tokio::sync::oneshot::Sender<()>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-pub type BridgeReconnectFuture =
-    Pin<Box<dyn Future<Output = anyhow::Result<crate::bridge::BridgeDisconnect>> + Send>>;
-pub type BridgeReconnectHandler = Arc<dyn Fn() -> BridgeReconnectFuture + Send + Sync + 'static>;
-
 pub async fn launch_and_inject(options: LaunchOptions) -> anyhow::Result<LaunchHandle> {
     launch_and_inject_with_hooks(options, DefaultLaunchHooks::shared()).await
+}
+
+/// 判断错误链里是不是「端口已被占用」。只有这一种失败值得等前任让位重试，
+/// 其余（权限不足、地址非法等）重试多少次都一样，直接冒泡更快也更好排查。
+fn error_is_address_in_use(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io_error| io_error.kind() == std::io::ErrorKind::AddrInUse)
+    })
+}
+
+/// 判断错误链里是不是「端口被系统禁止绑定」（issue #2189）。
+/// Windows 上 Hyper-V/WSL 会在开机时把动态端口范围（49152-65535）里的一段段端口
+/// 划进排除区间，落在区间里的端口 bind 报 os error 10013（PermissionDenied），
+/// 和「被进程占用」不是一回事。真正被排除区间划走时重试不会成功，
+/// 但重启瞬间旧套接字未放开也会暂时返回同一个错误，所以只有固定端口会在
+/// 有限窗口内重试，窗口结束后仍失败才给出对症指引。
+fn error_is_bind_forbidden(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(crate::ports::port_bind_forbidden)
+    })
+}
+
+/// 把 helper 端口 bind 失败翻译成用户能照着处理的提示。
+///
+/// 过去只有「端口被占用」会追加中文说明（issue #1933 的重试逻辑），
+/// Windows 保留端口区间（os error 10013）直接裸抛英文 bind 报错，
+/// 用户既看不懂也不知道为什么混入 Responses key 之后就再也起不来。
+fn describe_helper_bind_failure(
+    error: anyhow::Error,
+    helper_port: u16,
+    protocol_proxy_enabled: bool,
+    bind_retry_timeout_ms: u64,
+) -> anyhow::Error {
+    if protocol_proxy_enabled && error_is_address_in_use(&error) {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "helper.bind_gave_up_on_busy_port",
+            serde_json::json!({
+                "helper_port": helper_port,
+                "waited_ms": bind_retry_timeout_ms,
+            }),
+        );
+        return error.context(format!(
+            "协议代理端口 {helper_port} 被其他进程占用，等待 {} 秒后仍未释放。\
+             该端口写在 config.toml 的 base_url 里，不能自动改用其他端口；\
+             请退出仍在运行的 Alunixa X 或占用该端口的程序后重试。",
+            bind_retry_timeout_ms / 1000
+        ));
+    }
+    if error_is_bind_forbidden(&error) {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "helper.bind_forbidden_port",
+            serde_json::json!({ "helper_port": helper_port }),
+        );
+        if cfg!(windows) {
+            return error.context(format!(
+                "helper 端口 {helper_port} 被 Windows 保留，无法绑定\
+                 （os error 10013，常见于 Hyper-V/WSL 开机划走的动态端口排除区间）。\
+                 请以管理员运行 netsh interface ipv4 show excludedportrange protocol=tcp \
+                 确认该端口是否在排除区间内，重启电脑通常可重新分配；\
+                 协议代理模式下也可以设置环境变量 ALUNIXA_X_PROTOCOL_PROXY_PORT \
+                 换一个端口后重试。"
+            ));
+        }
+        return error.context(format!(
+            "helper 端口 {helper_port} 绑定被系统拒绝，请检查端口占用与权限。"
+        ));
+    }
+    error
+}
+
+/// 按 `interval_ms` 重试启动 helper，直到成功或超过 `timeout_ms`。
+/// 端口被占用会重试；`retry_forbidden` 为真时，暂时的 10013 也放在同一段等待里。
+async fn start_helper_waiting_for_busy_port<F, Fut>(
+    mut start: F,
+    timeout_ms: u64,
+    interval_ms: u64,
+    retry_forbidden: bool,
+) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<()>>,
+{
+    let mut waited_ms = 0;
+    let mut attempts = 0;
+    loop {
+        attempts += 1;
+        let error = match start().await {
+            Ok(()) => {
+                if attempts > 1 {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "helper.bind_recovered_after_busy_port",
+                        serde_json::json!({
+                            "attempts": attempts,
+                            "waited_ms": waited_ms,
+                        }),
+                    );
+                }
+                return Ok(());
+            }
+            Err(error) => error,
+        };
+        let retryable =
+            error_is_address_in_use(&error) || (retry_forbidden && error_is_bind_forbidden(&error));
+        if !retryable || waited_ms >= timeout_ms {
+            return Err(error);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+        waited_ms += interval_ms;
+    }
+}
+
+fn helper_bind_retry_timeout_ms(protocol_proxy_enabled: bool, is_macos: bool) -> u64 {
+    if protocol_proxy_enabled {
+        PROTOCOL_PROXY_BIND_RETRY_TIMEOUT_MS
+    } else if is_macos {
+        HELPER_BIND_RETRY_TIMEOUT_MS
+    } else {
+        0
+    }
+}
+
+pub fn protocol_proxy_bind_retry_timeout_ms() -> u64 {
+    PROTOCOL_PROXY_BIND_RETRY_TIMEOUT_MS
+}
+
+pub fn helper_bind_retry_interval_ms() -> u64 {
+    HELPER_BIND_RETRY_INTERVAL_MS
+}
+
+/// 这次启动如果必须占用写进 `config.toml` 的协议代理端口，返回那个端口。
+/// 不需要协议代理时返回 `None`，调用方不应去等一个用不到的端口。
+pub fn required_fixed_helper_port(settings: &BackendSettings) -> Option<u16> {
+    let enabled =
+        relay_protocol_proxy_enabled(settings) || remote_control_provider_proxy_enabled(settings);
+    enabled.then(crate::protocol_proxy::protocol_proxy_port)
+}
+
+/// 在拉起新 launcher 之前确认固定端口已经能绑定。
+/// `probe` 成功表示端口已释放；占用和暂时的 10013 都继续等，其它错误立即返回。
+pub fn wait_for_fixed_helper_port(
+    port: u16,
+    timeout_ms: u64,
+    interval_ms: u64,
+    mut probe: impl FnMut(u16) -> std::io::Result<()>,
+    mut sleep: impl FnMut(u64),
+) -> anyhow::Result<()> {
+    let mut waited_ms = 0u64;
+    loop {
+        match probe(port) {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                let error = anyhow::Error::from(error);
+                let retryable = error_is_address_in_use(&error) || error_is_bind_forbidden(&error);
+                if !retryable || waited_ms >= timeout_ms {
+                    return Err(describe_helper_bind_failure(error, port, true, timeout_ms));
+                }
+                sleep(interval_ms);
+                waited_ms = waited_ms.saturating_add(interval_ms);
+            }
+        }
+    }
 }
 
 pub async fn launch_and_inject_with_hooks<H>(
@@ -333,111 +574,55 @@ where
     let hooks = hooks.into_launch_hooks();
     let debug_port = hooks.select_debug_port(options.debug_port);
     let mut helper_port = hooks.select_helper_port(options.helper_port);
-    let mut settings = hooks.load_settings().await?;
-    let mut app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
+    let settings = hooks.load_settings().await?;
+    let app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
     let status_store = options.status_store.clone();
-    status_store.save_latest(&launch_status(
-        "starting",
-        "Alunixa X launcher is preparing the app and injection bridge.",
-        debug_port,
-        helper_port,
-        &app_dir,
-    ))?;
     let mut helper_started = false;
+    let mut launched = None;
+    let mut keep_launched_on_error = false;
+    let mut status_started_at_ms = 0;
 
     let result: anyhow::Result<LaunchHandle> = async {
+        // issue #2244：冷启动 80~110 秒期间既没有 latest-status 阶段，也没有带耗时的
+        // 日志，用户无法区分「正在处理」与「已经卡死」。每个前置步骤前后都打一次
+        // 阶段标记与耗时。
+        let timeline = LaunchTimeline::new(options.status_store.clone());
+        timeline.mark("start_native_browser_compatibility", 5);
+        hooks.start_native_browser_compatibility(&settings).await;
         let home = crate::relay_config::default_codex_home_dir();
-        match crate::relay_config::repair_stale_feature_entries_in_home(&home) {
-            Ok(true) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.stale_feature_entries_repaired",
-                    serde_json::json!({ "feature": "guardianv2" }),
-                );
-            }
-            Ok(false) => {}
-            Err(error) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.stale_feature_entries_repair_failed",
-                    serde_json::json!({ "message": error.to_string() }),
-                );
-            }
-        }
+        timeline.mark("cleanup_unsupported_config", 10);
+        hooks.cleanup_unsupported_config()?;
+        crate::relay_config::ensure_windows_sandbox_usable_for_current_user(&home)?;
         if settings.provider_sync_enabled {
+            timeline.mark("provider_sync", 15);
             crate::codex_app_state::capture_app_state_snapshot_nonfatal(&home, "launcher.before");
             hooks.run_provider_sync().await?;
-            settings = hooks
-                .load_settings()
-                .await
-                .context("failed to reload settings after provider sync")?;
-            app_dir = hooks.resolve_app_dir(options.app_dir.as_deref(), &settings)?;
             crate::codex_app_state::sync_app_state_after_provider_switch_nonfatal(
                 &home,
                 "launcher.after_provider_sync",
             );
         }
-        let pending_remote_recovery = hooks.has_pending_remote_control_session_recoveries();
-        if pending_remote_recovery && hooks.remote_control_session_recovery_is_safe_to_run() {
+        if hooks.has_pending_remote_control_session_recoveries()
+            && hooks.remote_control_session_recovery_is_safe_to_run()
+        {
+            timeline.mark("remote_control_session_recovery", 25);
             hooks.run_remote_control_session_recovery().await?;
-        } else if pending_remote_recovery {
+        } else if hooks.has_pending_remote_control_session_recoveries() {
             let _ = crate::diagnostic_log::append_diagnostic_log(
                 "launcher.remote_control_session_finalization_deferred",
                 serde_json::json!({"reason": "desktop_writer_active"}),
             );
         }
-        if settings.codex_app_performance_protection {
-            match crate::workspace_performance::prune_broad_saved_workspace_roots() {
-                Ok(result) if !result.removed.is_empty() => {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.performance_workspace_roots_pruned",
-                        serde_json::json!({ "removed": result.removed }),
-                    );
-                }
-                Ok(_) => {}
-                Err(error) => {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.performance_workspace_prune_failed",
-                        serde_json::json!({ "message": error.to_string() }),
-                    );
-                }
-            }
-        }
-        // Reapply the currently selected manager configuration on every AX
-        // launch so external edits cannot leave Codex on a stale provider.
-        hooks.apply_active_relay_profile(&settings).await?;
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "launcher.startup_config_reapplied",
-            serde_json::json!({ "source": "manager_settings" }),
-        );
-        let codex_version = crate::app_paths::codex_app_version(&app_dir);
-        if crate::relay_config::ensure_requires_openai_auth_for_new_codex(
-            &home,
-            codex_version.as_deref(),
-        )? {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.codex_requires_openai_auth_compat_applied",
-                serde_json::json!({
-                    "codexVersion": codex_version,
-                    "provider": settings.active_relay_profile().id,
-                }),
-            );
-        }
-        crate::relay_config::apply_preferred_model_to_home(
-            &home,
-            &settings.active_relay_profile(),
+        timeline.mark("dream_skin_theme", 30);
+        crate::dream_skin::sync_default_dream_skin_base_theme(
+            settings.enhancements_enabled
+                && settings.codex_app_dream_skin_enabled
+                && !settings.codex_app_dream_skin_paused,
+            &settings.codex_app_dream_skin_theme_config,
         )?;
-        // Native capability values belong to config.toml/profile layers. Do not
-        // replace external changes with the manager's last saved UI snapshot.
-        if let Err(error) = hooks.ensure_plugin_marketplace_config(&settings).await {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.plugin_marketplace_config_failed_nonfatal",
-                serde_json::json!({
-                    "message": error.to_string()
-                }),
-            );
-        }
-        if settings.computer_use_guard_enabled {
-            hooks.ensure_computer_use_config(&settings).await?;
-        }
+        // 这一步在 #2244 的采样里是嫌疑最大的同步全表扫描，单独标记起止，
+        // 从 latest-status 就能看出冷启动时间是否耗在这里。
+        timeline.mark("sanitize_historical_model_suffixes", 40);
         match crate::codex_sqlite::sanitize_historical_model_suffixes(&home) {
             Ok(result) if result.updated > 0 => {
                 let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -458,96 +643,73 @@ where
                 );
             }
         }
-        let protocol_proxy_enabled = relay_protocol_proxy_enabled(&settings);
+        timeline.mark("sanitize_historical_model_suffixes_done", 50);
+        let protocol_proxy_enabled = relay_protocol_proxy_enabled(&settings)
+            || remote_control_provider_proxy_enabled(&settings);
+        // issue #2264：重启链路上的模型漂移修复。launcher 不重放完整 apply（那会
+        // 覆盖 Codex 在 UI 选择后回写的 live 值），只在 live config 的 model 仍是
+        // 工具写入的隐式默认且有未归档目标任务时，对齐到目标任务模型。
+        if settings.relay_profiles_enabled {
+            let profile = settings.active_relay_profile();
+            if profile.relay_mode != crate::settings::RelayMode::Official {
+                if let Err(error) =
+                    crate::relay_config::align_live_config_model_with_goal_thread(&home, &profile)
+                {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.goal_thread_model_align_failed",
+                        serde_json::json!({
+                            "message": error.to_string(),
+                        }),
+                    );
+                }
+            }
+        }
         if protocol_proxy_enabled {
+            timeline.mark("protocol_proxy_config", 55);
             hooks.ensure_active_protocol_proxy_config(&settings).await?;
-            helper_port = crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT;
+            helper_port = crate::protocol_proxy::protocol_proxy_port();
         }
-        hooks
-            .ensure_imagegen_mcp_config(&settings, helper_port)
-            .await
-            .context("failed to configure the Alunixa X image_gen tool")?;
-        // Delete retired settings after provider/common-config replacement, including upgrades.
-        crate::retired_context::remove_from_home(&home)
-            .context("failed to remove retired context configuration")?;
-        // Check after every config writer, immediately before starting services/Codex.
-        if crate::codex_instructions::ensure_model_instructions_before_launch(
-            &home,
-            settings.codex_app_instructions_enabled,
-            &settings.codex_app_instructions,
-        )
-        .context("failed to restore Codex advanced instructions before launch")?
-        {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.model_instructions_restored",
-                serde_json::json!({ "checkedBeforeLaunch": true }),
-            );
-        }
-        hooks
-            .audit_startup_config(&settings, helper_port)
-            .await
-            .context("Codex 启动前全面配置校验失败")?;
         if settings.enhancements_enabled || protocol_proxy_enabled {
-            hooks.start_helper(helper_port).await?;
+            // macOS 重启时旧 launcher 的 socket 释放可能稍晚于进程退出。
+            timeline.mark("helper_bind", 60);
+            let bind_retry_timeout_ms =
+                helper_bind_retry_timeout_ms(protocol_proxy_enabled, cfg!(target_os = "macos"));
+            start_helper_waiting_for_busy_port(
+                || hooks.start_helper(helper_port),
+                bind_retry_timeout_ms,
+                HELPER_BIND_RETRY_INTERVAL_MS,
+                protocol_proxy_enabled,
+            )
+            .await
+            .map_err(|error| {
+                describe_helper_bind_failure(
+                    error,
+                    helper_port,
+                    protocol_proxy_enabled,
+                    bind_retry_timeout_ms,
+                )
+            })?;
             helper_started = true;
+            timeline.mark("helper_listening", 65);
         }
 
-        crate::runtime_health::clear_renderer_error(debug_port);
+        timeline.mark("launch_codex", 70);
         let launch = hooks
             .launch_codex(&app_dir, debug_port, &settings, &settings.codex_extra_args)
             .await?;
-        // Once Codex has started, post-launch enhancement or status-persistence
-        // failures must not terminate the desktop process or stop its helper.
-        // The returned handle retains the helper until natural Codex exit.
+        launched = Some(launch.clone());
+        keep_launched_on_error = true;
+        timeline.mark("launch_codex_done", 80);
 
-        let mut final_status = "running";
-        // With enhancements explicitly off, respect the no-recovery boundary.
-        // Running describes process lifecycle, not verified native UI readiness.
-        let mut final_message = if settings.enhancements_enabled {
-            "Alunixa X launcher ready"
-        } else {
-            "Codex 已启动；增强已关闭，原生界面未验证，未自动重启 app-server"
-        }
-        .to_string();
-        if settings.computer_use_guard_enabled {
-            if hooks
-                .start_computer_use_guard_watchdog(&settings)
-                .await
-                .is_err()
-            {
-                mark_post_launch_degraded(
-                    &mut final_status,
-                    &mut final_message,
-                    "computer-use guard watchdog",
-                );
-            }
-        }
+        let mut injection_degraded = false;
         if settings.enhancements_enabled {
+            timeline.mark("ensure_injection", 85);
             let injection_ready = hooks
                 .ensure_injection(debug_port, helper_port, &app_dir)
                 .await;
+            timeline.mark("ensure_injection_done", 95);
             if injection_ready {
-                if hooks
-                    .verify_startup_injection(debug_port, helper_port, &settings)
-                    .await
-                    .is_err()
-                {
-                    mark_post_launch_degraded(
-                        &mut final_status,
-                        &mut final_message,
-                        "startup injection verification",
-                    );
-                } else if hooks
-                    .start_bridge_watchdog(debug_port, helper_port)
-                    .await
-                    .is_err()
-                {
-                    mark_post_launch_degraded(
-                        &mut final_status,
-                        &mut final_message,
-                        "bridge watchdog",
-                    );
-                }
+                keep_launched_on_error = false;
                 // 注入成功后页面已加载，此时可以通过 CDP 清理 Electron Local Storage
                 // 中残留的带后缀模型名，避免模型选择器继续显示废弃项。
                 crate::codex_local_storage::sanitize_local_storage_model_suffixes_nonfatal(
@@ -555,34 +717,39 @@ where
                 )
                 .await;
             } else {
-                mark_post_launch_degraded(
-                    &mut final_status,
-                    &mut final_message,
-                    "startup injection",
+                let degraded = launch_status(
+                    "running_degraded",
+                    "Codex launched; Alunixa X enhancements are still waiting for the page bridge.",
+                    debug_port,
+                    helper_port,
+                    &app_dir,
                 );
-            }
-
-            // Native UI recovery is independent of enhancement injection and its
-            // verification. Try the bounded native restart even when injection
-            // timed out, without claiming the enhancement bridge is ready.
-            if hooks.wait_for_native_ui(debug_port).await.is_err() {
-                mark_post_launch_degraded(&mut final_status, &mut final_message, "native Codex UI");
+                options.status_store.save_latest(&degraded)?;
+                status_started_at_ms = degraded.started_at_ms;
+                hooks.write_status("running_degraded").await;
+                injection_degraded = true;
             }
         }
 
-        let status = launch_status(
-            final_status,
-            &final_message,
-            debug_port,
-            helper_port,
-            &app_dir,
-        );
-        if options.status_store.save_latest(&status).is_err() {
-            // The helper may also carry the active protocol proxy. A failed
-            // status write must not tear down an otherwise launched session.
-            mark_post_launch_degraded(&mut final_status, &mut final_message, "status persistence");
+        // 注入降级或只启用协议代理也要固定身份；后台重注入不能为旧启动器换绑实例。
+        hooks.capture_injected_launch_identity(debug_port).await;
+        if settings.enhancements_enabled && !injection_degraded {
+            hooks.start_bridge_watchdog(debug_port, helper_port).await?;
         }
-        hooks.write_status(final_status).await;
+
+        if !settings.enhancements_enabled || !injection_degraded {
+            timeline.mark("ready", 100);
+            let status = launch_status(
+                "running",
+                "Alunixa X launcher ready",
+                debug_port,
+                helper_port,
+                &app_dir,
+            );
+            options.status_store.save_latest(&status)?;
+            status_started_at_ms = status.started_at_ms;
+            hooks.write_status("running").await;
+        }
 
         Ok(LaunchHandle {
             debug_port,
@@ -590,6 +757,7 @@ where
             app_dir: app_dir.clone(),
             launch,
             status_store: status_store.clone(),
+            status_started_at_ms,
             helper_started,
             hooks: Arc::clone(&hooks),
         })
@@ -599,12 +767,16 @@ where
     match result {
         Ok(handle) => Ok(handle),
         Err(error) => {
+            hooks.stop_native_browser_compatibility().await;
             if helper_started {
                 hooks.shutdown_helper(helper_port).await;
             }
-            // Only pre-launch errors reach this branch; preserve their stage
-            // and nested cause in the failure shown by AX.
-            let message = format!("{error:#}");
+            if let Some(launch) = &launched {
+                if !keep_launched_on_error {
+                    hooks.terminate_codex(launch).await;
+                }
+            }
+            let message = error.to_string();
             let failure = launch_status("failed", &message, debug_port, helper_port, &app_dir);
             let _ = status_store.save_latest(&failure);
             hooks.write_status("failed").await;
@@ -617,66 +789,15 @@ fn relay_protocol_proxy_enabled(settings: &BackendSettings) -> bool {
     settings.active_relay_uses_protocol_proxy()
 }
 
-fn mark_post_launch_degraded(status: &mut &'static str, message: &mut String, stage: &'static str) {
-    if *status == "running_degraded" {
-        // Preserve earlier failures when another independent stage degrades.
-        message.push_str(&format!(" 另有未完成阶段：{stage}。"));
-    } else {
-        *message = format!(
-            "Codex 已启动，但以下启动阶段未完成：{stage}。窗口已保留，将继续等待 Codex 自然退出；增强功能或原生界面可能尚未就绪。可在原生错误页点击 Try again 继续恢复。"
-        );
-    }
-    *status = "running_degraded";
-    // Only fixed stage identifiers and booleans belong in degraded diagnostics;
-    // upstream errors can contain local paths, tokens, or renderer content.
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        "launcher.post_launch_degraded",
-        serde_json::json!({
-            "stage": stage,
-            "processPreserved": true
-        }),
-    );
-}
-
-fn imagegen_mcp_executable_path(launcher_path: &Path) -> PathBuf {
-    let file_name = if cfg!(windows) {
-        "alunixa-x-imagegen-mcp.exe"
-    } else {
-        "alunixa-x-imagegen-mcp"
-    };
-    launcher_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(file_name)
-}
-
-fn select_native_menu_inspector_port(debug_port: u16) -> u16 {
-    let requested = debug_port.saturating_add(100);
-    crate::ports::select_platform_loopback_port(requested)
-}
-
-fn start_native_menu_localizer(inspector_port: u16) {
-    if inspector_port == 0 {
-        return;
-    }
-    tokio::spawn(async move {
-        if let Err(error) = crate::native_menu::install_native_menu_localizer(inspector_port).await
-        {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "native_menu.localization_failed",
-                serde_json::json!({
-                    "inspector_port": inspector_port,
-                    "message": error.to_string()
-                }),
-            );
-        }
-    });
+fn remote_control_provider_proxy_enabled(settings: &BackendSettings) -> bool {
+    let profile = settings.active_relay_profile();
+    profile.relay_mode == crate::settings::RelayMode::Official && profile.official_mix_api_key
 }
 
 #[cfg(windows)]
 fn apply_codexplusplus_window_icon_after_launch(process_id: u32) {
     let icon_resource_path =
-        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("alunixa-x.exe"));
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("alunixa-x-plus.exe"));
     tokio::spawn(async move {
         for attempt in 1..=30 {
             if crate::windows_apply_codexplusplus_icon_to_process_window(
@@ -732,85 +853,407 @@ impl DefaultLaunchHooks {
         Arc::new(Self::default())
     }
 
-    pub async fn set_bridge_disconnect(&self, disconnect: crate::bridge::BridgeDisconnect) {
-        *self.bridge_disconnect.lock().await = Some(disconnect);
+    /// Configures the launcher-specific callback used by subsequent watchdog reinjections.
+    pub async fn set_bridge_reinjector(&self, reinjector: BridgeReinjector) {
+        *self.bridge_reinjector.lock().await = Some(reinjector);
     }
+}
 
-    pub fn shared_terminal_broker(&self) -> Arc<crate::shared_terminal::SharedTerminalBroker> {
-        self.shared_terminal.clone()
-    }
+fn helper_bind_host() -> String {
+    std::env::var("ALUNIXA_X_HELPER_BIND")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "127.0.0.1".to_string())
+}
 
-    pub async fn start_bridge_connection_watchdog(
+#[async_trait(?Send)]
+impl LaunchHooks for DefaultLaunchHooks {
+    fn resolve_app_dir(
         &self,
-        debug_port: u16,
-        helper_port: u16,
-        reconnect: BridgeReconnectHandler,
+        app_dir: Option<&Path>,
+        settings: &BackendSettings,
+    ) -> anyhow::Result<PathBuf> {
+        crate::app_paths::resolve_codex_app_dir_with_saved(
+            app_dir,
+            Some(settings.codex_app_path.as_str()),
+        )
+        .ok_or_else(|| {
+            // issue #2204：原来四种失败原因（不存在 / 是 Alunixa X 目录 / 无可执行文件 /
+            // 纯自动探测落空）共用一句「Codex App directory not found」，用户看不出
+            // 该改什么。这里按来源细分，并保留原句前缀以便既有日志检索与用户既有
+            // 报障文本仍能对上。
+            let saved = settings.codex_app_path.trim();
+            let message = crate::app_paths::describe_codex_app_dir_not_found(app_dir, Some(saved));
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.app_dir_not_found",
+                serde_json::json!({
+                    "explicit_app_path": app_dir.map(|path| path.to_string_lossy().to_string()),
+                    "saved_app_path": saved,
+                    "reason": message,
+                }),
+            );
+            anyhow::anyhow!(message)
+        })
+    }
+
+    fn select_debug_port(&self, requested: u16) -> u16 {
+        crate::ports::select_packaged_codex_debug_port(requested)
+    }
+
+    fn select_helper_port(&self, requested: u16) -> u16 {
+        crate::ports::select_platform_loopback_port(requested)
+    }
+
+    async fn load_settings(&self) -> anyhow::Result<BackendSettings> {
+        SettingsStore::default().load()
+    }
+
+    fn cleanup_unsupported_config(&self) -> anyhow::Result<()> {
+        let home = crate::relay_config::default_codex_home_dir();
+        crate::relay_config::cleanup_unsupported_approval_policies_in_home(&home)?;
+        Ok(())
+    }
+
+    async fn run_provider_sync(&self) -> anyhow::Result<()> {
+        anyhow::bail!("provider sync requires launcher hooks with alunixa-x-data integration")
+    }
+
+    async fn run_remote_control_session_recovery(&self) -> anyhow::Result<()> {
+        anyhow::bail!(
+            "Remote Control session recovery requires launcher hooks with alunixa-x-data integration"
+        )
+    }
+
+    fn remote_control_session_recovery_is_safe_to_run(&self) -> bool {
+        crate::watcher::find_session_index_cleanup_blocking_processes().is_empty()
+    }
+
+    async fn apply_active_relay_profile(&self, settings: &BackendSettings) -> anyhow::Result<()> {
+        if !settings.relay_profiles_enabled {
+            return Ok(());
+        }
+        let profile = settings.active_relay_profile();
+        let home = crate::relay_config::default_codex_home_dir();
+        let common_config = crate::relay_config::normalize_config_text(
+            &[
+                settings.relay_common_config_contents.as_str(),
+                settings.relay_context_config_contents.as_str(),
+            ]
+            .into_iter()
+            .map(str::trim)
+            .filter(|section| !section.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        );
+        if profile.relay_mode == crate::settings::RelayMode::Official
+            && !profile.official_mix_api_key
+        {
+            let auth_contents = (!profile.auth_contents.trim().is_empty())
+                .then_some(profile.auth_contents.as_str());
+            crate::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents)?;
+            return Ok(());
+        }
+        crate::relay_config::apply_relay_profile_to_home_with_switch_rules(
+            &home,
+            &profile,
+            &common_config,
+        )?;
+        Ok(())
+    }
+
+    async fn ensure_active_protocol_proxy_config(
+        &self,
+        settings: &BackendSettings,
     ) -> anyhow::Result<()> {
-        let mut disconnect = self
-            .bridge_disconnect
-            .lock()
+        let home = crate::relay_config::default_codex_home_dir();
+        crate::relay_config::ensure_active_protocol_proxy_config_in_home(&home, settings)?;
+        Ok(())
+    }
+
+    async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
+        let bind_host = helper_bind_host();
+        let listener = tokio::net::TcpListener::bind((bind_host.as_str(), helper_port))
             .await
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("CDP bridge disconnect signal is unavailable"))?;
+            .with_context(|| {
+                format!("failed to bind helper runtime on {bind_host}:{helper_port}")
+            })?;
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "helper.listening",
+            serde_json::json!({
+                "helper_port": helper_port,
+                "bind_host": bind_host,
+                "address": format!("http://{bind_host}:{helper_port}")
+            }),
+        );
+        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown_rx => break,
+                    accepted = listener.accept() => {
+                        if let Ok((stream, addr)) = accepted {
+                            tokio::spawn(async move {
+                                let _ = handle_helper_connection(stream, Some(addr)).await;
+                            });
+                        }
+                    }
+                }
+            }
+        });
+        *self.helper.lock().await = Some(HelperRuntime {
+            shutdown: shutdown_tx,
+            task,
+        });
+        Ok(())
+    }
+
+    async fn launch_codex(
+        &self,
+        app_dir: &Path,
+        debug_port: u16,
+        _settings: &BackendSettings,
+        extra_args: &[String],
+    ) -> anyhow::Result<CodexLaunch> {
+        let launch_extra_args = normalize_codex_extra_args(extra_args);
+        if cfg!(windows) {
+            // AUMID 解析留在调用点：它要查系统里的 Store 注册表（#2140），是有副作用
+            // 的一步；下面的构造函数只做纯拼接。解析不出来（目录名像包、但系统里没
+            // 这个包）就不再走打包激活，继续往下按路径启动——与既有回退路径一致。
+            let activation =
+                crate::app_paths::packaged_app_user_model_id(app_dir).map(|app_user_model_id| {
+                    build_packaged_activation(&app_user_model_id, debug_port, &launch_extra_args)
+                });
+            if let Some(activation) = activation {
+                let CodexLaunch::PackagedActivation {
+                    app_user_model_id,
+                    arguments,
+                    ..
+                } = &activation
+                else {
+                    unreachable!();
+                };
+                match activate_packaged_app(app_user_model_id, arguments).await {
+                    Ok(process_id) => {
+                        #[cfg(windows)]
+                        {
+                            let executable = crate::app_paths::build_codex_executable(app_dir);
+                            // 立即持有激活 PID，不能在漫长注入之后再按旧 PID 打开进程。
+                            let process = match crate::windows_integration::TrackedWindowsProcess::capture(
+                                process_id,
+                                &executable,
+                            ) {
+                                Ok(process) => process,
+                                Err(error) => {
+                                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                                        "launcher.packaged_process_wait_failed_nonfatal",
+                                        serde_json::json!({ "process_id": process_id, "message": format!("{error:#}") }),
+                                    );
+                                    None
+                                }
+                            };
+                            *self.packaged_executable.lock().await = Some(executable);
+                            *self.packaged_activation_process.lock().await = process;
+                            *self.packaged_launch_identity.lock().await = None;
+                        }
+                        apply_codexplusplus_window_icon_after_launch(process_id);
+                        return Ok(match activation {
+                            CodexLaunch::PackagedActivation {
+                                app_user_model_id,
+                                arguments,
+                                ..
+                            } => CodexLaunch::PackagedActivation {
+                                app_user_model_id,
+                                arguments,
+                                process_id: Some(process_id),
+                            },
+                            CodexLaunch::Process { .. } => unreachable!(),
+                        });
+                    }
+                    Err(error) => {
+                        // AUMID 激活失败（例如清单 Application Id 变化）时回退到
+                        // 直接执行应用，避免整份配置无法启动。
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "launcher.packaged_activation_fallback",
+                            serde_json::json!({
+                                "app_user_model_id": app_user_model_id,
+                                "app_dir": app_dir,
+                                "error": error.to_string()
+                            }),
+                        );
+                        // 提权进程激活打包应用必然失败，按路径启动的进程会因缺少
+                        // 包身份立即退出、注入也必然失败；此时必须如实失败并给出
+                        // 指引，而不是静默回退导致 latest-status.json 误报 running
+                        // （issue #2351）。
+                        if let Some(reason) = packaged_activation_fallback_block_reason(
+                            crate::windows_integration::current_process_is_elevated(),
+                        ) {
+                            anyhow::bail!("{reason}（激活错误：{error}）");
+                        }
+                    }
+                }
+            }
+        }
+
+        if app_dir.extension().and_then(|value| value.to_str()) == Some("app") {
+            let launch_action = select_macos_debug_launch_action(
+                is_macos_app_running(app_dir).await,
+                crate::cdp::endpoint_available(debug_port),
+            );
+            let cleanup_policy = match launch_action {
+                MacosDebugLaunchAction::LaunchNew => MacosCleanupPolicy::QuitIfNotPreviouslyRunning,
+                MacosDebugLaunchAction::ReuseRunningDebugApp => {
+                    MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning
+                }
+                MacosDebugLaunchAction::RestartRunningApp => {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.macos_existing_app_without_cdp_restart_requested",
+                        serde_json::json!({
+                            "app_dir": app_dir,
+                            "debug_port": debug_port
+                        }),
+                    );
+                    quit_macos_app_and_wait(app_dir).await?;
+                    MacosCleanupPolicy::QuitIfNotPreviouslyRunning
+                }
+            };
+            let command = build_macos_open_command(app_dir, debug_port, &launch_extra_args);
+            let executable = command
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("macOS open command is empty"))?;
+            let child = Command::new(executable)
+                .args(&command[1..])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("failed to launch macOS Codex app")?;
+            *self.child.lock().await = Some(child);
+            return Ok(CodexLaunch::Process {
+                command,
+                wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
+                macos_cleanup_policy: Some(cleanup_policy),
+            });
+        }
+
+        let command = build_codex_command(app_dir, debug_port, &launch_extra_args);
+        let executable = command
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Codex command is empty"))?;
+        let mut child_command = Command::new(executable);
+        child_command
+            .args(&command[1..])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        child_command.creation_flags(crate::windows_integration::CREATE_NO_WINDOW);
+        let child = child_command
+            .spawn()
+            .with_context(|| format!("failed to launch Codex executable {executable}"))?;
+        *self.child.lock().await = Some(child);
+        Ok(CodexLaunch::Process {
+            command,
+            wait_strategy: ProcessWaitStrategy::TrackedChild,
+            macos_cleanup_policy: None,
+        })
+    }
+
+    async fn inject(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
+        retry_injection(debug_port, helper_port).await
+    }
+    async fn capture_injected_launch_identity(&self, debug_port: u16) {
+        #[cfg(windows)]
+        {
+            let mut identity = self.packaged_launch_identity.lock().await;
+            if identity.is_some() { return; }
+            let Some(executable) = self.packaged_executable.lock().await.clone() else { return; };
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+            let mut last_discovery_error = None;
+            loop {
+                let browser_id = validated_codex_browser_id(debug_port).await;
+                let mut process = match crate::windows_integration::capture_debug_listener(debug_port, &executable) {
+                    Ok(process) => process,
+                    Err(error) => {
+                        let message = format!("{error:#}");
+                        if last_discovery_error.as_ref() != Some(&message) {
+                            let _ = crate::diagnostic_log::append_diagnostic_log(
+                                "launcher.packaged_process_identity_unavailable",
+                                serde_json::json!({ "debug_port": debug_port, "message": message }),
+                            );
+                        }
+                        last_discovery_error = Some(message);
+                        None
+                    }
+                };
+                let activation = self.packaged_activation_process.lock().await;
+                let activation_matches = activation.as_ref().zip(process.as_ref()).is_some_and(|(activation, process)| {
+                    activation.process_id == process.process_id && activation.birth_id == process.birth_id
+                });
+                drop(activation);
+                // target 列表、UUID 和 listener 查询之间可能发生替换；只接受稳定的 Codex UUID。
+                let browser_still_matches = if let Some(initial) = browser_id.as_deref() {
+                    validated_codex_browser_id(debug_port).await.as_deref() == Some(initial)
+                } else { false };
+                if browser_id.is_some() && !activation_matches && !browser_still_matches { process = None; }
+                let browser_id = browser_id.filter(|_| browser_still_matches);
+                // 无 CDP 页时，已验证可执行文件和句柄的 listener 仍可作为本次进程身份。
+                if browser_id.is_some() || process.is_some() {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.packaged_launch_identity_captured",
+                        serde_json::json!({
+                            "debug_port": debug_port,
+                            "browser_identity_bound": browser_id.is_some(),
+                            "process_id": process.as_ref().map(|process| process.process_id),
+                            "birth_id": process.as_ref().map(|process| process.birth_id),
+                        }),
+                    );
+                    *identity = Some(PackagedLaunchIdentity { browser_id, process });
+                    return;
+                }
+                if tokio::time::Instant::now() >= deadline { return; }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = debug_port;
+    }
+    async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
+        let bridge_reinjector = self.bridge_reinjector.lock().await.clone();
         let (shutdown, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
             #[cfg(windows)]
             let pet_cursor_task = tokio::spawn(run_pet_real_mouse_cursor_driver(debug_port));
-            'watchdog: loop {
-                let reason = tokio::select! {
+            let mut observed_browser_id: Option<String> = None;
+            let mut bridge_health_failures = 0u8;
+            let mut bridge_reinject_backoff = BridgeReinjectBackoff::default();
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
                     _ = &mut shutdown_rx => break,
-                    result = &mut disconnect => result.unwrap_or_else(|_| "CDP bridge monitor stopped".to_string()),
-                };
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "bridge.connection_disconnected",
-                    serde_json::json!({
-                        "debug_port": debug_port,
-                        "helper_port": helper_port,
-                        "message": reason
-                    }),
-                );
-
-                let mut retry_delay = std::time::Duration::ZERO;
-                loop {
-                    if !retry_delay.is_zero() {
-                        tokio::select! {
-                            _ = &mut shutdown_rx => break 'watchdog,
-                            _ = tokio::time::sleep(retry_delay) => {}
+                    _ = interval.tick() => {
+                        let current_browser_id = match crate::cdp::browser_identity(debug_port).await {
+                            Ok(identity) => identity.browser_id().ok(),
+                            Err(_) => None,
+                        };
+                        let identity_changed = current_browser_id
+                            .as_deref()
+                            .is_some_and(|current| {
+                                browser_identity_changed(observed_browser_id.as_deref(), current)
+                            });
+                        if let Some(current) = current_browser_id {
+                            observed_browser_id = Some(current);
                         }
-                    }
-                    let reconnect_result = tokio::select! {
-                        _ = &mut shutdown_rx => break 'watchdog,
-                        result = reconnect() => result,
-                    };
-                    match reconnect_result {
-                        Ok(next_disconnect) => {
-                            disconnect = next_disconnect;
-                            let _ = crate::diagnostic_log::append_diagnostic_log(
-                                "bridge.connection_reconnected",
-                                serde_json::json!({
-                                    "debug_port": debug_port,
-                                    "helper_port": helper_port
-                                }),
-                            );
-                            break;
-                        }
-                        Err(error) => {
-                            let _ = crate::diagnostic_log::append_diagnostic_log(
-                                "bridge.connection_reconnect_failed",
-                                serde_json::json!({
-                                    "debug_port": debug_port,
-                                    "helper_port": helper_port,
-                                    "message": error.to_string()
-                                }),
-                            );
-                            retry_delay = match retry_delay.as_millis() {
-                                0 => std::time::Duration::from_millis(250),
-                                1..=499 => std::time::Duration::from_millis(500),
-                                500..=999 => std::time::Duration::from_secs(1),
-                                1000..=1999 => std::time::Duration::from_secs(2),
-                                _ => std::time::Duration::from_secs(5),
-                            };
-                        }
+                        let (pet_result, _) = tokio::join!(
+                            sync_pet_real_mouse_overlay(debug_port, helper_port),
+                            check_and_reinject_bridge_inner(
+                                debug_port,
+                                helper_port,
+                                identity_changed,
+                                bridge_reinjector.clone(),
+                                &mut bridge_health_failures,
+                                &mut bridge_reinject_backoff,
+                            ),
+                        );
+                        record_pet_overlay_sync_result(debug_port, helper_port, pet_result);
                     }
                 }
             }
@@ -831,536 +1274,6 @@ impl DefaultLaunchHooks {
         }
         Ok(())
     }
-}
-
-fn helper_bind_host() -> String {
-    std::env::var("ALUNIXA_X_HELPER_BIND")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "127.0.0.1".to_string())
-}
-
-#[async_trait(?Send)]
-impl LaunchHooks for DefaultLaunchHooks {
-    async fn ensure_active_protocol_proxy_config(
-        &self,
-        settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        crate::relay_config::ensure_active_protocol_proxy_config_in_home(
-            &crate::codex_home::default_codex_home_dir(),
-            settings,
-        )
-        .map(|_| ())
-    }
-    fn resolve_app_dir(
-        &self,
-        app_dir: Option<&Path>,
-        settings: &BackendSettings,
-    ) -> anyhow::Result<PathBuf> {
-        crate::app_paths::resolve_codex_app_dir_with_saved(
-            app_dir,
-            Some(settings.codex_app_path.as_str()),
-        )
-        .ok_or_else(|| anyhow::anyhow!("Codex App directory not found"))
-    }
-
-    fn select_debug_port(&self, requested: u16) -> u16 {
-        crate::ports::select_packaged_codex_debug_port(requested)
-    }
-
-    fn select_helper_port(&self, requested: u16) -> u16 {
-        crate::ports::select_platform_loopback_port(requested)
-    }
-
-    async fn load_settings(&self) -> anyhow::Result<BackendSettings> {
-        SettingsStore::default().load()
-    }
-
-    async fn run_provider_sync(&self) -> anyhow::Result<()> {
-        anyhow::bail!("provider sync requires launcher hooks with alunixa-x-data integration")
-    }
-
-    async fn apply_active_relay_profile(&self, settings: &BackendSettings) -> anyhow::Result<()> {
-        let mut profile = settings.active_relay_profile();
-        crate::relay_config::normalize_relay_profile_for_storage(&mut profile)
-            .context("failed to validate the active provider before Codex startup")?;
-        let home = crate::relay_config::default_codex_home_dir();
-        let common_config = crate::relay_config::normalize_config_text(
-            &[
-                settings.relay_common_config_contents.as_str(),
-                settings.relay_context_config_contents.as_str(),
-            ]
-            .into_iter()
-            .map(str::trim)
-            .filter(|section| !section.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n\n"),
-        );
-        if profile.relay_mode == crate::settings::RelayMode::Official
-            && !profile.official_mix_api_key
-        {
-            let auth_contents = (!profile.auth_contents.trim().is_empty())
-                .then_some(profile.auth_contents.as_str());
-            crate::relay_config::clear_relay_config_to_home_with_auth_and_computer_use_guard(
-                &home,
-                auth_contents,
-                settings.computer_use_guard_enabled,
-            )?;
-            return Ok(());
-        }
-        crate::relay_config::apply_relay_profile_config_to_home_with_switch_rules_and_computer_use_guard(
-            &home,
-            &profile,
-            &common_config,
-            settings.computer_use_guard_enabled,
-        )?;
-        Ok(())
-    }
-
-    async fn ensure_computer_use_config(&self, settings: &BackendSettings) -> anyhow::Result<()> {
-        if !settings.computer_use_guard_enabled {
-            crate::computer_use_guard::remove_managed_computer_use_config(
-                &crate::relay_config::default_codex_home_dir(),
-            )?;
-            return Ok(());
-        }
-        let home = crate::relay_config::default_codex_home_dir();
-        let artifacts = crate::computer_use_guard::resolve_computer_use_guard_artifacts(&home)?;
-        crate::computer_use_guard::ensure_computer_use_config_with_artifacts(&home, &artifacts)?;
-        *self.computer_use_guard_artifacts.lock().await = Some(artifacts);
-        Ok(())
-    }
-
-    async fn ensure_plugin_marketplace_config(
-        &self,
-        settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        if !settings.codex_app_plugin_marketplace_unlock {
-            crate::plugin_marketplace::remove_alunixa_x_marketplace_config(
-                &crate::relay_config::default_codex_home_dir(),
-            )?;
-            return Ok(());
-        }
-        let home = crate::relay_config::default_codex_home_dir();
-        match crate::plugin_marketplace::ensure_openai_curated_marketplace_config(&home) {
-            Ok(configured) => {
-                if configured {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.openai_curated_marketplace_configured",
-                        serde_json::json!({
-                            "home": home,
-                        }),
-                    );
-                }
-            }
-            Err(error) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.openai_curated_marketplace_config_failed",
-                    serde_json::json!({
-                        "home": home,
-                        "message": error.to_string(),
-                    }),
-                );
-            }
-        }
-        match crate::plugin_marketplace::ensure_role_specific_plugins_marketplace_config(&home) {
-            Ok(configured) => {
-                if configured {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.role_specific_plugins_marketplace_configured",
-                        serde_json::json!({
-                            "home": home,
-                        }),
-                    );
-                }
-            }
-            Err(error) => {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "launcher.role_specific_plugins_marketplace_config_failed",
-                    serde_json::json!({
-                        "home": home,
-                        "message": error.to_string(),
-                    }),
-                );
-            }
-        }
-        Ok(())
-    }
-
-    async fn ensure_imagegen_mcp_config(
-        &self,
-        settings: &BackendSettings,
-        helper_port: u16,
-    ) -> anyhow::Result<()> {
-        let home = crate::relay_config::default_codex_home_dir();
-        let launcher_path = std::env::current_exe().context("无法解析 Alunixa X launcher 路径")?;
-        let enabled = crate::image_models::mcp_enabled(settings);
-        let imagegen_mcp_path = imagegen_mcp_executable_path(&launcher_path);
-        if enabled && !imagegen_mcp_path.is_file() {
-            anyhow::bail!(
-                "Alunixa X image_gen MCP companion 不存在：{}",
-                imagegen_mcp_path.display()
-            );
-        }
-        let changed = crate::relay_config::set_codex_imagegen_mcp_in_home(
-            &home,
-            &imagegen_mcp_path,
-            helper_port,
-            enabled,
-        )?;
-        if changed {
-            let _ = crate::diagnostic_log::append_diagnostic_log(
-                "launcher.imagegen_mcp_config_updated",
-                serde_json::json!({
-                    "enabled": enabled,
-                    "helper_port": helper_port,
-                    "home": home
-                }),
-            );
-        }
-        Ok(())
-    }
-
-    async fn audit_startup_config(
-        &self,
-        settings: &BackendSettings,
-        helper_port: u16,
-    ) -> anyhow::Result<()> {
-        let home = crate::relay_config::default_codex_home_dir();
-        let launcher_path = std::env::current_exe().context("无法解析 Alunixa X launcher 路径")?;
-        self.ensure_computer_use_config(settings).await?;
-        self.ensure_plugin_marketplace_config(settings).await?;
-        self.ensure_imagegen_mcp_config(settings, helper_port)
-            .await?;
-        let report = crate::startup_audit::audit_and_repair_before_launch(
-            &home,
-            settings,
-            helper_port,
-            &launcher_path,
-        )?;
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "launcher.startup_config_audit",
-            serde_json::json!({
-                "checkedFiles": report.checked_files,
-                "checkedConfigSections": report.checked_config_sections,
-                "advancedInstructionFiles": report.advanced_instruction_files,
-                "repairedItems": report.repaired_items
-            }),
-        );
-        Ok(())
-    }
-
-    async fn start_helper(&self, helper_port: u16) -> anyhow::Result<()> {
-        let bind_host = helper_bind_host();
-        let listener = tokio::net::TcpListener::bind((bind_host.as_str(), helper_port))
-            .await
-            .with_context(|| {
-                format!("failed to bind helper runtime on {bind_host}:{helper_port}")
-            })?;
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "helper.listening",
-            serde_json::json!({
-                "helper_port": helper_port,
-                "bind_host": bind_host,
-                "address": format!("http://{bind_host}:{helper_port}")
-            }),
-        );
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let (connection_shutdown, _) = tokio::sync::broadcast::channel(1);
-        let accepted_connection_shutdown = connection_shutdown.clone();
-        let shared_terminal = self.shared_terminal.clone();
-        let task = tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = &mut shutdown_rx => break,
-                    accepted = listener.accept() => {
-                        if let Ok((stream, addr)) = accepted {
-                            let connection_shutdown = accepted_connection_shutdown.subscribe();
-                            let shared_terminal = shared_terminal.clone();
-                            tokio::spawn(async move {
-                                let _ = handle_helper_connection(
-                                    stream,
-                                    Some(addr),
-                                    connection_shutdown,
-                                    shared_terminal,
-                                )
-                                .await;
-                            });
-                        }
-                    }
-                }
-            }
-        });
-        let runtime = HelperRuntime {
-            shutdown: shutdown_tx,
-            connection_shutdown,
-            task,
-        };
-        let previous = self.helper.lock().await.replace(runtime);
-        if let Some(previous) = previous {
-            let _ = previous.connection_shutdown.send(());
-            let _ = previous.shutdown.send(());
-            let _ = previous.task.await;
-        }
-        Ok(())
-    }
-
-    async fn launch_codex(
-        &self,
-        app_dir: &Path,
-        debug_port: u16,
-        settings: &BackendSettings,
-        extra_args: &[String],
-    ) -> anyhow::Result<CodexLaunch> {
-        crate::codex_auto_update::apply_codex_auto_update_policy(
-            settings.codex_app_disable_auto_update,
-        )
-        .context("failed to apply Codex automatic update policy")?;
-        if settings.enhancements_enabled {
-            let home = crate::relay_config::default_codex_home_dir();
-            crate::codex_app_state::prepare_projectless_main_window_nonfatal(
-                &home,
-                "launcher.prelaunch",
-            );
-        }
-        let native_menu_localization_enabled = settings.codex_app_native_menu_localization;
-        let native_menu_inspector_port =
-            native_menu_localization_enabled.then(|| select_native_menu_inspector_port(debug_port));
-        let launch_extra_args = codex_extra_args_for_launch(settings, extra_args);
-        if cfg!(windows) {
-            let activation = if let Some(inspector_port) = native_menu_inspector_port {
-                build_packaged_activation_with_native_menu_inspector(
-                    app_dir,
-                    debug_port,
-                    inspector_port,
-                    &launch_extra_args,
-                )
-            } else {
-                build_packaged_activation(app_dir, debug_port, &launch_extra_args)
-            };
-            if let Some(activation) = activation {
-                #[cfg(windows)]
-                if settings.codex_app_packaged_proxy_repair {
-                    let report = crate::packaged_proxy::inspect_or_repair(
-                        app_dir,
-                        &crate::install::option_or_current_exe(
-                            &None,
-                            crate::install::SILENT_BINARY,
-                        ),
-                        "enforce_at_startup",
-                        None,
-                        None,
-                    )
-                    .await;
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "launcher.packaged_proxy_check",
-                        &report,
-                    );
-                    if report
-                        .packaged
-                        .as_ref()
-                        .is_some_and(|p| p.state == crate::packaged_proxy::ProxyState::DeadLoopback)
-                    {
-                        anyhow::bail!(
-                            "应用隔离代理指向失效本机端口且未修复，请在 Agent 能力页检查并恢复"
-                        );
-                    }
-                }
-                let CodexLaunch::PackagedActivation {
-                    app_user_model_id,
-                    arguments,
-                    ..
-                } = &activation
-                else {
-                    unreachable!();
-                };
-                let process_id = activate_packaged_app(app_user_model_id, arguments).await?;
-                apply_codexplusplus_window_icon_after_launch(process_id);
-                if let Some(inspector_port) = native_menu_inspector_port {
-                    if native_menu_localization_enabled {
-                        start_native_menu_localizer(inspector_port);
-                    }
-                }
-                return Ok(match activation {
-                    CodexLaunch::PackagedActivation {
-                        app_user_model_id,
-                        arguments,
-                        ..
-                    } => CodexLaunch::PackagedActivation {
-                        app_user_model_id,
-                        arguments,
-                        process_id: Some(process_id),
-                    },
-                    CodexLaunch::Process { .. } => unreachable!(),
-                });
-            }
-        }
-
-        if app_dir.extension().and_then(|value| value.to_str()) == Some("app") {
-            let cleanup_policy = if is_macos_app_running(app_dir).await {
-                MacosCleanupPolicy::SkipQuitBecauseAlreadyRunning
-            } else {
-                MacosCleanupPolicy::QuitIfNotPreviouslyRunning
-            };
-            let command = if let Some(inspector_port) = native_menu_inspector_port {
-                build_macos_open_command_with_native_menu_inspector(
-                    app_dir,
-                    debug_port,
-                    inspector_port,
-                    &launch_extra_args,
-                )
-            } else {
-                build_macos_open_command(app_dir, debug_port, &launch_extra_args)
-            };
-            let executable = command
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("macOS open command is empty"))?;
-            let mut child_command = Command::new(executable);
-            crate::codex_auto_update::configure_codex_process_command(
-                &mut child_command,
-                settings.codex_app_disable_auto_update,
-            );
-            let child = child_command
-                .args(&command[1..])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("failed to launch macOS Codex app")?;
-            *self.child.lock().await = Some(child);
-            if let Some(inspector_port) = native_menu_inspector_port {
-                if native_menu_localization_enabled {
-                    start_native_menu_localizer(inspector_port);
-                }
-            }
-            return Ok(CodexLaunch::Process {
-                command,
-                wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
-                macos_cleanup_policy: Some(cleanup_policy),
-            });
-        }
-
-        let command = if let Some(inspector_port) = native_menu_inspector_port {
-            build_codex_command_with_native_menu_inspector(
-                app_dir,
-                debug_port,
-                inspector_port,
-                &launch_extra_args,
-            )
-        } else {
-            build_codex_command(app_dir, debug_port, &launch_extra_args)
-        };
-        let executable = command
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("Codex command is empty"))?;
-        let mut child_command = Command::new(executable);
-        crate::codex_auto_update::configure_codex_process_command(
-            &mut child_command,
-            settings.codex_app_disable_auto_update,
-        );
-        child_command
-            .args(&command[1..])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        #[cfg(windows)]
-        child_command.creation_flags(crate::windows_integration::CREATE_NO_WINDOW);
-        let child = child_command
-            .spawn()
-            .with_context(|| format!("failed to launch Codex executable {executable}"))?;
-        *self.child.lock().await = Some(child);
-        if let Some(inspector_port) = native_menu_inspector_port {
-            if native_menu_localization_enabled {
-                start_native_menu_localizer(inspector_port);
-            }
-        }
-        Ok(CodexLaunch::Process {
-            command,
-            wait_strategy: ProcessWaitStrategy::TrackedChild,
-            macos_cleanup_policy: None,
-        })
-    }
-
-    async fn inject(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
-        let disconnect = retry_injection(debug_port, helper_port).await?;
-        self.set_bridge_disconnect(disconnect).await;
-        Ok(())
-    }
-
-    async fn verify_startup_injection(
-        &self,
-        debug_port: u16,
-        helper_port: u16,
-        settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        verify_startup_model_injection(debug_port, helper_port, settings).await
-    }
-    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
-        crate::runtime_health::wait_for_native_ui(debug_port).await
-    }
-    async fn start_bridge_watchdog(&self, debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
-        let reconnect: BridgeReconnectHandler = Arc::new(move || {
-            Box::pin(async move {
-                let disconnect = retry_injection(debug_port, helper_port).await?;
-                let pet_result = sync_pet_real_mouse_overlay(debug_port, helper_port).await;
-                record_pet_overlay_sync_result(debug_port, helper_port, pet_result);
-                Ok(disconnect)
-            })
-        });
-        self.start_bridge_connection_watchdog(debug_port, helper_port, reconnect)
-            .await
-    }
-
-    async fn start_computer_use_guard_watchdog(
-        &self,
-        settings: &BackendSettings,
-    ) -> anyhow::Result<()> {
-        #[cfg(windows)]
-        {
-            if !settings.computer_use_guard_enabled {
-                return Ok(());
-            }
-            let home = crate::relay_config::default_codex_home_dir();
-            let artifacts = self.computer_use_guard_artifacts.lock().await.clone();
-            let (shutdown, mut shutdown_rx) = tokio::sync::oneshot::channel();
-            let task = tokio::spawn(async move {
-                run_post_launch_computer_use_guard(home, artifacts, &mut shutdown_rx).await;
-            });
-            if let Some(runtime) = self
-                .computer_use_guard_watchdog
-                .lock()
-                .await
-                .replace(ComputerUseGuardWatchdogRuntime { shutdown, task })
-            {
-                let _ = runtime.shutdown.send(());
-                let _ = runtime.task.await;
-            }
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let _ = &settings;
-            let (shutdown, mut shutdown_rx) = tokio::sync::oneshot::channel();
-            let task = tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = &mut shutdown_rx => break,
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
-                            crate::computer_use_guard::kill_orphaned_computer_use_processes();
-                        }
-                    }
-                }
-            });
-            if let Some(runtime) = self
-                .computer_use_guard_watchdog
-                .lock()
-                .await
-                .replace(ComputerUseGuardWatchdogRuntime { shutdown, task })
-            {
-                let _ = runtime.shutdown.send(());
-                let _ = runtime.task.await;
-            }
-        }
-        Ok(())
-    }
 
     async fn write_status(&self, _status: &str) {}
 
@@ -1376,47 +1289,47 @@ impl LaunchHooks for DefaultLaunchHooks {
                 }
             }
             CodexLaunch::PackagedActivation { process_id, .. } => {
+                #[cfg(windows)]
+                {
+                    let executable = self.packaged_executable.lock().await.take()
+                        .context("missing packaged Codex executable identity")?;
+                    let activation = self.packaged_activation_process.lock().await.take();
+                    let identity = self.packaged_launch_identity.lock().await.take().unwrap_or_default();
+                    return wait_for_windows_packaged_exit(
+                        &executable, *process_id, activation, identity, debug_port,
+                    ).await;
+                }
+                #[cfg(not(windows))]
                 if let Some(process_id) = process_id {
-                    if wait_for_windows_process_id(*process_id).await.is_err() {
-                        // A PID can disappear before OpenProcess, or its wait
-                        // handle can fail. Confirm liveness below in either case.
+                    if let Err(error) = wait_for_windows_process_id(*process_id).await {
                         let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "launcher.packaged_process_wait_fallback",
-                            serde_json::json!({"processExitConfirmed": false}),
+                            "launcher.packaged_process_wait_failed_nonfatal",
+                            serde_json::json!({
+                                "process_id": process_id,
+                                "message": format!("{error:#}")
+                            }),
                         );
                     }
                 }
             }
         }
-        let mut empty_streak = 0u32;
-        loop {
-            let has_codex_process = !crate::watcher::find_codex_processes().is_empty();
-            let cdp_available = should_probe_launcher_cdp(cfg!(windows), has_codex_process)
-                && crate::ports::is_existing_codex_cdp_port(debug_port);
-            if !launcher_target_alive(has_codex_process, cdp_available) {
-                empty_streak = empty_streak.saturating_add(1);
-                if empty_streak >= 3 {
-                    break;
-                }
-            } else {
-                empty_streak = 0;
-            }
+        // Another Codex process must not keep this launcher holding the native
+        // browser monitor. Directly owned processes and this debug port can.
+        while owned_launcher_target_alive(
+            launcher_owned_process_alive(launch, debug_port),
+            crate::cdp::endpoint_available(debug_port),
+        ) {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
         Ok(())
     }
 
     async fn shutdown_helper(&self, _helper_port: u16) {
-        if let Some(runtime) = self.computer_use_guard_watchdog.lock().await.take() {
-            let _ = runtime.shutdown.send(());
-            let _ = runtime.task.await;
-        }
         if let Some(runtime) = self.bridge_watchdog.lock().await.take() {
             let _ = runtime.shutdown.send(());
             let _ = runtime.task.await;
         }
         if let Some(runtime) = self.helper.lock().await.take() {
-            let _ = runtime.connection_shutdown.send(());
             let _ = runtime.shutdown.send(());
             let _ = runtime.task.await;
         }
@@ -1457,19 +1370,9 @@ impl LaunchHooks for DefaultLaunchHooks {
     }
 }
 
-fn launcher_target_alive(has_codex_process: bool, cdp_available: bool) -> bool {
-    has_codex_process || cdp_available
-}
-
-fn should_probe_launcher_cdp(is_windows: bool, has_codex_process: bool) -> bool {
-    is_windows && !has_codex_process
-}
-
 async fn handle_helper_connection(
     mut stream: tokio::net::TcpStream,
     remote_addr: Option<SocketAddr>,
-    mut connection_shutdown: tokio::sync::broadcast::Receiver<()>,
-    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
 ) -> anyhow::Result<()> {
     let request = match read_http_request(&mut stream).await {
         Ok(request) => request,
@@ -1496,108 +1399,43 @@ async fn handle_helper_connection(
     let raw_path = parts.next().unwrap_or_default();
     let path = raw_path.split('?').next().unwrap_or(raw_path);
     let request_user_agent = header_value_from_headers(&request_headers, "user-agent");
+    let request_beta_features =
+        header_value_from_headers(&request_headers, "x-codex-beta-features");
+    let request_session_id = header_value_from_headers(&request_headers, "session-id");
+    let request_thread_id = header_value_from_headers(&request_headers, "thread-id");
+    let request_opencode_session =
+        header_value_from_headers(&request_headers, "x-opencode-session");
+    let request_content_type = header_value_from_headers(&request_headers, "content-type");
+    let request_content_encoding = header_value_from_headers(&request_headers, "content-encoding");
     let remote_addr_text = remote_addr.map(|addr| addr.to_string());
 
-    if path.starts_with("/wallpaper/") {
-        let settings = SettingsStore::default().load()?;
-        let range = header_value_from_headers(&request_headers, "range");
-        crate::wallpaper::serve(&mut stream, method, raw_path, range.as_deref(), &settings).await?;
-        stream.shutdown().await?;
-        return Ok(());
-    }
-
-    let quiet_status_request = matches!(
-        path,
-        "/backend/status"
-            | "/backend/events"
-            | "/shared-terminal/submit"
-            | "/shared-terminal/next"
-            | "/shared-terminal/started"
-            | "/shared-terminal/heartbeat"
-            | "/shared-terminal/complete"
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "helper.request",
+        serde_json::json!({
+            "method": method,
+            "path": path,
+            "request_line": request_line,
+            "remote_addr": remote_addr_text,
+            "body_bytes": request.body.len()
+        }),
     );
-    if !quiet_status_request {
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "helper.request",
-            serde_json::json!({
-                "method": method,
-                "path": path,
-                "request_line": request_line,
-                "remote_addr": remote_addr_text,
-                "body_bytes": request.body.len()
-            }),
-        );
-    }
 
-    if path == "/backend/events"
-        && method == "GET"
-        && header_value_from_headers(&request_headers, "upgrade")
-            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
-    {
-        return handle_backend_events_websocket(stream, &request_headers, &mut connection_shutdown)
-            .await;
-    }
-    if crate::protocol_proxy::is_transparent_api_proxy_path(path)
-        && method == "GET"
-        && header_value_from_headers(&request_headers, "upgrade")
-            .is_some_and(|value| value.eq_ignore_ascii_case("websocket"))
-    {
-        let forward_headers = header_pairs_from_headers(&request_headers);
-        return handle_transparent_api_websocket(
-            stream,
+    if matches!(path, "/dictation/transcribe" | "/dictation/status") {
+        return handle_dictation_connection(
+            &mut stream,
+            method,
+            path,
             &request_headers,
-            raw_path,
-            &forward_headers,
-            request_user_agent.as_deref(),
-            remote_addr_text,
-            &mut connection_shutdown,
+            &request.body,
+            request_content_type.as_deref().unwrap_or_default(),
         )
         .await;
     }
-
-    let request_body_bytes = request.body.as_bytes();
-    let request_body = request_body_bytes.map(String::from_utf8_lossy);
-    if path.starts_with("/shared-terminal/")
-        && !remote_addr.is_some_and(|address| address.ip().is_loopback())
-    {
-        let body = serde_json::to_vec(&serde_json::json!({
-            "status": "failed",
-            "message": "共享终端仅允许本机访问"
-        }))?;
-        write_http_response(
+    if crate::protocol_proxy::is_audio_transcriptions_proxy_path(path) && method == "POST" {
+        return handle_audio_transcriptions_proxy_connection(
             &mut stream,
-            "403 Forbidden",
-            "application/json; charset=utf-8",
-            &body,
-        )
-        .await?;
-        stream.shutdown().await?;
-        return Ok(());
-    }
-    if path == "/shared-terminal/submit" && method == "POST" {
-        let request = serde_json::from_slice::<crate::shared_terminal::SharedTerminalRequest>(
-            request_body_bytes.context("共享终端请求体过大")?,
-        )
-        .context("共享终端提交请求无效")?;
-        let response = shared_terminal.submit(request).await?;
-        let body = serde_json::to_vec(&response)?;
-        write_http_response(
-            &mut stream,
-            "200 OK",
-            "application/json; charset=utf-8",
-            &body,
-        )
-        .await?;
-        stream.shutdown().await?;
-        return Ok(());
-    }
-    if crate::protocol_proxy::is_responses_proxy_path(path)
-        && method == "POST"
-        && request_body.is_some()
-    {
-        return handle_protocol_proxy_connection(
-            &mut stream,
-            request_body.as_deref().unwrap_or_default(),
+            &request.body,
+            request_content_type.as_deref(),
             request_user_agent.as_deref(),
             method,
             path,
@@ -1605,13 +1443,107 @@ async fn handle_helper_connection(
         )
         .await;
     }
-    if crate::protocol_proxy::is_chat_completions_proxy_path(path)
-        && method == "POST"
-        && request_body.is_some()
+    if (crate::protocol_proxy::is_image_generations_proxy_path(path)
+        || crate::protocol_proxy::is_image_edits_proxy_path(path))
+        && method == "OPTIONS"
     {
+        write_http_response(
+            &mut stream,
+            "204 No Content",
+            "application/json; charset=utf-8",
+            &[],
+        )
+        .await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
+    if (crate::protocol_proxy::is_image_generations_proxy_path(path)
+        || crate::protocol_proxy::is_image_edits_proxy_path(path))
+        && method == "POST"
+    {
+        return handle_image_proxy_connection(
+            &mut stream,
+            &request.body,
+            request_content_type.as_deref(),
+            request_user_agent.as_deref(),
+            method,
+            path,
+            remote_addr_text,
+        )
+        .await;
+    }
+    if crate::protocol_proxy::is_responses_proxy_path(path) && method == "GET" {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "status": "upgrade_required",
+            "message": "WebSocket transport is not supported by the local protocol proxy; retry with HTTP."
+        }))?;
+        write_http_response(
+            &mut stream,
+            "426 Upgrade Required",
+            "application/json; charset=utf-8",
+            &body,
+        )
+        .await?;
+        log_helper_response(
+            "helper.responses_websocket_upgrade_required",
+            method,
+            path,
+            "426 Upgrade Required",
+            remote_addr_text,
+        );
+        stream.shutdown().await?;
+        return Ok(());
+    }
+    if crate::protocol_proxy::is_responses_proxy_path(path) && method == "POST" {
+        let request_body = match decode_protocol_proxy_request_body(
+            &request.body,
+            request_content_encoding.as_deref(),
+        ) {
+            Ok(body) => body,
+            Err(error) => {
+                let body = serde_json::to_vec(&serde_json::json!({
+                    "status": "failed",
+                    "message": error.to_string()
+                }))?;
+                write_http_response(
+                    &mut stream,
+                    "400 Bad Request",
+                    "application/json; charset=utf-8",
+                    &body,
+                )
+                .await?;
+                log_helper_response(
+                    "helper.protocol_proxy_decode_failed",
+                    method,
+                    path,
+                    "400 Bad Request",
+                    remote_addr_text,
+                );
+                stream.shutdown().await?;
+                return Ok(());
+            }
+        };
+        return handle_protocol_proxy_connection(
+            &mut stream,
+            &request_body,
+            request_user_agent.as_deref(),
+            request_beta_features.as_deref(),
+            crate::protocol_proxy::ProxySessionHeaders {
+                session_id: request_session_id.as_deref(),
+                thread_id: request_thread_id.as_deref(),
+                opencode_session: request_opencode_session.as_deref(),
+            },
+            method,
+            path,
+            remote_addr_text,
+        )
+        .await;
+    }
+    let request_body = String::from_utf8_lossy(&request.body);
+    if crate::protocol_proxy::is_chat_completions_proxy_path(path) && method == "POST" {
         return handle_chat_completions_proxy_connection(
             &mut stream,
-            request_body.as_deref().unwrap_or_default(),
+            &request_body,
             request_user_agent.as_deref(),
             method,
             path,
@@ -1629,53 +1561,33 @@ async fn handle_helper_connection(
         )
         .await;
     }
-    if crate::protocol_proxy::is_transparent_api_proxy_path(path)
-        && matches!(
-            method,
-            "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS"
-        )
-    {
-        if method == "OPTIONS" {
-            write_http_cors_preflight_response(&mut stream).await?;
-            stream.shutdown().await?;
-            return Ok(());
-        }
-        let forward_headers = header_pairs_from_headers(&request_headers);
-        let request_body_len = request.body.len();
-        let request_body = request.body.into_reqwest_body()?;
-        return handle_transparent_proxy_connection(
-            &mut stream,
-            method,
-            raw_path,
-            &forward_headers,
-            request_body,
-            (request_body_len > 0).then_some(request_body_len),
-            request_user_agent.as_deref(),
-            remote_addr_text,
-        )
-        .await;
-    }
 
     let (status, body, content_type, log_event) = if path == "/backend/status"
         && matches!(method, "GET" | "POST" | "OPTIONS")
     {
         (
             "200 OK".to_string(),
-            serde_json::to_vec(&backend_status_payload("http-helper"))?,
+            serde_json::to_vec(&serde_json::json!({
+                "status": "ok",
+                "message": "后端已连接",
+                "version": crate::version::VERSION,
+                "hideOfficialUsageAlert": crate::assets::hide_official_usage_alert_config(
+                    &crate::settings::SettingsStore::default().load().unwrap_or_default()
+                ),
+                "transport": "http-helper"
+            }))?,
             "application/json; charset=utf-8".to_string(),
             "helper.backend_status_ok",
         )
     } else if path == "/diagnostics/log" && matches!(method, "POST" | "OPTIONS") {
         if method == "POST" {
-            let detail = serde_json::from_str::<serde_json::Value>(
-                request_body.as_deref().unwrap_or_default(),
-            )
-            .unwrap_or_else(|error| {
-                serde_json::json!({
-                    "parse_error": error.to_string(),
-                    "raw": request_body.as_deref().unwrap_or_default()
-                })
-            });
+            let detail =
+                serde_json::from_str::<serde_json::Value>(&request_body).unwrap_or_else(|error| {
+                    serde_json::json!({
+                        "parse_error": error.to_string(),
+                        "raw": request_body
+                    })
+                });
             let event = detail
                 .get("event")
                 .and_then(serde_json::Value::as_str)
@@ -1704,6 +1616,17 @@ async fn handle_helper_connection(
         } else {
             overlay_image_response()
         }
+    } else if path == "/dream-skin/image" && matches!(method, "GET" | "OPTIONS") {
+        if method == "OPTIONS" {
+            (
+                "200 OK".to_string(),
+                Vec::new(),
+                "application/octet-stream".to_string(),
+                "helper.dream_skin_image_options",
+            )
+        } else {
+            dream_skin_image_response()
+        }
     } else {
         (
             "404 Not Found".to_string(),
@@ -1715,17 +1638,15 @@ async fn handle_helper_connection(
             "helper.unknown_path",
         )
     };
-    if !quiet_status_request {
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            log_event,
-            serde_json::json!({
-                "method": method,
-                "path": path,
-                "status": status,
-                "remote_addr": remote_addr_text
-            }),
-        );
-    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        log_event,
+        serde_json::json!({
+            "method": method,
+            "path": path,
+            "status": status,
+            "remote_addr": remote_addr_text
+        }),
+    );
     let response = if method == "OPTIONS" {
         format!(
             "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -1744,185 +1665,28 @@ async fn handle_helper_connection(
     Ok(())
 }
 
-fn backend_status_payload(transport: &str) -> Value {
-    serde_json::json!({
-        "status": "ok",
-        "message": "后端已连接",
-        "version": crate::version::VERSION,
-        "transport": transport,
-        "processId": std::process::id()
-    })
-}
-
-async fn handle_backend_events_websocket(
-    mut stream: tokio::net::TcpStream,
-    request: &str,
-    connection_shutdown: &mut tokio::sync::broadcast::Receiver<()>,
-) -> anyhow::Result<()> {
-    let key = header_value_from_headers(request, "sec-websocket-key")
-        .ok_or_else(|| anyhow::anyhow!("WebSocket upgrade is missing Sec-WebSocket-Key"))?;
-    let version = header_value_from_headers(request, "sec-websocket-version")
-        .unwrap_or_else(|| "13".to_string());
-    if version != "13" {
-        anyhow::bail!("unsupported WebSocket version {version}");
-    }
-    let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
-    let response = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {accept_key}\r\n\r\n"
-    );
-    stream.write_all(response.as_bytes()).await?;
-
-    let mut websocket = tokio_tungstenite::WebSocketStream::from_raw_socket(
-        stream,
-        tokio_tungstenite::tungstenite::protocol::Role::Server,
-        None,
-    )
-    .await;
-    websocket
-        .send(tokio_tungstenite::tungstenite::Message::Text(
-            backend_status_payload("websocket").to_string().into(),
-        ))
-        .await?;
-    loop {
-        let message = tokio::select! {
-            _ = connection_shutdown.recv() => {
-                let _ = websocket.close(None).await;
-                break;
-            }
-            message = websocket.next() => message,
-        };
-        let Some(message) = message else {
-            break;
-        };
-        match message? {
-            tokio_tungstenite::tungstenite::Message::Text(text)
-                if text.eq_ignore_ascii_case("status") =>
-            {
-                websocket
-                    .send(tokio_tungstenite::tungstenite::Message::Text(
-                        backend_status_payload("websocket").to_string().into(),
-                    ))
-                    .await?;
-            }
-            tokio_tungstenite::tungstenite::Message::Ping(payload) => {
-                websocket
-                    .send(tokio_tungstenite::tungstenite::Message::Pong(payload))
-                    .await?;
-            }
-            tokio_tungstenite::tungstenite::Message::Close(_) => break,
-            _ => {}
+fn decode_protocol_proxy_request_body(
+    body: &[u8],
+    content_encoding: Option<&str>,
+) -> anyhow::Result<String> {
+    let encoding = content_encoding.unwrap_or_default().trim();
+    let decoded = if encoding.is_empty() || encoding.eq_ignore_ascii_case("identity") {
+        body.to_vec()
+    } else if encoding.eq_ignore_ascii_case("zstd") {
+        let decoder = zstd::stream::read::Decoder::new(std::io::Cursor::new(body))?;
+        let mut limited = decoder.take((MAX_HTTP_BODY_BYTES + 1) as u64);
+        let mut decoded = Vec::new();
+        limited.read_to_end(&mut decoded)?;
+        if decoded.len() > MAX_HTTP_BODY_BYTES {
+            anyhow::bail!("解压后的请求体超过大小限制");
         }
-    }
-    Ok(())
-}
+        decoded
+    } else {
+        anyhow::bail!("不支持的 Content-Encoding：{encoding}");
+    };
 
-async fn handle_transparent_api_websocket(
-    mut stream: tokio::net::TcpStream,
-    request: &str,
-    request_path: &str,
-    request_headers: &[(String, String)],
-    request_user_agent: Option<&str>,
-    remote_addr_text: Option<String>,
-    connection_shutdown: &mut tokio::sync::broadcast::Receiver<()>,
-) -> anyhow::Result<()> {
-    let key = header_value_from_headers(request, "sec-websocket-key")
-        .ok_or_else(|| anyhow::anyhow!("WebSocket upgrade is missing Sec-WebSocket-Key"))?;
-    let version = header_value_from_headers(request, "sec-websocket-version")
-        .unwrap_or_else(|| "13".to_string());
-    if version != "13" {
-        anyhow::bail!("unsupported WebSocket version {version}");
-    }
-    let (mut upstream, upstream_response) =
-        match crate::protocol_proxy::open_transparent_websocket_request(
-            request_path,
-            request_headers,
-            request_user_agent,
-        )
-        .await
-        {
-            Ok(connected) => connected,
-            Err(error) => {
-                log_proxy_open_failure(
-                    "helper.transparent_websocket_open_failed",
-                    "GET",
-                    request_path,
-                    remote_addr_text.as_deref(),
-                    None,
-                    &error,
-                );
-                let body = serde_json::to_vec(&serde_json::json!({
-                    "error": {
-                        "type": "alunixa_x_proxy_error",
-                        "message": error.to_string()
-                    }
-                }))?;
-                write_http_response(
-                    &mut stream,
-                    "502 Bad Gateway",
-                    "application/json; charset=utf-8",
-                    &body,
-                )
-                .await?;
-                stream.shutdown().await?;
-                return Ok(());
-            }
-        };
-    let accept_key = tokio_tungstenite::tungstenite::handshake::derive_accept_key(key.as_bytes());
-    let mut response = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: {accept_key}\r\n"
-    );
-    if let Some(protocol) = upstream_response
-        .headers()
-        .get("sec-websocket-protocol")
-        .and_then(|value| value.to_str().ok())
-    {
-        response.push_str("Sec-WebSocket-Protocol: ");
-        response.push_str(protocol);
-        response.push_str("\r\n");
-    }
-    response.push_str("\r\n");
-    stream.write_all(response.as_bytes()).await?;
-    let mut downstream = tokio_tungstenite::WebSocketStream::from_raw_socket(
-        stream,
-        tokio_tungstenite::tungstenite::protocol::Role::Server,
-        None,
-    )
-    .await;
-    loop {
-        tokio::select! {
-            _ = connection_shutdown.recv() => {
-                let _ = downstream.close(None).await;
-                let _ = upstream.close(None).await;
-                break;
-            }
-            message = downstream.next() => {
-                let Some(message) = message else { break; };
-                let message = message?;
-                let close = matches!(message, tokio_tungstenite::tungstenite::Message::Close(_));
-                upstream.send(message).await?;
-                if close {
-                    break;
-                }
-            }
-            message = upstream.next() => {
-                let Some(message) = message else { break; };
-                let message = message?;
-                let close = matches!(message, tokio_tungstenite::tungstenite::Message::Close(_));
-                downstream.send(message).await?;
-                if close {
-                    break;
-                }
-            }
-        }
-    }
-    log_helper_response(
-        "helper.transparent_websocket_closed",
-        "GET",
-        request_path,
-        "101 Switching Protocols",
-        remote_addr_text,
-    );
-    Ok(())
+    String::from_utf8(decoded)
+        .map_err(|error| anyhow::anyhow!("Responses 请求体不是 UTF-8：{error}"))
 }
 
 fn overlay_image_response() -> (String, Vec<u8>, String, &'static str) {
@@ -1955,6 +1719,47 @@ fn overlay_image_response() -> (String, Vec<u8>, String, &'static str) {
             bytes,
             content_type.to_string(),
             "helper.overlay_image_ok",
+        ),
+        Err(_) => not_found(),
+    }
+}
+
+fn dream_skin_image_response() -> (String, Vec<u8>, String, &'static str) {
+    let not_found = || {
+        (
+            "404 Not Found".to_string(),
+            serde_json::to_vec(&serde_json::json!({
+                "status": "failed",
+                "message": "皮肤图片未启用或图片不可用"
+            }))
+            .unwrap_or_default(),
+            "application/json; charset=utf-8".to_string(),
+            "helper.dream_skin_image_not_found",
+        )
+    };
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    if !settings.codex_app_dream_skin_enabled {
+        return not_found();
+    }
+    let image_path = PathBuf::from(settings.codex_app_dream_skin_image_path.trim());
+    if image_path.as_os_str().is_empty() || !image_path.is_file() {
+        let (content_type, image) = crate::assets::dream_skin_default_image();
+        return (
+            "200 OK".to_string(),
+            image.to_vec(),
+            content_type.to_string(),
+            "helper.dream_skin_default_image_ok",
+        );
+    }
+    let Some(content_type) = overlay_image_content_type(&image_path) else {
+        return not_found();
+    };
+    match std::fs::read(&image_path) {
+        Ok(bytes) => (
+            "200 OK".to_string(),
+            bytes,
+            content_type.to_string(),
+            "helper.dream_skin_image_ok",
         ),
         Err(_) => not_found(),
     }
@@ -2015,35 +1820,11 @@ async fn handle_models_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let settings = crate::settings::SettingsStore::default()
-        .load()
-        .unwrap_or_default();
-    let active = settings.active_relay_profile();
-    if active.relay_mode == crate::settings::RelayMode::CustomModels {
-        let body = serde_json::to_vec(&crate::protocol_proxy::custom_models_list_payload(&active))?;
-        write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
-        log_helper_response(
-            "helper.models_proxy_ok",
-            method,
-            path,
-            "200 OK",
-            remote_addr_text,
-        );
-        stream.shutdown().await?;
-        return Ok(());
-    }
-    let upstream = match crate::protocol_proxy::open_models_proxy_request(request_user_agent).await
+    let mut upstream = match crate::protocol_proxy::open_models_proxy_request(request_user_agent)
+        .await
     {
         Ok(upstream) => upstream,
         Err(error) => {
-            log_proxy_open_failure(
-                "helper.models_proxy_open_failed",
-                method,
-                path,
-                remote_addr_text.as_deref(),
-                None,
-                &error,
-            );
             let body = serde_json::to_vec(
                 &serde_json::json!({                 "status": "failed",                 "message": error.to_string()             }),
             )?;
@@ -2054,11 +1835,11 @@ async fn handle_models_proxy_connection(
                 &body,
             )
             .await?;
-            log_helper_response(
+            log_helper_proxy_failure(
                 "helper.models_proxy_failed",
                 method,
                 path,
-                "502 Bad Gateway",
+                &error.to_string(),
                 remote_addr_text,
             );
             stream.shutdown().await?;
@@ -2072,18 +1853,7 @@ async fn handle_models_proxy_connection(
     } else {
         upstream.content_type.clone()
     };
-    let mut body = upstream.response.bytes().await?.to_vec();
-    if is_success
-        && matches!(
-            upstream.wire_api,
-            crate::protocol_proxy::UpstreamWireApi::AnthropicMessages
-                | crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent
-        )
-    {
-        if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&body) {
-            body = serde_json::to_vec(&crate::protocol_proxy::normalize_models_payload(&payload))?;
-        }
-    }
+    let body = upstream.read_body().await?;
     write_http_response(stream, &status, &content_type, &body).await?;
     log_helper_response(
         if is_success {
@@ -2103,323 +1873,82 @@ async fn handle_protocol_proxy_connection(
     stream: &mut tokio::net::TcpStream,
     request_body: &str,
     request_user_agent: Option<&str>,
+    request_beta_features: Option<&str>,
+    session_headers: crate::protocol_proxy::ProxySessionHeaders<'_>,
     method: &str,
     path: &str,
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
     let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
-    let mut upstream = Some(
-        match crate::protocol_proxy::open_responses_proxy_request_for_path(
-            request_body,
-            request_user_agent,
-            path,
-        )
-        .await
-        {
-            Ok(upstream) => upstream,
-            Err(error) => {
-                log_proxy_open_failure(
-                    "helper.protocol_proxy_open_failed",
-                    method,
-                    path,
-                    remote_addr_text.as_deref(),
-                    request_json
-                        .as_ref()
-                        .and_then(|request| request.get("model"))
-                        .and_then(serde_json::Value::as_str),
-                    &error,
-                );
-                let invalid_request = crate::protocol_proxy::is_protocol_conversion_error(&error)
-                    || error.downcast_ref::<serde_json::Error>().is_some();
-                let status = if invalid_request {
-                    "400 Bad Request"
-                } else {
-                    "502 Bad Gateway"
-                };
-                let body = serde_json::to_vec(&serde_json::json!({
-                    "error":{
-                        "type":if invalid_request { "invalid_request_error" } else { "upstream_error" },
-                        "code":if invalid_request { "unsupported_protocol_conversion" } else { "upstream_request_failed" },
-                        "message":error.to_string()
-                    }
-                }))?;
-                write_http_response(stream, status, "application/json; charset=utf-8", &body)
-                    .await?;
-                log_helper_response(
-                    "helper.protocol_proxy_failed",
-                    method,
-                    path,
-                    status,
-                    remote_addr_text,
-                );
-                stream.shutdown().await?;
-                return Ok(());
-            }
-        },
-    );
-    if !upstream
-        .as_ref()
-        .is_some_and(|response| response.is_success())
+    let mut upstream = match crate::protocol_proxy::open_responses_proxy_request_for_path_with_session_headers(
+        request_body,
+        request_user_agent,
+        path,
+        request_beta_features,
+        session_headers,
+    )
+    .await
     {
-        let failed = upstream
-            .take()
-            .expect("Responses upstream response should exist before handling failure");
-        let status = failed.status();
-        let failed_status_code = failed.status_code;
-        let upstream_content_type = failed.content_type.clone();
-        let upstream_body = failed.response.bytes().await?.to_vec();
-        let negotiation_enabled = responses_id_negotiation_enabled();
-        if failed.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses
-            && negotiation_enabled
-            && matches!(failed_status_code, 400 | 422)
-        {
-            if let Some(repair) =
-                crate::protocol_proxy::repair_responses_item_ids_for_upstream_error(
-                    request_body,
-                    &String::from_utf8_lossy(&upstream_body),
-                )
-            {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "protocol_proxy.responses_item_id_prefix_retry_http_error",
-                    serde_json::json!({
-                        "sourcePrefix": repair.source_prefix,
-                        "expectedPrefix": repair.expected_prefix,
-                        "changedItemCount": repair.changed_count
-                    }),
-                );
-                match crate::protocol_proxy::open_responses_proxy_request_for_path(
-                    &repair.body,
-                    request_user_agent,
-                    path,
-                )
-                .await
-                {
-                    Ok(retry) if retry.is_success() => {
-                        let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "protocol_proxy.responses_item_id_prefix_retry_http_ok",
-                            serde_json::json!({
-                                "sourcePrefix": repair.source_prefix,
-                                "expectedPrefix": repair.expected_prefix,
-                                "changedItemCount": repair.changed_count
-                            }),
-                        );
-                        upstream = Some(retry);
-                    }
-                    Ok(_) => {
-                        let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "protocol_proxy.responses_item_id_prefix_retry_rejected",
-                            serde_json::json!({ "reason": "http_retry_non_success" }),
-                        );
-                    }
-                    Err(error) => {
-                        let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "protocol_proxy.responses_item_id_prefix_retry_failed",
-                            serde_json::json!({
-                                "reason": "http_retry_open_failed",
-                                "error": error.to_string().chars().take(512).collect::<String>()
-                            }),
-                        );
-                    }
-                }
-            }
-        }
-        if upstream.is_none() {
-            let error = crate::protocol_proxy::responses_error_from_upstream(
-                failed_status_code,
-                &upstream_content_type,
-                &upstream_body,
-            );
-            let body = serde_json::to_vec(&error)?;
-            write_http_response(stream, &status, "application/json; charset=utf-8", &body).await?;
-            log_helper_response(
-                "helper.protocol_proxy_upstream_error",
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let unsupported = error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
+            let status = if unsupported.is_some() { "400 Bad Request" } else { "502 Bad Gateway" };
+            let body = serde_json::to_vec(&unsupported.map(|error| error.response_body()).unwrap_or_else(|| {
+                serde_json::json!({"status":"failed","message":error.to_string()})
+            }))?;
+            write_http_response(
+                stream,
+                status,
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            log_helper_proxy_failure(
+                "helper.protocol_proxy_failed",
                 method,
                 path,
-                &status,
+                &error.to_string(),
                 remote_addr_text,
             );
             stream.shutdown().await?;
             return Ok(());
         }
-    }
-    let upstream =
-        upstream.expect("Responses upstream response should exist after failure recovery");
-    if upstream.is_stream {
-        if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
-            let negotiation_enabled = responses_id_negotiation_enabled();
-            if !negotiation_enabled {
-                write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8")
-                    .await?;
-                let normalized_images =
-                    forward_responses_sse_stream(stream, upstream.response, Vec::new()).await?;
-                log_responses_image_status_normalization(normalized_images);
-                log_helper_response(
-                    "helper.protocol_proxy_stream_ok",
-                    method,
-                    path,
-                    "200 OK",
-                    remote_addr_text,
-                );
-                stream.shutdown().await?;
-                return Ok(());
-            }
-            let mut upstream_response = upstream.response;
-            let mut prefix = read_responses_stream_prefix(&mut upstream_response).await?;
-            let mut retry_applied = false;
-            if let Some(repair) =
-                crate::protocol_proxy::repair_responses_item_ids_for_upstream_error(
-                    request_body,
-                    &String::from_utf8_lossy(&prefix),
-                )
-            {
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "protocol_proxy.responses_item_id_prefix_retry",
-                    serde_json::json!({
-                        "sourcePrefix": repair.source_prefix,
-                        "expectedPrefix": repair.expected_prefix,
-                        "changedItemCount": repair.changed_count
-                    }),
-                );
-                match crate::protocol_proxy::open_responses_proxy_request_for_path(
-                    &repair.body,
-                    request_user_agent,
-                    path,
-                )
-                .await
-                {
-                    Ok(retry)
-                        if retry.is_success()
-                            && retry.is_stream
-                            && retry.wire_api
-                                == crate::protocol_proxy::UpstreamWireApi::Responses =>
-                    {
-                        upstream_response = retry.response;
-                        prefix = read_responses_stream_prefix(&mut upstream_response).await?;
-                        if String::from_utf8_lossy(&prefix).contains("invalid_id_prefix") {
-                            let _ = crate::diagnostic_log::append_diagnostic_log(
-                                "protocol_proxy.responses_item_id_prefix_retry_rejected",
-                                serde_json::json!({ "reason": "retry_still_invalid_id_prefix" }),
-                            );
-                        } else {
-                            retry_applied = true;
-                        }
-                    }
-                    Ok(_) => {
-                        let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "protocol_proxy.responses_item_id_prefix_retry_rejected",
-                            serde_json::json!({ "reason": "unexpected_retry_response" }),
-                        );
-                    }
-                    Err(error) => {
-                        let _ = crate::diagnostic_log::append_diagnostic_log(
-                            "protocol_proxy.responses_item_id_prefix_retry_failed",
-                            serde_json::json!({
-                                "error": error.to_string().chars().take(512).collect::<String>()
-                            }),
-                        );
-                    }
-                }
-            }
-            write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
-            let normalized_images =
-                forward_responses_sse_stream(stream, upstream_response, prefix).await?;
-            log_responses_image_status_normalization(normalized_images);
-            log_helper_response(
-                if retry_applied {
-                    "helper.protocol_proxy_stream_retry_ok"
-                } else {
-                    "helper.protocol_proxy_stream_ok"
-                },
-                method,
-                path,
-                "200 OK",
-                remote_addr_text,
-            );
-            stream.shutdown().await?;
-            return Ok(());
-        }
-        write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
-        let fallback_request = serde_json::json!({});
-        let original_request = request_json.as_ref().unwrap_or(&fallback_request);
-        let mut converter = crate::protocol_proxy::UpstreamSseToResponsesConverter::with_request(
-            upstream.wire_api,
-            original_request,
-        )
-        .ok_or_else(|| anyhow::anyhow!("无法为上游协议创建流转换器"))?;
-        let mut bytes_stream = upstream.response.bytes_stream();
-        let mut stream_failed = false;
-        let mut terminal_deadline = None;
-        loop {
-            let deadline = terminal_deadline.unwrap_or_else(|| {
-                tokio::time::Instant::now() + crate::protocol_proxy::upstream_stream_idle_timeout()
-            });
-            let next = match tokio::time::timeout_at(deadline, bytes_stream.next()).await {
-                Ok(next) => next,
-                Err(_) => {
-                    let failed = converter.fail(
-                        if terminal_deadline.is_some() {
-                            "上游已经停止生成但未结束流，保留已收到的数据且不自动重放请求"
-                                .to_string()
-                        } else {
-                            format!(
-                                "上游流超过 {} 秒没有新数据",
-                                crate::protocol_proxy::upstream_stream_idle_timeout().as_secs()
-                            )
-                        },
-                        Some(
-                            if terminal_deadline.is_some() {
-                                "missing_stream_terminator"
-                            } else {
-                                "stream_idle_timeout"
-                            }
-                            .to_string(),
-                        ),
-                    );
-                    if !failed.is_empty() {
-                        stream.write_all(&failed).await?;
-                    }
-                    stream_failed = true;
-                    break;
-                }
-            };
-            let Some(chunk) = next else {
-                break;
-            };
-            match chunk {
-                Ok(bytes) => {
-                    let converted = converter.push_bytes(&bytes);
-                    if !converted.is_empty() {
-                        stream.write_all(&converted).await?;
-                    }
-                    if converter.is_completed() {
-                        break;
-                    }
-                    if converter.is_waiting_for_terminal_event() && terminal_deadline.is_none() {
-                        terminal_deadline =
-                            Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
-                    }
-                }
-                Err(error) => {
-                    let failed = converter.fail(
-                        format!("Stream error: {error}"),
-                        Some("stream_error".to_string()),
-                    );
-                    if !failed.is_empty() {
-                        stream.write_all(&failed).await?;
-                    }
-                    stream_failed = true;
-                    break;
-                }
-            }
-        }
-        if !stream_failed {
-            let tail = converter.finish();
-            if !tail.is_empty() {
-                stream.write_all(&tail).await?;
-            }
-        }
+    };
+    if !upstream.is_success() {
+        let status = upstream.status();
+        let upstream_content_type = upstream.content_type.clone();
+        let upstream_body = upstream.read_body().await?;
+        let error = crate::protocol_proxy::responses_error_from_upstream(
+            upstream.status_code,
+            &upstream_content_type,
+            &upstream_body,
+        );
+        let body = serde_json::to_vec(&error)?;
+        write_http_response(stream, &status, "application/json; charset=utf-8", &body).await?;
         log_helper_response(
-            "helper.protocol_proxy_stream_ok",
+            "helper.protocol_proxy_upstream_error",
+            method,
+            path,
+            &status,
+            remote_addr_text,
+        );
+        stream.shutdown().await?;
+        return Ok(());
+    }
+    if upstream.native_compaction_passthrough {
+        let body = upstream.read_body().await?;
+        let content_type = if upstream.content_type.is_empty() {
+            if upstream.is_stream {
+                "text/event-stream; charset=utf-8"
+            } else {
+                "application/json; charset=utf-8"
+            }
+        } else {
+            &upstream.content_type
+        };
+        write_http_response(stream, "200 OK", content_type, &body).await?;
+        log_helper_response(
+            "helper.protocol_proxy_compaction_native",
             method,
             path,
             "200 OK",
@@ -2428,7 +1957,99 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let upstream_body = upstream.response.bytes().await?;
+    if upstream.is_stream {
+        write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
+        if upstream.compaction {
+            // v2 远程压缩：无论上游协议都重组为恰好一个 compaction 输出项，
+            // 压缩无增量展示诉求，收齐上游文本后一次性下发。
+            // SSE 事件可能跨网络 chunk 拆开，converter 内部按事件边界缓冲。
+            let mut converter = crate::protocol_proxy::CompactionSseConverter::new(
+                request_json
+                    .as_ref()
+                    .and_then(|request| request.get("model"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or(""),
+            );
+            if upstream.wire_api != crate::protocol_proxy::UpstreamWireApi::Responses {
+                converter = converter.with_chat_upstream();
+            }
+            let mut bytes_stream = upstream.take_response()?.bytes_stream();
+            while let Some(chunk) = bytes_stream.next().await {
+                match chunk {
+                    Ok(bytes) => converter.push_upstream_bytes(&bytes),
+                    Err(error) => {
+                        converter.fail(format!("Stream error: {error}"), None);
+                        break;
+                    }
+                }
+            }
+            let payload = converter.finish();
+            stream.write_all(&payload).await?;
+            log_helper_response(
+                "helper.protocol_proxy_compaction_ok",
+                method,
+                path,
+                "200 OK",
+                remote_addr_text,
+            );
+            stream.shutdown().await?;
+            return Ok(());
+        }
+        let failure = forward_protocol_proxy_stream(
+            stream,
+            upstream.take_response()?,
+            upstream.wire_api,
+            request_json.as_ref(),
+        )
+        .await?;
+        if let Some(reason) = failure {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "helper.protocol_proxy_stream_failed",
+                serde_json::json!({
+                    "method": method,
+                    "path": path,
+                    "status": "200 OK",
+                    "stream_outcome": "failed",
+                    "wireApi": upstream.wire_api,
+                    "compactV2": request_json.as_ref().is_some_and(crate::protocol_proxy::request_has_compaction_trigger),
+                    "error": reason,
+                    "remote_addr": remote_addr_text
+                }),
+            );
+        } else {
+            log_helper_response(
+                "helper.protocol_proxy_stream_ok",
+                method,
+                path,
+                "200 OK",
+                remote_addr_text,
+            );
+        }
+        stream.shutdown().await?;
+        return Ok(());
+    }
+    let upstream_body = upstream.read_body().await?;
+    if upstream.compaction {
+        // v2 远程压缩非流式路径：同样重组为单个 compaction 输出项。
+        let body = crate::protocol_proxy::wrap_non_stream_response_as_compaction(
+            &upstream_body,
+            request_json
+                .as_ref()
+                .and_then(|request| request.get("model"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(""),
+        )?;
+        write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &body).await?;
+        log_helper_response(
+            "helper.protocol_proxy_compaction_ok",
+            method,
+            path,
+            "200 OK",
+            remote_addr_text,
+        );
+        stream.shutdown().await?;
+        return Ok(());
+    }
     if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
         write_http_response(
             stream,
@@ -2451,67 +2072,12 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let fallback_request = serde_json::json!({});
-    let original_request = request_json.as_ref().unwrap_or(&fallback_request);
-    let conversion = (|| -> anyhow::Result<serde_json::Value> {
-        let upstream_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
-        match upstream.wire_api {
-            crate::protocol_proxy::UpstreamWireApi::ChatCompletions => {
-                crate::protocol_proxy::chat_completion_to_response_with_request(
-                    upstream_json,
-                    original_request,
-                )
-            }
-            crate::protocol_proxy::UpstreamWireApi::Completions => {
-                crate::protocol_proxy::completion_to_response_with_request(
-                    upstream_json,
-                    original_request,
-                )
-            }
-            crate::protocol_proxy::UpstreamWireApi::AnthropicMessages => {
-                crate::protocol_proxy::anthropic_message_to_response_with_request(
-                    upstream_json,
-                    original_request,
-                )
-            }
-            crate::protocol_proxy::UpstreamWireApi::GeminiGenerateContent => {
-                crate::protocol_proxy::gemini_generate_content_to_response_with_request(
-                    upstream_json,
-                    original_request,
-                )
-            }
-            crate::protocol_proxy::UpstreamWireApi::Responses
-            | crate::protocol_proxy::UpstreamWireApi::AudioTranscriptions
-            | crate::protocol_proxy::UpstreamWireApi::Transparent => Ok(upstream_json),
-        }
-    })();
-    let response_json = match conversion {
-        Ok(response) => response,
-        Err(error) => {
-            let body = serde_json::to_vec(&serde_json::json!({"error":{
-                "type":"upstream_protocol_error","code":"invalid_upstream_response","message":error.to_string()
-            }}))?;
-            write_http_response(
-                stream,
-                "502 Bad Gateway",
-                "application/json; charset=utf-8",
-                &body,
-            )
-            .await?;
-            stream.shutdown().await?;
-            return Ok(());
-        }
+    let chat_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
+    let response_json = if let Some(request_json) = request_json.as_ref() {
+        crate::protocol_proxy::chat_completion_to_response_with_request(chat_json, request_json)?
+    } else {
+        crate::protocol_proxy::chat_completion_to_response(chat_json)?
     };
-    if original_request
-        .get("stream")
-        .and_then(serde_json::Value::as_bool)
-        == Some(true)
-    {
-        let body = crate::protocol_proxy::response_to_sse(&response_json)?;
-        write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &body).await?;
-        stream.shutdown().await?;
-        return Ok(());
-    }
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
     log_helper_response(
@@ -2524,277 +2090,335 @@ async fn handle_protocol_proxy_connection(
     stream.shutdown().await?;
     Ok(())
 }
-
-const RESPONSES_STREAM_PREFIX_LIMIT: usize = 64 * 1024;
-const RESPONSES_SSE_COMPAT_EVENT_LIMIT: usize = 64 * 1024 * 1024;
-
-fn responses_id_negotiation_enabled() -> bool {
-    SettingsStore::default()
-        .load()
-        .map(|settings| {
-            settings.enhancements_enabled && settings.codex_app_responses_id_negotiation
-        })
-        .unwrap_or(false)
-}
-
-async fn read_responses_stream_prefix(response: &mut reqwest::Response) -> anyhow::Result<Vec<u8>> {
-    let mut prefix = Vec::new();
-    while prefix.len() < RESPONSES_STREAM_PREFIX_LIMIT {
-        let Some(chunk) = response
-            .chunk()
-            .await
-            .context("读取 Responses 上游流首段失败")?
-        else {
-            break;
-        };
-        prefix.extend_from_slice(&chunk);
-        if responses_stream_prefix_is_decidable(&prefix) {
-            break;
-        }
-    }
-    Ok(prefix)
-}
-
-fn responses_stream_prefix_is_decidable(prefix: &[u8]) -> bool {
-    if prefix.len() >= RESPONSES_STREAM_PREFIX_LIMIT {
-        return true;
-    }
-    let text = String::from_utf8_lossy(prefix).replace("\r\n", "\n");
-    let Some(complete_end) = text.rfind("\n\n") else {
-        return false;
-    };
-    for block in text[..complete_end].split("\n\n") {
-        if block.contains("invalid_id_prefix") {
-            return true;
-        }
-        let event = block
-            .lines()
-            .find_map(|line| line.strip_prefix("event:"))
-            .map(str::trim)
-            .map(str::to_string)
-            .or_else(|| {
-                block.lines().find_map(|line| {
-                    let data = line.strip_prefix("data:")?.trim();
-                    serde_json::from_str::<serde_json::Value>(data)
-                        .ok()?
-                        .get("type")?
-                        .as_str()
-                        .map(str::to_string)
-                })
-            })
-            .unwrap_or_default();
-        // Some providers validate typed input only after emitting
-        // response.created / response.in_progress. Keep buffering those
-        // lifecycle-only events; release once actual output begins or a
-        // terminal response event arrives.
-        if matches!(
-            event.as_str(),
-            "response.created" | "response.queued" | "response.in_progress"
-        ) {
-            continue;
-        }
-        if event.starts_with("response.") {
-            return true;
-        }
-    }
-    false
-}
-
-#[derive(Default)]
-struct ResponsesSseCompatibilityFilter {
-    pending: Vec<u8>,
-}
-
-impl ResponsesSseCompatibilityFilter {
-    fn push_bytes(&mut self, bytes: &[u8]) -> (Vec<u8>, usize) {
-        self.pending.extend_from_slice(bytes);
-        if self.pending.len() > RESPONSES_SSE_COMPAT_EVENT_LIMIT {
-            return (std::mem::take(&mut self.pending), 0);
-        }
-
-        let mut output = Vec::new();
-        let mut normalized = 0;
-        while let Some(end) = responses_sse_block_end(&self.pending) {
-            let block = self.pending.drain(..end).collect::<Vec<_>>();
-            let (block, changed) = normalize_responses_sse_block(&block);
-            output.extend_from_slice(&block);
-            normalized += changed;
-        }
-        (output, normalized)
-    }
-
-    fn finish(&mut self) -> Vec<u8> {
-        std::mem::take(&mut self.pending)
-    }
-}
-
-fn responses_sse_block_end(bytes: &[u8]) -> Option<usize> {
-    let lf = bytes
-        .windows(2)
-        .position(|window| window == b"\n\n")
-        .map(|index| index + 2);
-    let crlf = bytes
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|index| index + 4);
-    match (lf, crlf) {
-        (Some(lf), Some(crlf)) => Some(lf.min(crlf)),
-        (Some(lf), None) => Some(lf),
-        (None, Some(crlf)) => Some(crlf),
-        (None, None) => None,
-    }
-}
-
-fn normalize_responses_sse_block(block: &[u8]) -> (Vec<u8>, usize) {
-    let Ok(text) = std::str::from_utf8(block) else {
-        return (block.to_vec(), 0);
-    };
-    let (body, event_end, line_end) = if let Some(body) = text.strip_suffix("\r\n\r\n") {
-        (body, "\r\n\r\n", "\r\n")
-    } else if let Some(body) = text.strip_suffix("\n\n") {
-        (body, "\n\n", "\n")
-    } else {
-        return (block.to_vec(), 0);
-    };
-
-    let mut changed = 0;
-    let mut completed_image_event = false;
-    let mut lines = Vec::new();
-    for line in body.split(line_end) {
-        let Some(data) = line.strip_prefix("data:") else {
-            lines.push(line.to_string());
-            continue;
-        };
-        let data = data.trim_start();
-        if data.is_empty() || data == "[DONE]" || !data.contains("image_generation_call") {
-            lines.push(line.to_string());
-            continue;
-        }
-        let Ok(mut value) = serde_json::from_str::<serde_json::Value>(data) else {
-            lines.push(line.to_string());
-            continue;
-        };
-        let normalized = normalize_image_generation_status(&mut value);
-        if normalized == 0 {
-            lines.push(line.to_string());
-            continue;
-        }
-        changed += normalized;
-        completed_image_event |= value.get("type").and_then(serde_json::Value::as_str)
-            == Some("response.image_generation_call.completed");
-        lines.push(format!("data: {}", value));
-    }
-    if changed == 0 {
-        return (block.to_vec(), 0);
-    }
-    if completed_image_event {
-        for line in &mut lines {
-            if line
-                .strip_prefix("event:")
-                .is_some_and(|event| event.trim().starts_with("response.image_generation_call."))
-            {
-                *line = "event: response.image_generation_call.completed".to_string();
-            }
-        }
-    }
-    (
-        format!("{}{event_end}", lines.join(line_end)).into_bytes(),
-        changed,
-    )
-}
-
-fn normalize_image_generation_status(value: &mut serde_json::Value) -> usize {
-    let mut changed = 0;
-    match value {
-        serde_json::Value::Object(object) => {
-            let has_result = object
-                .get("result")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|result| !result.trim().is_empty());
-            let item_type = object
-                .get("type")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            if has_result && item_type.as_deref() == Some("image_generation_call") {
-                let completed =
-                    object.get("status").and_then(serde_json::Value::as_str) == Some("completed");
-                if !completed {
-                    object.insert("status".to_string(), serde_json::json!("completed"));
-                    changed += 1;
-                }
-            }
-            if has_result
-                && item_type
-                    .as_deref()
-                    .is_some_and(|event| event.starts_with("response.image_generation_call."))
-            {
-                if item_type.as_deref() != Some("response.image_generation_call.completed") {
-                    object.insert(
-                        "type".to_string(),
-                        serde_json::json!("response.image_generation_call.completed"),
-                    );
-                    changed += 1;
-                }
-                let completed =
-                    object.get("status").and_then(serde_json::Value::as_str) == Some("completed");
-                if !completed {
-                    object.insert("status".to_string(), serde_json::json!("completed"));
-                    changed += 1;
-                }
-            }
-            for child in object.values_mut() {
-                changed += normalize_image_generation_status(child);
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                changed += normalize_image_generation_status(item);
-            }
-        }
-        _ => {}
-    }
-    changed
-}
-
-async fn forward_responses_sse_stream(
+async fn handle_dictation_connection(
     stream: &mut tokio::net::TcpStream,
-    response: reqwest::Response,
-    initial: Vec<u8>,
-) -> anyhow::Result<usize> {
-    let mut filter = ResponsesSseCompatibilityFilter::default();
-    let mut normalized = 0;
-    let (output, changed) = filter.push_bytes(&initial);
-    normalized += changed;
-    if !output.is_empty() {
-        stream.write_all(&output).await?;
-    }
-    let mut bytes_stream = response.bytes_stream();
-    while let Some(chunk) = bytes_stream.next().await {
-        let Ok(bytes) = chunk else {
-            break;
+    method: &str,
+    path: &str,
+    headers: &str,
+    body: &[u8],
+    content_type: &str,
+) -> anyhow::Result<()> {
+    let (status, response) = if method == "OPTIONS" {
+        ("204 No Content".to_string(), Vec::new())
+    } else if path == "/dictation/status" && method == "GET" {
+        let settings = SettingsStore::default().load().unwrap_or_default();
+        (
+            "200 OK".to_string(),
+            serde_json::to_vec(&crate::dictation::public_status(
+                &crate::dictation::effective_settings(&settings),
+            ))?,
+        )
+    } else if path == "/dictation/transcribe" && method == "POST" {
+        let token = header_value_from_headers(headers, crate::dictation::TOKEN_HEADER);
+        let result = if !crate::dictation::valid_helper_token(token.as_deref()) {
+            Err(crate::dictation::DictationError {
+                status: 403,
+                message: "语音请求未授权，请从 Alunixa X 重新发起".to_string(),
+            })
+        } else {
+            let settings = SettingsStore::default().load().unwrap_or_default();
+            let effective = crate::dictation::effective_settings(&settings);
+            match transcribe_until_disconnect(stream, &effective, body, content_type).await {
+                Some(result) => result,
+                None => return Ok(()),
+            }
         };
-        let (output, changed) = filter.push_bytes(&bytes);
-        normalized += changed;
-        if !output.is_empty() {
-            stream.write_all(&output).await?;
+        match result {
+            Ok(value) => ("200 OK".to_string(), serde_json::to_vec(&value)?),
+            Err(error) => {
+                let reason = match error.status {
+                    400 => "Bad Request",
+                    403 => "Forbidden",
+                    413 => "Payload Too Large",
+                    504 => "Gateway Timeout",
+                    _ => "Bad Gateway",
+                };
+                (
+                    format!("{} {reason}", error.status),
+                    serde_json::to_vec(
+                        &serde_json::json!({ "status": "failed", "message": error.message }),
+                    )?,
+                )
+            }
         }
-    }
-    let tail = filter.finish();
-    if !tail.is_empty() {
-        stream.write_all(&tail).await?;
-    }
-    Ok(normalized)
+    } else {
+        (
+            "405 Method Not Allowed".to_string(),
+            serde_json::to_vec(
+                &serde_json::json!({ "status": "failed", "message": "语音接口不支持此请求方法" }),
+            )?,
+        )
+    };
+    let response_headers = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json; charset=utf-8\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, X-Codex-Plus-Dictation-Token\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        response.len()
+    );
+    stream.write_all(response_headers.as_bytes()).await?;
+    stream.write_all(&response).await?;
+    stream.shutdown().await?;
+    Ok(())
 }
 
-fn log_responses_image_status_normalization(normalized: usize) {
-    if normalized == 0 {
-        return;
+async fn transcribe_until_disconnect(
+    stream: &mut tokio::net::TcpStream,
+    settings: &crate::settings::DictationSettings,
+    body: &[u8],
+    content_type: &str,
+) -> Option<Result<Value, crate::dictation::DictationError>> {
+    // 浏览器取消请求、关闭连接时释放 reqwest future，停止上游上传或等待。
+    tokio::select! {
+        result = crate::dictation::transcribe(settings, body, content_type) => Some(result),
+        _ = async {
+            let mut buffer = [0u8; 64];
+            loop {
+                match stream.read(&mut buffer).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {},
+                }
+            }
+        } => None,
     }
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        "protocol_proxy.responses_image_generation_status_completed",
-        serde_json::json!({ "normalizedItemCount": normalized }),
-    );
 }
+
+#[cfg(test)]
+mod dictation_http_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn dictation_helper_rejects_requests_without_capability() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, remote) = listener.accept().await.unwrap();
+            handle_helper_connection(stream, Some(remote))
+                .await
+                .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client.write_all(format!("POST /dictation/transcribe HTTP/1.1\r\nHost: {addr}\r\nContent-Type: multipart/form-data; boundary=test\r\nContent-Length: 0\r\n\r\n").as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 403 Forbidden"));
+        assert!(!response.contains(crate::dictation::helper_token()));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dictation_helper_preflight_allows_capability_header() {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, remote) = listener.accept().await.unwrap();
+            handle_helper_connection(stream, Some(remote))
+                .await
+                .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(addr).await.unwrap();
+        client
+            .write_all(
+                format!("OPTIONS /dictation/transcribe HTTP/1.1\r\nHost: {addr}\r\n\r\n")
+                    .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 204 No Content"));
+        assert!(response.contains(crate::dictation::TOKEN_HEADER));
+        assert!(!response.contains(crate::dictation::helper_token()));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dictation_disconnect_stops_waiting_for_upstream() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let upstream = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)))
+            .mount(&upstream)
+            .await;
+        let settings = crate::settings::DictationSettings {
+            enabled: true,
+            base_url: format!("{}/v1", upstream.uri()),
+            ..Default::default()
+        };
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let task = tokio::spawn(async move {
+            transcribe_until_disconnect(&mut stream, &settings,
+                b"--test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.webm\"\r\n\r\naudio\r\n--test--\r\n",
+                "multipart/form-data; boundary=test").await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if !upstream.received_requests().await.unwrap().is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        drop(client);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+async fn handle_audio_transcriptions_proxy_connection(
+    stream: &mut tokio::net::TcpStream,
+    request_body: &[u8],
+    request_content_type: Option<&str>,
+    request_user_agent: Option<&str>,
+    method: &str,
+    path: &str,
+    remote_addr_text: Option<String>,
+) -> anyhow::Result<()> {
+    let mut upstream = match crate::protocol_proxy::open_audio_transcriptions_proxy_request(
+        request_body,
+        request_content_type.unwrap_or_default(),
+        request_user_agent,
+    )
+    .await
+    {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "status": "failed",
+                "message": error.to_string()
+            }))?;
+            write_http_response(
+                stream,
+                "502 Bad Gateway",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            log_helper_proxy_failure(
+                "helper.audio_transcriptions_proxy_failed",
+                method,
+                path,
+                &error.to_string(),
+                remote_addr_text,
+            );
+            stream.shutdown().await?;
+            return Ok(());
+        }
+    };
+    let status = upstream.status();
+    let is_success = upstream.is_success();
+    let content_type = if upstream.content_type.is_empty() {
+        "application/json; charset=utf-8".to_string()
+    } else {
+        upstream.content_type.clone()
+    };
+    let body = upstream.read_body().await?;
+    write_http_response(stream, &status, &content_type, &body).await?;
+    log_helper_response(
+        if is_success {
+            "helper.audio_transcriptions_proxy_ok"
+        } else {
+            "helper.audio_transcriptions_proxy_upstream_error"
+        },
+        method,
+        path,
+        &status,
+        remote_addr_text,
+    );
+    stream.shutdown().await?;
+    Ok(())
+}
+
+async fn handle_image_proxy_connection(
+    stream: &mut tokio::net::TcpStream,
+    request_body: &[u8],
+    request_content_type: Option<&str>,
+    request_user_agent: Option<&str>,
+    method: &str,
+    path: &str,
+    remote_addr_text: Option<String>,
+) -> anyhow::Result<()> {
+    let upstream = if crate::protocol_proxy::is_image_generations_proxy_path(path) {
+        crate::protocol_proxy::open_image_generations_proxy_request(
+            request_body,
+            request_user_agent,
+        )
+        .await
+    } else {
+        crate::protocol_proxy::open_image_edits_proxy_request(
+            request_body,
+            request_content_type.unwrap_or_default(),
+            request_user_agent,
+        )
+        .await
+    };
+    let mut upstream = match upstream {
+        Ok(upstream) => upstream,
+        Err(error) => {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "status": "failed",
+                "message": error.to_string()
+            }))?;
+            write_http_response(
+                stream,
+                "502 Bad Gateway",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            log_helper_proxy_failure(
+                "helper.image_proxy_failed",
+                method,
+                path,
+                &error.to_string(),
+                remote_addr_text,
+            );
+            stream.shutdown().await?;
+            return Ok(());
+        }
+    };
+    let status = upstream.status();
+    let is_success = upstream.is_success();
+    let content_type = if upstream.content_type.is_empty() {
+        "application/json; charset=utf-8".to_string()
+    } else {
+        upstream.content_type.clone()
+    };
+    let body = upstream.read_body().await?;
+    write_http_response(stream, &status, &content_type, &body).await?;
+    log_helper_response(
+        if is_success {
+            "helper.image_proxy_ok"
+        } else {
+            "helper.image_proxy_upstream_error"
+        },
+        method,
+        path,
+        &status,
+        remote_addr_text,
+    );
+    stream.shutdown().await?;
+    Ok(())
+}
+
 async fn handle_chat_completions_proxy_connection(
     stream: &mut tokio::net::TcpStream,
     request_body: &str,
@@ -2803,8 +2427,7 @@ async fn handle_chat_completions_proxy_connection(
     path: &str,
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
-    let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
-    let upstream = match crate::protocol_proxy::open_chat_completions_proxy_request(
+    let mut upstream = match crate::protocol_proxy::open_chat_completions_proxy_request(
         request_body,
         request_user_agent,
     )
@@ -2812,17 +2435,6 @@ async fn handle_chat_completions_proxy_connection(
     {
         Ok(upstream) => upstream,
         Err(error) => {
-            log_proxy_open_failure(
-                "helper.chat_completions_proxy_open_failed",
-                method,
-                path,
-                remote_addr_text.as_deref(),
-                request_json
-                    .as_ref()
-                    .and_then(|request| request.get("model"))
-                    .and_then(serde_json::Value::as_str),
-                &error,
-            );
             let body = serde_json::to_vec(
                 &serde_json::json!({                 "status": "failed",                 "message": error.to_string()             }),
             )?;
@@ -2833,11 +2445,11 @@ async fn handle_chat_completions_proxy_connection(
                 &body,
             )
             .await?;
-            log_helper_response(
+            log_helper_proxy_failure(
                 "helper.chat_completions_proxy_failed",
                 method,
                 path,
-                "502 Bad Gateway",
+                &error.to_string(),
                 remote_addr_text,
             );
             stream.shutdown().await?;
@@ -2853,7 +2465,7 @@ async fn handle_chat_completions_proxy_connection(
     };
     if upstream.is_stream && is_success {
         write_http_stream_headers(stream, &status, &content_type).await?;
-        let mut bytes_stream = upstream.response.bytes_stream();
+        let mut bytes_stream = upstream.take_response()?.bytes_stream();
         while let Some(chunk) = bytes_stream.next().await {
             stream.write_all(&chunk?).await?;
         }
@@ -2867,92 +2479,13 @@ async fn handle_chat_completions_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let body = upstream.response.bytes().await?.to_vec();
+    let body = upstream.read_body().await?;
     write_http_response(stream, &status, &content_type, &body).await?;
     log_helper_response(
         if is_success {
             "helper.chat_completions_proxy_ok"
         } else {
             "helper.chat_completions_proxy_upstream_error"
-        },
-        method,
-        path,
-        &status,
-        remote_addr_text,
-    );
-    stream.shutdown().await?;
-    Ok(())
-}
-
-async fn handle_transparent_proxy_connection(
-    stream: &mut tokio::net::TcpStream,
-    method: &str,
-    path: &str,
-    request_headers: &[(String, String)],
-    request_body: reqwest::Body,
-    request_body_len: Option<u64>,
-    request_user_agent: Option<&str>,
-    remote_addr_text: Option<String>,
-) -> anyhow::Result<()> {
-    let upstream = match crate::protocol_proxy::open_transparent_proxy_request(
-        method,
-        path,
-        request_headers,
-        request_body,
-        request_body_len,
-        request_user_agent,
-    )
-    .await
-    {
-        Ok(upstream) => upstream,
-        Err(error) => {
-            log_proxy_open_failure(
-                "helper.transparent_proxy_open_failed",
-                method,
-                path,
-                remote_addr_text.as_deref(),
-                None,
-                &error,
-            );
-            let body = serde_json::to_vec(&serde_json::json!({
-                "error": {
-                    "type": "alunixa_x_proxy_error",
-                    "message": error.to_string()
-                }
-            }))?;
-            write_http_response(
-                stream,
-                "502 Bad Gateway",
-                "application/json; charset=utf-8",
-                &body,
-            )
-            .await?;
-            log_helper_response(
-                "helper.transparent_proxy_failed",
-                method,
-                path,
-                "502 Bad Gateway",
-                remote_addr_text,
-            );
-            stream.shutdown().await?;
-            return Ok(());
-        }
-    };
-    let status = upstream.status();
-    let is_success = upstream.is_success();
-    let response_headers = upstream.response.headers().clone();
-    write_http_proxy_headers(stream, &status, &response_headers).await?;
-    if method != "HEAD" {
-        let mut bytes_stream = upstream.response.bytes_stream();
-        while let Some(chunk) = bytes_stream.next().await {
-            stream.write_all(&chunk?).await?;
-        }
-    }
-    log_helper_response(
-        if is_success {
-            "helper.transparent_proxy_ok"
-        } else {
-            "helper.transparent_proxy_upstream_error"
         },
         method,
         path,
@@ -2978,62 +2511,6 @@ async fn write_http_response(
     Ok(())
 }
 
-async fn write_http_cors_preflight_response(
-    stream: &mut tokio::net::TcpStream,
-) -> anyhow::Result<()> {
-    stream
-        .write_all(
-            b"HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Max-Age: 86400\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        )
-        .await?;
-    Ok(())
-}
-
-async fn write_http_proxy_headers(
-    stream: &mut tokio::net::TcpStream,
-    status: &str,
-    upstream_headers: &reqwest::header::HeaderMap,
-) -> anyhow::Result<()> {
-    let mut response = format!(
-        "HTTP/1.1 {status}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccess-Control-Expose-Headers: *\r\n"
-    );
-    for (name, value) in upstream_headers {
-        if !transparent_response_header_allowed(name.as_str()) {
-            continue;
-        }
-        let Ok(value) = value.to_str() else {
-            continue;
-        };
-        response.push_str(name.as_str());
-        response.push_str(": ");
-        response.push_str(value);
-        response.push_str("\r\n");
-    }
-    response.push_str("Connection: close\r\n\r\n");
-    stream.write_all(response.as_bytes()).await?;
-    Ok(())
-}
-
-fn transparent_response_header_allowed(name: &str) -> bool {
-    !matches!(
-        name.trim().to_ascii_lowercase().as_str(),
-        "access-control-allow-credentials"
-            | "access-control-allow-headers"
-            | "access-control-allow-methods"
-            | "access-control-allow-origin"
-            | "access-control-expose-headers"
-            | "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "set-cookie"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
-}
-
 async fn write_http_stream_headers(
     stream: &mut tokio::net::TcpStream,
     status: &str,
@@ -3044,6 +2521,62 @@ async fn write_http_stream_headers(
     );
     stream.write_all(response.as_bytes()).await?;
     Ok(())
+}
+
+// 返回流失败原因，HTTP 响应头已经发送，不能再把失败伪装成第二个 HTTP 502。
+async fn forward_protocol_proxy_stream(
+    stream: &mut tokio::net::TcpStream,
+    response: reqwest::Response,
+    wire_api: crate::protocol_proxy::UpstreamWireApi,
+    request: Option<&Value>,
+) -> anyhow::Result<Option<String>> {
+    let mut chunks = response.bytes_stream();
+    if wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
+        let mut observer = crate::protocol_proxy::NativeResponsesSseObserver::default();
+        while let Some(chunk) = chunks.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    stream.write_all(&bytes).await?;
+                    observer.push_bytes(&bytes);
+                }
+                Err(error) => return Ok(Some(error.without_url().to_string())),
+            }
+        }
+        return Ok(observer.finish());
+    }
+    let mut converter = request
+        .map(crate::protocol_proxy::ChatSseToResponsesConverter::with_request)
+        .unwrap_or_default();
+    while let Some(chunk) = chunks.next().await {
+        match chunk {
+            Ok(bytes) => {
+                let converted = converter.push_bytes(&bytes);
+                stream.write_all(&converted).await?;
+                if converter.has_failed() {
+                    return Ok(Some("上游返回了流式错误事件".to_string()));
+                }
+            }
+            Err(error) => {
+                let failed = converter.fail(
+                    "上游响应流读取失败".to_string(),
+                    Some("stream_error".to_string()),
+                );
+                stream.write_all(&failed).await?;
+                return Ok(Some(error.without_url().to_string()));
+            }
+        }
+    }
+    // EOF 不是 Chat 协议的完成事件；已发出的文本和工具增量不能自动重放。
+    if !converter.has_terminal_event() {
+        let failed = converter.fail(
+            "上游在完成事件前结束了响应流".to_string(),
+            Some("stream_incomplete".to_string()),
+        );
+        stream.write_all(&failed).await?;
+        return Ok(Some("上游缺少完成事件".to_string()));
+    }
+    stream.write_all(&converter.finish()).await?;
+    Ok(None)
 }
 
 fn log_helper_response(
@@ -3064,57 +2597,28 @@ fn log_helper_response(
     );
 }
 
-fn log_proxy_open_failure(
+/// 代理失败（502）专用日志：在通用字段之外带上**失败原因**。
+///
+/// 这些分支把 error 写进了响应体，旧实现却只记 method/path/status，于是
+/// 客户端只看到「unexpected status 502 Bad Gateway: Unknown error」，
+/// 日志里也查不到为什么（issue #2385）。原因必须落进日志，否则
+/// 「上游不可达 / 没配可用中转 / 请求体解析失败」这几种完全不同的故障
+/// 在现场长得一模一样。
+fn log_helper_proxy_failure(
     event: &str,
     method: &str,
     path: &str,
-    remote_addr: Option<&str>,
-    request_model: Option<&str>,
-    error: &anyhow::Error,
+    error: &str,
+    remote_addr_text: Option<String>,
 ) {
-    let settings = crate::settings::SettingsStore::default()
-        .load()
-        .unwrap_or_default();
-    let relay = settings.active_relay_profile();
-    let custom_model = request_model.and_then(|model| {
-        relay
-            .custom_models
-            .iter()
-            .find(|candidate| candidate.model.eq_ignore_ascii_case(model))
-    });
-    let (base_url, protocol) = custom_model
-        .map(|model| (model.base_url.as_str(), model.protocol))
-        .unwrap_or((relay.base_url.as_str(), relay.protocol));
-    let parsed_url = reqwest::Url::parse(base_url).ok();
-    let mut error_message = error.to_string();
-    let mut secrets = relay
-        .custom_models
-        .iter()
-        .map(|model| model.api_key.as_str())
-        .chain(std::iter::once(relay.api_key.as_str()))
-        .filter(|secret| !secret.trim().is_empty())
-        .collect::<Vec<_>>();
-    secrets.sort_unstable_by_key(|secret| std::cmp::Reverse(secret.len()));
-    for secret in secrets {
-        error_message = error_message.replace(secret, "[REDACTED]");
-    }
-    if error_message.len() > 2048 {
-        error_message.truncate(2048);
-        error_message.push_str("...");
-    }
     let _ = crate::diagnostic_log::append_diagnostic_log(
         event,
         serde_json::json!({
             "method": method,
             "path": path,
-            "remote_addr": remote_addr,
-            "relayId": relay.id,
-            "relayName": relay.name,
-            "requestModel": request_model,
-            "protocol": protocol,
-            "targetScheme": parsed_url.as_ref().map(reqwest::Url::scheme),
-            "targetHost": parsed_url.as_ref().and_then(reqwest::Url::host_str),
-            "error": error_message
+            "status": "502 Bad Gateway",
+            "error": error,
+            "remote_addr": remote_addr_text
         }),
     );
 }
@@ -3153,113 +2657,12 @@ mod computer_use_tests {
 }
 
 const MAX_HTTP_HEADER_BYTES: usize = 64 * 1024;
-#[cfg(not(test))]
-const HTTP_BODY_MEMORY_THRESHOLD: usize = 64 * 1024 * 1024;
-#[cfg(test)]
-const HTTP_BODY_MEMORY_THRESHOLD: usize = 64 * 1024;
-const MAX_HTTP_BODY_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MAX_HTTP_BODY_BYTES: usize = 32 * 1024 * 1024;
+const MAX_HTTP_ENCODED_BODY_BYTES: usize = 64 * 1024 * 1024;
 
 struct HttpRequest {
     headers: Vec<u8>,
-    body: HttpRequestBody,
-}
-
-enum HttpRequestBody {
-    Memory(Vec<u8>),
-    TempFile {
-        file: tempfile::NamedTempFile,
-        len: u64,
-    },
-}
-
-impl HttpRequestBody {
-    fn len(&self) -> u64 {
-        match self {
-            Self::Memory(body) => body.len() as u64,
-            Self::TempFile { len, .. } => *len,
-        }
-    }
-
-    fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Memory(body) => Some(body),
-            Self::TempFile { .. } => None,
-        }
-    }
-
-    fn into_reqwest_body(self) -> anyhow::Result<reqwest::Body> {
-        match self {
-            Self::Memory(body) => Ok(reqwest::Body::from(body)),
-            Self::TempFile { mut file, .. } => {
-                file.as_file_mut().seek(SeekFrom::Start(0))?;
-                let file = file.into_file();
-                let file = tokio::fs::File::from_std(file);
-                Ok(reqwest::Body::wrap_stream(ReaderStream::new(file)))
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn into_vec(self) -> Result<Vec<u8>, HttpRequestReadError> {
-        match self {
-            Self::Memory(body) => Ok(body),
-            Self::TempFile { mut file, len } => {
-                file.as_file_mut().seek(SeekFrom::Start(0))?;
-                let mut body = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
-                std::io::Read::read_to_end(file.as_file_mut(), &mut body)?;
-                Ok(body)
-            }
-        }
-    }
-}
-
-struct HttpRequestBodySink {
-    body: HttpRequestBody,
-}
-
-impl HttpRequestBodySink {
-    fn new() -> Self {
-        Self {
-            body: HttpRequestBody::Memory(Vec::new()),
-        }
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> Result<(), HttpRequestReadError> {
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        let new_len = self
-            .body
-            .len()
-            .checked_add(bytes.len() as u64)
-            .ok_or_else(HttpRequestReadError::payload_too_large)?;
-        if new_len > MAX_HTTP_BODY_BYTES {
-            return Err(HttpRequestReadError::payload_too_large());
-        }
-        match &mut self.body {
-            HttpRequestBody::Memory(body)
-                if body.len().saturating_add(bytes.len()) <= HTTP_BODY_MEMORY_THRESHOLD =>
-            {
-                body.extend_from_slice(bytes);
-            }
-            HttpRequestBody::Memory(body) => {
-                let mut file = tempfile::NamedTempFile::new()
-                    .map_err(|error| HttpRequestReadError::internal(error.to_string()))?;
-                file.write_all(body)?;
-                file.write_all(bytes)?;
-                self.body = HttpRequestBody::TempFile { file, len: new_len };
-            }
-            HttpRequestBody::TempFile { file, len } => {
-                file.write_all(bytes)?;
-                *len = new_len;
-            }
-        }
-        Ok(())
-    }
-
-    fn finish(self) -> HttpRequestBody {
-        self.body
-    }
+    body: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -3280,13 +2683,6 @@ impl HttpRequestReadError {
         Self {
             status: "413 Payload Too Large",
             message: format!("HTTP 请求体超过 {MAX_HTTP_BODY_BYTES} 字节限制"),
-        }
-    }
-
-    fn internal(message: impl Into<String>) -> Self {
-        Self {
-            status: "500 Internal Server Error",
-            message: message.into(),
         }
     }
 
@@ -3312,11 +2708,10 @@ impl From<std::io::Error> for HttpRequestReadError {
 #[derive(Debug)]
 enum HttpBodyFraming {
     Empty,
-    ContentLength(u64),
+    ContentLength(usize),
     Chunked,
 }
 
-#[cfg(test)]
 #[derive(Debug)]
 enum ChunkedBody {
     Incomplete,
@@ -3331,117 +2726,79 @@ enum ChunkedBodyScan {
 
 #[derive(Default)]
 struct ChunkedScanState {
-    buffer: Vec<u8>,
-    state: ChunkedDecodeState,
-    trailer_bytes: usize,
+    position: usize,
+    decoded_len: usize,
     complete: bool,
 }
 
-#[derive(Default)]
-enum ChunkedDecodeState {
-    #[default]
-    Size,
-    Data(u64),
-    DataCrLf,
-    Trailers,
-}
-
 impl ChunkedScanState {
-    fn advance(
-        &mut self,
-        encoded: &[u8],
-        sink: &mut HttpRequestBodySink,
-    ) -> Result<ChunkedBodyScan, HttpRequestReadError> {
+    fn advance(&mut self, encoded: &[u8]) -> Result<ChunkedBodyScan, HttpRequestReadError> {
         if self.complete {
             return Ok(ChunkedBodyScan::Complete);
         }
-        self.buffer.extend_from_slice(encoded);
         loop {
-            match self.state {
-                ChunkedDecodeState::Size => {
-                    let Some(line_end) =
-                        self.buffer.windows(2).position(|window| window == b"\r\n")
+            let chunk_start = self.position;
+            let Some(line_end_offset) = encoded[chunk_start..]
+                .windows(2)
+                .position(|window| window == b"\r\n")
+            else {
+                if encoded.len().saturating_sub(chunk_start) > MAX_HTTP_HEADER_BYTES {
+                    return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+                }
+                return Ok(ChunkedBodyScan::Incomplete);
+            };
+            if line_end_offset > MAX_HTTP_HEADER_BYTES {
+                return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+            }
+            let line_end = chunk_start + line_end_offset;
+            let size_text = std::str::from_utf8(&encoded[chunk_start..line_end])
+                .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
+            let size_token = size_text.split(';').next().unwrap_or_default().trim();
+            let chunk_size = usize::from_str_radix(size_token, 16)
+                .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
+            let data_start = line_end + 2;
+
+            if chunk_size == 0 {
+                let mut trailer_start = data_start;
+                loop {
+                    let Some(trailer_end_offset) = encoded[trailer_start..]
+                        .windows(2)
+                        .position(|window| window == b"\r\n")
                     else {
-                        if self.buffer.len() > MAX_HTTP_HEADER_BYTES {
-                            return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-                        }
-                        return Ok(ChunkedBodyScan::Incomplete);
-                    };
-                    if line_end > MAX_HTTP_HEADER_BYTES {
-                        return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
-                    }
-                    let size_text =
-                        std::str::from_utf8(&self.buffer[..line_end]).map_err(|_| {
-                            HttpRequestReadError::bad_request("chunk size 不是有效 ASCII")
-                        })?;
-                    let size_token = size_text.split(';').next().unwrap_or_default().trim();
-                    let chunk_size = u64::from_str_radix(size_token, 16)
-                        .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
-                    if sink
-                        .body
-                        .len()
-                        .checked_add(chunk_size)
-                        .is_none_or(|length| length > MAX_HTTP_BODY_BYTES)
-                    {
-                        return Err(HttpRequestReadError::payload_too_large());
-                    }
-                    self.buffer.drain(..line_end + 2);
-                    self.state = if chunk_size == 0 {
-                        ChunkedDecodeState::Trailers
-                    } else {
-                        ChunkedDecodeState::Data(chunk_size)
-                    };
-                }
-                ChunkedDecodeState::Data(remaining) => {
-                    if self.buffer.is_empty() {
-                        return Ok(ChunkedBodyScan::Incomplete);
-                    }
-                    let take = usize::try_from(remaining.min(self.buffer.len() as u64))
-                        .unwrap_or(self.buffer.len());
-                    sink.write(&self.buffer[..take])?;
-                    self.buffer.drain(..take);
-                    let remaining = remaining - take as u64;
-                    self.state = if remaining == 0 {
-                        ChunkedDecodeState::DataCrLf
-                    } else {
-                        ChunkedDecodeState::Data(remaining)
-                    };
-                }
-                ChunkedDecodeState::DataCrLf => {
-                    if self.buffer.len() < 2 {
-                        return Ok(ChunkedBodyScan::Incomplete);
-                    }
-                    if &self.buffer[..2] != b"\r\n" {
-                        return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
-                    }
-                    self.buffer.drain(..2);
-                    self.state = ChunkedDecodeState::Size;
-                }
-                ChunkedDecodeState::Trailers => {
-                    let Some(line_end) =
-                        self.buffer.windows(2).position(|window| window == b"\r\n")
-                    else {
-                        if self.trailer_bytes.saturating_add(self.buffer.len())
-                            > MAX_HTTP_HEADER_BYTES
-                        {
+                        if encoded.len().saturating_sub(data_start) > MAX_HTTP_HEADER_BYTES {
                             return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
                         }
                         return Ok(ChunkedBodyScan::Incomplete);
                     };
-                    self.trailer_bytes = self
-                        .trailer_bytes
-                        .checked_add(line_end + 2)
-                        .ok_or_else(|| HttpRequestReadError::bad_request("chunk trailer 过大"))?;
-                    if self.trailer_bytes > MAX_HTTP_HEADER_BYTES {
+                    if trailer_start + trailer_end_offset - data_start > MAX_HTTP_HEADER_BYTES {
                         return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
                     }
-                    self.buffer.drain(..line_end + 2);
-                    if line_end == 0 {
+                    if trailer_end_offset == 0 {
+                        self.position = trailer_start + 2;
                         self.complete = true;
                         return Ok(ChunkedBodyScan::Complete);
                     }
+                    trailer_start += trailer_end_offset + 2;
                 }
             }
+            let next_decoded_len = self
+                .decoded_len
+                .checked_add(chunk_size)
+                .ok_or_else(HttpRequestReadError::payload_too_large)?;
+            if next_decoded_len > MAX_HTTP_BODY_BYTES {
+                return Err(HttpRequestReadError::payload_too_large());
+            }
+            let chunk_end = data_start
+                .checked_add(chunk_size)
+                .ok_or_else(HttpRequestReadError::payload_too_large)?;
+            if encoded.len() < chunk_end + 2 {
+                return Ok(ChunkedBodyScan::Incomplete);
+            }
+            if &encoded[chunk_end..chunk_end + 2] != b"\r\n" {
+                return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
+            }
+            self.decoded_len = next_decoded_len;
+            self.position = chunk_end + 2;
         }
     }
 }
@@ -3450,64 +2807,68 @@ async fn read_http_request(
     stream: &mut tokio::net::TcpStream,
 ) -> Result<HttpRequest, HttpRequestReadError> {
     let mut buffer = Vec::new();
-    let mut chunk = vec![0_u8; 16 * 1024];
-    let header_end = loop {
+    let mut chunk = vec![0_u8; 4096];
+    let mut header_end = None;
+    let mut framing = HttpBodyFraming::Empty;
+    let mut chunked_scan = ChunkedScanState::default();
+
+    loop {
         let read = stream.read(&mut chunk).await?;
         if read == 0 {
-            return Err(HttpRequestReadError::bad_request("HTTP 请求头不完整"));
+            break;
         }
         buffer.extend_from_slice(&chunk[..read]);
-        if let Some(end) = find_header_end(&buffer) {
-            if end > MAX_HTTP_HEADER_BYTES {
+        if header_end.is_none() {
+            header_end = find_header_end(&buffer);
+            if let Some(end) = header_end {
+                if end > MAX_HTTP_HEADER_BYTES {
+                    return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
+                }
+                framing = http_body_framing(&buffer[..end])?;
+            } else if buffer.len() > MAX_HTTP_HEADER_BYTES {
                 return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
             }
-            break end;
         }
-        if buffer.len() > MAX_HTTP_HEADER_BYTES {
-            return Err(HttpRequestReadError::bad_request("HTTP 请求头过大"));
-        }
-    };
-    if buffer.is_empty() || header_end + 4 > buffer.len() {
-        return Err(HttpRequestReadError::bad_request("HTTP 请求头不完整"));
-    }
-    let headers = buffer[..header_end].to_vec();
-    let framing = http_body_framing(&headers)?;
-    let initial_body = buffer[header_end + 4..].to_vec();
-    let mut sink = HttpRequestBodySink::new();
-    let body = match framing {
-        HttpBodyFraming::Empty => sink.finish(),
-        HttpBodyFraming::ContentLength(content_length) => {
-            if content_length > MAX_HTTP_BODY_BYTES {
+        if let Some(end) = header_end {
+            let body = &buffer[end + 4..];
+            if body.len() > MAX_HTTP_ENCODED_BODY_BYTES {
                 return Err(HttpRequestReadError::payload_too_large());
             }
-            let initial_take = usize::try_from(content_length.min(initial_body.len() as u64))
-                .unwrap_or(initial_body.len());
-            sink.write(&initial_body[..initial_take])?;
-            while sink.body.len() < content_length {
-                let read = stream.read(&mut chunk).await?;
-                if read == 0 {
-                    return Err(HttpRequestReadError::bad_request("HTTP 请求体不完整"));
+            match framing {
+                HttpBodyFraming::Empty => break,
+                HttpBodyFraming::ContentLength(content_length) => {
+                    if content_length > MAX_HTTP_BODY_BYTES {
+                        return Err(HttpRequestReadError::payload_too_large());
+                    }
+                    if body.len() >= content_length {
+                        break;
+                    }
                 }
-                let remaining = content_length - sink.body.len();
-                let take = usize::try_from(remaining.min(read as u64)).unwrap_or(read);
-                sink.write(&chunk[..take])?;
+                HttpBodyFraming::Chunked => match chunked_scan.advance(body)? {
+                    ChunkedBodyScan::Incomplete => {}
+                    ChunkedBodyScan::Complete => break,
+                },
             }
-            sink.finish()
         }
-        HttpBodyFraming::Chunked => {
-            let mut decoder = ChunkedScanState::default();
-            let mut status = decoder.advance(&initial_body, &mut sink)?;
-            while matches!(status, ChunkedBodyScan::Incomplete) {
-                let read = stream.read(&mut chunk).await?;
-                if read == 0 {
-                    return Err(HttpRequestReadError::bad_request(
-                        "chunked HTTP 请求体不完整",
-                    ));
-                }
-                status = decoder.advance(&chunk[..read], &mut sink)?;
+    }
+
+    let header_end =
+        header_end.ok_or_else(|| HttpRequestReadError::bad_request("HTTP 请求头不完整"))?;
+    let headers = buffer[..header_end].to_vec();
+    let encoded_body = &buffer[header_end + 4..];
+    let body = match framing {
+        HttpBodyFraming::Empty => Vec::new(),
+        HttpBodyFraming::ContentLength(content_length) => {
+            content_length_body(encoded_body, content_length)?
+        }
+        HttpBodyFraming::Chunked => match decode_chunked_body(encoded_body)? {
+            ChunkedBody::Complete(body) => body,
+            ChunkedBody::Incomplete => {
+                return Err(HttpRequestReadError::bad_request(
+                    "chunked HTTP 请求体不完整",
+                ));
             }
-            sink.finish()
-        }
+        },
     };
 
     Ok(HttpRequest { headers, body })
@@ -3528,7 +2889,7 @@ fn http_body_framing(headers: &[u8]) -> Result<HttpBodyFraming, HttpRequestReadE
         if name.trim().eq_ignore_ascii_case("content-length") {
             let parsed = value
                 .trim()
-                .parse::<u64>()
+                .parse::<usize>()
                 .map_err(|_| HttpRequestReadError::bad_request("Content-Length 无效"))?;
             if content_length
                 .replace(parsed)
@@ -3565,35 +2926,83 @@ fn http_body_framing(headers: &[u8]) -> Result<HttpBodyFraming, HttpRequestReadE
     }
 }
 
-#[cfg(test)]
 fn content_length_body(
     encoded: &[u8],
-    content_length: u64,
+    content_length: usize,
 ) -> Result<Vec<u8>, HttpRequestReadError> {
     if content_length > MAX_HTTP_BODY_BYTES {
         return Err(HttpRequestReadError::payload_too_large());
     }
-    let content_length =
-        usize::try_from(content_length).map_err(|_| HttpRequestReadError::payload_too_large())?;
     if encoded.len() < content_length {
         return Err(HttpRequestReadError::bad_request("HTTP 请求体不完整"));
     }
     Ok(encoded[..content_length].to_vec())
 }
 
-#[cfg(test)]
 fn decode_chunked_body(encoded: &[u8]) -> Result<ChunkedBody, HttpRequestReadError> {
-    let mut sink = HttpRequestBodySink::new();
-    let mut decoder = ChunkedScanState::default();
-    match decoder.advance(encoded, &mut sink)? {
-        ChunkedBodyScan::Incomplete => Ok(ChunkedBody::Incomplete),
-        ChunkedBodyScan::Complete => Ok(ChunkedBody::Complete(sink.finish().into_vec()?)),
+    let mut decoded = Vec::new();
+    let mut position = 0;
+    loop {
+        let Some(line_end_offset) = encoded[position..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+        else {
+            if encoded.len().saturating_sub(position) > MAX_HTTP_HEADER_BYTES {
+                return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+            }
+            return Ok(ChunkedBody::Incomplete);
+        };
+        if line_end_offset > MAX_HTTP_HEADER_BYTES {
+            return Err(HttpRequestReadError::bad_request("chunk size 行过大"));
+        }
+        let line_end = position + line_end_offset;
+        let size_text = std::str::from_utf8(&encoded[position..line_end])
+            .map_err(|_| HttpRequestReadError::bad_request("chunk size 不是有效 ASCII"))?;
+        let size_token = size_text.split(';').next().unwrap_or_default().trim();
+        let chunk_size = usize::from_str_radix(size_token, 16)
+            .map_err(|_| HttpRequestReadError::bad_request("chunk size 无效"))?;
+        position = line_end + 2;
+
+        if chunk_size == 0 {
+            loop {
+                let Some(trailer_end_offset) = encoded[position..]
+                    .windows(2)
+                    .position(|window| window == b"\r\n")
+                else {
+                    if encoded.len().saturating_sub(line_end + 2) > MAX_HTTP_HEADER_BYTES {
+                        return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
+                    }
+                    return Ok(ChunkedBody::Incomplete);
+                };
+                if position + trailer_end_offset - (line_end + 2) > MAX_HTTP_HEADER_BYTES {
+                    return Err(HttpRequestReadError::bad_request("chunk trailer 过大"));
+                }
+                if trailer_end_offset == 0 {
+                    return Ok(ChunkedBody::Complete(decoded));
+                }
+                position += trailer_end_offset + 2;
+            }
+        }
+        if decoded.len().saturating_add(chunk_size) > MAX_HTTP_BODY_BYTES {
+            return Err(HttpRequestReadError::payload_too_large());
+        }
+        let chunk_end = position
+            .checked_add(chunk_size)
+            .ok_or_else(HttpRequestReadError::payload_too_large)?;
+        if encoded.len() < chunk_end + 2 {
+            return Ok(ChunkedBody::Incomplete);
+        }
+        if &encoded[chunk_end..chunk_end + 2] != b"\r\n" {
+            return Err(HttpRequestReadError::bad_request("chunk 数据后缺少 CRLF"));
+        }
+        decoded.extend_from_slice(&encoded[position..chunk_end]);
+        position = chunk_end + 2;
     }
 }
 
 #[cfg(test)]
 fn scan_chunked_body(encoded: &[u8]) -> Result<ChunkedBodyScan, HttpRequestReadError> {
-    ChunkedScanState::default().advance(encoded, &mut HttpRequestBodySink::new())
+    ChunkedScanState::default().advance(encoded)
 }
 
 fn header_value_from_headers(headers: &str, header_name: &str) -> Option<String> {
@@ -3607,19 +3016,6 @@ fn header_value_from_headers(headers: &str, header_name: &str) -> Option<String>
                 .then(|| value.trim().to_string())
         })
         .filter(|value| !value.is_empty())
-}
-
-fn header_pairs_from_headers(headers: &str) -> Vec<(String, String)> {
-    headers
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            let name = name.trim();
-            let value = value.trim();
-            (!name.is_empty() && !value.is_empty()).then(|| (name.to_string(), value.to_string()))
-        })
-        .collect()
 }
 
 fn sanitize_diagnostic_event(event: &str) -> String {
@@ -3653,49 +3049,7 @@ pub fn build_codex_arguments_for_settings(
     debug_port: u16,
     settings: &BackendSettings,
 ) -> Vec<String> {
-    build_codex_arguments(
-        debug_port,
-        &codex_extra_args_for_launch(settings, &settings.codex_extra_args),
-    )
-}
-
-fn codex_extra_args_for_launch(settings: &BackendSettings, extra_args: &[String]) -> Vec<String> {
-    let mut args = Vec::new();
-    if settings.codex_app_fast_startup && !has_host_resolver_rules(extra_args) {
-        args.push(statsig_fast_fail_host_resolver_rule());
-    }
-    args.extend(normalize_codex_extra_args(extra_args));
-    args
-}
-
-fn has_host_resolver_rules(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg.trim().starts_with("--host-resolver-rules"))
-}
-
-fn statsig_fast_fail_host_resolver_rule() -> String {
-    [
-        "--host-resolver-rules=MAP ab.chatgpt.com 127.0.0.1",
-        "MAP featureassets.org 127.0.0.1",
-        "MAP prodregistryv2.org 127.0.0.1",
-        "MAP api.statsigcdn.com 127.0.0.1",
-        "MAP statsigapi.net 127.0.0.1",
-        "MAP cloudflare-dns.com 127.0.0.1",
-    ]
-    .join(",")
-}
-
-pub fn build_codex_arguments_with_native_menu_inspector(
-    debug_port: u16,
-    inspector_port: u16,
-    extra_args: &[String],
-) -> Vec<String> {
-    let mut args = build_codex_arguments(debug_port, &[]);
-    if inspector_port != 0 {
-        args.push(format!("--inspect=127.0.0.1:{inspector_port}"));
-    }
-    args.extend(normalize_codex_extra_args(extra_args));
-    args
+    build_codex_arguments(debug_port, &settings.codex_extra_args)
 }
 
 pub fn build_codex_command(app_dir: &Path, debug_port: u16, extra_args: &[String]) -> Vec<String> {
@@ -3708,62 +3062,28 @@ pub fn build_codex_command(app_dir: &Path, debug_port: u16, extra_args: &[String
     command
 }
 
-pub fn build_codex_command_with_native_menu_inspector(
-    app_dir: &Path,
-    debug_port: u16,
-    inspector_port: u16,
-    extra_args: &[String],
-) -> Vec<String> {
-    let mut command = vec![
-        crate::app_paths::build_codex_executable(app_dir)
-            .to_string_lossy()
-            .to_string(),
-    ];
-    command.extend(build_codex_arguments_with_native_menu_inspector(
-        debug_port,
-        inspector_port,
-        extra_args,
-    ));
-    command
-}
-
+/// 用已解析好的 AUMID 拼出打包激活命令。
+///
+/// AUMID 的解析（含「包是否已注册」这一查询，#2140）留在调用点，这里只做纯拼接。
+/// 早先本函数直接吃 `app_dir` 并自行解析，导致它在 Windows 上依赖 Store 注册表状态、
+/// 无法被测试驱动——测试机上的临时目录永远不算已注册，断言只能拿到 None。
 pub fn build_packaged_activation(
-    app_dir: &Path,
+    app_user_model_id: &str,
     debug_port: u16,
     extra_args: &[String],
-) -> Option<CodexLaunch> {
-    Some(CodexLaunch::PackagedActivation {
-        app_user_model_id: crate::app_paths::packaged_app_user_model_id(app_dir)?,
+) -> CodexLaunch {
+    CodexLaunch::PackagedActivation {
+        app_user_model_id: app_user_model_id.to_string(),
         arguments: command_line_arguments(&build_codex_arguments(debug_port, extra_args)),
         process_id: None,
-    })
+    }
 }
 
-pub fn build_packaged_activation_with_native_menu_inspector(
-    app_dir: &Path,
-    debug_port: u16,
-    inspector_port: u16,
-    extra_args: &[String],
-) -> Option<CodexLaunch> {
-    Some(CodexLaunch::PackagedActivation {
-        app_user_model_id: crate::app_paths::packaged_app_user_model_id(app_dir)?,
-        arguments: command_line_arguments(&build_codex_arguments_with_native_menu_inspector(
-            debug_port,
-            inspector_port,
-            extra_args,
-        )),
-        process_id: None,
-    })
-}
-
-async fn retry_injection(
-    debug_port: u16,
-    helper_port: u16,
-) -> anyhow::Result<crate::bridge::BridgeDisconnect> {
+async fn retry_injection(debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
     let mut last_error = None;
     for _ in 0..20 {
         match try_inject(debug_port, helper_port).await {
-            Ok(disconnect) => return Ok(disconnect),
+            Ok(()) => return Ok(()),
             Err(error) => {
                 last_error = Some(error);
                 tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -3773,100 +3093,354 @@ async fn retry_injection(
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("Codex injection failed")))
 }
 
-async fn verify_startup_model_injection(
+pub async fn check_and_reinject_bridge(debug_port: u16, helper_port: u16) -> bool {
+    // This one-shot entry point preserves its historical immediate-repair behavior.
+    let mut health_failures = BRIDGE_HEALTH_FAILURE_THRESHOLD.saturating_sub(1);
+    let mut backoff = BridgeReinjectBackoff::default();
+    check_and_reinject_bridge_inner(
+        debug_port,
+        helper_port,
+        false,
+        None,
+        &mut health_failures,
+        &mut backoff,
+    )
+    .await
+}
+
+pub fn browser_identity_changed(previous: Option<&str>, current: &str) -> bool {
+    previous.is_some_and(|previous| previous != current)
+}
+
+fn owned_launcher_target_alive(owned_process_alive: bool, debug_port_open: bool) -> bool {
+    owned_process_alive || debug_port_open
+}
+
+#[cfg(any(windows, test))]
+async fn validated_codex_browser_id(debug_port: u16) -> Option<String> {
+    let targets = crate::cdp::list_targets(debug_port).await.ok()?;
+    crate::cdp::pick_injectable_codex_page_target(&targets).ok()?;
+    crate::cdp::browser_identity(debug_port).await.ok()?.browser_id().ok()
+}
+
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct PackagedExitGrace {
+    missing_since: Option<std::time::Instant>,
+    missed_probes: u32,
+}
+
+#[cfg(any(windows, test))]
+impl PackagedExitGrace {
+    fn keep_waiting(
+        &mut self,
+        process_alive: Option<bool>,
+        cdp_available: bool,
+        now: std::time::Instant,
+    ) -> bool {
+        // 已捕获进程退出后，同端口的新实例不能为旧 launcher 续命。
+        if process_alive.unwrap_or(cdp_available) {
+            self.missing_since = None;
+            self.missed_probes = 0;
+            return true;
+        }
+        self.missed_probes = self.missed_probes.saturating_add(1);
+        let since = *self.missing_since.get_or_insert(now);
+        self.missed_probes < 3
+            || now.saturating_duration_since(since) < std::time::Duration::from_secs(10)
+    }
+}
+
+#[cfg(any(windows, test))]
+fn activation_process_is_startup_evidence(alive: bool, elapsed: std::time::Duration) -> bool {
+    // AUMID 有时返回仍存活的中转进程；它只能给实际调试进程有限的出现时间。
+    alive && elapsed < std::time::Duration::from_secs(30)
+}
+
+#[cfg(any(windows, test))]
+struct PackagedBrowserBinding {
+    initial_id: Option<String>,
+    replaced: bool,
+}
+
+#[cfg(any(windows, test))]
+impl PackagedBrowserBinding {
+    fn owns(&mut self, current_id: Option<&str>) -> bool {
+        if self.replaced { return false; }
+        match (self.initial_id.as_deref(), current_id) {
+            (Some(initial), Some(current)) if initial == current => true,
+            (Some(_), Some(_)) => { self.replaced = true; false }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_windows_packaged_exit(
+    executable: &Path,
+    activation_pid: Option<u32>,
+    activation: Option<crate::windows_integration::TrackedWindowsProcess>,
+    identity: PackagedLaunchIdentity,
+    debug_port: u16,
+) -> anyhow::Result<()> {
+    use crate::windows_integration::{TrackedWindowsProcess, capture_debug_listener};
+    let mut tracked = identity.process;
+    let mut browser = PackagedBrowserBinding { initial_id: identity.browser_id, replaced: false };
+    let mut grace = PackagedExitGrace::default();
+    let mut last_discovery_error: Option<String> = None;
+    let started_waiting = std::time::Instant::now();
+    loop {
+        let mut owned_browser = false;
+        if tracked.is_none() {
+            let current_browser_id = if browser.initial_id.is_some() && !browser.replaced {
+                crate::cdp::browser_identity(debug_port).await.ok()
+                    .and_then(|identity| identity.browser_id().ok())
+            } else { None };
+            owned_browser = browser.owns(current_browser_id.as_deref());
+            let discovery = if browser.replaced {
+                Ok(None)
+            } else {
+                capture_debug_listener(debug_port, executable).map(|process| process.filter(|process| {
+                    // 重新查询只能沿用初始 browser，或启动时已持有的同一个内核进程。
+                    owned_browser || activation.as_ref().is_some_and(|activation| {
+                        activation.process_id == process.process_id && activation.birth_id == process.birth_id
+                    })
+                }))
+            };
+            let discovery = match discovery {
+                Ok(Some(process)) => {
+                    let activation_matches = activation.as_ref().is_some_and(|activation| {
+                        activation.process_id == process.process_id && activation.birth_id == process.birth_id
+                    });
+                    if !activation_matches {
+                        let confirmation = crate::cdp::browser_identity(debug_port).await.ok()
+                            .and_then(|identity| identity.browser_id().ok());
+                        owned_browser = browser.owns(confirmation.as_deref());
+                    }
+                    Ok((activation_matches || owned_browser).then_some(process))
+                }
+                other => other,
+            };
+            match discovery {
+                Ok(Some(process)) => {
+                    let _ = crate::diagnostic_log::append_diagnostic_log(
+                        "launcher.packaged_process_tracked",
+                        serde_json::json!({ "debug_port": debug_port, "process_id": process.process_id, "birth_id": process.birth_id, "activation_pid": activation_pid }),
+                    );
+                    tracked = Some(process);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let message = format!("{error:#}");
+                    if last_discovery_error.as_deref() != Some(&message) {
+                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                            "launcher.packaged_process_identity_unavailable",
+                            serde_json::json!({ "debug_port": debug_port, "message": message }),
+                        );
+                    }
+                    last_discovery_error = Some(message);
+                }
+            }
+        }
+        let process_alive = if let Some(process) = &tracked {
+            Some(process.is_alive()?)
+        } else if browser.replaced {
+            Some(false)
+        } else {
+            // AUMID PID 只作等待实际 listener 出现期间的退路，不能替换已捕获主进程。
+            activation
+                .as_ref()
+                .map(TrackedWindowsProcess::is_alive)
+                .transpose()?
+                .filter(|alive| {
+                    activation_process_is_startup_evidence(*alive, started_waiting.elapsed())
+                })
+        };
+        if !grace.keep_waiting(process_alive, owned_browser, std::time::Instant::now()) {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "launcher.packaged_target_exited",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "activation_pid": activation_pid,
+                    "process_id": tracked.as_ref().map(|process| process.process_id),
+                    "process_alive": process_alive,
+                    "owned_browser_available": owned_browser,
+                    "browser_identity_bound": browser.initial_id.is_some(),
+                    "browser_replaced": browser.replaced,
+                    "missed_probes": grace.missed_probes,
+                    "grace_ms": 10000,
+                    "identity_error": last_discovery_error,
+                    "activation_grace_ms": 30000,
+                }),
+            );
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}
+
+/// macOS `open` is not the app's parent, so its tracked child exits immediately.
+/// Match the exact debug port in the app process command line instead.
+#[cfg(target_os = "macos")]
+fn launcher_owned_process_alive(launch: &CodexLaunch, debug_port: u16) -> bool {
+    matches!(
+        launch,
+        CodexLaunch::Process {
+            wait_strategy: ProcessWaitStrategy::ExternalWaitCommand,
+            ..
+        }
+    ) && !crate::watcher::find_macos_codex_processes_for_debug_port(debug_port).is_empty()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn launcher_owned_process_alive(_launch: &CodexLaunch, _debug_port: u16) -> bool {
+    false
+}
+
+fn should_reinject_after_health_result(
+    healthy: Option<bool>,
+    browser_identity_changed: bool,
+    health_failures: &mut u8,
+) -> bool {
+    let Some(healthy) = healthy else {
+        *health_failures = 0;
+        return false;
+    };
+    if healthy {
+        *health_failures = 0;
+        return false;
+    }
+    if browser_identity_changed {
+        *health_failures = BRIDGE_HEALTH_FAILURE_THRESHOLD;
+    } else {
+        *health_failures = health_failures.saturating_add(1);
+    }
+    *health_failures >= BRIDGE_HEALTH_FAILURE_THRESHOLD
+}
+
+async fn check_and_reinject_bridge_inner(
     debug_port: u16,
     helper_port: u16,
-    settings: &BackendSettings,
+    browser_identity_changed: bool,
+    bridge_reinjector: Option<BridgeReinjector>,
+    health_failures: &mut u8,
+    backoff: &mut BridgeReinjectBackoff,
+) -> bool {
+    let healthy = if browser_identity_changed {
+        Some(false)
+    } else {
+        match bridge_health_ok(debug_port).await {
+            Ok(healthy) => Some(healthy),
+            Err(error) => {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "bridge.health_check_failed",
+                    serde_json::json!({
+                        "debug_port": debug_port,
+                        "helper_port": helper_port,
+                        "message": error.to_string()
+                    }),
+                );
+                // A CDP timeout only means that the renderer did not answer
+                // this probe in time. The bridge heartbeat is the source of
+                // truth for actual availability; do not reinject on an
+                // indeterminate CDP result or a busy page will cause churn.
+                None
+            }
+        }
+    };
+    match healthy {
+        // 持续健康一段时间才清掉退避（见 BRIDGE_REINJECT_BACKOFF_RESET_AFTER_SECS）；
+        // 探测不确定时不改变退避状态。失效计数由 should_reinject_* 统一管理。
+        Some(true) => backoff.observe_healthy(std::time::Instant::now()),
+        None => {}
+        Some(false) => backoff.observe_unhealthy(),
+    }
+    if !should_reinject_after_health_result(healthy, browser_identity_changed, health_failures) {
+        return false;
+    }
+    if browser_identity_changed {
+        // 应用实例更换：旧退避针对的是旧页面，新页面需要立即注入。
+        backoff.reset();
+    }
+    let now = std::time::Instant::now();
+    if !backoff.ready(now) {
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "bridge.reinject_backoff_skipped",
+            serde_json::json!({
+                "debug_port": debug_port,
+                "helper_port": helper_port,
+                "consecutive_reinjections": backoff.consecutive_attempts,
+                "next_reinject_allowed_in_ms": backoff
+                    .next_allowed_at
+                    .map(|deadline| deadline.saturating_duration_since(now).as_millis() as u64),
+            }),
+        );
+        return false;
+    }
+    backoff.record_attempt(now);
+
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "bridge.reinject_start",
+        serde_json::json!({
+            "debug_port": debug_port,
+            "helper_port": helper_port,
+            "browser_identity_changed": browser_identity_changed,
+            "consecutive_health_failures": *health_failures
+        }),
+    );
+    let default_reinjector: BridgeReinjector =
+        Arc::new(move || Box::pin(async move { retry_injection(debug_port, helper_port).await }));
+    let reinject_result = run_bridge_reinjector(bridge_reinjector, default_reinjector).await;
+    match reinject_result {
+        Ok(()) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "bridge.reinject_ok",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "helper_port": helper_port
+                }),
+            );
+            *health_failures = 0;
+            true
+        }
+        Err(error) => {
+            let _ = crate::diagnostic_log::append_diagnostic_log(
+                "bridge.reinject_failed",
+                serde_json::json!({
+                    "debug_port": debug_port,
+                    "helper_port": helper_port,
+                    "message": error.to_string()
+                }),
+            );
+            false
+        }
+    }
+}
+
+async fn run_bridge_reinjector(
+    bridge_reinjector: Option<BridgeReinjector>,
+    default_reinjector: BridgeReinjector,
 ) -> anyhow::Result<()> {
-    let targets = crate::cdp::list_targets(debug_port)
-        .await
-        .with_context(|| format!("failed to list Codex CDP targets on port {debug_port}"))?;
+    match bridge_reinjector {
+        Some(reinject) => reinject().await,
+        None => default_reinjector().await,
+    }
+}
+
+async fn bridge_health_ok(debug_port: u16) -> anyhow::Result<bool> {
+    let targets = crate::cdp::list_targets(debug_port).await?;
     let target = crate::cdp::pick_injectable_codex_page_target(&targets)?;
     let websocket_url = target
         .web_socket_debugger_url
         .as_deref()
-        .context("selected CDP target has no websocket URL")?;
-    let script = r#"(async () => {
-  const result = await window.__alunixaXStartupModelInjection;
-  return JSON.stringify(result || { status: "failed", message: "startup injection result missing" });
-})()"#;
-    let response = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        crate::bridge::evaluate_script_with_await_promise(websocket_url, script, true),
+        .ok_or_else(|| anyhow::anyhow!("selected CDP target has no websocket URL"))?;
+    let result = crate::bridge::evaluate_script_with_await_promise(
+        websocket_url,
+        crate::bridge::bridge_health_check_script(),
+        true,
     )
-    .await
-    .context("Alunixa X startup model injection verification timed out")??;
-    let value = response
-        .pointer("/result/result/value")
-        .and_then(Value::as_str)
-        .context("Alunixa X startup model injection returned no result")?;
-    let result: Value = serde_json::from_str(value)
-        .context("failed to parse Alunixa X startup model injection result")?;
-    if result.get("status").and_then(Value::as_str) != Some("ok") {
-        anyhow::bail!(
-            "Alunixa X startup model injection failed: {}",
-            result
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown error")
-        );
-    }
-    if result.get("debugPort").and_then(Value::as_u64) != Some(u64::from(debug_port))
-        || result.get("helperPort").and_then(Value::as_u64) != Some(u64::from(helper_port))
-    {
-        anyhow::bail!("Alunixa X startup injection returned inconsistent runtime ports");
-    }
-    if settings.relay_profiles_enabled {
-        let profile = settings.active_relay_profile();
-        let expected_models = profile.ordered_model_names();
-        let actual_models = result
-            .get("models")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect::<Vec<_>>();
-        let missing = expected_models
-            .iter()
-            .filter(|expected| {
-                !actual_models
-                    .iter()
-                    .any(|actual| actual.eq_ignore_ascii_case(expected))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        if !missing.is_empty() {
-            anyhow::bail!(
-                "Alunixa X startup model injection is missing configured models: {}",
-                missing.join(", ")
-            );
-        }
-        let preferred_model = profile.preferred_model_name();
-        if !preferred_model.is_empty()
-            && !result
-                .get("selectedModel")
-                .and_then(Value::as_str)
-                .is_some_and(|selected| selected.eq_ignore_ascii_case(&preferred_model))
-        {
-            anyhow::bail!(
-                "Alunixa X startup model selection is inconsistent; expected {preferred_model}"
-            );
-        }
-        if settings.codex_app_model_whitelist_unlock
-            && !expected_models.is_empty()
-            && (!result
-                .get("responsePatchInstalled")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                || !result
-                    .get("messagePatchInstalled")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false))
-        {
-            anyhow::bail!("Alunixa X startup model unlock adapters were not installed");
-        }
-    }
-    Ok(())
+    .await?;
+    Ok(runtime_evaluate_result_is_true(&result))
 }
 
 fn runtime_evaluate_result_is_true(result: &Value) -> bool {
@@ -3878,26 +3452,22 @@ fn runtime_evaluate_result_is_true(result: &Value) -> bool {
         .unwrap_or(false)
 }
 
-async fn try_inject(
-    debug_port: u16,
-    helper_port: u16,
-) -> anyhow::Result<crate::bridge::BridgeDisconnect> {
+async fn try_inject(debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
     let targets = crate::cdp::list_targets(debug_port).await?;
     let target = crate::cdp::pick_injectable_codex_page_target(&targets)?;
     let websocket_url = target
         .web_socket_debugger_url
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("selected CDP target has no websocket URL"))?;
-    let settings = SettingsStore::default()
-        .load()
-        .context("failed to load settings for Alunixa X startup injection")?;
-    let script = crate::assets::injection_script_with_runtime(helper_port, debug_port, &settings);
+    let settings = SettingsStore::default().load().unwrap_or_default();
+    let script = crate::assets::injection_script_with_settings(helper_port, &settings);
     let ctx = crate::routes::BridgeContext::core(Arc::new(crate::routes::CoreRuntimeService::new(
         debug_port,
         StatusStore::default(),
     )));
-    crate::bridge::install_renderer_bridge_with_disconnect(
+    crate::bridge::install_bridge(
         websocket_url,
+        crate::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
             Box::pin(
@@ -3905,7 +3475,6 @@ async fn try_inject(
             )
         }),
         &[script],
-        &settings,
     )
     .await
 }
@@ -3922,30 +3491,29 @@ async fn confirmed_pet_overlay_targets(
         let Some(websocket_url) = target.web_socket_debugger_url.as_deref() else {
             continue;
         };
-        if pet_overlay_supports_v2_cursor(websocket_url).await {
+        if pet_overlay_supports_v2_cursor(websocket_url)
+            .await
+            .unwrap_or(false)
+        {
             confirmed.push(target);
         }
     }
     Ok(confirmed)
 }
 
-async fn pet_overlay_supports_v2_cursor(websocket_url: &str) -> bool {
-    crate::bridge::evaluate_script_with_await_promise(
+async fn pet_overlay_supports_v2_cursor(websocket_url: &str) -> anyhow::Result<bool> {
+    let result = crate::bridge::evaluate_script_with_await_promise(
         websocket_url,
         &crate::assets::pet_real_mouse_capability_probe_script(),
         true,
     )
-    .await
-    .as_ref()
-    .is_ok_and(runtime_evaluate_result_is_true)
+    .await?;
+    Ok(runtime_evaluate_result_is_true(&result))
 }
 
 async fn sync_pet_real_mouse_overlay(debug_port: u16, _helper_port: u16) -> anyhow::Result<()> {
     let settings = SettingsStore::default().load().unwrap_or_default();
     let enabled = settings.enhancements_enabled && settings.codex_app_pet_real_mouse_look;
-    if !enabled {
-        return Ok(());
-    }
     let targets = crate::cdp::list_targets(debug_port).await?;
     for target in targets
         .iter()
@@ -3954,8 +3522,17 @@ async fn sync_pet_real_mouse_overlay(debug_port: u16, _helper_port: u16) -> anyh
         let Some(websocket_url) = target.web_socket_debugger_url.as_deref() else {
             continue;
         };
-        let supports_v2 = enabled && pet_overlay_supports_v2_cursor(websocket_url).await;
-        let script = if supports_v2 {
+        let script = if !enabled {
+            crate::assets::pet_real_mouse_stop_script()
+        } else if pet_overlay_supports_v2_cursor(websocket_url)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to probe pet overlay capability in target {} ({})",
+                    target.id, target.url
+                )
+            })?
+        {
             crate::assets::pet_real_mouse_script()
         } else {
             crate::assets::pet_real_mouse_stop_script()
@@ -3977,7 +3554,7 @@ async fn run_pet_real_mouse_cursor_driver(debug_port: u16) {
     loop {
         let settings = SettingsStore::default().load().unwrap_or_default();
         if !settings.enhancements_enabled || !settings.codex_app_pet_real_mouse_look {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             continue;
         }
 
@@ -4001,15 +3578,6 @@ async fn run_pet_real_mouse_cursor_driver(debug_port: u16) {
                         "message": error.to_string()
                     }),
                 );
-            }
-        }
-        for target in &targets {
-            if let Some(websocket_url) = target.web_socket_debugger_url.as_deref() {
-                let _ = crate::bridge::evaluate_script(
-                    websocket_url,
-                    crate::assets::pet_real_mouse_stop_script(),
-                )
-                .await;
             }
         }
         drivers.abort_all();
@@ -4049,9 +3617,13 @@ async fn run_pet_real_mouse_target_driver(debug_port: u16, target: crate::cdp::C
     )
     .await;
 
-    let _ =
-        crate::bridge::evaluate_script(websocket_url, crate::assets::pet_real_mouse_stop_script())
-            .await;
+    if result.is_ok() {
+        let _ = crate::bridge::evaluate_script(
+            websocket_url,
+            crate::assets::pet_real_mouse_stop_script(),
+        )
+        .await;
+    }
     match result {
         Ok(()) => {
             PET_CURSOR_DRIVER_FAILED.store(false, Ordering::Relaxed);
@@ -4123,27 +3695,6 @@ pub fn build_macos_open_command(
     command
 }
 
-pub fn build_macos_open_command_with_native_menu_inspector(
-    app_dir: &Path,
-    debug_port: u16,
-    inspector_port: u16,
-    extra_args: &[String],
-) -> Vec<String> {
-    let mut command = vec![
-        "open".to_string(),
-        "-W".to_string(),
-        "-a".to_string(),
-        app_dir.to_string_lossy().to_string(),
-        "--args".to_string(),
-    ];
-    command.extend(build_codex_arguments_with_native_menu_inspector(
-        debug_port,
-        inspector_port,
-        extra_args,
-    ));
-    command
-}
-
 pub fn build_macos_cleanup_command(
     app_dir: &Path,
     policy: MacosCleanupPolicy,
@@ -4165,6 +3716,17 @@ pub fn build_macos_cleanup_command(
     ])
 }
 
+pub fn select_macos_debug_launch_action(
+    app_running: bool,
+    codex_cdp_available: bool,
+) -> MacosDebugLaunchAction {
+    match (app_running, codex_cdp_available) {
+        (false, _) => MacosDebugLaunchAction::LaunchNew,
+        (true, true) => MacosDebugLaunchAction::ReuseRunningDebugApp,
+        (true, false) => MacosDebugLaunchAction::RestartRunningApp,
+    }
+}
+
 async fn run_macos_cleanup_command(
     app_dir: &Path,
     policy: MacosCleanupPolicy,
@@ -4182,6 +3744,31 @@ async fn run_macos_cleanup_command(
         .status()
         .await
         .with_context(|| format!("failed to request macOS app quit for {}", app_dir.display()))?;
+    Ok(())
+}
+
+async fn quit_macos_app_and_wait(app_dir: &Path) -> anyhow::Result<()> {
+    run_macos_cleanup_command(app_dir, MacosCleanupPolicy::QuitIfNotPreviouslyRunning).await?;
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_millis(MACOS_DEBUG_TAKEOVER_WAIT_MS);
+    while is_macos_app_running(app_dir).await {
+        if tokio::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "macOS app did not exit before debug relaunch: {}",
+                app_dir.display()
+            );
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(
+            MACOS_DEBUG_TAKEOVER_INTERVAL_MS,
+        ))
+        .await;
+    }
+    let _ = crate::diagnostic_log::append_diagnostic_log(
+        "launcher.macos_existing_app_without_cdp_stopped",
+        serde_json::json!({
+            "app_dir": app_dir
+        }),
+    );
     Ok(())
 }
 
@@ -4218,155 +3805,11 @@ async fn is_macos_app_running(app_dir: &Path) -> bool {
             .eq_ignore_ascii_case("true")
 }
 
-#[cfg_attr(not(windows), allow(dead_code))]
-fn post_launch_guard_artifacts_ready(
-    artifacts: &crate::computer_use_guard::GuardArtifacts,
-) -> bool {
-    artifacts.notify_exe.is_some()
-        && artifacts.marketplace_path.is_some()
-        && (!artifacts.runtime_exports_needed || artifacts.sky_package_json.is_some())
-}
-
-#[cfg_attr(not(windows), allow(dead_code))]
-fn should_stop_post_launch_computer_use_guard(
-    stable_unchanged_attempts: usize,
-    artifacts: &crate::computer_use_guard::GuardArtifacts,
-) -> bool {
-    stable_unchanged_attempts >= POST_LAUNCH_COMPUTER_USE_GUARD_STABLE_ATTEMPTS
-        && post_launch_guard_artifacts_ready(artifacts)
-}
-
-#[cfg(windows)]
-async fn run_post_launch_computer_use_guard(
-    home: PathBuf,
-    mut artifacts: Option<crate::computer_use_guard::GuardArtifacts>,
-    shutdown_rx: &mut tokio::sync::oneshot::Receiver<()>,
-) {
-    let mut previous_delay = 0_u64;
-    let mut stable_unchanged_attempts = 0_usize;
-    for (index, delay) in POST_LAUNCH_COMPUTER_USE_GUARD_SECONDS
-        .iter()
-        .copied()
-        .enumerate()
-    {
-        let wait_seconds = delay.saturating_sub(previous_delay);
-        previous_delay = delay;
-        if wait_seconds > 0 {
-            tokio::select! {
-                _ = &mut *shutdown_rx => return,
-                _ = tokio::time::sleep(std::time::Duration::from_secs(wait_seconds)) => {}
-            }
-        }
-        let attempt = index + 1;
-        let resolved_artifacts = match artifacts.take() {
-            Some(artifacts) => artifacts,
-            None => match crate::computer_use_guard::resolve_computer_use_guard_artifacts(&home) {
-                Ok(resolved) => resolved,
-                Err(error) => {
-                    stable_unchanged_attempts = 0;
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "computer_use_guard.post_launch_failed",
-                        serde_json::json!({
-                            "attempt": attempt,
-                            "delay_seconds": delay,
-                            "phase": "resolve_artifacts",
-                            "message": error.to_string()
-                        }),
-                    );
-                    continue;
-                }
-            },
-        };
-        let artifacts_ready = post_launch_guard_artifacts_ready(&resolved_artifacts);
-        artifacts = artifacts_ready.then_some(resolved_artifacts.clone());
-        match crate::computer_use_guard::ensure_computer_use_config_with_artifacts(
-            &home,
-            &resolved_artifacts,
-        ) {
-            Ok(result) => {
-                if !result.changed && artifacts_ready {
-                    stable_unchanged_attempts += 1;
-                } else {
-                    stable_unchanged_attempts = 0;
-                }
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "computer_use_guard.post_launch_ok",
-                    serde_json::json!({
-                        "attempt": attempt,
-                        "delay_seconds": delay,
-                        "changed": result.changed,
-                        "stable_unchanged_attempts": stable_unchanged_attempts,
-                        "notify_exe": result
-                            .notify_exe
-                            .map(|path| path.to_string_lossy().to_string())
-                    }),
-                );
-                if should_stop_post_launch_computer_use_guard(
-                    stable_unchanged_attempts,
-                    &resolved_artifacts,
-                ) {
-                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                        "computer_use_guard.post_launch_stable_stop",
-                        serde_json::json!({
-                            "attempt": attempt,
-                            "delay_seconds": delay,
-                            "stable_unchanged_attempts": stable_unchanged_attempts
-                        }),
-                    );
-                    return;
-                }
-            }
-            Err(error) => {
-                stable_unchanged_attempts = 0;
-                let _ = crate::diagnostic_log::append_diagnostic_log(
-                    "computer_use_guard.post_launch_failed",
-                    serde_json::json!({
-                        "attempt": attempt,
-                        "delay_seconds": delay,
-                        "message": error.to_string()
-                    }),
-                );
-            }
-        }
-    }
-}
-
-#[cfg(windows)]
-async fn wait_for_windows_process_id(process_id: u32) -> anyhow::Result<()> {
-    tokio::task::spawn_blocking(move || wait_for_windows_process_id_blocking(process_id))
-        .await
-        .context("Windows process wait task failed")?
-}
-
 #[cfg(windows)]
 async fn terminate_windows_process_id(process_id: u32) -> anyhow::Result<()> {
     tokio::task::spawn_blocking(move || terminate_windows_process_id_blocking(process_id))
         .await
         .context("Windows process termination task failed")?
-}
-
-#[cfg(windows)]
-fn wait_for_windows_process_id_blocking(process_id: u32) -> anyhow::Result<()> {
-    use windows::Win32::Foundation::{CloseHandle, WAIT_FAILED};
-    use windows::Win32::System::Threading::{
-        INFINITE, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
-        WaitForSingleObject,
-    };
-
-    unsafe {
-        let handle = OpenProcess(
-            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-            false,
-            process_id,
-        )
-        .with_context(|| format!("failed to open Windows process id {process_id}"))?;
-        let wait_result = WaitForSingleObject(handle, INFINITE);
-        let _ = CloseHandle(handle);
-        if wait_result == WAIT_FAILED {
-            anyhow::bail!("failed to wait for Windows process id {process_id}");
-        }
-    }
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -4415,7 +3858,44 @@ fn launch_status(
         debug_port: Some(debug_port),
         helper_port: Some(helper_port),
         codex_app: Some(app_dir.to_string_lossy().to_string()),
-        aumid: None,
+        aumid: crate::app_paths::packaged_app_user_model_id(app_dir),
+        // 终态不再是「某个进行中的阶段」；进度固定 100 便于 manager 判断已结束。
+        phase: None,
+        progress: Some(100),
+    }
+}
+
+/// 启动阶段埋点（issue #2244）。
+///
+/// 把每个前置步骤写进 `latest-status.json` 的 `phase`/`progress`，同时往
+/// `alunixa-x.log` 记一条带「距启动开始多少毫秒」的日志。冷启动慢的时候，
+/// 用户与维护者由此能直接指出卡在哪一步，而不用靠进程采样反推。
+struct LaunchTimeline {
+    status_store: StatusStore,
+    started: std::time::Instant,
+}
+
+impl LaunchTimeline {
+    fn new(status_store: StatusStore) -> Self {
+        Self {
+            status_store,
+            started: std::time::Instant::now(),
+        }
+    }
+
+    /// 进入某个阶段。状态写入与日志写入都是 best-effort：埋点失败绝不能
+    /// 影响启动本身。
+    fn mark(&self, phase: &str, progress: u8) {
+        let elapsed_ms = self.started.elapsed().as_millis() as u64;
+        let _ = self.status_store.save_phase(phase, progress);
+        let _ = crate::diagnostic_log::append_diagnostic_log(
+            "launcher.phase",
+            serde_json::json!({
+                "phase": phase,
+                "progress": progress,
+                "elapsed_ms": elapsed_ms,
+            }),
+        );
     }
 }
 
@@ -4467,6 +3947,29 @@ pub async fn activate_packaged_app(
     anyhow::bail!("Packaged app activation is only supported on Windows")
 }
 
+/// 提权运行时禁止「AUMID 激活失败 → 按路径直接启动」回退的原因；
+/// 非提权返回 None 以保留回退（兜底清单 Application Id 变化等场景）。
+///
+/// 提权进程无法激活 MSIX 打包应用，按路径启动的进程会因缺少包身份
+/// （APPMODEL_ERROR_NO_PACKAGE）立即退出，注入也必然失败；此时必须如实失败
+/// 并给出指引，而不是静默回退导致 latest-status.json 误报 running（issue #2351）。
+///
+/// 不加 `#[cfg(windows)]`：调用点在 `if cfg!(windows)` 的运行时分支里，
+/// 全平台都要编译到这个函数（纯逻辑，无平台依赖）。
+fn packaged_activation_fallback_block_reason(is_elevated: bool) -> Option<&'static str> {
+    if is_elevated {
+        Some(
+            "Codex 打包应用激活失败，且 Alunixa X 当前以管理员（提权）身份运行：\
+             Windows 不允许提权进程激活 MSIX 打包应用，按路径启动的进程会因缺少\
+             包身份立即退出。请取消可执行文件「属性 → 兼容性 → 以管理员身份运行\
+             此程序」的勾选（或清除 AppCompatFlags\\Layers 中的 RUNASADMIN 标记），\
+             然后以普通权限重新启动 Alunixa X",
+        )
+    } else {
+        None
+    }
+}
+
 #[cfg(windows)]
 pub async fn activate_packaged_app(
     app_user_model_id: &str,
@@ -4484,8 +3987,7 @@ pub async fn activate_packaged_app(
 #[cfg(windows)]
 fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> anyhow::Result<u32> {
     use windows::Win32::System::Com::{
-        CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize,
+        CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
     };
     use windows::Win32::UI::Shell::{ApplicationActivationManager, IApplicationActivationManager};
     use windows::core::HSTRING;
@@ -4504,7 +4006,7 @@ fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> a
 
         let result: windows::core::Result<u32> = (|| {
             let manager: IApplicationActivationManager =
-                CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)?;
+                CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_ALL)?;
             let process_id = manager.ActivateApplication(
                 &HSTRING::from(app_user_model_id),
                 &HSTRING::from(arguments),
@@ -4523,241 +4025,513 @@ fn activate_packaged_app_blocking(app_user_model_id: &str, arguments: &str) -> a
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
+    // 提权分支依赖 issue #2351 的手动复现步骤验收（勾选兼容性「以管理员身份运行」
+    // 后应得到指引错误）。这里不断言当前进程的提权状态：GitHub 的 Windows runner
+    // 本身就以提权令牌运行，断言「CI shell 非提权」必然失败。
     #[test]
-    fn responses_negotiation_skips_vendor_prelude_until_real_failure() {
-        let rate_limits = b"event: codex.rate_limits\ndata: {}\n\n";
-        let metadata = b"event: codex.response.metadata\ndata: {}\n\n";
-        let failed = b"event: response.failed\ndata: {\"error\":{\"message\":\"[invalid_id_prefix] Invalid 'input[17].id': 'ctco_real'. Expected an ID that begins with 'fc'.\"}}\n\n";
-
-        let mut prefix = rate_limits.to_vec();
-        assert!(!responses_stream_prefix_is_decidable(&prefix));
-        prefix.extend_from_slice(metadata);
-        assert!(!responses_stream_prefix_is_decidable(&prefix));
-        prefix.extend_from_slice(failed);
-        assert!(responses_stream_prefix_is_decidable(&prefix));
-        assert!(String::from_utf8_lossy(&prefix).contains("invalid_id_prefix"));
+    fn elevated_activation_failure_blocks_path_fallback_with_guidance() {
+        let reason = packaged_activation_fallback_block_reason(true)
+            .expect("elevated activation failure must block the path fallback");
+        assert!(reason.contains("管理员"));
+        assert!(reason.contains("以普通权限"));
     }
 
     #[test]
-    fn responses_negotiation_keeps_lifecycle_only_events_until_output_begins() {
-        let mut prefix = b"event: codex.rate_limits\ndata: {}\n\n".to_vec();
-        prefix.extend_from_slice(
-            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
-        );
-        assert!(!responses_stream_prefix_is_decidable(&prefix));
+    fn unelevated_activation_failure_keeps_path_fallback() {
+        assert!(packaged_activation_fallback_block_reason(false).is_none());
+    }
 
-        prefix.extend_from_slice(
-            b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
-        );
-        assert!(!responses_stream_prefix_is_decidable(&prefix));
-
-        prefix.extend_from_slice(
-            b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\"}\n\n",
-        );
-        assert!(responses_stream_prefix_is_decidable(&prefix));
+    fn counted_reinjector(calls: Arc<AtomicUsize>) -> BridgeReinjector {
+        Arc::new(move || {
+            let calls = calls.clone();
+            Box::pin(async move {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            })
+        })
     }
 
     #[test]
-    fn responses_negotiation_catches_failure_after_created_and_in_progress() {
-        let mut prefix =
-            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n".to_vec();
-        prefix.extend_from_slice(
-            b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n",
-        );
-        assert!(!responses_stream_prefix_is_decidable(&prefix));
-
-        prefix.extend_from_slice(
-            b"event: response.failed\ndata: {\"type\":\"response.failed\",\"error\":{\"message\":\"[invalid_id_prefix] Invalid 'input[17].id': 'ctco_real'. Expected an ID that begins with 'fc'.\"}}\n\n",
-        );
-        assert!(responses_stream_prefix_is_decidable(&prefix));
-        assert!(String::from_utf8_lossy(&prefix).contains("ctco_real"));
+    fn owned_launcher_exit_follows_its_debug_port_not_other_codex_processes() {
+        assert!(owned_launcher_target_alive(false, true));
+        assert!(!owned_launcher_target_alive(false, false));
     }
 
     #[test]
-    fn responses_negotiation_waits_for_a_complete_sse_block() {
-        assert!(!responses_stream_prefix_is_decidable(
-            b"event: response.failed\ndata: {\"error\":\"invalid_id_prefix\"}"
+    fn owned_launcher_waits_for_its_codex_process_when_cdp_is_unavailable() {
+        assert!(owned_launcher_target_alive(true, false));
+    }
+
+    #[test]
+    fn packaged_launcher_survives_one_failed_cdp_probe_after_activation_pid_disappears() {
+        let now = std::time::Instant::now();
+        let mut grace = PackagedExitGrace::default();
+        assert!(grace.keep_waiting(None, false, now));
+        assert!(grace.keep_waiting(None, true, now + std::time::Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn packaged_launcher_waits_for_exact_process_without_cdp() {
+        let now = std::time::Instant::now();
+        let mut grace = PackagedExitGrace::default();
+        for seconds in [0, 10, 60, 3600] {
+            assert!(grace.keep_waiting(
+                Some(true),
+                false,
+                now + std::time::Duration::from_secs(seconds)
+            ));
+        }
+        assert_eq!(grace.missed_probes, 0);
+    }
+
+    #[test]
+    fn packaged_launcher_exits_after_bounded_continuous_absence() {
+        let now = std::time::Instant::now();
+        let mut grace = PackagedExitGrace::default();
+        for seconds in [0, 2, 4, 6, 8] {
+            assert!(grace.keep_waiting(None, false, now + std::time::Duration::from_secs(seconds)));
+        }
+        assert!(!grace.keep_waiting(None, false, now + std::time::Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn packaged_launcher_does_not_follow_another_instance_after_its_process_exits() {
+        let now = std::time::Instant::now();
+        let mut grace = PackagedExitGrace::default();
+        assert!(grace.keep_waiting(Some(true), true, now));
+        assert!(grace.keep_waiting(Some(false), true, now));
+        assert!(grace.keep_waiting(Some(false), true, now + std::time::Duration::from_secs(2)));
+        assert!(!grace.keep_waiting(Some(false), true, now + std::time::Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn packaged_launcher_recovery_resets_exit_grace() {
+        let now = std::time::Instant::now();
+        let mut grace = PackagedExitGrace::default();
+        assert!(grace.keep_waiting(None, false, now));
+        assert!(grace.keep_waiting(None, true, now + std::time::Duration::from_secs(8)));
+        assert!(grace.keep_waiting(None, false, now + std::time::Duration::from_secs(20)));
+        assert_eq!(grace.missed_probes, 1);
+    }
+
+    #[test]
+    fn packaged_activation_pid_alone_cannot_keep_launcher_alive_indefinitely() {
+        assert!(activation_process_is_startup_evidence(
+            true,
+            std::time::Duration::from_secs(29)
         ));
-        assert!(responses_stream_prefix_is_decidable(
-            b"event: response.failed\ndata: {\"error\":\"invalid_id_prefix\"}\n\n"
+        assert!(!activation_process_is_startup_evidence(
+            true,
+            std::time::Duration::from_secs(30)
         ));
+        assert!(!activation_process_is_startup_evidence(
+            false,
+            std::time::Duration::ZERO
+        ));
+    }
+
+    #[test]
+    fn packaged_browser_fallback_after_discovery_error_and_dead_activation_rejects_replacement() {
+        let now = std::time::Instant::now();
+        let mut binding = PackagedBrowserBinding {
+            initial_id: Some("original".to_string()),
+            replaced: false,
+        };
+        let mut grace = PackagedExitGrace::default();
+        // discovery 失败，没有真实句柄，activation 已退出后原路径降级为 None。
+        let process_alive = Some(false).filter(|alive| *alive);
+        for seconds in [0, 2, 4, 6, 8] {
+            assert!(grace.keep_waiting(process_alive, binding.owns(Some("replacement")), now + std::time::Duration::from_secs(seconds)));
+        }
+        assert!(!grace.keep_waiting(process_alive, binding.owns(Some("replacement")), now + std::time::Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn packaged_browser_fallback_without_initial_identity_is_bounded() {
+        let now = std::time::Instant::now();
+        let mut binding = PackagedBrowserBinding { initial_id: None, replaced: false };
+        let mut grace = PackagedExitGrace::default();
+        assert!(grace.keep_waiting(None, binding.owns(Some("unbound")), now));
+        assert!(grace.keep_waiting(None, binding.owns(Some("unbound")), now + std::time::Duration::from_secs(2)));
+        assert!(!grace.keep_waiting(None, binding.owns(Some("unbound")), now + std::time::Duration::from_secs(10)));
     }
 
     #[tokio::test]
-    async fn responses_negotiation_reads_chunked_vendor_prelude_through_failure() {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = [0_u8; 2048];
-            let _ = stream.read(&mut request).await.unwrap();
-            stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
-                )
-                .await
-                .unwrap();
-            for event in [
-                b"event: codex.rate_limits\ndata: {}\n\n".as_slice(),
-                b"event: codex.response.metadata\ndata: {}\n\n".as_slice(),
-                b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n".as_slice(),
-                b"event: response.in_progress\ndata: {\"type\":\"response.in_progress\"}\n\n"
-                    .as_slice(),
-                b"event: response.failed\ndata: {\"error\":{\"message\":\"invalid_id_prefix\"}}\n\n"
-                    .as_slice(),
-            ] {
-                stream
-                    .write_all(format!("{:X}\r\n", event.len()).as_bytes())
-                    .await
-                    .unwrap();
-                stream.write_all(event).await.unwrap();
-                stream.write_all(b"\r\n").await.unwrap();
-                stream.flush().await.unwrap();
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            stream.write_all(b"0\r\n\r\n").await.unwrap();
-        });
-
-        let mut response = reqwest::Client::new()
-            .get(format!("http://{addr}/responses"))
-            .send()
-            .await
-            .unwrap();
-        let prefix = read_responses_stream_prefix(&mut response).await.unwrap();
-        let text = String::from_utf8(prefix).unwrap();
-
-        assert!(text.contains("codex.rate_limits"));
-        assert!(text.contains("codex.response.metadata"));
-        assert!(text.contains("response.created"));
-        assert!(text.contains("response.in_progress"));
-        assert!(text.contains("response.failed"));
-        assert!(text.contains("invalid_id_prefix"));
-        server.await.unwrap();
+    async fn packaged_browser_capture_rejects_other_browsers_before_reading_their_identity() {
+        for (url, accepted) in [("chrome://newtab", false), ("app://-/index.html", true)] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let recorded = requests.clone();
+            let server = tokio::spawn(async move {
+                for _ in 0..if accepted { 2 } else { 1 } {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut request = [0; 4096];
+                    let count = stream.read(&mut request).await.unwrap();
+                    let request = String::from_utf8_lossy(&request[..count]);
+                    let path = request.split_whitespace().nth(1).unwrap().to_string();
+                    recorded.lock().unwrap().push(path.clone());
+                    let body = if path == "/json/version" {
+                        serde_json::json!({ "Browser":"Chrome/fixture", "webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/devtools/browser/fixture-browser") })
+                    } else {
+                        serde_json::json!([{ "id":"page", "type":"page", "title":"fixture", "url":url,
+                            "webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/devtools/page/fixture-page") }])
+                    }.to_string();
+                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                }
+            });
+            let identity = validated_codex_browser_id(port).await;
+            server.await.unwrap();
+            assert_eq!(identity.as_deref(), accepted.then_some("fixture-browser"));
+            assert_eq!(requests.lock().unwrap().as_slice(), if accepted { &["/json", "/json/version"][..] } else { &["/json"][..] });
+        }
     }
 
     #[test]
-    fn responses_image_generation_result_is_marked_completed() {
-        let block = b"event: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"image_generation_call\",\"id\":\"ig_real\",\"status\":\"generating\",\"result\":\"iVBORw0KGgo=\"}}\n\n";
-
-        let (normalized, changed) = normalize_responses_sse_block(block);
-        let text = String::from_utf8(normalized).unwrap();
-
-        assert_eq!(changed, 1);
-        assert!(text.contains("\"status\":\"completed\""));
-        assert!(text.contains("iVBORw0KGgo="));
-        assert!(!text.contains("\"status\":\"generating\""));
+    fn packaged_browser_fallback_after_discovery_error_keeps_only_same_initial_browser() {
+        let now = std::time::Instant::now();
+        let mut binding = PackagedBrowserBinding { initial_id: Some("original".to_string()), replaced: false };
+        let mut grace = PackagedExitGrace::default();
+        let process_alive = Some(false).filter(|alive| *alive);
+        for seconds in [0, 10, 60, 3600] {
+            assert!(grace.keep_waiting(process_alive, binding.owns(Some("original")), now + std::time::Duration::from_secs(seconds)));
+        }
+        assert!(!binding.owns(None));
+        assert!(binding.owns(Some("original")));
+        assert!(!binding.owns(Some("replacement")));
+        assert!(!binding.owns(Some("original")), "实例替换后不能重新绑定旧 ID");
     }
 
     #[test]
-    fn responses_image_generation_without_result_stays_unchanged() {
-        let block = b"event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"type\":\"image_generation_call\",\"id\":\"ig_real\",\"status\":\"generating\"}}\n\n";
-
-        let (normalized, changed) = normalize_responses_sse_block(block);
-
-        assert_eq!(changed, 0);
-        assert_eq!(normalized, block);
-    }
-
-    #[test]
-    fn responses_image_generation_filter_handles_chunked_crlf_event() {
-        let event = b"event: response.image_generation_call.in_progress\r\ndata: {\"type\":\"response.image_generation_call.in_progress\",\"result\":\"iVBORw0KGgo=\"}\r\n\r\n";
-        let split = event.len() / 2;
-        let mut filter = ResponsesSseCompatibilityFilter::default();
-
-        let (first, first_changed) = filter.push_bytes(&event[..split]);
-        assert!(first.is_empty());
-        assert_eq!(first_changed, 0);
-
-        let (second, second_changed) = filter.push_bytes(&event[split..]);
-        let text = String::from_utf8(second).unwrap();
-        assert_eq!(second_changed, 2);
-        assert!(text.contains("event: response.image_generation_call.completed"));
-        assert!(text.contains("response.image_generation_call.completed"));
-        assert!(text.contains("\"status\":\"completed\""));
-        assert!(filter.finish().is_empty());
-    }
-
-    #[test]
-    fn launcher_stays_alive_while_an_existing_cdp_endpoint_is_available() {
-        assert!(launcher_target_alive(false, true));
-        assert!(launcher_target_alive(true, false));
-        assert!(!launcher_target_alive(false, false));
-    }
-
-    #[test]
-    fn launcher_only_probes_cdp_for_unrecognized_windows_processes() {
-        assert!(should_probe_launcher_cdp(true, false));
-        assert!(!should_probe_launcher_cdp(true, true));
-        assert!(!should_probe_launcher_cdp(false, false));
-    }
-
-    #[test]
-    fn post_launch_failures_are_reported_as_degraded_without_close_message() {
-        let mut status = "running";
-        let mut message = "Alunixa X launcher ready".to_string();
-
-        mark_post_launch_degraded(&mut status, &mut message, "startup injection verification");
-
-        assert_eq!(status, "running_degraded");
-        assert!(message.contains("窗口已保留"));
-        assert!(message.contains("自然退出"));
-        assert!(message.contains("Try again"));
-        assert!(message.contains("startup injection verification"));
-        assert!(!message.contains("原因："));
-        assert!(!message.contains("launcher ready"));
-        assert!(!message.contains("terminate"));
-        assert!(!message.contains("关闭"));
-    }
-
-    #[test]
-    fn post_launch_failure_status_can_be_used_after_injection_timeout() {
-        let mut status = "running";
-        let mut message = "Alunixa X launcher ready".to_string();
-
-        mark_post_launch_degraded(&mut status, &mut message, "startup injection");
-
-        assert_eq!(status, "running_degraded");
-        assert!(message.contains("已启动"));
-        assert!(message.contains("窗口已保留"));
-    }
-
-    #[test]
-    fn post_launch_degraded_status_preserves_all_failed_stages_in_order() {
-        let mut status = "running";
-        let mut message = "Alunixa X launcher ready".to_string();
-
-        mark_post_launch_degraded(&mut status, &mut message, "startup injection");
-        let first_message = message.clone();
-        mark_post_launch_degraded(&mut status, &mut message, "native Codex UI");
-        mark_post_launch_degraded(&mut status, &mut message, "status persistence");
-
-        assert_eq!(status, "running_degraded");
-        assert!(message.starts_with(&first_message));
-        assert!(
-            message.find("startup injection").unwrap() < message.find("native Codex UI").unwrap()
-        );
-        assert!(
-            message.find("native Codex UI").unwrap() < message.find("status persistence").unwrap()
-        );
-        assert!(!message.contains("launcher ready"));
-    }
-
-    #[test]
-    fn imagegen_mcp_companion_is_resolved_next_to_the_launcher() {
-        let launcher = if cfg!(windows) {
-            PathBuf::from(r"C:\Program Files\Alunixa X\alunixa-x.exe")
-        } else {
-            PathBuf::from("/Applications/Alunixa X.app/Contents/MacOS/AlunixaX")
+    fn degraded_packaged_launch_keeps_its_captured_browser_after_activation_grace_expires() {
+        let now = std::time::Instant::now();
+        let mut binding = PackagedBrowserBinding {
+            initial_id: Some("captured-degraded-browser".to_string()),
+            replaced: false,
         };
-        let expected = launcher.parent().unwrap().join(if cfg!(windows) {
-            "alunixa-x-imagegen-mcp.exe"
-        } else {
-            "alunixa-x-imagegen-mcp"
-        });
-        assert_eq!(imagegen_mcp_executable_path(&launcher), expected);
+        let mut grace = PackagedExitGrace::default();
+        for seconds in [0, 10, 30, 60, 3600] {
+            let elapsed = std::time::Duration::from_secs(seconds);
+            let activation_alive = Some(false)
+                .filter(|alive| activation_process_is_startup_evidence(*alive, elapsed));
+            assert!(grace.keep_waiting(
+                activation_alive,
+                binding.owns(Some("captured-degraded-browser")),
+                now + elapsed,
+            ));
+        }
+        assert_eq!(grace.missed_probes, 0);
+    }
+
+    #[test]
+    fn packaged_tracked_process_remains_authoritative_when_browser_probe_fails() {
+        let now = std::time::Instant::now();
+        let mut binding = PackagedBrowserBinding { initial_id: Some("original".to_string()), replaced: false };
+        let mut grace = PackagedExitGrace::default();
+        assert!(grace.keep_waiting(Some(true), binding.owns(None), now));
+        assert!(grace.keep_waiting(Some(true), binding.owns(Some("replacement")), now));
+        assert!(grace.keep_waiting(Some(true), false, now + std::time::Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn terminal_status_preserves_run_identity_and_clears_in_progress_phase() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = StatusStore::new(temp.path().join("status.json"));
+        store
+            .save_latest(&LaunchStatus {
+                status: "running".to_string(),
+                started_at_ms: 10,
+                phase: Some("ready".to_string()),
+                debug_port: Some(9229),
+                ..LaunchStatus::default()
+            })
+            .unwrap();
+        save_terminal_launch_status(&store, 10, "stopped", "Codex exited").unwrap();
+        let status = store.load_latest().unwrap().unwrap();
+        assert_eq!(status.status, "stopped");
+        assert_eq!(status.message, "Codex exited");
+        assert_eq!(status.started_at_ms, 10);
+        assert_eq!(status.debug_port, Some(9229));
+        assert_eq!(status.phase, None);
+    }
+
+    #[test]
+    fn old_launcher_terminal_status_cannot_overwrite_new_restart_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = StatusStore::new(temp.path().join("status.json"));
+        let next_request = LaunchStatus {
+            status: "starting".to_string(),
+            started_at_ms: 20,
+            ..LaunchStatus::default()
+        };
+        store.save_latest(&next_request).unwrap();
+        save_terminal_launch_status(&store, 10, "stopped", "old process exited").unwrap();
+        assert_eq!(store.load_latest().unwrap(), Some(next_request));
+    }
+
+    #[test]
+    fn bridge_health_failures_reinject_only_after_consecutive_unhealthy_results() {
+        let mut failures = 0;
+        assert!(!should_reinject_after_health_result(
+            Some(false),
+            false,
+            &mut failures
+        ));
+        assert_eq!(failures, 1);
+        assert!(should_reinject_after_health_result(
+            Some(false),
+            false,
+            &mut failures
+        ));
+        assert_eq!(failures, BRIDGE_HEALTH_FAILURE_THRESHOLD);
+        assert!(!should_reinject_after_health_result(
+            Some(true),
+            false,
+            &mut failures
+        ));
+        assert_eq!(failures, 0);
+
+        failures = 1;
+        assert!(!should_reinject_after_health_result(
+            None,
+            false,
+            &mut failures
+        ));
+        assert_eq!(failures, 0);
+        assert!(should_reinject_after_health_result(
+            Some(false),
+            true,
+            &mut failures
+        ));
+    }
+
+    #[test]
+    fn reinject_backoff_delay_doubles_and_caps() {
+        assert_eq!(
+            reinject_backoff_delay(0),
+            std::time::Duration::from_secs(10)
+        );
+        assert_eq!(
+            reinject_backoff_delay(1),
+            std::time::Duration::from_secs(20)
+        );
+        assert_eq!(
+            reinject_backoff_delay(2),
+            std::time::Duration::from_secs(40)
+        );
+        assert_eq!(
+            reinject_backoff_delay(4),
+            std::time::Duration::from_secs(160)
+        );
+        assert_eq!(
+            reinject_backoff_delay(5),
+            std::time::Duration::from_secs(300)
+        );
+        assert_eq!(
+            reinject_backoff_delay(32),
+            std::time::Duration::from_secs(300)
+        );
+    }
+
+    #[test]
+    fn reinject_backoff_blocks_until_deadline_and_resets_on_recovery() {
+        let now = std::time::Instant::now();
+        let mut backoff = BridgeReinjectBackoff::default();
+        assert!(backoff.ready(now), "首次重注入应立即允许");
+
+        backoff.record_attempt(now);
+        assert_eq!(backoff.consecutive_attempts, 1);
+        assert!(!backoff.ready(now), "重注入后应进入退避窗口");
+        assert!(backoff.ready(now + reinject_backoff_delay(0)));
+
+        backoff.record_attempt(now + reinject_backoff_delay(0));
+        assert_eq!(backoff.consecutive_attempts, 2);
+        assert!(!backoff.ready(now + reinject_backoff_delay(0)));
+        assert!(backoff.ready(now + reinject_backoff_delay(0) + reinject_backoff_delay(1)));
+
+        backoff.reset();
+        assert_eq!(backoff.consecutive_attempts, 0);
+        assert!(backoff.ready(now), "健康恢复后应立即允许重注入");
+    }
+
+    #[test]
+    fn reinject_backoff_resets_only_after_sustained_health() {
+        let now = std::time::Instant::now();
+        let reset_after = std::time::Duration::from_secs(BRIDGE_REINJECT_BACKOFF_RESET_AFTER_SECS);
+        let mut backoff = BridgeReinjectBackoff::default();
+
+        backoff.record_attempt(now);
+        backoff.observe_healthy(now + std::time::Duration::from_secs(1));
+        assert_eq!(
+            backoff.consecutive_attempts, 1,
+            "注入后立刻健康不应清零退避，否则退避永远停在第一档"
+        );
+
+        backoff.observe_healthy(now + std::time::Duration::from_secs(30));
+        assert_eq!(backoff.consecutive_attempts, 1, "未满阈值不应清零");
+
+        // 中途出现一次不健康，重新计时。
+        backoff.observe_unhealthy();
+        let restart = now + std::time::Duration::from_secs(40);
+        backoff.observe_healthy(restart);
+        backoff.observe_healthy(now + std::time::Duration::from_secs(1) + reset_after);
+        assert_eq!(
+            backoff.consecutive_attempts, 1,
+            "不健康之后必须从新起点重新计时"
+        );
+
+        backoff.observe_healthy(restart + reset_after);
+        assert_eq!(backoff.consecutive_attempts, 0, "持续健康满阈值后应清零");
+        assert!(backoff.healthy_since.is_none());
+        assert!(backoff.ready(restart + reset_after));
+    }
+
+    #[test]
+    fn helper_bind_retry_covers_fixed_proxy_ports_and_macos_restarts() {
+        assert_eq!(
+            helper_bind_retry_timeout_ms(true, false),
+            PROTOCOL_PROXY_BIND_RETRY_TIMEOUT_MS
+        );
+        assert_eq!(
+            helper_bind_retry_timeout_ms(false, true),
+            HELPER_BIND_RETRY_TIMEOUT_MS
+        );
+        assert_eq!(helper_bind_retry_timeout_ms(false, false), 0);
+        assert_eq!(
+            helper_bind_retry_timeout_ms(true, true),
+            PROTOCOL_PROXY_BIND_RETRY_TIMEOUT_MS
+        );
+    }
+
+    #[test]
+    fn fixed_helper_port_is_required_only_when_protocol_proxy_is_used() {
+        assert_eq!(
+            required_fixed_helper_port(&BackendSettings::default()),
+            None
+        );
+
+        let official_mix = BackendSettings {
+            active_relay_id: "official-mix".to_string(),
+            relay_profiles: vec![crate::settings::RelayProfile {
+                id: "official-mix".to_string(),
+                relay_mode: crate::settings::RelayMode::Official,
+                official_mix_api_key: true,
+                protocol: crate::settings::RelayProtocol::Responses,
+                ..crate::settings::RelayProfile::default()
+            }],
+            ..BackendSettings::default()
+        };
+        assert_eq!(
+            required_fixed_helper_port(&official_mix),
+            Some(crate::protocol_proxy::protocol_proxy_port())
+        );
+    }
+
+    #[test]
+    fn fixed_port_wait_retries_transient_forbidden_and_stops_on_other_errors() {
+        let temp = tempfile::tempdir().unwrap();
+        let log_path = temp.path().join("diagnostic.log");
+        crate::diagnostic_log::set_diagnostic_log_path_for_tests(Some(log_path));
+        struct RestoreLog;
+        impl Drop for RestoreLog {
+            fn drop(&mut self) {
+                crate::diagnostic_log::set_diagnostic_log_path_for_tests(None);
+            }
+        }
+        let _restore = RestoreLog;
+
+        let forbidden_attempts = std::cell::Cell::new(0u32);
+        let sleeps = std::cell::Cell::new(0u32);
+        wait_for_fixed_helper_port(
+            57321,
+            400,
+            200,
+            |_| {
+                let attempt = forbidden_attempts.get();
+                forbidden_attempts.set(attempt + 1);
+                if attempt < 2 {
+                    Err(std::io::Error::from_raw_os_error(10013))
+                } else {
+                    Ok(())
+                }
+            },
+            |_| sleeps.set(sleeps.get() + 1),
+        )
+        .unwrap();
+        assert_eq!(forbidden_attempts.get(), 3);
+        assert_eq!(sleeps.get(), 2);
+
+        let probes = std::cell::Cell::new(0u32);
+        let other_sleeps = std::cell::Cell::new(0u32);
+        let error = wait_for_fixed_helper_port(
+            57321,
+            10_000,
+            200,
+            |_| {
+                probes.set(probes.get() + 1);
+                Err(std::io::Error::other("simulated unrelated failure"))
+            },
+            |_| other_sleeps.set(other_sleeps.get() + 1),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert_eq!(probes.get(), 1);
+        assert_eq!(other_sleeps.get(), 0);
+        assert!(message.contains("simulated unrelated failure"), "{message}");
+        assert!(!message.contains("被其他进程占用"), "{message}");
+        assert!(!message.contains("被 Windows 保留"), "{message}");
+
+        let permanent_probes = std::cell::Cell::new(0u32);
+        let permanent_sleeps = std::cell::Cell::new(0u32);
+        let error = wait_for_fixed_helper_port(
+            57321,
+            400,
+            200,
+            |_| {
+                permanent_probes.set(permanent_probes.get() + 1);
+                Err(std::io::Error::from_raw_os_error(10013))
+            },
+            |_| permanent_sleeps.set(permanent_sleeps.get() + 1),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        assert_eq!(permanent_probes.get(), 3);
+        assert_eq!(permanent_sleeps.get(), 2);
+        assert!(message.contains("os error 10013"), "{message}");
+        assert!(!message.contains("被其他进程占用"), "{message}");
+        if cfg!(windows) {
+            assert!(message.contains("被 Windows 保留"), "{message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn bridge_reinjector_prefers_launcher_callback() {
+        let launcher_calls = Arc::new(AtomicUsize::new(0));
+        let default_calls = Arc::new(AtomicUsize::new(0));
+
+        run_bridge_reinjector(
+            Some(counted_reinjector(launcher_calls.clone())),
+            counted_reinjector(default_calls.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(launcher_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(default_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn bridge_reinjector_falls_back_to_core_callback() {
+        let default_calls = Arc::new(AtomicUsize::new(0));
+
+        run_bridge_reinjector(None, counted_reinjector(default_calls.clone()))
+            .await
+            .unwrap();
+
+        assert_eq!(default_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -4780,7 +4554,15 @@ mod tests {
     }
 
     #[test]
-    fn chunked_decoder_rejects_a_declared_chunk_larger_than_the_body_limit() {
+    fn chunked_decoder_accepts_exact_body_limit_and_rejects_one_byte_more() {
+        let mut exact = format!("{:X}\r\n", MAX_HTTP_BODY_BYTES).into_bytes();
+        exact.resize(exact.len() + MAX_HTTP_BODY_BYTES, b'a');
+        exact.extend_from_slice(b"\r\n0\r\n\r\n");
+        let ChunkedBody::Complete(decoded) = decode_chunked_body(&exact).unwrap() else {
+            panic!("expected complete chunked body");
+        };
+        assert_eq!(decoded.len(), MAX_HTTP_BODY_BYTES);
+
         let oversized = format!("{:X}\r\n", MAX_HTTP_BODY_BYTES + 1).into_bytes();
         let error = decode_chunked_body(&oversized).unwrap_err();
         assert_eq!(error.status(), "413 Payload Too Large");
@@ -4819,23 +4601,17 @@ mod tests {
     }
 
     #[test]
-    fn content_length_body_distinguishes_incomplete_and_oversized_bodies() {
-        let incomplete = content_length_body(&[], MAX_HTTP_BODY_BYTES).unwrap_err();
-        assert_eq!(incomplete.status(), "400 Bad Request");
+    fn content_length_body_accepts_exact_limit_and_rejects_one_byte_more() {
+        let exact = vec![b'a'; MAX_HTTP_BODY_BYTES];
+        assert_eq!(
+            content_length_body(&exact, MAX_HTTP_BODY_BYTES)
+                .unwrap()
+                .len(),
+            MAX_HTTP_BODY_BYTES
+        );
+
         let error = content_length_body(&[], MAX_HTTP_BODY_BYTES + 1).unwrap_err();
         assert_eq!(error.status(), "413 Payload Too Large");
-    }
-
-    #[test]
-    fn request_body_sink_spills_large_bodies_to_a_temporary_file_without_data_loss() {
-        let expected = vec![b'x'; HTTP_BODY_MEMORY_THRESHOLD + 1];
-        let mut sink = HttpRequestBodySink::new();
-        for chunk in expected.chunks(4093) {
-            sink.write(chunk).unwrap();
-        }
-        let body = sink.finish();
-        assert!(matches!(body, HttpRequestBody::TempFile { .. }));
-        assert_eq!(body.into_vec().unwrap(), expected);
     }
 
     #[tokio::test]
@@ -4869,6 +4645,257 @@ mod tests {
         assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 400 Bad Request"));
     }
 
+    #[tokio::test]
+    async fn helper_returns_426_for_responses_websocket_upgrade() {
+        let response = send_raw_helper_request(
+            b"GET /v1/responses HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n",
+        )
+        .await;
+
+        assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 426 Upgrade Required"));
+    }
+
+    #[tokio::test]
+    async fn helper_keeps_unknown_image_path_as_not_found() {
+        let response = send_raw_helper_request(
+            b"POST /v1/images/unknown HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        )
+        .await;
+
+        let response = String::from_utf8_lossy(&response);
+        assert!(response.starts_with("HTTP/1.1 404 Not Found"));
+        assert!(response.contains("未知后端路径"));
+    }
+
+    #[tokio::test]
+    async fn helper_proxies_image_generation_upstream_error_response() {
+        let _settings_guard = crate::paths::settings_path_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        let previous_settings_path =
+            crate::paths::set_settings_path_for_tests(Some(settings_path.clone()));
+        let upstream_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let upstream_addr = upstream_listener.local_addr().unwrap();
+        let settings = serde_json::json!({
+            "relayProfiles": [{
+                "id": "images",
+                "name": "Images",
+                "baseUrl": format!("http://{upstream_addr}/v1"),
+                "upstreamBaseUrl": format!("http://{upstream_addr}/v1"),
+                "apiKey": "sk-test",
+                "protocol": "responses",
+                "relayMode": "mixedApi"
+            }],
+            "activeRelayId": "images"
+        });
+        std::fs::write(settings_path, serde_json::to_vec_pretty(&settings).unwrap()).unwrap();
+        let upstream = tokio::spawn(async move {
+            let (mut stream, _) = upstream_listener.accept().await.unwrap();
+            let request = read_http_request(&mut stream).await.unwrap();
+            let body = br#"{"error":{"message":"rate limited"}}"#;
+            let response = format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/problem+json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(body).await.unwrap();
+            request
+        });
+        let request_body = br#"{"model":"gpt-image-2","prompt":"draw a square"}"#;
+        let headers = format!(
+            "POST /v1/images/generations HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            request_body.len()
+        );
+        let mut request = headers.into_bytes();
+        request.extend_from_slice(request_body);
+
+        let response = send_raw_helper_request(&request).await;
+
+        let response_text = String::from_utf8_lossy(&response);
+        assert!(response_text.starts_with("HTTP/1.1 429 Too Many Requests"));
+        assert!(response_text.contains("Content-Type: application/problem+json"));
+        assert!(response.ends_with(br#"{"error":{"message":"rate limited"}}"#));
+        let upstream_request = upstream.await.unwrap();
+        let request_line = String::from_utf8_lossy(&upstream_request.headers);
+        assert!(request_line.starts_with("POST /v1/images/generations HTTP/1.1"));
+        assert_eq!(upstream_request.body, request_body);
+        crate::paths::set_settings_path_for_tests(previous_settings_path);
+    }
+
+    #[test]
+    fn protocol_proxy_request_body_decodes_zstd() {
+        let body = br#"{"model":"gpt-5.6-sol","input":"probe","stream":false}"#;
+        let compressed = zstd::stream::encode_all(std::io::Cursor::new(body), 3).unwrap();
+
+        let decoded = decode_protocol_proxy_request_body(&compressed, Some("zstd")).unwrap();
+
+        assert_eq!(decoded.as_bytes(), body);
+        assert!(decode_protocol_proxy_request_body(body, Some("gzip")).is_err());
+    }
+
+    #[tokio::test]
+    async fn helper_replaces_chatgpt_auth_when_proxying_zstd_responses_request() {
+        let _settings_guard = crate::paths::settings_path_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        let previous_settings_path =
+            crate::paths::set_settings_path_for_tests(Some(settings_path.clone()));
+        let upstream_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let upstream_addr = upstream_listener.local_addr().unwrap();
+        let settings = serde_json::json!({
+            "relayProfilesEnabled": true,
+            "relayProfiles": [{
+                "id": "remote-control",
+                "name": "Remote Control Relay",
+                "baseUrl": format!("http://{upstream_addr}/v1"),
+                "upstreamBaseUrl": format!("http://{upstream_addr}/v1"),
+                "apiKey": "sk-upstream",
+                "protocol": "responses",
+                "relayMode": "official",
+                "officialMixApiKey": true
+            }],
+            "activeRelayId": "remote-control"
+        });
+        std::fs::write(settings_path, serde_json::to_vec_pretty(&settings).unwrap()).unwrap();
+
+        let upstream = tokio::spawn(async move {
+            let (mut stream, _) = upstream_listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let mut expected_len = None;
+            loop {
+                let read = stream.read(&mut buffer).await.unwrap();
+                assert!(read > 0, "upstream request ended before body completed");
+                request.extend_from_slice(&buffer[..read]);
+                if expected_len.is_none() {
+                    if let Some(header_end) = find_header_end(&request) {
+                        let headers = String::from_utf8_lossy(&request[..header_end]);
+                        let content_length = header_value_from_headers(&headers, "content-length")
+                            .unwrap()
+                            .parse::<usize>()
+                            .unwrap();
+                        expected_len = Some(header_end + 4 + content_length);
+                    }
+                }
+                if expected_len.is_some_and(|length| request.len() >= length) {
+                    break;
+                }
+            }
+            let response_body = br#"{"id":"resp_remote","object":"response"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                response_body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.write_all(response_body).await.unwrap();
+            request
+        });
+
+        let body = br#"{"model":"gpt-5.6-sol","input":"probe","stream":false}"#;
+        let compressed = zstd::stream::encode_all(std::io::Cursor::new(body), 3).unwrap();
+        let helper_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let helper_addr = helper_listener.local_addr().unwrap();
+        let helper = tokio::spawn(async move {
+            let (stream, remote_addr) = helper_listener.accept().await.unwrap();
+            handle_helper_connection(stream, Some(remote_addr))
+                .await
+                .unwrap();
+        });
+        let mut client = tokio::net::TcpStream::connect(helper_addr).await.unwrap();
+        let headers = format!(
+            "POST /v1/responses HTTP/1.1\r\nHost: {helper_addr}\r\nAuthorization: Bearer chatgpt-secret\r\nSeSsIoN-Id: conversation-123\r\nTHREAD-ID: thread-123\r\nX-OpenCode-Session: opencode-123\r\nCookie: private-cookie\r\nX-Unrelated: private-value\r\nContent-Type: application/json\r\nContent-Encoding: zstd\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            compressed.len()
+        );
+        client.write_all(headers.as_bytes()).await.unwrap();
+        client.write_all(&compressed).await.unwrap();
+        let mut response = Vec::new();
+        client.read_to_end(&mut response).await.unwrap();
+        assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 200 OK"));
+
+        helper.await.unwrap();
+        let upstream_request = upstream.await.unwrap();
+        let header_end = find_header_end(&upstream_request).unwrap();
+        let upstream_headers =
+            String::from_utf8_lossy(&upstream_request[..header_end]).to_ascii_lowercase();
+        assert!(upstream_headers.starts_with("post /v1/responses http/1.1"));
+        assert!(upstream_headers.contains("authorization: bearer sk-upstream"));
+        assert!(!upstream_headers.contains("chatgpt-secret"));
+        assert!(upstream_headers.contains("session-id: conversation-123"));
+        assert!(upstream_headers.contains("thread-id: thread-123"));
+        assert!(upstream_headers.contains("x-opencode-session: opencode-123"));
+        assert!(!upstream_headers.contains("private-cookie"));
+        assert!(!upstream_headers.contains("private-value"));
+        let upstream_body: serde_json::Value =
+            serde_json::from_slice(&upstream_request[header_end + 4..]).unwrap();
+        assert_eq!(upstream_body["model"], "gpt-5.6-sol");
+        crate::paths::set_settings_path_for_tests(previous_settings_path);
+    }
+
+    #[tokio::test]
+    async fn helper_rejects_encrypted_agent_content_as_bad_request_before_upstream_send() {
+        let _settings_guard = crate::paths::settings_path_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        let settings_path = temp.path().join("settings.json");
+        struct RestoreSettingsPath(Option<PathBuf>);
+        impl Drop for RestoreSettingsPath {
+            fn drop(&mut self) {
+                crate::paths::set_settings_path_for_tests(self.0.take());
+            }
+        }
+        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(settings_path.clone())));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        std::fs::write(settings_path, serde_json::to_vec(&serde_json::json!({
+            "activeRelayId":"encrypted-agent-test",
+            "relayProfiles":[{"id":"encrypted-agent-test","name":"Encrypted agent test",
+                "baseUrl":format!("http://{address}/v1"),"apiKey":"fixture-api-key",
+                "protocol":"chatCompletions","relayMode":"mixedApi"}]
+        })).unwrap()).unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let upstream = tokio::spawn(async move {
+            tokio::select! {
+                accepted = listener.accept() => {
+                    let (mut socket, _) = accepted.unwrap();
+                    let _ = read_http_request(&mut socket).await.unwrap();
+                    let body = br#"{"choices":[{"message":{"role":"assistant","content":"wrong"},"finish_reason":"stop"}]}"#;
+                    socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await.unwrap();
+                    socket.write_all(body).await.unwrap();
+                    true
+                },
+                _ = stopped => false,
+            }
+        });
+        let body = br#"{"model":"custom-model","stream":false,"input":[{"type":"encrypted_content","encrypted_content":"fixture-private-payload"}]}"#;
+        let mut request = format!("POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+        request.extend_from_slice(body);
+        let response = send_raw_helper_request(&request).await;
+        let _ = stop.send(());
+        let contacted = upstream.await.unwrap();
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "{response}");
+        let body = response.split_once("\r\n\r\n").unwrap().1;
+        let error: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(error["error"]["type"], "invalid_request_error");
+        assert_eq!(error["error"]["code"], "unsupported_encrypted_agent_content");
+        assert!(!response.contains("fixture-private-payload"));
+        assert!(!response.contains("fixture-api-key"));
+        assert!(!contacted);
+
+        // 只有新增的 typed unsupported 错误映射为 400，其余请求错误沿用 502。
+        let response = send_raw_helper_request(b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1\r\nConnection: close\r\n\r\n{").await;
+        let response = String::from_utf8(response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 502 Bad Gateway"));
+        let body: serde_json::Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["status"], "failed");
+        assert!(!response.contains("unsupported_encrypted_agent_content"));
+    }
+
     async fn send_raw_helper_request(request: &[u8]) -> Vec<u8> {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -4876,15 +4903,9 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = listener.accept().await.unwrap();
-            let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
-            handle_helper_connection(
-                stream,
-                Some(remote_addr),
-                connection_shutdown,
-                crate::shared_terminal::SharedTerminalBroker::shared(),
-            )
-            .await
-            .unwrap();
+            handle_helper_connection(stream, Some(remote_addr))
+                .await
+                .unwrap();
         });
         let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
         client.write_all(request).await.unwrap();
@@ -4968,15 +4989,9 @@ mod tests {
         let helper_addr = helper_listener.local_addr().unwrap();
         let helper = tokio::spawn(async move {
             let (stream, remote_addr) = helper_listener.accept().await.unwrap();
-            let (_connection_shutdown_tx, connection_shutdown) = tokio::sync::broadcast::channel(1);
-            handle_helper_connection(
-                stream,
-                Some(remote_addr),
-                connection_shutdown,
-                crate::shared_terminal::SharedTerminalBroker::shared(),
-            )
-            .await
-            .unwrap();
+            handle_helper_connection(stream, Some(remote_addr))
+                .await
+                .unwrap();
         });
         let mut client = tokio::net::TcpStream::connect(helper_addr).await.unwrap();
         let headers = format!(
@@ -5000,52 +5015,112 @@ mod tests {
         assert_eq!(upstream.await.unwrap(), expected_body);
         crate::paths::set_settings_path_for_tests(previous_settings_path);
     }
+}
 
-    #[test]
-    fn post_launch_guard_stops_after_stable_ready_artifacts() {
-        let artifacts = crate::computer_use_guard::GuardArtifacts {
-            notify_exe: Some(PathBuf::from("codex-computer-use.exe")),
-            marketplace_path: Some(PathBuf::from("openai-bundled")),
-            sky_package_json: None,
-            runtime_exports_needed: false,
-        };
+#[cfg(test)]
+mod proxy_stream_tests {
+    use super::forward_protocol_proxy_stream;
+    use crate::protocol_proxy::UpstreamWireApi;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        assert!(!should_stop_post_launch_computer_use_guard(2, &artifacts));
-        assert!(should_stop_post_launch_computer_use_guard(3, &artifacts));
+    async fn forward_fixture(body: &str, truncated: bool, wire: UpstreamWireApi) -> (Option<String>, String) {
+        let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = upstream.local_addr().unwrap();
+        let body = body.to_owned();
+        let upstream_task = tokio::spawn(async move {
+            let (mut socket, _) = upstream.accept().await.unwrap();
+            let mut request = Vec::new();
+            loop {
+                let byte = socket.read_u8().await.unwrap();
+                request.push(byte);
+                if request.ends_with(b"\r\n\r\n") { break; }
+            }
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
+            socket.write_all(format!("{:X}\r\n{}\r\n", body.len(), body).as_bytes()).await.unwrap();
+            if !truncated { socket.write_all(b"0\r\n\r\n").await.unwrap(); }
+            socket.shutdown().await.unwrap();
+        });
+        let response = reqwest::Client::builder().no_proxy().build().unwrap()
+            .get(format!("http://{address}/stream?key=fixture-secret")).send().await.unwrap();
+        let downstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut reader = tokio::net::TcpStream::connect(downstream.local_addr().unwrap()).await.unwrap();
+        let (mut writer, _) = downstream.accept().await.unwrap();
+        let forwarded = tokio::spawn(async move {
+            let result = forward_protocol_proxy_stream(&mut writer, response, wire, None).await.unwrap();
+            writer.shutdown().await.unwrap();
+            result
+        });
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await.unwrap();
+        let result = forwarded.await.unwrap();
+        upstream_task.await.unwrap();
+        (result, String::from_utf8(bytes).unwrap())
     }
 
-    #[test]
-    fn post_launch_guard_keeps_retrying_until_artifacts_are_ready() {
-        let missing_notify = crate::computer_use_guard::GuardArtifacts {
-            notify_exe: None,
-            marketplace_path: Some(PathBuf::from("openai-bundled")),
-            sky_package_json: None,
-            runtime_exports_needed: false,
-        };
-        let missing_marketplace = crate::computer_use_guard::GuardArtifacts {
-            notify_exe: Some(PathBuf::from("codex-computer-use.exe")),
-            marketplace_path: None,
-            sky_package_json: None,
-            runtime_exports_needed: false,
-        };
-        let missing_runtime_package = crate::computer_use_guard::GuardArtifacts {
-            notify_exe: Some(PathBuf::from("codex-computer-use.exe")),
-            marketplace_path: Some(PathBuf::from("openai-bundled")),
-            sky_package_json: None,
-            runtime_exports_needed: true,
-        };
+    #[tokio::test]
+    async fn transport_errors_are_failures_for_native_and_chat_streams() {
+        for wire in [UpstreamWireApi::Responses, UpstreamWireApi::ChatCompletions] {
+            let (failure, output) = forward_fixture(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n", true, wire,
+            ).await;
+            let failure = failure.expect("truncated transfer must not log stream_ok");
+            assert!(!failure.contains("fixture-secret"));
+            assert!(!output.contains("event: response.completed"));
+            if wire == UpstreamWireApi::ChatCompletions {
+                assert!(output.contains("event: response.failed"));
+            }
+        }
+    }
 
-        assert!(!should_stop_post_launch_computer_use_guard(
-            3,
-            &missing_notify
-        ));
-        assert!(!should_stop_post_launch_computer_use_guard(
-            3,
-            &missing_marketplace
-        ));
-        assert!(!should_stop_post_launch_computer_use_guard(
-            3,
-            &missing_runtime_package
-        ));
+    #[tokio::test]
+    async fn chat_eof_and_error_events_are_not_completed_or_replayed() {
+        for body in [
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+            "event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n",
+        ] {
+            let (failure, output) = forward_fixture(body, false, UpstreamWireApi::ChatCompletions).await;
+            assert!(failure.is_some());
+            assert!(output.contains("event: response.failed"));
+            assert!(!output.contains("event: response.completed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn native_responses_failure_events_are_observed_without_rewriting_or_echoing_payload() {
+        for (body, event_type) in [
+            ("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"private-upstream-error\"},\"output\":[{\"encrypted_content\":\"private-payload\"}]}}\n\n", "response.failed"),
+            ("data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"private-upstream-error\"}}}\n\n", "response.incomplete"),
+            ("event: error\ndata: {\"error\":{\"message\":\"private-upstream-error\"}}\r\n\r\n", "error"),
+        ] {
+            let (failure, output) = forward_fixture(body, false, UpstreamWireApi::Responses).await;
+            let failure = failure.expect("原生失败事件不得记成 stream_ok");
+            assert!(failure.contains(event_type));
+            assert!(!failure.contains("private-upstream-error"));
+            assert!(!failure.contains("private-payload"));
+            assert_eq!(output, body, "原生响应必须原字节转发");
+        }
+    }
+
+    #[tokio::test]
+    async fn native_responses_clean_http_eof_without_completed_is_diagnosed_without_replay() {
+        let body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: [DONE]\n\n";
+        let (failure, output) = forward_fixture(body, false, UpstreamWireApi::Responses).await;
+        assert!(failure.expect("HTTP EOF 和 DONE 均不能代替 response.completed").contains("完成事件"));
+        assert_eq!(output, body);
+    }
+
+    #[tokio::test]
+    async fn successful_native_passthrough_and_chat_completion_are_preserved() {
+        let native = "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n";
+        let (failure, output) = forward_fixture(native, false, UpstreamWireApi::Responses).await;
+        assert!(failure.is_none());
+        assert_eq!(output, native);
+        let (failure, output) = forward_fixture(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+            false, UpstreamWireApi::ChatCompletions,
+        ).await;
+        assert!(failure.is_none());
+        assert!(output.contains("event: response.completed"));
+        assert!(!output.contains("event: response.failed"));
     }
 }

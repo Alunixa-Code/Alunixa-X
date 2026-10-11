@@ -1,5 +1,4 @@
 pub mod app_server;
-mod progress;
 pub mod session_store;
 pub mod weixin;
 
@@ -10,11 +9,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use self::app_server::{
-    AppServerConfig, AppServerProgressEvent, AppServerProgressKind, AppServerProgressPhase,
-    AppServerTurnResult, CodexAppServer,
-};
-use self::progress::forward_progress_to_weixin;
+use self::app_server::{AppServerConfig, AppServerTurnResult, CodexAppServer};
 use self::session_store::{ConnectSessionStore, ConnectState};
 use self::weixin::{WeixinClient, WeixinMessage};
 
@@ -62,8 +57,10 @@ impl Default for WeixinConnectConfig {
 
 impl WeixinConnectConfig {
     pub fn normalized(mut self) -> Self {
-        self.base_url = weixin::normalize_service_base_url(&self.base_url)
-            .unwrap_or_else(|_| default_weixin_base_url());
+        self.base_url = self.base_url.trim().trim_end_matches('/').to_string();
+        if self.base_url.is_empty() {
+            self.base_url = default_weixin_base_url();
+        }
         self.token = self.token.trim().to_string();
         self.account_id = self.account_id.trim().to_string();
         self.allow_from = self.allow_from.trim().to_string();
@@ -104,10 +101,43 @@ impl Default for WeixinConnectStatus {
 
 pub type SharedWeixinConnectStatus = Arc<Mutex<WeixinConnectStatus>>;
 
+/// 只在消息边界切换 CLI，避免中断正在执行的回合。
+#[derive(Clone)]
+pub struct WeixinCodexPath(Arc<Mutex<String>>);
+
+impl WeixinCodexPath {
+    pub fn new(path: &str) -> Self {
+        Self(Arc::new(Mutex::new(path.trim().to_string())))
+    }
+
+    pub fn set(&self, path: &str) {
+        *self.0.lock().unwrap_or_else(|error| error.into_inner()) = path.trim().to_string();
+    }
+
+    fn apply(&self, config: &mut AppServerConfig) -> bool {
+        let path = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if config.executable == *path {
+            return false;
+        }
+        config.executable.clone_from(&path);
+        true
+    }
+}
+
 pub async fn run_weixin_connect(
     config: WeixinConnectConfig,
     stop: Arc<AtomicBool>,
     status: SharedWeixinConnectStatus,
+) -> anyhow::Result<()> {
+    let codex_path = WeixinCodexPath::new(&config.codex_path);
+    run_weixin_connect_with_codex_path(config, stop, status, codex_path).await
+}
+
+pub async fn run_weixin_connect_with_codex_path(
+    config: WeixinConnectConfig,
+    stop: Arc<AtomicBool>,
+    status: SharedWeixinConnectStatus,
+    codex_path: WeixinCodexPath,
 ) -> anyhow::Result<()> {
     let config = config.normalized();
     if config.token.is_empty() {
@@ -132,7 +162,7 @@ pub async fn run_weixin_connect(
     let client = WeixinClient::new(&config.base_url, &config.token, &config.route_tag)?;
     let store = ConnectSessionStore::default_for_account(&config.account_id);
     let mut state = store.load().unwrap_or_default();
-    let app_config = AppServerConfig {
+    let mut app_config = AppServerConfig {
         executable: config.codex_path.clone(),
         work_dir,
         model: config.model.clone(),
@@ -177,8 +207,17 @@ pub async fn run_weixin_connect(
             if !message.is_finished_user_message()
                 || message.is_older_than(now_ms(), MAX_INBOUND_MESSAGE_AGE_MS)
                 || state.is_processed(&message_key)
-                || !is_allowed_peer(&config.allow_from, &message.from_user_id)
             {
+                continue;
+            }
+            // 白名单外的消息以前完全静默：不回复也没有任何提示，
+            // 用户无法区分「消息没到」和「被过滤了」。
+            if !is_allowed_peer(&config.allow_from, &message.from_user_id) {
+                update_status(&status, |current| {
+                    current.state = "running".to_string();
+                    current.message =
+                        format!("已忽略来自非白名单发送方的消息：{}", message.from_user_id);
+                });
                 continue;
             }
             let Some(text) = message.text() else {
@@ -197,6 +236,11 @@ pub async fn run_weixin_connect(
             state
                 .context_tokens
                 .insert(message.from_user_id.clone(), message.context_token.clone());
+            if codex_path.apply(&mut app_config) {
+                if let Some(mut server) = app_server.take() {
+                    server.close().await;
+                }
+            }
             let result = process_weixin_message(
                 &client,
                 &app_config,
@@ -230,13 +274,13 @@ pub async fn run_weixin_connect(
                     let _ = client
                         .send_text_chunks(
                             &message.from_user_id,
-                            "Codex 处理失败，请在 Alunixa X 中查看连接状态。",
+                            "Codex 处理失败，请在 Alunixa X 管理器中查看连接状态。",
                             &message.context_token,
                         )
                         .await;
                     update_status(&status, |current| {
-                        current.state = "error".to_string();
-                        current.message = format!("处理微信消息失败：{error}");
+                        current.state = "retrying".to_string();
+                        current.message = format!("处理微信消息失败，等待下一条消息重试：{error}");
                         current.last_peer_id = message.from_user_id.clone();
                         current.last_message_at_ms = now_ms();
                     });
@@ -266,150 +310,45 @@ async fn process_weixin_message(
     text: &str,
     stop: &AtomicBool,
 ) -> anyhow::Result<()> {
-    let (progress_sender, progress_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let progress_task = tokio::spawn(forward_progress_to_weixin(
-        client.clone(),
-        message.from_user_id.clone(),
-        message.context_token.clone(),
-        progress_receiver,
-    ));
+    if let Some(reason) = local_model_endpoint_unreachable_reason().await {
+        bail!("{reason}");
+    }
+    if app_server
+        .as_ref()
+        .map(|server| !server.is_running())
+        .unwrap_or(true)
+    {
+        *app_server = Some(CodexAppServer::start(app_config.clone()).await?);
+    }
+    let server = app_server.as_mut().context("Codex app-server 未启动")?;
+    let saved_thread_id = state.thread_ids.get(&message.from_user_id).cloned();
+    let thread_id = match server.prepare_thread(saved_thread_id.as_deref()).await {
+        Ok(thread_id) => thread_id,
+        Err(error) if saved_thread_id.is_some() => {
+            state.thread_ids.remove(&message.from_user_id);
+            server
+                .prepare_thread(None)
+                .await
+                .with_context(|| format!("恢复原会话失败（{error}），新建会话也失败"))?
+        }
+        Err(error) => return Err(error),
+    };
+    state
+        .thread_ids
+        .insert(message.from_user_id.clone(), thread_id.clone());
 
-    send_progress(
-        &progress_sender,
-        "bridge",
-        AppServerProgressKind::Status,
-        AppServerProgressPhase::Started,
-        "已收到微信消息",
-        "正在连接 Codex 并准备联系人独立会话。",
-    );
-
-    let operation_result: anyhow::Result<AppServerTurnResult> = async {
-        if app_server
-            .as_ref()
-            .map(|server| !server.is_running())
-            .unwrap_or(true)
-        {
-            send_progress(
-                &progress_sender,
-                "app-server",
-                AppServerProgressKind::Status,
-                AppServerProgressPhase::Started,
-                "正在启动 Codex app-server",
-                "会自动尝试用户配置、Codex Desktop 缓存、桌面包和 PATH 中的 CLI。",
-            );
-            match CodexAppServer::start(app_config.clone()).await {
-                Ok(server) => {
-                    *app_server = Some(server);
-                    send_progress(
-                        &progress_sender,
-                        "app-server",
-                        AppServerProgressKind::Status,
-                        AppServerProgressPhase::Completed,
-                        "Codex app-server 已连接",
-                        "JSON-RPC 初始化成功。",
-                    );
-                }
-                Err(error) => {
-                    send_progress(
-                        &progress_sender,
-                        "app-server",
-                        AppServerProgressKind::Error,
-                        AppServerProgressPhase::Failed,
-                        "Codex app-server 启动失败",
-                        &format!("{error:#}"),
-                    );
-                    return Err(error);
+    let turn = server.run_turn(&thread_id, text);
+    tokio::pin!(turn);
+    let turn_result = loop {
+        tokio::select! {
+            reply = &mut turn => break reply?,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
+                if stop.load(Ordering::SeqCst) {
+                    bail!("微信连接已停止");
                 }
             }
         }
-        let server = app_server.as_mut().context("Codex app-server 未启动")?;
-        let saved_thread_id = state.thread_ids.get(&message.from_user_id).cloned();
-        send_progress(
-            &progress_sender,
-            "thread",
-            AppServerProgressKind::Status,
-            AppServerProgressPhase::Started,
-            if saved_thread_id.is_some() {
-                "正在恢复联系人会话"
-            } else {
-                "正在创建联系人会话"
-            },
-            "每个微信联系人继续映射到独立 Codex thread。",
-        );
-        let thread_id = match server.prepare_thread(saved_thread_id.as_deref()).await {
-            Ok(thread_id) => thread_id,
-            Err(error) if saved_thread_id.is_some() => {
-                send_progress(
-                    &progress_sender,
-                    "thread",
-                    AppServerProgressKind::Error,
-                    AppServerProgressPhase::Failed,
-                    "恢复原会话失败",
-                    &format!("{error:#}\n正在创建新会话继续处理。"),
-                );
-                state.thread_ids.remove(&message.from_user_id);
-                send_progress(
-                    &progress_sender,
-                    "thread-new",
-                    AppServerProgressKind::Status,
-                    AppServerProgressPhase::Started,
-                    "正在创建替代会话",
-                    "原会话不可恢复，正在新建 Codex thread。",
-                );
-                server
-                    .prepare_thread(None)
-                    .await
-                    .with_context(|| format!("恢复原会话失败（{error}），新建会话也失败"))?
-            }
-            Err(error) => return Err(error),
-        };
-        state
-            .thread_ids
-            .insert(message.from_user_id.clone(), thread_id.clone());
-        send_progress(
-            &progress_sender,
-            "thread-ready",
-            AppServerProgressKind::Status,
-            AppServerProgressPhase::Completed,
-            "联系人会话准备完成",
-            "开始把本条微信消息交给 Codex。",
-        );
-
-        let turn = server.run_turn_with_progress(&thread_id, text, Some(progress_sender.clone()));
-        tokio::pin!(turn);
-        loop {
-            tokio::select! {
-                reply = &mut turn => break reply,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(200)) => {
-                    if stop.load(Ordering::SeqCst) {
-                        break Err(anyhow::anyhow!("微信连接已停止"));
-                    }
-                }
-            }
-        }
-    }
-    .await;
-
-    if let Err(error) = &operation_result {
-        send_progress(
-            &progress_sender,
-            "bridge-error",
-            AppServerProgressKind::Error,
-            AppServerProgressPhase::Failed,
-            "Codex 处理失败",
-            &format!("{error:#}"),
-        );
-    }
-    drop(progress_sender);
-    if let Ok(Err(error)) = progress_task.await {
-        let _ = crate::diagnostic_log::append_diagnostic_log(
-            "connect.weixin_progress_delivery_failed",
-            serde_json::json!({
-                "message": error.to_string().chars().take(320).collect::<String>()
-            }),
-        );
-    }
-    let turn_result = operation_result?;
+    };
     let reply = if turn_result.reply.trim().is_empty() {
         "Codex 已完成处理，但没有返回文字内容。"
     } else {
@@ -423,23 +362,6 @@ async fn process_weixin_message(
             &message.context_token,
         )
         .await
-}
-
-fn send_progress(
-    sender: &tokio::sync::mpsc::UnboundedSender<AppServerProgressEvent>,
-    item_id: &str,
-    kind: AppServerProgressKind,
-    phase: AppServerProgressPhase,
-    title: &str,
-    detail: &str,
-) {
-    let _ = sender.send(AppServerProgressEvent {
-        item_id: item_id.to_string(),
-        kind,
-        phase,
-        title: title.to_string(),
-        detail: detail.to_string(),
-    });
 }
 
 fn append_reply_footer(
@@ -495,6 +417,41 @@ fn is_allowed_peer(allow_from: &str, peer: &str) -> bool {
             .any(|allowed| !allowed.is_empty() && allowed == peer)
 }
 
+/// 模型流量若走本地代理（config.toml 的 openai_base_url 指向 127.0.0.1，
+/// 由 Alunixa X 的单模型路由写入），该代理只随从 Alunixa X 启动的桌面版存在。
+/// 提前探测，避免 turn 失败后只剩一句模糊的「处理失败」。
+async fn local_model_endpoint_unreachable_reason() -> Option<String> {
+    let base_url = std::fs::read_to_string(
+        crate::relay_config::default_codex_home_dir().join("config.toml"),
+    )
+    .ok()
+    .and_then(|contents| crate::relay_config::root_key_string(&contents, "openai_base_url"))?;
+    let (host, port) = localhost_endpoint(&base_url)?;
+    let connect = tokio::net::TcpStream::connect((host.as_str(), port));
+    if tokio::time::timeout(std::time::Duration::from_millis(300), connect)
+        .await
+        .is_ok_and(|result| result.is_ok())
+    {
+        return None;
+    }
+    Some(
+        "Codex 桌面版当前未运行，微信连接暂时无法调用模型。\
+         请先从 Alunixa X 启动 Codex 桌面版后重试。"
+            .to_string(),
+    )
+}
+
+/// 只对「本地回环 + 显式端口」的 base_url 预检；
+/// 直连中转站或未带端口的地址不属于桌面版代理，返回 None 表示跳过。
+fn localhost_endpoint(base_url: &str) -> Option<(String, u16)> {
+    let url = reqwest::Url::parse(base_url.trim()).ok()?;
+    let host = url.host_str()?;
+    if host != "127.0.0.1" && host != "localhost" {
+        return None;
+    }
+    Some((host.to_string(), url.port()?))
+}
+
 fn normalize_sandbox(value: &str) -> String {
     match value.trim() {
         "workspace-write" => "workspace-write",
@@ -533,6 +490,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_cli_path_replaces_startup_path_at_next_message() {
+        let path = WeixinCodexPath::new("missing-codex");
+        let runtime_path = path.clone();
+        let mut config = AppServerConfig {
+            executable: "missing-codex".to_string(),
+            work_dir: PathBuf::from("."),
+            model: "test-model".to_string(),
+            sandbox: "read-only".to_string(),
+        };
+        assert!(!runtime_path.apply(&mut config));
+        path.set(" C:/new/codex.exe ");
+        assert_eq!(config.executable, "missing-codex");
+        assert!(runtime_path.apply(&mut config));
+        assert_eq!(config.executable, "C:/new/codex.exe");
+        assert_eq!(config.model, "test-model");
+        assert!(!runtime_path.apply(&mut config));
+        path.set("   ");
+        assert!(runtime_path.apply(&mut config));
+        assert_eq!(config.executable, "");
+    }
+
+    #[test]
     fn allow_from_supports_wildcard_and_comma_separated_ids() {
         assert!(is_allowed_peer("", "a@im.wechat"));
         assert!(is_allowed_peer("*", "a@im.wechat"));
@@ -540,26 +519,107 @@ mod tests {
         assert!(!is_allowed_peer("a@im.wechat", "b@im.wechat"));
     }
 
+    /// 白名单外的消息不再无声消失：状态栏要能看到「已忽略」，
+    /// 否则用户无法区分「消息没到」和「被过滤」（群内真实发生过）。
+    /// 用 wiremock 假微信网关驱动真实消息循环验证。
+    #[tokio::test]
+    async fn non_allowlisted_message_updates_status_and_is_dropped() {
+        let server = wiremock::MockServer::start().await;
+        let message = serde_json::json!({
+            "seq": 1,
+            "message_id": (now_ms() % 1_000_000) as i64,
+            "from_user_id": "stranger@im.wechat",
+            "client_id": "unit-test",
+            "create_time_ms": now_ms() as i64,
+            "message_type": 1,
+            "message_state": 2,
+            "item_list": [{ "type": 1, "text_item": { "text": "hi" } }],
+            "context_token": "ctx"
+        });
+        let updates = serde_json::json!({
+            "ret": 0,
+            "errcode": 0,
+            "errmsg": "",
+            "msgs": [message],
+            "get_updates_buf": "YnVm",
+            "longpolling_timeout_ms": 1000
+        });
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::path("/ilink/bot/getupdates"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200)
+                    .set_body_json(updates)
+                    .set_delay(std::time::Duration::from_millis(300)),
+            )
+            .mount(&server)
+            .await;
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let config = WeixinConnectConfig {
+            base_url: server.uri(),
+            token: "tok".to_string(),
+            account_id: "unit-test-ignore".to_string(),
+            allow_from: "only-me@im.wechat".to_string(),
+            route_tag: String::new(),
+            work_dir: work_dir.path().display().to_string(),
+            model: String::new(),
+            sandbox: "read-only".to_string(),
+            codex_path: String::new(),
+        };
+        let status: SharedWeixinConnectStatus = Arc::new(Mutex::new(Default::default()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let task = tokio::spawn(run_weixin_connect_with_codex_path(
+            config,
+            Arc::clone(&stop),
+            Arc::clone(&status),
+            WeixinCodexPath::new(""),
+        ));
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        // 循环正常退出时会写「微信连接已停止」，必须在停止前快照处理状态
+        let snapshot = status
+            .lock()
+            .map(|current| current.message.clone())
+            .unwrap_or_default();
+        stop.store(true, Ordering::SeqCst);
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), task).await;
+
+        let message = snapshot;
+        assert!(
+            message.contains("已忽略来自非白名单发送方的消息"),
+            "状态栏应提示已忽略，实际：{message}"
+        );
+        // 清理循环写入真实 app state 目录的测试状态文件
+        let _ = std::fs::remove_file(
+            crate::paths::default_app_state_dir().join("weixin-connect-state-unit-test-ignore.json"),
+        );
+    }
+
+    #[test]
+    fn localhost_endpoint_only_matches_explicit_local_ports() {
+        assert_eq!(
+            localhost_endpoint("http://127.0.0.1:57321/v1"),
+            Some(("127.0.0.1".to_string(), 57321))
+        );
+        assert_eq!(
+            localhost_endpoint("http://localhost:8080/v1"),
+            Some(("localhost".to_string(), 8080))
+        );
+        // 直连中转站不属于桌面版代理，不预检
+        assert_eq!(localhost_endpoint("https://api.example.com/v1"), None);
+        // 无显式端口的本地地址也不预检，避免误判成「桌面版未运行」
+        assert_eq!(localhost_endpoint("http://127.0.0.1/v1"), None);
+    }
+
     #[test]
     fn config_normalizes_base_url_and_sandbox() {
         let config = WeixinConnectConfig {
-            base_url: " https://edge.weixin.qq.com/ ".to_string(),
+            base_url: " https://example.test/ ".to_string(),
             sandbox: "unknown".to_string(),
             ..WeixinConnectConfig::default()
         }
         .normalized();
-        assert_eq!(config.base_url, "https://edge.weixin.qq.com");
+        assert_eq!(config.base_url, "https://example.test");
         assert_eq!(config.sandbox, "read-only");
-    }
-
-    #[test]
-    fn config_rejects_non_weixin_service_hosts() {
-        let config = WeixinConnectConfig {
-            base_url: "https://example.test".to_string(),
-            ..WeixinConnectConfig::default()
-        }
-        .normalized();
-        assert_eq!(config.base_url, DEFAULT_WEIXIN_BASE_URL);
     }
 
     #[test]

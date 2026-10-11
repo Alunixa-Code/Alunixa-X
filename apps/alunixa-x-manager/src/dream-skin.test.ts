@@ -1,119 +1,361 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { describe, it } from "node:test";
+import { readFile } from "node:fs/promises";
+import ts from "typescript";
 
-import { defaultDreamSkinTheme, normalizeDreamSkinTheme } from "./dream-skin.ts";
+import {
+  defaultDreamSkinTheme,
+  isDreamSkinDraftDirty,
+  normalizeDreamSkinTheme,
+  resolveDreamSkinStylePreset,
+} from "./dream-skin.ts";
 
-const root = path.dirname(fileURLToPath(import.meta.url));
-const appSource = readFileSync(path.join(root, "App.tsx"), "utf8");
-const commandSource = readFileSync(
-  path.join(root, "..", "src-tauri", "src", "commands.rs"),
-  "utf8",
-);
-const communitySource = readFileSync(
-  path.join(root, "..", "..", "..", "crates", "alunixa-x-core", "src", "dream_skin_community.rs"),
-  "utf8",
-);
-const packageSource = readFileSync(
-  path.join(root, "..", "..", "..", "crates", "alunixa-x-core", "src", "dream_skin_package.rs"),
-  "utf8",
-);
-const assetsSource = readFileSync(
-  path.join(root, "..", "..", "..", "crates", "alunixa-x-core", "src", "assets.rs"),
-  "utf8",
-);
-const managerLibSource = readFileSync(
-  path.join(root, "..", "src-tauri", "src", "lib.rs"),
-  "utf8",
-);
-const windowsThemeSource = readFileSync(
-  path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "windows", "renderer-inject.js"),
-  "utf8",
-);
-const windowsThemeCss = readFileSync(
-  path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "windows", "dream-skin.css"),
-  "utf8",
-);
-const macosThemeCss = readFileSync(
-  path.join(root, "..", "..", "..", "assets", "inject", "upstream", "dream-skin", "macos", "dream-skin.css"),
-  "utf8",
-);
+describe("dream skin theme helpers", () => {
+  it("uses the Codex-Dream-Skin theme.json defaults", () => {
+    const theme = defaultDreamSkinTheme();
 
-test("DreamSkin defaults are neutral and preserve safe custom fields", () => {
-  const defaults = defaultDreamSkinTheme();
-  assert.equal(defaults.id, "dream-skin-default");
-  assert.equal(defaults.name, "Dream Skin");
-  assert.equal(defaults.promoUrl, undefined);
-  const normalized = normalizeDreamSkinTheme({
-    ...defaults,
-    colors: { ...defaults.colors!, accent: "javascript:bad" },
-    customTargetField: { keep: true },
+    assert.equal(theme.schemaVersion, 1);
+    assert.equal(theme.name, "Dream Skin");
+    assert.equal(theme.stylePreset, undefined);
+    assert.equal(theme.brandSubtitle, "CODEX DREAM SKIN");
+    assert.equal(theme.colors!.accent, "#E25563");
   });
-  assert.equal(normalized.colors?.accent, "#E25563");
-  assert.deepEqual(normalized.customTargetField, { keep: true });
-});
 
-test("DreamSkin community uses a fixed API and validates every package", () => {
-  assert.match(communitySource, /COMMUNITY_API_ORIGIN: &str = "https:\/\/api\.dreamskin\.cc"/);
-  assert.match(communitySource, /redirect\(reqwest::redirect::Policy::none\(\)\)/);
-  assert.match(communitySource, /package_sha256/);
-  assert.match(packageSource, /PACKAGE_LIMIT: usize = 32 \* 1024 \* 1024/);
-  assert.match(packageSource, /validate_safe_css/);
-  assert.match(packageSource, /validate_image_content/);
-  assert.match(packageSource, /deny_unknown_fields/);
-});
+  it("restores an invalid color without dropping valid text", () => {
+    const base = defaultDreamSkinTheme();
+    const theme = normalizeDreamSkinTheme({
+      ...base,
+      name: "My Theme",
+      colors: { ...base.colors!, accent: "javascript:bad" },
+    });
 
-test("DreamSkin manager exposes search, preview, ZIP import, install, update, and activation", () => {
-  for (const contract of [
-    "refresh_dream_skin_community",
-    "install_dream_skin_community_theme",
-    "import_dream_skin_theme_package",
-    "activate_dream_skin_theme",
-    "delete_dream_skin_theme",
-    "restore_default_dream_skin",
-  ]) {
-    assert.match(commandSource, new RegExp(contract));
-  }
-  assert.match(appSource, /DreamSkinScreen/);
-  assert.match(appSource, /搜索主题、作者或版本/);
-  assert.match(appSource, /在线预览/);
-  assert.match(appSource, /导入 ZIP 主题包/);
-  assert.match(appSource, /theme\.updateAvailable/);
-});
+    assert.equal(theme.name, "My Theme");
+    assert.equal(theme.colors!.accent, "#E25563");
+  });
 
-test("DreamSkin runtime is appended without replacing the current renderer", () => {
-  assert.match(assetsSource, /const RENDERER_SCRIPT: &str = include_str!/);
-  assert.match(assetsSource, /dream_skin_target_runtime_script/);
-  assert.match(assetsSource, /DREAM_SKIN_RENDERER_REVISION/);
-  assert.match(assetsSource, /upstream\/dream-skin/);
-  assert.match(assetsSource, /upstream\/cidala-tiger/);
-  assert.match(assetsSource, /upstream\/snow-skin/);
-  assert.match(assetsSource, /upstream\/glass-vision/);
-  assert.match(assetsSource, /codex-dream-skin-companion/);
-  assert.match(assetsSource, /data-alunixa-x-dream-skin-main-surface/);
-  assert.match(assetsSource, /naturalHeight \/ image\.naturalWidth/);
-});
+  it("maps legacy market themes to their layout presets", () => {
+    assert.equal(resolveDreamSkinStylePreset("preset-cyber-neon", undefined), "cyber-neon");
+    assert.equal(resolveDreamSkinStylePreset("codex-snow-skin", "dream-original"), "codex-snow");
+    assert.equal(resolveDreamSkinStylePreset("custom-theme", undefined), "dream-original");
+  });
 
-test("DreamSkin deep links accept only canonical version identifiers", () => {
-  assert.match(communitySource, /strip_prefix\("dreamskin:\/\/apply\?version="\)/);
-  assert.match(communitySource, /validate_version_id/);
-  assert.match(communitySource, /%76er_1234abcd/);
-  assert.match(managerLibSource, /tauri::RunEvent::Opened \{ urls \}/);
-  assert.match(managerLibSource, /handle_dream_skin_url\(url\.as_str\(\)\)/);
-});
+  it("runs the unmodified target renderers instead of the rewritten theme packages", async () => {
+    const assets = await readFile(new URL("../../../crates/alunixa-x-core/src/assets.rs", import.meta.url), "utf8");
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
 
-test("DreamSkin adapts and releases the modern Codex main surface", () => {
-  assert.match(windowsThemeSource, /codex-dream-skin-selectors\/1/);
-  assert.match(windowsThemeSource, /_MainContentSurface_/);
-  assert.match(windowsThemeSource, /_ComposerLayoutRoot_/);
-  assert.match(windowsThemeSource, /data-ds-part/);
-});
+    assert.match(assets, /upstream\/dream-skin/);
+    assert.match(assets, /upstream\/cidala-tiger/);
+    assert.match(assets, /upstream\/snow-skin/);
+    assert.match(assets, /upstream\/glass-vision/);
+    assert.doesNotMatch(assets, /assets\/inject\/themes\//);
+    assert.match(assets, /__DREAM_SKIN_CSS_JSON__/);
+    assert.match(assets, /__GLASS_VISION_CSS_JSON__/);
+    assert.match(renderer, /__ALUNIXA_X_EXTERNAL_DREAM_SKIN_RUNTIME__/);
+    assert.match(renderer, /__ALUNIXA_X_CLEAR_DREAM_SKIN__/);
+  });
 
-test("DreamSkin hides only the top-fade element, never the conversation container", () => {
-  for (const css of [windowsThemeCss, macosThemeCss]) {
-    assert.doesNotMatch(css, /:is\([^)]*\[data-app-shell-main-content-top-fade\][^)]*\)\s*\{\s*display:\s*none/i);
-    assert.match(css, /:is\(\.app-shell-main-content-top-fade, \[class\*="_MainContentTopFade_"\]\)\s*\{\s*display:\s*none/i);
-  }
+  it("preserves target-only theme fields without rewriting them", () => {
+    const theme = normalizeDreamSkinTheme({
+      schemaVersion: 1,
+      id: "target-theme",
+      name: "Target Theme",
+      brandSubtitle: "TARGET",
+      tagline: "Target tagline",
+      projectPrefix: "project · ",
+      projectLabel: "Select project",
+      statusText: "ONLINE",
+      quote: "EXACT",
+      appearance: "dark",
+      art: { focusX: 0.72, focusY: 0.45, safeArea: "left", taskMode: "ambient" },
+      palette: { accent: "#123456", custom: "keep" },
+      promoTitle: "Sponsor",
+      promoSub: "sponsor.example",
+      promoUrl: "https://sponsor.example",
+      companion: {
+        dataUrl: "data:image/webp;base64,UklGRg==",
+        width: 96,
+        side: "right",
+      },
+      customTargetField: { nested: true },
+    });
+
+    assert.equal(theme.colors, undefined);
+    assert.equal(theme.stylePreset, undefined);
+    assert.deepEqual(theme.art, { focusX: 0.72, focusY: 0.45, safeArea: "left", taskMode: "ambient" });
+    assert.deepEqual(theme.palette, { accent: "#123456", custom: "keep" });
+    assert.deepEqual(theme.companion, {
+      dataUrl: "data:image/webp;base64,UklGRg==",
+      width: 96,
+      side: "right",
+    });
+    assert.deepEqual(theme.customTargetField, { nested: true });
+  });
+
+  it("renders an optional image companion beside the visible composer", async () => {
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+
+    assert.match(renderer, /codex-dream-skin-companion/);
+    assert.match(renderer, /theme\.companion/);
+    assert.match(renderer, /\.composer-footer/);
+    assert.match(renderer, /\.composer-surface-chrome/);
+    assert.match(renderer, /data:image\/(?:png|jpeg|webp|gif);base64/);
+    assert.match(renderer, /removeDreamSkinCompanion/);
+    assert.match(renderer, /ensureDreamSkinCompanion\(\s*window\.__ALUNIXA_X_DREAM_SKIN_THEME__/);
+  });
+
+  it("aligns tall companion images by rendered height with a wider vertical offset range", async () => {
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(renderer, /companion\.naturalWidth/);
+    assert.match(renderer, /companion\.naturalHeight/);
+    assert.match(renderer, /composer\.rect\.bottom - renderedHeight \+ config\.offsetY/);
+    assert.match(renderer, /window\.innerHeight - renderedHeight - edge/);
+    assert.match(renderer, /const offsetY = Math\.max\(-160, Math\.min\(Number\(companion\.offsetY\) \|\| 0, 160\)\)/);
+    assert.match(app, /min=\{-160\}/);
+    assert.match(app, /max=\{160\}/);
+    assert.match(app, /Math\.max\(-160, Math\.min\(160, Number\(event\.currentTarget\.value\) \|\| 0\)\)/);
+  });
+
+  it("uses the current shared selector contract without requiring a visible sidebar", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/upstream/dream-skin/windows/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+    const compatibility = await readFile(
+      new URL("../../../assets/inject/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+    const assets = await readFile(
+      new URL("../../../crates/alunixa-x-core/src/assets.rs", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /codex-dream-skin-selectors\/1/);
+    assert.match(renderer, /data-app-shell-main-surface/);
+    assert.match(renderer, /_MainContentSurface_/);
+    assert.match(renderer, /data-ds-part/);
+    assert.match(renderer, /MutationObserver/);
+    assert.match(compatibility, /main\[class\*="_MainContentSurface_"\]/);
+    assert.match(compatibility, /shellMain\.classList\.add\("main-surface"\)/);
+    assert.match(compatibility, /data-alunixa-x-dream-skin-main-surface/);
+    assert.match(compatibility, /clearDreamSkinMainSurfaceCompatibility\(\)/);
+    assert.match(assets, /DREAM_SKIN_RENDERER_REVISION: &str = "24-home-composer-rounded"/);
+  });
+
+  it("covers the current shell, composer, message, and top-fade contracts", async () => {
+    const renderer = await readFile(
+      new URL("../../../assets/inject/upstream/dream-skin/windows/renderer-inject.js", import.meta.url),
+      "utf8",
+    );
+    const css = await readFile(
+      new URL("../../../assets/inject/upstream/dream-skin/windows/dream-skin.css", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(renderer, /_ComposerLayoutRoot_/);
+    assert.match(renderer, /data-local-conversation-final-assistant/);
+    assert.match(renderer, /data-local-conversation-user-anchor/);
+    assert.match(css, /_MainContentTopFade_/);
+    assert.match(css, /_ComposerLayoutBody_/);
+    assert.match(css, /data-markdown-table="true"/);
+    assert.match(css, /_Toolbar_.*> \*/s);
+    assert.match(css, /data-composer-home-utility-bar-position="above"[\s\S]*box-sizing:\s*border-box/);
+    assert.match(css, /_StickyActionBar_/);
+    assert.match(css, /data-ds-part="home"[\s\S]*overflow:\s*hidden\s*!important/);
+  });
+
+  it("exposes companion image controls in the theme editor", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(app, /dream-skin-companion-controls/);
+    assert.match(app, /FileReader/);
+    assert.match(app, /companion\.dataUrl/);
+    assert.match(app, /companion\?\.offsetX/);
+    assert.match(app, /companion\?\.offsetY/);
+    assert.match(app, /companionEnabled/);
+  });
+
+  it("detects text, color, and image draft changes", () => {
+    const draft = {
+      config: defaultDreamSkinTheme(),
+      imagePath: "current.png",
+      builtin: false,
+    };
+
+    assert.equal(isDreamSkinDraftDirty(draft, draft), false);
+    assert.equal(isDreamSkinDraftDirty(draft, {
+      ...draft,
+      config: { ...draft.config, name: "Changed" },
+    }), true);
+    assert.equal(isDreamSkinDraftDirty(draft, {
+      ...draft,
+      config: { ...draft.config, stylePreset: "cyber-neon" },
+    }), true);
+    assert.equal(isDreamSkinDraftDirty(draft, {
+      ...draft,
+      config: {
+        ...draft.config,
+        colors: { ...draft.config.colors!, accent: "#112233" },
+      },
+    }), true);
+    assert.equal(isDreamSkinDraftDirty(draft, { ...draft, imagePath: "other.png" }), true);
+  });
+
+  it("visibly credits the source project and exposes complete controls", async () => {
+    const source = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    for (const text of [
+      "Fei-Away/Codex-Dream-Skin",
+      "MIT License",
+      "第三方图片",
+      "主题名称",
+      "品牌副标题",
+      "主题标语",
+      "项目前缀",
+      "项目按钮文字",
+      "状态文字",
+      "引用文字",
+      "应用所选主题",
+      "恢复 Codex 外观",
+      "实机验证",
+      "保存截图",
+    ]) {
+      assert.match(source, new RegExp(text));
+    }
+    assert.doesNotMatch(source, /暂停皮肤|继续皮肤|pauseDreamSkin/);
+  });
+
+  it("keeps the image preview inside its grid column in a compact window", async () => {
+    const styles = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+    const previewRule = styles.match(/\.dream-skin-preview\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    assert.match(previewRule, /width:\s*100%/);
+    assert.doesNotMatch(previewRule, /min-height:\s*220px/);
+  });
+
+  it("uses the current launcher debug port for live skin operations", async () => {
+    const source = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /overview\?\.latest_launch\?\.debug_port\s*\?\?/);
+  });
+
+  it("keeps theme draft separate from backend settings until explicit activation", async () => {
+    const source = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(source, /selectedDreamSkinTheme/);
+    assert.match(source, /dreamSkinThemeDraft/);
+    assert.match(source, /activate_dream_skin_theme/);
+    assert.match(source, /DreamSkinUnsavedDialog/);
+    assert.match(source, /pendingDreamSkinRestart/);
+    assert.match(source, /重启并应用/);
+    assert.doesNotMatch(source, /当前 Codex 无法实时切换完整主题，需要重启 Codex\+\+。是否立即重启/);
+  });
+
+  it("restores the original appearance as pending without reloading or restarting Codex", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const commands = await readFile(new URL("../src-tauri/src/commands.rs", import.meta.url), "utf8");
+    const restoreStart = app.indexOf("const restoreDreamSkin = async () =>");
+    const restoreEnd = app.indexOf("const verifyDreamSkin", restoreStart);
+    const restoreHandler = app.slice(restoreStart, restoreEnd);
+    const commandStart = commands.indexOf("pub async fn restore_dream_skin");
+    const commandEnd = commands.indexOf("pub fn reset_dream_skin_theme", commandStart);
+    const restoreCommand = commands.slice(commandStart, commandEnd);
+
+    assert.match(restoreHandler, /Codex 原始外观/);
+    assert.match(restoreHandler, /setPendingDreamSkinRestart/);
+    assert.doesNotMatch(restoreHandler, /window\.confirm|await restart\(\)/);
+    assert.doesNotMatch(restoreCommand, /reload_dream_skin_live/);
+    assert.match(restoreCommand, /pending_restart\(false, false\)/);
+  });
+
+  it("renders responsive three-column theme grids with platform guidance", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+
+    assert.match(app, /dream-skin-theme-library/);
+    assert.match(app, /Windows 使用亮暗模式、图片取色和可选强调色/);
+    assert.match(css, /\.dream-skin-market-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
+    assert.match(css, /\.dream-skin-theme-list\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
+    assert.match(css, /@media \(max-width:\s*760px\)[\s\S]*\.dream-skin-theme-list\s*\{[^}]*grid-template-columns:\s*1fr/s);
+  });
+
+  it("keeps advanced editing collapsed with one explicit theme activation action", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const source = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const screen = source.statements.find((node): node is ts.FunctionDeclaration =>
+      ts.isFunctionDeclaration(node) && node.name?.text === "DreamSkinScreen",
+    );
+    assert.ok(screen);
+
+    // 用 JSX 结构定位完整区域，避免新增嵌套 details 后截在第一个结束标签。
+    const elements = new Map<string, ts.JsxElement>();
+    const visit = (node: ts.Node): void => {
+      if (ts.isJsxElement(node)) {
+        const className = node.openingElement.attributes.properties.find((attribute) =>
+          ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "className",
+        );
+        if (className && ts.isJsxAttribute(className) && className.initializer && ts.isStringLiteral(className.initializer)) {
+          for (const name of className.initializer.text.split(/\s+/)) elements.set(name, node);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(screen);
+    const customizerNode = elements.get("dream-skin-customizer");
+    const libraryNode = elements.get("dream-skin-theme-library");
+    const overviewNode = elements.get("dream-skin-overview");
+    assert.ok(customizerNode);
+    assert.ok(libraryNode);
+    assert.ok(overviewNode);
+    const customizer = customizerNode.getText(source);
+    const library = libraryNode.getText(source);
+    const overview = overviewNode.getText(source);
+
+    assert.doesNotMatch(customizerNode.openingElement.getText(source), /\sopen(?:=|\s|>)/);
+    assert.match(overview, /应用所选主题/);
+    assert.match(overview, /actions\.activateDreamSkinTheme\(\)/);
+    assert.equal((screen.getText(source).match(/actions\.activateDreamSkinTheme\(\)/g) ?? []).length, 1);
+    assert.match(library, /actions\.selectDreamSkinTheme\(item\)/);
+    assert.doesNotMatch(library, /actions\.activateDreamSkinTheme\(\)/);
+    assert.doesNotMatch(library, /t\("(?:从图片创建|保存主题|恢复 Dream Skin 默认主题)"\)/);
+    assert.match(customizer, /t\("从图片创建"\)/);
+    assert.match(customizer, /t\("保存主题"\)/);
+    assert.match(customizer, /t\("恢复 Dream Skin 默认主题"\)/);
+    assert.match(customizer, /t\("恢复 Codex 默认配色"\)/);
+  });
+
+  it("exposes only effective Windows appearance and accent controls", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+
+    assert.match(app, /dream-skin-windows-theme-controls/);
+    assert.match(app, /自动/);
+    assert.match(app, /亮色/);
+    assert.match(app, /暗色/);
+    assert.match(app, /跟随图片配色/);
+    assert.match(app, /isWindowsPlatform \? \([\s\S]*dream-skin-windows-theme-controls[\s\S]*dream-skin-colors/);
+    assert.match(app, /if \(isWindowsPlatform\) \{[\s\S]*delete config\.colors;[\s\S]*delete config\.palette;/);
+  });
+
+  it("separates the remote marketplace from local theme editing", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+
+    assert.match(app, /refresh_dream_skin_market/);
+    assert.match(app, /install_dream_skin_market_theme/);
+    assert.match(app, /主题市场/);
+    assert.match(app, /投稿主题/);
+    assert.match(app, /onInstalled=\{\(\) => setThemeView\("local"\)\}/);
+    assert.match(css, /\.dream-skin-market-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
+    assert.match(css, /\.dream-skin-market-preview\s*\{[^}]*aspect-ratio:\s*16 \/ 9/s);
+  });
+
+  it("allows the webview to load managed theme images only", async () => {
+    const raw = await readFile(new URL("../src-tauri/tauri.conf.json", import.meta.url), "utf8");
+    const config = JSON.parse(raw);
+    const assetProtocol = config.app?.security?.assetProtocol;
+
+    assert.equal(assetProtocol?.enable, true);
+    assert.deepEqual(assetProtocol?.scope, ["$HOME/.codex-session-delete/dream-skin/**"]);
+  });
 });

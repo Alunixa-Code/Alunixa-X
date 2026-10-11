@@ -1554,7 +1554,7 @@ fn schema_kind(db: &Connection) -> anyhow::Result<Option<SchemaKind>> {
     Ok(None)
 }
 
-fn has_table(db: &Connection, table: &str) -> anyhow::Result<bool> {
+pub(crate) fn has_table(db: &Connection, table: &str) -> anyhow::Result<bool> {
     Ok(db
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -1578,7 +1578,7 @@ fn table_columns(db: &Connection, table: &str) -> anyhow::Result<Vec<String>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-fn select_dicts(db: &Connection, sql: &str, params: &[&dyn ToSql]) -> anyhow::Result<Vec<Value>> {
+pub(crate) fn select_dicts(db: &Connection, sql: &str, params: &[&dyn ToSql]) -> anyhow::Result<Vec<Value>> {
     let mut stmt = db.prepare(sql)?;
     let columns: Vec<String> = stmt
         .column_names()
@@ -2013,7 +2013,7 @@ fn sql_value_to_json(value: ValueRef<'_>) -> Value {
     }
 }
 
-fn json_to_sql_value(value: &Value) -> SqlValue {
+pub(crate) fn json_to_sql_value(value: &Value) -> SqlValue {
     match value {
         Value::Null => SqlValue::Null,
         Value::Bool(value) => SqlValue::Integer(i64::from(*value)),

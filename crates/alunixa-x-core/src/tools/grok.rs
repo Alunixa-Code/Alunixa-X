@@ -35,10 +35,11 @@ use crate::tools::ToolConfig;
 
 /// Grok 的 `api_backend` 取值。当前 Alunixa X 只产 `chat_completions`，
 /// 如果上游是 Responses 或 Anthropic Messages 端点，跟着 profile 的协议走。
-fn api_backend_for(profile: &RelayProfile) -> &'static str {
+fn api_backend_for(profile: &RelayProfile) -> anyhow::Result<&'static str> {
     match profile.protocol {
-        RelayProtocol::Responses => "responses",
-        RelayProtocol::ChatCompletions => "chat_completions",
+        RelayProtocol::Responses => Ok("responses"),
+        RelayProtocol::ChatCompletions => Ok("chat_completions"),
+        _ => bail!("Grok CLI requires Responses or Chat Completions; this provider protocol is not supported by its native config"),
     }
 }
 
@@ -154,7 +155,7 @@ pub fn apply_profile_to_grok_at(
     }
 
     let base_url = profile_base_url(profile);
-    let api_backend = api_backend_for(profile).to_string();
+    let api_backend = api_backend_for(profile)?.to_string();
     let api_key = profile.api_key.trim().to_string();
 
     // 先把磁盘上的现状读出来：revision 用来做并发保护（防止覆盖别人的改动），

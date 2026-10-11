@@ -1,18 +1,18 @@
-use std::ffi::OsString;
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, bail};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdout, Command};
-use tokio::sync::mpsc::UnboundedSender;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+/// app-server 起不来时保留多少行 stderr 用于报错。
+const STDERR_TAIL_LINES: usize = 8;
 const TURN_TIMEOUT: Duration = Duration::from_secs(600);
-const MAX_LAUNCH_ERROR_CHARS: usize = 480;
-const MAX_PROGRESS_EVENT_CHARS: usize = 16_000;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
@@ -36,181 +36,6 @@ pub struct AppServerTurnResult {
     pub usage: TurnUsage,
 }
 
-struct TurnEvents {
-    thread_id: String,
-    turn_id: Option<String>,
-    pending: Vec<Value>,
-    pending_bytes: usize,
-    reply_parts: Vec<String>,
-    final_parts: Vec<String>,
-    model: String,
-    usage: TurnUsage,
-    completed: bool,
-    progress: Option<UnboundedSender<AppServerProgressEvent>>,
-}
-
-impl TurnEvents {
-    fn new(thread_id: &str, model: &str) -> Self {
-        Self {
-            thread_id: thread_id.to_string(),
-            turn_id: None,
-            pending: Vec::new(),
-            pending_bytes: 0,
-            reply_parts: Vec::new(),
-            final_parts: Vec::new(),
-            model: model.to_string(),
-            usage: TurnUsage::default(),
-            completed: false,
-            progress: None,
-        }
-    }
-
-    fn begin(&mut self, result: &Value) -> anyhow::Result<()> {
-        self.turn_id = Some(extract_turn_id(result).context("Codex turn/start 未返回 turn id")?);
-        if self.model.is_empty() {
-            self.model = extract_model(result).unwrap_or_default();
-        }
-        if let Some(usage) = extract_turn_usage(result) {
-            self.usage = usage;
-        }
-        self.pending_bytes = 0;
-        for message in std::mem::take(&mut self.pending) {
-            self.record(message)?;
-        }
-        Ok(())
-    }
-
-    fn record(&mut self, message: Value) -> anyhow::Result<()> {
-        let Some(method) = message.get("method").and_then(Value::as_str) else {
-            return Ok(());
-        };
-        let params = &message["params"];
-        if params
-            .get("threadId")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id != self.thread_id)
-        {
-            return Ok(());
-        }
-        let Some(turn_id) = self.turn_id.as_deref() else {
-            let bytes = message.to_string().len();
-            anyhow::ensure!(
-                self.pending.len() < 1024 && self.pending_bytes + bytes <= 2 * 1024 * 1024,
-                "too many notifications before turn/start response"
-            );
-            self.pending_bytes += bytes;
-            self.pending.push(message);
-            return Ok(());
-        };
-        let event_turn = params.get("turnId").and_then(Value::as_str).or_else(|| {
-            params
-                .get("turn")
-                .and_then(|turn| turn.get("id"))
-                .and_then(Value::as_str)
-        });
-        if event_turn.is_some_and(|id| id != turn_id)
-            || (method == "turn/completed" && event_turn != Some(turn_id))
-        {
-            return Ok(());
-        }
-        if self.model.is_empty() {
-            self.model = extract_model(&message).unwrap_or_default();
-        }
-        if let Some(usage) = extract_turn_usage(&message) {
-            self.usage = usage;
-        }
-        let progress_events = if is_server_request(&message) {
-            progress_events_from_server_request(&message)
-        } else {
-            progress_events_from_message(&message)
-        };
-        for event in progress_events {
-            emit_progress(self.progress.as_ref(), event);
-        }
-        match method {
-            "item/completed" => {
-                if let Some(text) = extract_completed_agent_text(&message) {
-                    if params["item"]["phase"].as_str() == Some("final_answer")
-                        && !self.final_parts.contains(&text)
-                    {
-                        self.final_parts.push(text.clone());
-                    }
-                    if !self.reply_parts.contains(&text) {
-                        self.reply_parts.push(text);
-                    }
-                }
-            }
-            "turn/completed" => match params["turn"]["status"].as_str() {
-                Some("failed") => bail!(
-                    "{}",
-                    deep_string(Some(&params["turn"]["error"]), &["message", "error"])
-                        .unwrap_or_else(|| "Codex turn failed".to_string())
-                ),
-                Some("interrupted" | "cancelled") => bail!("Codex turn was interrupted"),
-                Some("completed") | None => self.completed = true,
-                _ => {}
-            },
-            "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
-                bail!(
-                    "{}",
-                    deep_string(Some(params), &["message", "error"])
-                        .unwrap_or_else(|| "Codex app-server 返回未知错误".to_string())
-                );
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn finish(self) -> AppServerTurnResult {
-        AppServerTurnResult {
-            reply: if self.final_parts.is_empty() {
-                self.reply_parts
-            } else {
-                self.final_parts
-            }
-            .join("\n\n"),
-            model: self.model,
-            usage: self.usage,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AppServerProgressKind {
-    Status,
-    Reasoning,
-    Plan,
-    WebSearch,
-    Command,
-    FileChange,
-    Tool,
-    Collaboration,
-    Image,
-    Review,
-    Compaction,
-    Reply,
-    Error,
-    Other,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppServerProgressPhase {
-    Started,
-    Delta,
-    Completed,
-    Failed,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppServerProgressEvent {
-    pub item_id: String,
-    pub kind: AppServerProgressKind,
-    pub phase: AppServerProgressPhase,
-    pub title: String,
-    pub detail: String,
-}
-
 pub struct CodexAppServer {
     child: Child,
     stdin: tokio::process::ChildStdin,
@@ -220,116 +45,149 @@ pub struct CodexAppServer {
     config: AppServerConfig,
 }
 
-#[derive(Debug, Clone)]
-struct AppServerLaunchCandidate {
-    executable: PathBuf,
-    arguments: Vec<OsString>,
-    environment: Vec<(OsString, OsString)>,
-    source: &'static str,
+fn collect_stderr_tail(sink: &Arc<Mutex<VecDeque<String>>>) -> String {
+    sink.lock()
+        .map(|lines| lines.iter().cloned().collect::<Vec<_>>().join("；"))
+        .unwrap_or_default()
 }
 
-impl AppServerLaunchCandidate {
-    fn standard(executable: PathBuf, source: &'static str) -> Self {
-        Self {
-            executable,
-            arguments: vec![OsString::from("app-server")],
-            environment: Vec::new(),
-            source,
+/// 留空时不让用户猜路径：Windows 直接选用桌面版维护的标准 CLI，
+/// 其余平台沿用 PATH 里的 codex（macOS 桌面版内置路径本来就可执行）。
+fn resolve_startup_executable(configured: &str) -> String {
+    if !configured.is_empty() {
+        return configured.to_string();
+    }
+    #[cfg(windows)]
+    if let Some(path) = crate::app_paths::find_desktop_managed_codex_cli() {
+        return path.to_string_lossy().into_owned();
+    }
+    "codex".to_string()
+}
+
+/// 启动前先把「路径本身就不对」的情况挑出来。
+///
+/// 之前不管什么原因失败，用户只会看到一句「请检查 Codex CLI 路径」——填的是目录、
+/// 文件不存在、没有执行权限、甚至 app-server 协议不兼容，全都是这一句，
+/// 于是 #1879 下面积了十几条「到底该填什么路径」。
+///
+/// 裸命令名（codex）交给 PATH 解析，这里只校验看起来像路径的输入。
+fn validate_codex_executable(executable: &str) -> anyhow::Result<()> {
+    let looks_like_path = executable.contains('/')
+        || executable.contains('\\')
+        || Path::new(executable).is_absolute();
+    if !looks_like_path {
+        return Ok(());
+    }
+    if crate::app_paths::is_windows_store_cli_path(executable) {
+        bail!(
+            "Codex CLI 路径位于系统保护的安装目录内，Alunixa X 无法直接运行它：{executable}\n\
+             请清空「Codex CLI 路径」保存（留空时自动查找），\
+             或点击「使用桌面版内置 CLI」重新选择。"
+        );
+    }
+    let path = Path::new(executable);
+    if !path.exists() {
+        bail!(
+            "Codex CLI 路径不存在：{executable}\n请填 Codex CLI 可执行文件的完整路径。\
+             macOS 桌面版通常在 /Applications/ChatGPT.app/Contents/Resources/codex；\
+             npm 全局安装可用 `which codex` / `where codex` 查看。"
+        );
+    }
+    if path.is_dir() {
+        bail!(
+            "Codex CLI 路径指向的是目录而不是可执行文件：{executable}\n\
+             请去掉结尾的路径分隔符，或补上具体的可执行文件名。"
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path)
+            && metadata.permissions().mode() & 0o111 == 0
+        {
+            bail!("Codex CLI 没有执行权限：{executable}");
         }
     }
+    Ok(())
 }
 
-#[derive(Debug)]
-struct AppServerStartFailure {
-    stage: &'static str,
-    message: String,
-    os_error_code: Option<i32>,
+/// spawn 失败按错误类别给出对应提示，不再一律归成「请检查路径」。
+fn spawn_failure_hint(executable: &str, kind: std::io::ErrorKind) -> &'static str {
+    match kind {
+        std::io::ErrorKind::NotFound => {
+            if cfg!(windows) && !executable.contains('/') && !executable.contains('\\') {
+                // CreateProcess 解析裸命令名只补 .exe，npm 生成的 codex.cmd 不在其列（#1879）
+                "：找不到可运行的 Codex CLI；请点击「使用桌面版内置 CLI」自动填入，\
+                 或将「Codex CLI 路径」留空自动查找"
+            } else {
+                "：找不到该文件；填 Codex CLI 可执行文件的完整路径，或确保 codex 在 PATH 里"
+            }
+        }
+        std::io::ErrorKind::PermissionDenied
+            if crate::app_paths::is_windows_store_cli_path(executable) =>
+        {
+            "：此路径位于系统保护的安装目录，无法直接运行；\
+             请清空「Codex CLI 路径」自动查找，或点击「使用桌面版内置 CLI」重新选择"
+        }
+        std::io::ErrorKind::PermissionDenied => "：没有执行权限",
+        _ => "",
+    }
 }
 
 impl CodexAppServer {
     pub async fn start(config: AppServerConfig) -> anyhow::Result<Self> {
-        let candidates = app_server_launch_candidates(&config.executable);
-        Self::start_with_candidates(config, candidates).await
-    }
-
-    async fn start_with_candidates(
-        config: AppServerConfig,
-        candidates: Vec<AppServerLaunchCandidate>,
-    ) -> anyhow::Result<Self> {
-        let mut failures = Vec::new();
-        for candidate in candidates {
-            match Self::start_candidate(config.clone(), &candidate).await {
-                Ok(server) => {
-                    append_launch_diagnostic("connect.weixin_app_server_spawned", &candidate, None);
-                    return Ok(server);
-                }
-                Err(error) => {
-                    append_launch_diagnostic(
-                        "connect.weixin_app_server_candidate_failed",
-                        &candidate,
-                        Some(&error),
-                    );
-                    let os_error = error
-                        .os_error_code
-                        .map(|code| format!("，os error {code}"))
-                        .unwrap_or_default();
-                    failures.push(format!(
-                        "{}（{}，{}{}）：{}",
-                        candidate.executable.display(),
-                        candidate.source,
-                        error.stage,
-                        os_error,
-                        bounded_launch_error(&error.message)
-                    ));
-                }
-            }
-        }
-        let detail = if failures.is_empty() {
-            "没有解析到任何 Codex CLI 候选".to_string()
-        } else {
-            failures.join("；")
-        };
-        bail!("无法启动 Codex app-server；已尝试的 CLI 均失败：{detail}")
-    }
-
-    async fn start_candidate(
-        mut config: AppServerConfig,
-        candidate: &AppServerLaunchCandidate,
-    ) -> Result<Self, AppServerStartFailure> {
-        let mut command = Command::new(&candidate.executable);
+        let executable = resolve_startup_executable(config.executable.trim());
+        validate_codex_executable(&executable)?;
+        let mut command = Command::new(&executable);
         command
-            .args(&candidate.arguments)
-            .envs(candidate.environment.iter().cloned())
+            .arg("app-server")
             .current_dir(&config.work_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // Windows 下不设 CREATE_NO_WINDOW 时，app-server 会拿到可见控制台并弹出
+        // CMD/Windows Terminal 窗口，它派生的 MCP 子进程（memory 等）也会各起一个
+        // conhost。仓库其它 spawn 路径都已设该标志，仅此处遗漏（issue #2048）。
         #[cfg(windows)]
-        command.creation_flags(0x08000000);
-        let mut child = command.spawn().map_err(|error| AppServerStartFailure {
-            stage: "创建进程",
-            message: error.to_string(),
-            os_error_code: error.raw_os_error(),
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(crate::windows_integration::CREATE_NO_WINDOW);
+        }
+        let mut child = command.spawn().map_err(|error| {
+            let hint = spawn_failure_hint(&executable, error.kind());
+            anyhow::anyhow!("无法启动 Codex app-server（{executable}）{hint}（{error}）")
         })?;
-        let stdin = child.stdin.take().ok_or_else(|| AppServerStartFailure {
-            stage: "连接 stdin",
-            message: "子进程没有提供 stdin 管道".to_string(),
-            os_error_code: None,
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| AppServerStartFailure {
-            stage: "连接 stdout",
-            message: "子进程没有提供 stdout 管道".to_string(),
-            os_error_code: None,
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .context("无法连接 Codex app-server stdin")?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("无法连接 Codex app-server stdout")?;
+        // 别把 stderr 读了就扔——app-server 起不来时，真正的原因只在这里。
+        // 留最近几行，初始化失败时附到错误信息上。
+        let stderr_tail = Arc::new(Mutex::new(VecDeque::<String>::new()));
         if let Some(stderr) = child.stderr.take() {
+            let sink = Arc::clone(&stderr_tail);
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
-                while matches!(lines.next_line().await, Ok(Some(_))) {}
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let line = line.trim().to_string();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if let Ok(mut sink) = sink.lock() {
+                        if sink.len() == STDERR_TAIL_LINES {
+                            sink.pop_front();
+                        }
+                        sink.push_back(line);
+                    }
+                }
             });
         }
 
-        config.executable = candidate.executable.to_string_lossy().into_owned();
         let mut server = Self {
             child,
             stdin,
@@ -338,14 +196,14 @@ impl CodexAppServer {
             running: true,
             config,
         };
-        server
-            .initialize()
-            .await
-            .map_err(|error| AppServerStartFailure {
-                stage: "初始化",
-                message: format!("{error:#}"),
-                os_error_code: None,
-            })?;
+        if let Err(error) = server.initialize().await {
+            let detail = collect_stderr_tail(&stderr_tail);
+            return Err(if detail.is_empty() {
+                error
+            } else {
+                error.context(format!("Codex app-server 输出：{detail}"))
+            });
+        }
         Ok(server)
     }
 
@@ -372,25 +230,6 @@ impl CodexAppServer {
         thread_id: &str,
         prompt: &str,
     ) -> anyhow::Result<AppServerTurnResult> {
-        self.run_turn_with_progress(thread_id, prompt, None).await
-    }
-
-    pub async fn run_turn_with_progress(
-        &mut self,
-        thread_id: &str,
-        prompt: &str,
-        progress: Option<UnboundedSender<AppServerProgressEvent>>,
-    ) -> anyhow::Result<AppServerTurnResult> {
-        emit_progress(
-            progress.as_ref(),
-            AppServerProgressEvent {
-                item_id: "turn".to_string(),
-                kind: AppServerProgressKind::Status,
-                phase: AppServerProgressPhase::Started,
-                title: "Codex 已收到任务".to_string(),
-                detail: "正在准备会话并开始处理。".to_string(),
-            },
-        );
         let id = self.take_request_id();
         let mut params = json!({
             "threadId": thread_id,
@@ -412,51 +251,72 @@ impl CodexAppServer {
         }))
         .await?;
 
-        let mut events = TurnEvents::new(thread_id, self.config.model.trim());
-        events.progress = progress.clone();
+        let mut response_received = false;
+        let mut turn_completed = false;
+        let mut reply_parts = Vec::new();
+        let mut model = self.config.model.trim().to_string();
+        let mut usage = TurnUsage::default();
         let deadline = tokio::time::Instant::now() + TURN_TIMEOUT;
-        while events.turn_id.is_none() || !events.completed {
+        while !response_received || !turn_completed {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
-                emit_progress(
-                    progress.as_ref(),
-                    progress_event(
-                        "turn",
-                        AppServerProgressKind::Error,
-                        AppServerProgressPhase::Failed,
-                        "等待 Codex 回复超时",
-                        "本轮任务超过 600 秒仍未完成。",
-                    ),
-                );
                 bail!("等待 Codex 回复超时");
             }
             let message = self.read_message(remaining).await?;
             if is_server_request(&message) {
-                events.record(message.clone())?;
                 self.reject_server_request(&message).await?;
                 continue;
             }
             if response_id(&message) == Some(id) {
                 if let Some(error) = rpc_error(&message) {
-                    emit_progress(
-                        progress.as_ref(),
-                        progress_event(
-                            "turn",
-                            AppServerProgressKind::Error,
-                            AppServerProgressPhase::Failed,
-                            "启动任务失败",
-                            &error,
-                        ),
-                    );
                     bail!("Codex turn/start 失败：{error}");
                 }
                 let result = message.get("result").cloned().unwrap_or(Value::Null);
-                events.begin(&result)?;
+                if extract_turn_id(&result).is_none() {
+                    bail!("Codex turn/start 未返回 turn id");
+                }
+                if model.is_empty() {
+                    model = extract_model(&result).unwrap_or_default();
+                }
+                if let Some(reported_usage) = extract_turn_usage(&result) {
+                    usage = reported_usage;
+                }
+                response_received = true;
                 continue;
             }
-            events.record(message)?;
+
+            if model.is_empty() {
+                model = extract_model(&message).unwrap_or_default();
+            }
+            if let Some(reported_usage) = extract_turn_usage(&message) {
+                usage = reported_usage;
+            }
+
+            match message.get("method").and_then(Value::as_str) {
+                Some("item/completed") => {
+                    if let Some(text) = extract_completed_agent_text(&message) {
+                        if !reply_parts.iter().any(|part| part == &text) {
+                            reply_parts.push(text);
+                        }
+                    }
+                }
+                Some("turn/completed") => turn_completed = true,
+                Some("thread/status/changed") if thread_status_is_idle(&message) => {
+                    turn_completed = true;
+                }
+                Some("error") => {
+                    let error = deep_string(message.get("params"), &["message", "error"])
+                        .unwrap_or_else(|| "Codex app-server 返回未知错误".to_string());
+                    bail!("{error}");
+                }
+                _ => {}
+            }
         }
-        Ok(events.finish())
+        Ok(AppServerTurnResult {
+            reply: reply_parts.join("\n\n"),
+            model,
+            usage,
+        })
     }
 
     pub async fn close(&mut self) {
@@ -478,7 +338,11 @@ impl CodexAppServer {
                 "capabilities": {
                     "experimentalApi": true,
                     "optOutNotificationMethods": [
+                        "command/exec/outputDelta",
                         "item/agentMessage/delta",
+                        "item/plan/delta",
+                        "item/fileChange/outputDelta",
+                        "item/reasoning/summaryTextDelta",
                         "item/reasoning/textDelta"
                     ]
                 }
@@ -544,9 +408,8 @@ impl CodexAppServer {
     }
 
     async fn read_message(&mut self, timeout: Duration) -> anyhow::Result<Value> {
-        let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let line = tokio::time::timeout_at(deadline, self.stdout.next_line())
+            let line = tokio::time::timeout(timeout, self.stdout.next_line())
                 .await
                 .context("等待 Codex app-server 响应超时")??;
             let Some(line) = line else {
@@ -623,117 +486,6 @@ impl CodexAppServer {
         self.next_id = self.next_id.saturating_add(1);
         id
     }
-}
-
-fn app_server_launch_candidates(configured: &str) -> Vec<AppServerLaunchCandidate> {
-    let configured = (!configured.trim().is_empty()).then(|| PathBuf::from(configured.trim()));
-    let cached = crate::app_paths::find_cached_codex_cli_candidates();
-    let bundled = crate::app_paths::resolve_codex_app_dir_with_saved(None, None)
-        .and_then(|app_dir| crate::app_paths::find_bundled_codex_cli(&app_dir));
-    let on_path = crate::app_paths::find_codex_cli_on_path();
-    assemble_app_server_launch_candidates(configured, cached, bundled, on_path)
-}
-
-fn assemble_app_server_launch_candidates(
-    configured: Option<PathBuf>,
-    cached: Vec<PathBuf>,
-    bundled: Option<PathBuf>,
-    on_path: Option<PathBuf>,
-) -> Vec<AppServerLaunchCandidate> {
-    let configured_is_store = configured
-        .as_deref()
-        .is_some_and(crate::app_paths::is_windows_store_codex_cli);
-    let mut candidates = Vec::new();
-    if !configured_is_store {
-        if let Some(configured) = configured.clone() {
-            push_launch_candidate(&mut candidates, configured, "configured");
-        }
-    }
-    for executable in cached {
-        push_launch_candidate(&mut candidates, executable, "desktop-cache");
-    }
-    if configured_is_store {
-        if let Some(configured) = configured {
-            push_launch_candidate(&mut candidates, configured, "configured-store");
-        }
-    }
-    if let Some(bundled) = bundled {
-        push_launch_candidate(&mut candidates, bundled, "desktop-bundle");
-    }
-    let has_path_candidate = on_path.is_some();
-    if let Some(on_path) = on_path {
-        push_launch_candidate(&mut candidates, on_path, "path");
-    }
-    if !has_path_candidate {
-        push_launch_candidate(
-            &mut candidates,
-            PathBuf::from(if cfg!(windows) { "codex.exe" } else { "codex" }),
-            "command-search",
-        );
-    }
-    candidates
-}
-
-fn push_launch_candidate(
-    candidates: &mut Vec<AppServerLaunchCandidate>,
-    executable: PathBuf,
-    source: &'static str,
-) {
-    let key = launch_executable_key(&executable);
-    if candidates
-        .iter()
-        .any(|candidate| launch_executable_key(&candidate.executable) == key)
-    {
-        return;
-    }
-    candidates.push(AppServerLaunchCandidate::standard(executable, source));
-}
-
-fn launch_executable_key(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) {
-        normalized.to_ascii_lowercase()
-    } else {
-        normalized
-    }
-}
-
-fn bounded_launch_error(message: &str) -> String {
-    let mut value = message
-        .chars()
-        .filter(|character| !character.is_control() || *character == '\n' || *character == '\t')
-        .take(MAX_LAUNCH_ERROR_CHARS)
-        .collect::<String>();
-    if message.chars().count() > MAX_LAUNCH_ERROR_CHARS {
-        value.push_str("...");
-    }
-    value
-}
-
-#[cfg(not(test))]
-fn append_launch_diagnostic(
-    event: &str,
-    candidate: &AppServerLaunchCandidate,
-    failure: Option<&AppServerStartFailure>,
-) {
-    let _ = crate::diagnostic_log::append_diagnostic_log(
-        event,
-        json!({
-            "source": candidate.source,
-            "executable": candidate.executable.to_string_lossy(),
-            "stage": failure.map(|failure| failure.stage),
-            "osErrorCode": failure.and_then(|failure| failure.os_error_code),
-            "message": failure.map(|failure| bounded_launch_error(&failure.message))
-        }),
-    );
-}
-
-#[cfg(test)]
-fn append_launch_diagnostic(
-    _event: &str,
-    _candidate: &AppServerLaunchCandidate,
-    _failure: Option<&AppServerStartFailure>,
-) {
 }
 
 impl Drop for CodexAppServer {
@@ -849,12 +601,18 @@ fn extract_completed_agent_text(message: &Value) -> Option<String> {
     ) {
         return None;
     }
-    if string_field(item, &["phase"]).as_deref() == Some("commentary") {
-        return None;
-    }
     deep_string(Some(item), &["text", "content", "output_text"])
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
+}
+
+fn thread_status_is_idle(message: &Value) -> bool {
+    message
+        .get("params")
+        .and_then(|params| params.get("status"))
+        .and_then(|status| status.get("type").or(Some(status)))
+        .and_then(Value::as_str)
+        == Some("idle")
 }
 
 fn deep_string(value: Option<&Value>, keys: &[&str]) -> Option<String> {
@@ -883,989 +641,9 @@ fn deep_string(value: Option<&Value>, keys: &[&str]) -> Option<String> {
     None
 }
 
-fn emit_progress(
-    sender: Option<&UnboundedSender<AppServerProgressEvent>>,
-    event: AppServerProgressEvent,
-) {
-    if let Some(sender) = sender {
-        let _ = sender.send(event);
-    }
-}
-
-fn progress_events_from_server_request(message: &Value) -> Vec<AppServerProgressEvent> {
-    let method = message
-        .get("method")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let params = message.get("params").unwrap_or(&Value::Null);
-    let item_id = string_field(params, &["itemId", "item_id"]).unwrap_or_else(|| method.into());
-    let (title, detail) = match method {
-        "item/commandExecution/requestApproval" => (
-            "命令请求授权".to_string(),
-            "微信连接使用 approvalPolicy=never，已自动拒绝该授权请求。".to_string(),
-        ),
-        "item/fileChange/requestApproval" => (
-            "文件修改请求授权".to_string(),
-            "微信连接使用 approvalPolicy=never，已自动拒绝该授权请求。".to_string(),
-        ),
-        "item/permissions/requestApproval" => (
-            "权限请求".to_string(),
-            "微信连接不会扩大权限，已返回空权限集合。".to_string(),
-        ),
-        "item/tool/requestUserInput" => (
-            "工具等待用户输入".to_string(),
-            "当前微信桥接不支持结构化输入表单，已返回空答案。".to_string(),
-        ),
-        "item/tool/call" => (
-            "客户端工具调用".to_string(),
-            "该客户端工具在微信桥接中不可用，已向 Codex 返回失败。".to_string(),
-        ),
-        _ => return Vec::new(),
-    };
-    vec![AppServerProgressEvent {
-        item_id,
-        kind: AppServerProgressKind::Error,
-        phase: AppServerProgressPhase::Failed,
-        title,
-        detail,
-    }]
-}
-
-fn progress_events_from_message(message: &Value) -> Vec<AppServerProgressEvent> {
-    let Some(method) = message.get("method").and_then(Value::as_str) else {
-        return Vec::new();
-    };
-    let params = message.get("params").unwrap_or(&Value::Null);
-    match method {
-        "turn/started" => vec![progress_event(
-            "turn",
-            AppServerProgressKind::Status,
-            AppServerProgressPhase::Started,
-            "任务开始执行",
-            "Codex 已创建本轮任务。",
-        )],
-        "turn/completed" => {
-            let status = extract_turn_status(params).unwrap_or_else(|| "completed".to_string());
-            let failed = matches!(status.as_str(), "failed" | "interrupted" | "cancelled");
-            vec![progress_event(
-                "turn",
-                if failed {
-                    AppServerProgressKind::Error
-                } else {
-                    AppServerProgressKind::Status
-                },
-                if failed {
-                    AppServerProgressPhase::Failed
-                } else {
-                    AppServerProgressPhase::Completed
-                },
-                if failed {
-                    "任务执行结束"
-                } else {
-                    "任务处理完成"
-                },
-                &format!("状态：{}", translated_status(&status)),
-            )]
-        }
-        "item/started" => params
-            .get("item")
-            .and_then(|item| progress_event_from_item(item, false))
-            .into_iter()
-            .collect(),
-        "item/completed" => params
-            .get("item")
-            .and_then(|item| progress_event_from_item(item, true))
-            .into_iter()
-            .collect(),
-        "item/reasoning/summaryTextDelta" => delta_event(
-            params,
-            AppServerProgressKind::Reasoning,
-            "思考摘要",
-            "delta",
-        ),
-        "item/reasoning/summaryPartAdded" => {
-            delta_event_with_text(params, AppServerProgressKind::Reasoning, "思考摘要", "\n")
-        }
-        "item/plan/delta" => delta_event(params, AppServerProgressKind::Plan, "计划更新", "delta"),
-        "item/commandExecution/outputDelta" | "command/exec/outputDelta" => {
-            delta_event(params, AppServerProgressKind::Command, "命令输出", "delta")
-        }
-        "item/fileChange/outputDelta" => delta_event(
-            params,
-            AppServerProgressKind::FileChange,
-            "文件修改输出",
-            "delta",
-        ),
-        "item/fileChange/patchUpdated" => {
-            let detail = format_file_changes(params.get("changes"));
-            if detail.is_empty() {
-                Vec::new()
-            } else {
-                vec![progress_event(
-                    &progress_item_id(params),
-                    AppServerProgressKind::FileChange,
-                    AppServerProgressPhase::Delta,
-                    "文件修改更新",
-                    &detail,
-                )]
-            }
-        }
-        "item/mcpToolCall/progress" => delta_event(
-            params,
-            AppServerProgressKind::Tool,
-            "工具执行进度",
-            "message",
-        ),
-        "error" => {
-            let detail = deep_string(Some(params), &["message", "error"])
-                .unwrap_or_else(|| "Codex app-server 返回未知错误".to_string());
-            vec![progress_event(
-                "error",
-                AppServerProgressKind::Error,
-                AppServerProgressPhase::Failed,
-                "Codex 执行错误",
-                &detail,
-            )]
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn progress_event_from_item(item: &Value, completed: bool) -> Option<AppServerProgressEvent> {
-    let item_type = item.get("type").and_then(Value::as_str)?;
-    if matches!(item_type, "userMessage" | "hookPrompt") {
-        return None;
-    }
-    let id = string_field(item, &["id"]).unwrap_or_else(|| item_type.to_string());
-    let status = string_field(item, &["status"]).unwrap_or_default();
-    let failed = completed && matches!(status.as_str(), "failed" | "declined" | "interrupted");
-    let phase = if failed {
-        AppServerProgressPhase::Failed
-    } else if completed {
-        AppServerProgressPhase::Completed
-    } else {
-        AppServerProgressPhase::Started
-    };
-    let (kind, started_title, completed_title, detail) = match item_type {
-        "reasoning" => (
-            AppServerProgressKind::Reasoning,
-            "思考中",
-            "思考阶段完成",
-            join_string_array(item.get("summary")),
-        ),
-        "plan" => (
-            AppServerProgressKind::Plan,
-            "正在制定计划",
-            "计划已更新",
-            string_field(item, &["text"]).unwrap_or_default(),
-        ),
-        "webSearch" | "web_search" => (
-            AppServerProgressKind::WebSearch,
-            "正在搜索网页",
-            "网页搜索完成",
-            format_web_search(item),
-        ),
-        "commandExecution" | "command_execution" => (
-            AppServerProgressKind::Command,
-            "正在执行命令",
-            if failed {
-                "命令执行失败"
-            } else {
-                "命令执行完成"
-            },
-            format_command_item(item, completed),
-        ),
-        "fileChange" | "file_change" => (
-            AppServerProgressKind::FileChange,
-            "正在修改文件",
-            if failed {
-                "文件修改失败"
-            } else {
-                "文件修改完成"
-            },
-            format_file_changes(item.get("changes")),
-        ),
-        "mcpToolCall" | "mcp_tool_call" => (
-            AppServerProgressKind::Tool,
-            "正在调用 MCP 工具",
-            if failed {
-                "MCP 工具调用失败"
-            } else {
-                "MCP 工具调用完成"
-            },
-            format_mcp_item(item, completed),
-        ),
-        "dynamicToolCall" | "dynamic_tool_call" => (
-            AppServerProgressKind::Tool,
-            "正在调用工具",
-            if failed {
-                "工具调用失败"
-            } else {
-                "工具调用完成"
-            },
-            format_dynamic_tool_item(item, completed),
-        ),
-        "collabAgentToolCall"
-        | "collab_agent_tool_call"
-        | "subAgentActivity"
-        | "sub_agent_activity" => (
-            AppServerProgressKind::Collaboration,
-            "正在执行 Agent 协作",
-            if failed {
-                "Agent 协作失败"
-            } else {
-                "Agent 协作完成"
-            },
-            format_collaboration_item(item),
-        ),
-        "imageGeneration" | "image_generation" => (
-            AppServerProgressKind::Image,
-            "正在生成图片",
-            if failed {
-                "图片生成失败"
-            } else {
-                "图片生成完成"
-            },
-            format_image_generation_item(item),
-        ),
-        "imageView" | "image_view" => (
-            AppServerProgressKind::Image,
-            "正在查看图片",
-            "图片查看完成",
-            string_field(item, &["path"]).unwrap_or_default(),
-        ),
-        "sleep" => (
-            AppServerProgressKind::Status,
-            "正在等待",
-            "等待完成",
-            item.get("durationMs")
-                .and_then(Value::as_u64)
-                .map(|value| format!("{} 毫秒", value))
-                .unwrap_or_default(),
-        ),
-        "enteredReviewMode" | "entered_review_mode" => (
-            AppServerProgressKind::Review,
-            "进入审查模式",
-            "审查模式已进入",
-            string_field(item, &["review"]).unwrap_or_default(),
-        ),
-        "exitedReviewMode" | "exited_review_mode" => (
-            AppServerProgressKind::Review,
-            "退出审查模式",
-            "审查模式已退出",
-            string_field(item, &["review"]).unwrap_or_default(),
-        ),
-        "contextCompaction" | "context_compaction" => (
-            AppServerProgressKind::Compaction,
-            "正在压缩上下文",
-            "上下文压缩完成",
-            String::new(),
-        ),
-        "agentMessage" | "assistantMessage" | "output_text" => {
-            let commentary = string_field(item, &["phase"]).as_deref() == Some("commentary");
-            (
-                AppServerProgressKind::Reply,
-                if commentary {
-                    "正在生成过程输出"
-                } else {
-                    "正在生成最终回复"
-                },
-                if commentary {
-                    "Codex 过程输出"
-                } else {
-                    "最终回复已生成"
-                },
-                if completed && commentary {
-                    deep_string(Some(item), &["text", "content", "output_text"]).unwrap_or_default()
-                } else {
-                    String::new()
-                },
-            )
-        }
-        _ => (
-            AppServerProgressKind::Other,
-            "正在执行操作",
-            "操作完成",
-            format!("类型：{item_type}"),
-        ),
-    };
-    Some(AppServerProgressEvent {
-        item_id: id,
-        kind,
-        phase,
-        title: if completed {
-            completed_title
-        } else {
-            started_title
-        }
-        .to_string(),
-        detail: sanitize_progress_text(&detail),
-    })
-}
-
-fn progress_event(
-    item_id: &str,
-    kind: AppServerProgressKind,
-    phase: AppServerProgressPhase,
-    title: &str,
-    detail: &str,
-) -> AppServerProgressEvent {
-    AppServerProgressEvent {
-        item_id: item_id.to_string(),
-        kind,
-        phase,
-        title: title.to_string(),
-        detail: sanitize_progress_text(detail),
-    }
-}
-
-fn delta_event(
-    params: &Value,
-    kind: AppServerProgressKind,
-    title: &str,
-    field: &str,
-) -> Vec<AppServerProgressEvent> {
-    let detail = params
-        .get(field)
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    delta_event_with_text(params, kind, title, detail)
-}
-
-fn delta_event_with_text(
-    params: &Value,
-    kind: AppServerProgressKind,
-    title: &str,
-    detail: &str,
-) -> Vec<AppServerProgressEvent> {
-    let detail = sanitize_progress_text(detail);
-    if detail.is_empty() {
-        return Vec::new();
-    }
-    vec![AppServerProgressEvent {
-        item_id: progress_item_id(params),
-        kind,
-        phase: AppServerProgressPhase::Delta,
-        title: title.to_string(),
-        detail,
-    }]
-}
-
-fn progress_item_id(params: &Value) -> String {
-    string_field(params, &["itemId", "item_id", "id"]).unwrap_or_else(|| "progress".to_string())
-}
-
-fn string_field(value: &Value, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        value
-            .get(*key)
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-    })
-}
-
-fn join_string_array(value: Option<&Value>) -> String {
-    value
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .unwrap_or_default()
-}
-
-fn format_command_item(item: &Value, completed: bool) -> String {
-    let mut parts = Vec::new();
-    if !completed {
-        if let Some(command) = string_field(item, &["command"]) {
-            parts.push(format!("命令：{command}"));
-        }
-        if let Some(cwd) = string_field(item, &["cwd"]) {
-            parts.push(format!("目录：{cwd}"));
-        }
-    } else {
-        if let Some(status) = string_field(item, &["status"]) {
-            parts.push(format!("状态：{}", translated_status(&status)));
-        }
-        if let Some(exit_code) = item.get("exitCode").and_then(Value::as_i64) {
-            parts.push(format!("退出码：{exit_code}"));
-        }
-        if let Some(duration) = item.get("durationMs").and_then(Value::as_i64) {
-            parts.push(format!("耗时：{duration} ms"));
-        }
-    }
-    parts.join("\n")
-}
-
-fn format_file_changes(value: Option<&Value>) -> String {
-    let Some(changes) = value.and_then(Value::as_array) else {
-        return String::new();
-    };
-    changes
-        .iter()
-        .take(24)
-        .map(|change| {
-            let path = string_field(change, &["path"]).unwrap_or_else(|| "未知文件".to_string());
-            let kind = change
-                .get("kind")
-                .and_then(|kind| kind.get("type").or(Some(kind)))
-                .and_then(Value::as_str)
-                .unwrap_or("update");
-            format!("- {}：{path}", translated_status(kind))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn format_web_search(item: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(query) = string_field(item, &["query"]) {
-        parts.push(format!("查询：{query}"));
-    }
-    if let Some(action) = item.get("action") {
-        if let Some(action_type) = string_field(action, &["type"]) {
-            parts.push(format!("操作：{}", translated_status(&action_type)));
-        }
-        if let Some(url) = string_field(action, &["url"]) {
-            parts.push(format!("页面：{url}"));
-        }
-        if let Some(pattern) = string_field(action, &["pattern"]) {
-            parts.push(format!("查找：{pattern}"));
-        }
-    }
-    if let Some(results) = item.get("results").and_then(Value::as_array) {
-        for (index, result) in results.iter().take(8).enumerate() {
-            let title = string_field(result, &["title", "name"])
-                .unwrap_or_else(|| format!("结果 {}", index + 1));
-            let url = string_field(result, &["url", "link"]).unwrap_or_default();
-            let snippet =
-                string_field(result, &["snippet", "description", "text"]).unwrap_or_default();
-            let mut line = format!("{}. {title}", index + 1);
-            if !url.is_empty() {
-                line.push_str(&format!("\n   {url}"));
-            }
-            if !snippet.is_empty() {
-                line.push_str(&format!("\n   {snippet}"));
-            }
-            parts.push(line);
-        }
-    }
-    parts.join("\n")
-}
-
-fn format_mcp_item(item: &Value, completed: bool) -> String {
-    let server = string_field(item, &["server"]).unwrap_or_else(|| "MCP".to_string());
-    let tool = string_field(item, &["tool"]).unwrap_or_else(|| "tool".to_string());
-    let mut parts = vec![format!("工具：{server}/{tool}")];
-    if !completed {
-        if let Some(arguments) = item.get("arguments") {
-            parts.push(format!("参数：{}", safe_json_preview(arguments)));
-        }
-    } else if let Some(error) = item.get("error").filter(|value| !value.is_null()) {
-        parts.push(format!("错误：{}", safe_json_preview(error)));
-    } else if let Some(result) = item.get("result").filter(|value| !value.is_null()) {
-        parts.push(format!("结果：{}", safe_json_preview(result)));
-    }
-    parts.join("\n")
-}
-
-fn format_dynamic_tool_item(item: &Value, completed: bool) -> String {
-    let namespace = string_field(item, &["namespace"]).unwrap_or_default();
-    let tool = string_field(item, &["tool"]).unwrap_or_else(|| "tool".to_string());
-    let full_tool = if namespace.is_empty() {
-        tool
-    } else {
-        format!("{namespace}/{tool}")
-    };
-    let mut parts = vec![format!("工具：{full_tool}")];
-    if !completed {
-        if let Some(arguments) = item.get("arguments") {
-            parts.push(format!("参数：{}", safe_json_preview(arguments)));
-        }
-    } else if let Some(content) = item.get("contentItems") {
-        parts.push(format!("结果：{}", safe_json_preview(content)));
-    }
-    parts.join("\n")
-}
-
-fn format_collaboration_item(item: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(tool) = string_field(item, &["tool", "kind"]) {
-        parts.push(format!("操作：{}", translated_status(&tool)));
-    }
-    if let Some(model) = string_field(item, &["model"]) {
-        parts.push(format!("模型：{model}"));
-    }
-    if let Some(path) = string_field(item, &["agentPath"]) {
-        parts.push(format!("Agent：{path}"));
-    }
-    if let Some(states) = item.get("agentsStates") {
-        parts.push(format!("状态：{}", safe_json_preview(states)));
-    }
-    parts.join("\n")
-}
-
-fn format_image_generation_item(item: &Value) -> String {
-    let mut parts = Vec::new();
-    if let Some(status) = string_field(item, &["status"]) {
-        parts.push(format!("状态：{}", translated_status(&status)));
-    }
-    if let Some(prompt) = string_field(item, &["revisedPrompt"]) {
-        parts.push(format!("优化提示词：{prompt}"));
-    }
-    if let Some(path) = string_field(item, &["savedPath"]) {
-        parts.push(format!("保存位置：{path}"));
-    }
-    if let Some(failure) = item.get("failure") {
-        parts.push(format!("错误：{}", safe_json_preview(failure)));
-    }
-    parts.join("\n")
-}
-
-fn safe_json_preview(value: &Value) -> String {
-    fn sanitized(value: &Value) -> Value {
-        match value {
-            Value::Object(object) => Value::Object(
-                object
-                    .iter()
-                    .map(|(key, value)| {
-                        let lower = key.to_ascii_lowercase();
-                        let value = if [
-                            "token",
-                            "secret",
-                            "password",
-                            "authorization",
-                            "cookie",
-                            "api_key",
-                            "apikey",
-                            "access_token",
-                            "refresh_token",
-                        ]
-                        .iter()
-                        .any(|needle| lower.contains(needle))
-                        {
-                            Value::String("[redacted]".to_string())
-                        } else {
-                            sanitized(value)
-                        };
-                        (key.clone(), value)
-                    })
-                    .collect(),
-            ),
-            Value::Array(values) => Value::Array(values.iter().take(24).map(sanitized).collect()),
-            Value::String(value) => Value::String(sanitize_progress_text(value)),
-            other => other.clone(),
-        }
-    }
-    sanitize_progress_text(&serde_json::to_string(&sanitized(value)).unwrap_or_default())
-}
-
-pub(super) fn sanitize_progress_text(value: &str) -> String {
-    let mut without_ansi = String::new();
-    let mut chars = value.chars().peekable();
-    while let Some(character) = chars.next() {
-        if character == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-            continue;
-        }
-        if !character.is_control() || matches!(character, '\n' | '\r' | '\t') {
-            without_ansi.push(character);
-        }
-    }
-    let sanitized = without_ansi
-        .lines()
-        .map(|line| {
-            let lower_line = line.to_ascii_lowercase();
-            if [
-                "authorization:",
-                "api_key=",
-                "apikey=",
-                "password=",
-                "access_token=",
-                "refresh_token=",
-                "cookie:",
-            ]
-            .iter()
-            .any(|needle| lower_line.contains(needle))
-            {
-                return "[redacted]".to_string();
-            }
-            line.split_whitespace()
-                .map(|part| {
-                    let lower = part.to_ascii_lowercase();
-                    if part.len() > 512
-                        || part.starts_with("sk-")
-                        || part.starts_with("ghp_")
-                        || part.starts_with("github_pat_")
-                        || part.starts_with("cfat_")
-                        || part.starts_with("eyJ")
-                        || lower.contains("access_token=")
-                        || lower.contains("refresh_token=")
-                        || lower.contains("authorization:")
-                        || lower.contains("api_key=")
-                        || lower.contains("apikey=")
-                        || lower.contains("password=")
-                    {
-                        "[redacted]".to_string()
-                    } else {
-                        part.to_string()
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let mut bounded = sanitized
-        .chars()
-        .take(MAX_PROGRESS_EVENT_CHARS)
-        .collect::<String>();
-    if sanitized.chars().count() > MAX_PROGRESS_EVENT_CHARS {
-        bounded.push_str("\n…该事件内容超过 16000 字符，已截断；后续操作状态仍会继续发送。");
-    }
-    bounded
-}
-
-fn extract_turn_status(value: &Value) -> Option<String> {
-    string_field(value, &["status", "type"])
-        .or_else(|| value.get("turn").and_then(extract_turn_status))
-}
-
-fn translated_status(status: &str) -> &str {
-    match status {
-        "inProgress" | "in_progress" => "进行中",
-        "completed" | "success" => "完成",
-        "failed" | "error" => "失败",
-        "declined" => "已拒绝",
-        "interrupted" | "cancelled" => "已中断",
-        "add" => "新增",
-        "delete" => "删除",
-        "update" => "更新",
-        "search" => "搜索",
-        "openPage" | "open_page" => "打开网页",
-        "findInPage" | "find_in_page" => "页内查找",
-        "spawnAgent" | "spawn_agent" => "创建 Agent",
-        "sendInput" | "send_input" => "发送输入",
-        "sendMessage" | "send_message" => "发送消息",
-        "followupTask" | "followup_task" => "追加任务",
-        "interruptAgent" | "interrupt_agent" => "中断 Agent",
-        "listAgents" | "list_agents" => "列出 Agent",
-        "wait" => "等待",
-        "closeAgent" | "close_agent" => "关闭 Agent",
-        "resumeAgent" | "resume_agent" => "恢复 Agent",
-        other => other,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, Write};
-
-    #[test]
-    fn turn_events_ignore_idle_foreign_threads_and_stale_turns_including_progress() {
-        let mut events = TurnEvents::new("target", "model");
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        events.progress = Some(sender);
-        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
-        for message in [
-            json!({"method":"thread/status/changed","params":{"threadId":"target","status":{"type":"idle"}}}),
-            json!({"method":"turn/completed","params":{"threadId":"other","turn":{"id":"current","status":"completed"}}}),
-            json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"previous","status":"completed"}}}),
-            json!({"method":"item/completed","params":{"threadId":"other","item":{"type":"agentMessage","text":"foreign output","phase":"commentary"}}}),
-            json!({"method":"item/reasoning/summaryTextDelta","params":{"threadId":"target","turnId":"previous","delta":"stale output"}}),
-        ] {
-            events.record(message).unwrap();
-        }
-        assert!(!events.completed);
-        assert!(events.reply_parts.is_empty());
-        assert!(receiver.try_recv().is_err());
-        events.record(json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"current","status":"completed"}}})).unwrap();
-        assert!(events.completed);
-        assert_eq!(
-            receiver.try_recv().unwrap().phase,
-            AppServerProgressPhase::Completed
-        );
-    }
-
-    #[test]
-    fn turn_events_replay_early_progress_and_prefer_final_answer() {
-        let mut events = TurnEvents::new("target", "model");
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        events.progress = Some(sender);
-        for (phase, text) in [("commentary", "working"), ("final_answer", "done")] {
-            events.record(json!({"method":"item/completed","params":{"threadId":"target","turnId":"current",
-                "item":{"type":"agentMessage","phase":phase,"text":text}}})).unwrap();
-        }
-        events.record(json!({"method":"turn/completed","params":{"threadId":"target","turn":{"id":"current","status":"completed"}}})).unwrap();
-        assert!(!events.completed);
-        assert!(receiver.try_recv().is_err());
-        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
-        assert!(events.completed);
-        assert_eq!(receiver.try_recv().unwrap().detail, "working");
-        assert_eq!(events.finish().reply, "done");
-    }
-
-    #[test]
-    fn failed_interrupted_and_cancelled_turns_cannot_finish_successfully() {
-        for status in ["failed", "interrupted", "cancelled"] {
-            let mut events = TurnEvents::new("target", "model");
-            events.begin(&json!({"turn":{"id":"current"}})).unwrap();
-            assert!(
-                events
-                    .record(
-                        json!({"method":"turn/completed","params":{"threadId":"target",
-                "turn":{"id":"current","status":status,"error":{"message":"failure"}}}})
-                    )
-                    .is_err()
-            );
-            assert!(!events.completed);
-        }
-        let mut events = TurnEvents::new("target", "model");
-        events.begin(&json!({"turn":{"id":"current"}})).unwrap();
-        events.record(json!({"method":"error","params":{"threadId":"target","turnId":"current","willRetry":true,"message":"retry"}})).unwrap();
-        assert!(!events.completed);
-    }
-
-    #[test]
-    fn early_notifications_have_a_bounded_buffer() {
-        let mut events = TurnEvents::new("target", "model");
-        let oversized = "x".repeat(2 * 1024 * 1024);
-        assert!(
-            events
-                .record(json!({"method":"item/commandExecution/outputDelta",
-            "params":{"threadId":"target","turnId":"current","delta":oversized}}))
-                .is_err()
-        );
-        assert!(events.pending.is_empty());
-    }
-
-    #[test]
-    fn explicit_custom_cli_keeps_priority_before_automatic_fallbacks() {
-        let candidates = assemble_app_server_launch_candidates(
-            Some(PathBuf::from("custom-codex")),
-            vec![PathBuf::from("cached-codex")],
-            Some(PathBuf::from("bundled-codex")),
-            Some(PathBuf::from("path-codex")),
-        );
-        assert_eq!(
-            candidates
-                .iter()
-                .map(|candidate| candidate.source)
-                .collect::<Vec<_>>(),
-            vec!["configured", "desktop-cache", "desktop-bundle", "path"]
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_store_cli_prefers_the_same_version_user_cache() {
-        let configured = PathBuf::from(
-            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.814.5517.0_x64__publisher\app\resources\codex.exe",
-        );
-        let cached =
-            PathBuf::from(r"C:\Users\tester\AppData\Local\OpenAI\Codex\bin\hash\codex.exe");
-        let candidates = assemble_app_server_launch_candidates(
-            Some(configured.clone()),
-            vec![cached.clone()],
-            Some(configured),
-            Some(PathBuf::from(r"C:\Tools\codex.exe")),
-        );
-        assert_eq!(candidates[0].executable, cached);
-        assert_eq!(candidates[0].source, "desktop-cache");
-        assert_eq!(candidates[1].source, "configured-store");
-        assert_eq!(candidates.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn app_server_retries_a_second_isolated_cli_after_spawn_failure() {
-        let temp = tempfile::tempdir().unwrap();
-        let current_test_exe = std::env::current_exe().unwrap();
-        let missing = AppServerLaunchCandidate::standard(
-            temp.path().join("missing-codex-do-not-create"),
-            "missing-test",
-        );
-        let fake = AppServerLaunchCandidate {
-            executable: current_test_exe.clone(),
-            arguments: vec![
-                OsString::from("connect::app_server::tests::fake_codex_app_server_process"),
-                OsString::from("--exact"),
-                OsString::from("--ignored"),
-                OsString::from("--nocapture"),
-                OsString::from("--test-threads=1"),
-            ],
-            environment: vec![(
-                OsString::from("ALUNIXA_X_FAKE_APP_SERVER"),
-                OsString::from("1"),
-            )],
-            source: "fake-test",
-        };
-        let config = AppServerConfig {
-            executable: missing.executable.to_string_lossy().into_owned(),
-            work_dir: temp.path().to_path_buf(),
-            model: String::new(),
-            sandbox: "read-only".to_string(),
-        };
-
-        let mut server = CodexAppServer::start_with_candidates(config, vec![missing, fake])
-            .await
-            .unwrap();
-        assert_eq!(PathBuf::from(&server.config.executable), current_test_exe);
-        server.close().await;
-    }
-
-    #[tokio::test]
-    async fn app_server_streams_visible_progress_from_isolated_fake_process() {
-        let temp = tempfile::tempdir().unwrap();
-        let fake = AppServerLaunchCandidate {
-            executable: std::env::current_exe().unwrap(),
-            arguments: vec![
-                OsString::from("connect::app_server::tests::fake_codex_app_server_process"),
-                OsString::from("--exact"),
-                OsString::from("--ignored"),
-                OsString::from("--nocapture"),
-                OsString::from("--test-threads=1"),
-            ],
-            environment: vec![(
-                OsString::from("ALUNIXA_X_FAKE_APP_SERVER"),
-                OsString::from("1"),
-            )],
-            source: "fake-progress-test",
-        };
-        let config = AppServerConfig {
-            executable: fake.executable.to_string_lossy().into_owned(),
-            work_dir: temp.path().to_path_buf(),
-            model: "gpt-test".to_string(),
-            sandbox: "read-only".to_string(),
-        };
-        let mut server = CodexAppServer::start_with_candidates(config, vec![fake])
-            .await
-            .unwrap();
-        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-        let result = server
-            .run_turn_with_progress("thread-1", "test progress", Some(sender))
-            .await
-            .unwrap();
-        assert_eq!(result.reply, "fake final reply");
-        let mut events = Vec::new();
-        while let Ok(event) = receiver.try_recv() {
-            events.push(event);
-        }
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::Reasoning
-                && event.phase == AppServerProgressPhase::Delta
-                && event.detail.contains("检查配置")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::WebSearch
-                && event.phase == AppServerProgressPhase::Completed
-                && event.detail.contains("Example result")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::Command
-                && event.phase == AppServerProgressPhase::Delta
-                && event.detail.contains("command output")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::Tool
-                && event.phase == AppServerProgressPhase::Completed
-                && event.detail.contains("tool result")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::FileChange
-                && event.phase == AppServerProgressPhase::Completed
-                && event.detail.contains("src/main.rs")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::Reply
-                && event.phase == AppServerProgressPhase::Completed
-                && event.title == "Codex 过程输出"
-                && event.detail.contains("fake progress narration")
-        }));
-        assert!(events.iter().any(|event| {
-            event.kind == AppServerProgressKind::Status
-                && event.phase == AppServerProgressPhase::Completed
-        }));
-        server.close().await;
-    }
-
-    #[test]
-    #[ignore = "isolated JSON-RPC child used by app-server fallback tests"]
-    fn fake_codex_app_server_process() {
-        if std::env::var("ALUNIXA_X_FAKE_APP_SERVER").as_deref() != Ok("1") {
-            return;
-        }
-        let stdin = std::io::stdin();
-        let mut stdout = std::io::stdout().lock();
-        writeln!(stdout).unwrap();
-        stdout.flush().unwrap();
-        for line in stdin.lock().lines().map_while(Result::ok) {
-            let Ok(message) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            let Some(id) = message.get("id").cloned() else {
-                continue;
-            };
-            let method = message
-                .get("method")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if method == "turn/start" {
-                let messages = [
-                    json!({"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"stale-turn","status":"completed"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"foreign-thread","turnId":"turn-1","item":{"type":"agentMessage","text":"foreign output","phase":"commentary"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"reasoning","id":"reason-1","summary":[],"content":[]}}}),
-                    json!({"jsonrpc":"2.0","method":"item/reasoning/summaryTextDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"reason-1","summaryIndex":0,"delta":"正在检查配置"}}),
-                    json!({"jsonrpc":"2.0","id":id,"result":{"turn":{"id":"turn-1"},"model":"gpt-test"}}),
-                    json!({"jsonrpc":"2.0","method":"thread/status/changed","params":{"threadId":"thread-1","status":{"type":"idle"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"reasoning","id":"reason-1","summary":["检查配置完成"],"content":[]}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"webSearch","id":"web-1","query":"Codex docs","action":{"type":"search","query":"Codex docs"},"results":null}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"webSearch","id":"web-1","query":"Codex docs","action":{"type":"search","query":"Codex docs"},"results":[{"title":"Example result","url":"https://example.test","snippet":"result summary"}]}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"commandExecution","id":"cmd-1","command":"echo test","cwd":"C:/workspace","status":"inProgress","commandActions":[],"aggregatedOutput":null,"exitCode":null,"durationMs":null}}}),
-                    json!({"jsonrpc":"2.0","method":"item/commandExecution/outputDelta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"cmd-1","delta":"command output\n"}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"commandExecution","id":"cmd-1","command":"echo test","cwd":"C:/workspace","status":"completed","commandActions":[],"aggregatedOutput":"command output\n","exitCode":0,"durationMs":10}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"mcpToolCall","id":"tool-1","server":"demo","tool":"lookup","status":"inProgress","arguments":{"query":"safe","api_key":"secret"},"result":null,"error":null}}}),
-                    json!({"jsonrpc":"2.0","method":"item/mcpToolCall/progress","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"tool-1","message":"tool working"}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"mcpToolCall","id":"tool-1","server":"demo","tool":"lookup","status":"completed","arguments":{"query":"safe"},"result":{"content":[{"type":"text","text":"tool result"}]},"error":null}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"fileChange","id":"patch-1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@"}],"status":"inProgress"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"fileChange","id":"patch-1","changes":[{"path":"src/main.rs","kind":{"type":"update"},"diff":"@@"}],"status":"completed"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"commentary-1","text":"","phase":"commentary"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"commentary-1","text":"fake progress narration","phase":"commentary"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"","phase":"final_answer"}}}),
-                    json!({"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"type":"agentMessage","id":"msg-1","text":"fake final reply","phase":"final_answer"}}}),
-                    json!({"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}),
-                ];
-                for response in messages {
-                    writeln!(stdout, "{response}").unwrap();
-                }
-                stdout.flush().unwrap();
-                continue;
-            }
-            let response = match method {
-                "initialize" => json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {"serverInfo": {"name": "isolated-fake-codex"}}
-                }),
-                _ => json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {"code": -32601, "message": "method not found"}
-                }),
-            };
-            writeln!(stdout, "{response}").unwrap();
-            stdout.flush().unwrap();
-        }
-    }
 
     #[test]
     fn extracts_ids_from_current_app_server_shapes() {
@@ -1888,27 +666,6 @@ mod tests {
         assert_eq!(
             extract_completed_agent_text(&message).as_deref(),
             Some("done")
-        );
-        let commentary = json!({
-            "method": "item/completed",
-            "params": {"item": {
-                "type": "agentMessage",
-                "text": "interim",
-                "phase": "commentary"
-            }}
-        });
-        assert_eq!(extract_completed_agent_text(&commentary), None);
-        let final_answer = json!({
-            "method": "item/completed",
-            "params": {"item": {
-                "type": "agentMessage",
-                "text": "final",
-                "phase": "final_answer"
-            }}
-        });
-        assert_eq!(
-            extract_completed_agent_text(&final_answer).as_deref(),
-            Some("final")
         );
         let user = json!({
             "method": "item/completed",
@@ -1938,29 +695,108 @@ mod tests {
         );
     }
 
+    /// #1879：以前不管什么原因失败都只说「请检查 Codex CLI 路径」，
+    /// 用户填了目录、填了不存在的路径、权限不对，看到的都是同一句话。
     #[test]
-    fn visible_progress_ignores_raw_reasoning_and_redacts_tool_secrets() {
-        assert!(
-            progress_events_from_message(&json!({
-                "method": "item/reasoning/textDelta",
-                "params": {"itemId":"reason-1","delta":"hidden raw reasoning"}
-            }))
-            .is_empty()
-        );
-        let event = progress_event_from_item(
-            &json!({
-                "type":"mcpToolCall",
-                "id":"tool-1",
-                "server":"demo",
-                "tool":"fetch",
-                "status":"inProgress",
-                "arguments":{"query":"hello","api_key":"sk-secret-value"}
-            }),
-            false,
+    fn executable_validation_names_the_actual_problem() {
+        let temp = tempfile::tempdir().unwrap();
+
+        // 目录而不是可执行文件——issue 里多人贴的正是带尾斜杠的目录路径
+        let error = validate_codex_executable(&temp.path().display().to_string()).unwrap_err();
+        assert!(error.to_string().contains("目录"), "{error}");
+
+        // 路径不存在
+        let missing = temp.path().join("nope").join("codex");
+        let error = validate_codex_executable(&missing.display().to_string()).unwrap_err();
+        assert!(error.to_string().contains("不存在"), "{error}");
+
+        // 裸命令名交给 PATH 解析，不该在这里被拦下
+        assert!(validate_codex_executable("codex").is_ok());
+    }
+
+    /// #2028：系统保护目录（WindowsApps）路径在启动前就被拦下，
+    /// 并直接告诉用户怎么改，而不是等 spawn 失败后一句「没有执行权限」。
+    #[test]
+    fn windows_store_cli_path_is_rejected_with_actionable_message() {
+        let error = validate_codex_executable(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_26.915.4065.0_x64__2p2nqsd0c76g0\app\resources\codex.exe",
         )
-        .unwrap();
-        assert!(event.detail.contains("hello"));
-        assert!(event.detail.contains("[redacted]"));
-        assert!(!event.detail.contains("sk-secret-value"));
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("系统保护"), "{message}");
+        assert!(message.contains("留空"), "{message}");
+        assert!(message.contains("使用桌面版内置 CLI"), "{message}");
+    }
+
+    /// 留空即自动选用：显式填写的路径原样透传；空值在 Windows 上优先
+    /// 桌面版维护的标准 CLI，取不到时退回 PATH（#2028 的零配置路径）。
+    #[test]
+    fn empty_executable_resolves_to_standard_cli_or_path() {
+        assert_eq!(
+            resolve_startup_executable("C:/x/codex.exe"),
+            "C:/x/codex.exe"
+        );
+        let fallback = resolve_startup_executable("");
+        assert!(
+            fallback == "codex" || fallback.to_ascii_lowercase().ends_with("codex.exe"),
+            "{fallback}"
+        );
+    }
+
+    #[test]
+    fn spawn_hints_distinguish_windows_store_and_missing_cli_cases() {
+        let store = spawn_failure_hint(
+            r"C:\Program Files\WindowsApps\OpenAI.Codex_1.0\app\resources\codex.exe",
+            std::io::ErrorKind::PermissionDenied,
+        );
+        assert!(store.contains("系统保护"), "{store}");
+        assert!(store.contains("清空"), "{store}");
+
+        let plain =
+            spawn_failure_hint(r"C:\codex\codex.exe", std::io::ErrorKind::PermissionDenied);
+        assert_eq!(plain, "：没有执行权限");
+
+        let missing = spawn_failure_hint("codex", std::io::ErrorKind::NotFound);
+        if cfg!(windows) {
+            assert!(missing.contains("使用桌面版内置 CLI"), "{missing}");
+        } else {
+            assert!(missing.contains("PATH"), "{missing}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executable_validation_flags_a_file_without_exec_permission() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("codex");
+        std::fs::write(&path, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let error = validate_codex_executable(&path.display().to_string()).unwrap_err();
+        assert!(error.to_string().contains("执行权限"), "{error}");
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(validate_codex_executable(&path.display().to_string()).is_ok());
+    }
+
+    /// app-server 起不来时，真正的原因只在 stderr 里；以前被读了就扔。
+    #[test]
+    fn stderr_tail_is_kept_and_bounded() {
+        let sink = Arc::new(Mutex::new(VecDeque::<String>::new()));
+        {
+            let mut guard = sink.lock().unwrap();
+            for i in 0..(STDERR_TAIL_LINES + 4) {
+                if guard.len() == STDERR_TAIL_LINES {
+                    guard.pop_front();
+                }
+                guard.push_back(format!("line-{i}"));
+            }
+        }
+        let tail = collect_stderr_tail(&sink);
+        assert!(tail.contains(&format!("line-{}", STDERR_TAIL_LINES + 3)));
+        // 只留最近若干行，不能无限涨
+        assert!(!tail.contains("line-0"));
+        assert_eq!(tail.split('；').count(), STDERR_TAIL_LINES);
     }
 }

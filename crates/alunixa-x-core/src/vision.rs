@@ -118,14 +118,52 @@ pub enum ImageHandling {
     Vlm,
 }
 
+/// 归一化 per-model map 的查表 key：剥掉 `[1M]` 窗口后缀，**保留原大小写**。
+///
+/// 后缀剥离复用 `model_suffix::parse_model_suffix`（与 catalog 生成同一套语义），
+/// 与前端 `model-windows.ts` 的 `modelMapKeyFromRowName` 逐字对齐：
+/// 只剥「合法窗口后缀」，`x[abc]`/`x[0]` 这类非法后缀整串保留。
+fn normalize_model_key(raw: &str) -> String {
+    crate::model_suffix::parse_model_suffix(raw).0
+}
+
+/// 在 per-model map 中逐级查表：原始名 → 规范 slug（剥后缀）→ 剥后缀 + 大小写不敏感。
+///
+/// 三级回退与前端 `model-windows.ts::lookupModelMapEntry` 同源（issue #2345）：
+/// - 直接命中：上游请求里的 model 字符串与 map key 逐字相同；
+/// - 规范 slug：请求带 `[1M]` 后缀而 key 不带（前端落盘的新数据）；
+/// - 归一化后大小写不敏感：**两侧都先剥后缀再比大小写**——只剥请求侧不够，
+///   历史数据的 key 是带后缀的行名原样（`deepseek-v4-pro[1M]`），请求侧不带后缀时
+///   会整个漏掉。同时覆盖供应商 slug 大小写不统一（`GLM-5.3` vs `glm-5.3`）。
+///
+/// 大小写不敏感一级按 BTreeMap 的字典序取第一个匹配，保证同一份配置的多次请求
+/// 解析结果稳定（不会因 HashMap 迭代序在两个同名不同 case 的 key 之间抖动）。
+fn lookup_model_map<'a, T>(
+    map: &'a std::collections::BTreeMap<String, T>,
+    model: &str,
+) -> Option<&'a T> {
+    if let Some(value) = map.get(model) {
+        return Some(value);
+    }
+    let slug = normalize_model_key(model);
+    if let Some(value) = map.get(&slug) {
+        return Some(value);
+    }
+    map.iter()
+        .find(|(key, _)| normalize_model_key(key).to_lowercase() == slug.to_lowercase())
+        .map(|(_, value)| value)
+}
+
 /// 解析 model_vlm JSON，返回该模型的图片处理模式。
+///
+/// 未命中任何一级回退时返回 `SendAsIs`（默认行为不变，per-profile 单值配置也
+/// 不进这张 map，不受影响）。
 pub fn image_handling_mode(model: &str, model_vlm_json: &str) -> ImageHandling {
     if let Ok(map) =
         serde_json::from_str::<std::collections::BTreeMap<String, ImageHandling>>(model_vlm_json)
+        && let Some(mode) = lookup_model_map(&map, model)
     {
-        if let Some(mode) = map.get(model) {
-            return *mode;
-        }
+        return *mode;
     }
     ImageHandling::SendAsIs
 }
@@ -247,6 +285,8 @@ fn strip_all_images(messages: &mut [Value]) {
 
 /// 从 relay 配置解析模型上下文窗口上限（token 数）。
 /// 三级 fallback：model_windows JSON → context_window 全局 → 272_000 硬兜底。
+/// map 查表走与 `image_handling_mode` 同一套 key 归一化（剥后缀 + 大小写回退），
+/// 否则按模型配好的窗口会被请求体里的 `[1M]` 后缀整条错过（issue #2345）。
 fn resolve_context_window(
     model_windows_json: &str,
     context_window_str: &str,
@@ -254,13 +294,11 @@ fn resolve_context_window(
 ) -> u64 {
     let model_name = request_model.rsplit('/').next().unwrap_or(request_model);
     if let Ok(map) =
-        serde_json::from_str::<std::collections::HashMap<String, String>>(model_windows_json)
+        serde_json::from_str::<std::collections::BTreeMap<String, String>>(model_windows_json)
+        && let Some(token) = lookup_model_map(&map, model_name)
+        && let Some(w) = crate::model_suffix::parse_window_token(&token)
     {
-        if let Some(token) = map.get(model_name) {
-            if let Some(w) = crate::model_suffix::parse_window_token(token) {
-                return w;
-            }
-        }
+        return w;
     }
     if let Ok(w) = context_window_str.parse::<u64>() {
         if w > 0 {

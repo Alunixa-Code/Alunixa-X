@@ -440,7 +440,6 @@
     if (tab === alunixaXExtensionsTab) return renderCodexPlusExtensionsNav();
     return [
       { key: "home", label: "主页" },
-      { key: "sponsor", label: "推荐内容" },
     ].map((item) => `
       <button type="button" class="alunixa-x-page-nav-item" data-alunixa-x-page-nav="${item.key}" data-active="${String(tab === item.key)}">${item.label}</button>
     `).join("");
@@ -634,120 +633,6 @@
         .filter(Boolean)
         .some((text) => String(text).toLowerCase().includes(query));
     });
-  }
-
-  const alunixaXAdsUrl = "/ads";
-  let alunixaXAds = [];
-  let alunixaXAdsLoaded = false;
-
-  function isCodexPlusAdExpired(ad) {
-    if (!ad.expires_at) return false;
-    const expiresAt = Date.parse(ad.expires_at);
-    return Number.isFinite(expiresAt) && expiresAt < Date.now();
-  }
-
-  function normalizeCodexPlusAds(payload) {
-    if (!payload || !Array.isArray(payload.ads)) return [];
-    // 只留赞助商推荐。上游清单里的 normal 条目不属于合作伙伴分组，
-    // 放进来只会让「有数据但渲染不出东西」的状态变得难以判断。
-    return payload.ads.filter((ad) => {
-      return ad && ad.type === "sponsor" && ad.title && ad.description && ad.url && !isCodexPlusAdExpired(ad);
-    }).map((ad) => ({
-      id: String(ad.id || ad.title),
-      type: ad.type,
-      title: String(ad.title),
-      description: String(ad.description),
-      url: String(ad.url),
-      image: ad.image ? String(ad.image) : "",
-      expires_at: ad.expires_at ? String(ad.expires_at) : "",
-      highlights: Array.isArray(ad.highlights) ? ad.highlights.map((item) => String(item)).filter(Boolean) : [],
-    }));
-  }
-
-  function formatCodexPlusAdTitle(title) {
-    const value = String(title || "");
-    return value.split(/[｜|]/, 1)[0].trim() || value;
-  }
-
-  /** 推荐卡片的右上角外链箭头，跟 VSCode/Codex 的「新窗口打开」同一语义。 */
-  const alunixaXAdArrowIcon = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 10.5 10.5 5.5"/><path d="M6.5 5.5h4v4"/></svg>';
-
-  function renderCodexPlusAdGroup() {
-    const ads = alunixaXAds;
-    if (!ads.length) return `<div class="alunixa-x-ad-empty">暂无推荐内容。</div>`;
-    return ads.map((ad) => {
-      const name = formatCodexPlusAdTitle(ad.title);
-      // 底部那条优惠信息：取第一个亮点。没有就不渲染整条，免得留一段空白。
-      const promo = (ad.highlights || []).find(Boolean) || "";
-      // 没有配图时用名称首字当占位，比空一块更整齐。
-      const icon = ad.image
-        ? `<img class="alunixa-x-ad-icon" src="${escapeHtml(ad.image)}" alt="" loading="lazy" />`
-        : `<span class="alunixa-x-ad-icon alunixa-x-ad-icon-fallback" aria-hidden="true">${escapeHtml(name.slice(0, 1))}</span>`;
-      return `
-        <a class="alunixa-x-ad-card" data-alunixa-x-ad-url="${escapeHtml(ad.url)}" href="${escapeHtml(ad.url)}" rel="noreferrer" title="${escapeHtml(name)}">
-          <span class="alunixa-x-ad-main">
-            ${icon}
-            <span class="alunixa-x-ad-text">
-              <span class="alunixa-x-ad-title">${escapeHtml(name)}</span>
-              <span class="alunixa-x-ad-description">${escapeHtml(ad.description)}</span>
-              ${promo ? `<span class="alunixa-x-ad-promo">${escapeHtml(promo)}</span>` : ""}
-            </span>
-            <span class="alunixa-x-ad-arrow" aria-hidden="true">${alunixaXAdArrowIcon}</span>
-          </span>
-        </a>
-      `;
-    }).join("");
-  }
-
-  function renderCodexPlusAds() {
-    if (!alunixaXAdsLoaded) return `<div class="alunixa-x-ad-empty">推荐内容加载中…</div>`;
-    if (!alunixaXAds.length) return `<div class="alunixa-x-ad-empty">暂无推荐内容。</div>`;
-    // 合作伙伴用同一套原生列表节奏展示，文案与外链沿用后端数据。
-    return `<div class="alunixa-x-ad-list">${renderCodexPlusAdGroup()}</div>`;
-  }
-
-  function cacheBustCodexPlusAdUrl(url, version) {
-    return `${url}${url.includes("?") ? "&" : "?"}v=${version}`;
-  }
-
-  async function directFetchCodexPlusAds() {
-    const urls = [
-      "https://raw.githubusercontent.com/BigPizzaV3/Ad-List/main/ads.json",
-      "https://cdn.jsdelivr.net/gh/BigPizzaV3/Ad-List@main/ads.json",
-    ];
-    let lastError = null;
-    const cacheBust = Date.now();
-    for (const url of urls) {
-      try {
-        const response = await fetch(cacheBustCodexPlusAdUrl(url, cacheBust), {
-          headers: { "Accept": "application/json" },
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return await response.json();
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw lastError || new Error("ad list unavailable");
-  }
-
-  async function fetchCodexPlusAds() {
-    try {
-      const localPayload = await postJson(alunixaXAdsUrl, {});
-      alunixaXAds = normalizeCodexPlusAds(localPayload?.ads ? localPayload : localPayload?.payload);
-      if (!alunixaXAds.length) alunixaXAds = normalizeCodexPlusAds(await directFetchCodexPlusAds());
-    } catch (error) {
-      sendCodexPlusDiagnostic("ads_fetch_failed", {
-        errorName: error?.name || "",
-        errorMessage: error?.message || String(error),
-      });
-      alunixaXAds = [];
-    } finally {
-      alunixaXAdsLoaded = true;
-      const panel = document.querySelector('[data-alunixa-x-panel="sponsor"] .alunixa-x-ad-remote');
-      if (panel) panel.innerHTML = renderCodexPlusAds();
-    }
   }
 
   function selectCodexPlusTab(tab) {
@@ -1326,15 +1211,7 @@
               <div class="alunixa-x-extensions-detail" data-alunixa-x-extensions-detail="true">${renderCodexPlusExtensionsDetail()}</div>
             </div>
           </div>
-          <div class="alunixa-x-panel" data-alunixa-x-panel="sponsor" hidden>
-            <div class="alunixa-x-discovery alunixa-x-sponsor-page">
-              <div class="alunixa-x-discovery-header">
-                <div><h1 class="alunixa-x-discovery-title">推荐内容</h1><p class="alunixa-x-discovery-description alunixa-x-sponsor-text">以下推荐来自支持 Alunixa X 继续维护的合作方。</p></div>
-              </div>
-              <h2 class="alunixa-x-discovery-section-title">合作伙伴</h2>
-              <div class="alunixa-x-ad-remote">${renderCodexPlusAds()}</div>
-            </div>
-          </div>
+
         </div>
       </div>
       <div id="alunixa-x-typing-effect-menu" class="alunixa-x-dropdown-menu" data-alunixa-x-typing-effect-menu="true" role="listbox" aria-label="打字特效（彩虹 P）" hidden>
@@ -1568,7 +1445,6 @@
         window.addEventListener("resize", window.__alunixaXPageResizeHandler);
       }
     }
-    if (!alunixaXAdsLoaded) fetchCodexPlusAds();
     selectCodexPlusTab(initialTab);
     // 必须在 selectCodexPlusTab 之后：激活态要靠 data-alunixa-x-active-tab
     // 判断当前是 Alunixa X 还是「拓展」，提前调用会永远落到 home 上。
@@ -1591,9 +1467,6 @@
   }
 
   /** 「推荐内容」页面：从弹窗的二级 tab 提出来，成为图标栏上的一级入口。 */
-  function openCodexPlusSponsor() {
-    openCodexPlusModal({ page: true, tab: alunixaXSponsorTab });
-  }
 
   function closeCodexPlusPage() {
     closeCodexPlusTypingEffectDropdown();
@@ -1803,7 +1676,6 @@
     const specs = [
       { id: alunixaXRailNavId, label: "Alunixa X", iconMarkup: icons.home, withStatus: true, onActivate: openCodexPlusPage },
       { id: alunixaXRailExtensionsId, label: "拓展", iconMarkup: icons.extensions, withStatus: false, onActivate: openCodexPlusExtensions },
-      { id: alunixaXRailSponsorId, label: "推荐内容", iconMarkup: icons.sponsor, withStatus: false, onActivate: openCodexPlusSponsor },
     ];
 
     const anchor = alunixaXRailPrimaryAnchor(rail);

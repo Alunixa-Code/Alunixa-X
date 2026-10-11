@@ -10,7 +10,9 @@ fn assert_sha256(relative_path: &str, expected: &str) {
             path.display()
         )
     });
-    // Hash the repository's canonical LF representation on every platform.
+    // Git may materialize these text assets with CRLF on Windows. Hash the
+    // repository's canonical LF representation so the guard is platform
+    // independent while still detecting substantive asset changes.
     let mut normalized = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
@@ -33,7 +35,7 @@ fn bundled_target_renderers_and_styles_remain_byte_exact() {
         ),
         (
             "assets/inject/upstream/dream-skin/windows/dream-skin.css",
-            "F45CAA9A0A3D57157FBFA89DB98FEB6C5B87DBA21E09049E5341DB378C6F385D",
+            "F8F944AB2D8E7C409AE7AE7F2F079DC79D6674F729129798A7281B492D8D8DA6",
         ),
         (
             "assets/inject/upstream/dream-skin/macos/renderer-inject.js",
@@ -41,7 +43,7 @@ fn bundled_target_renderers_and_styles_remain_byte_exact() {
         ),
         (
             "assets/inject/upstream/dream-skin/macos/dream-skin.css",
-            "F45CAA9A0A3D57157FBFA89DB98FEB6C5B87DBA21E09049E5341DB378C6F385D",
+            "F8F944AB2D8E7C409AE7AE7F2F079DC79D6674F729129798A7281B492D8D8DA6",
         ),
         (
             "assets/inject/upstream/cidala-tiger/windows/renderer-inject.js",
@@ -77,5 +79,40 @@ fn bundled_target_renderers_and_styles_remain_byte_exact() {
         ),
     ] {
         assert_sha256(path, hash);
+    }
+}
+
+#[test]
+fn bundled_skin_pack_theme_files_remain_byte_exact() {
+    for (path, hash) in [
+        (
+            "caishen-lite",
+            "379CB601522E7A5C2FC906E3D8BD5C7C64385FBD2A428798F8D169DEB7026F2E",
+        ),
+        (
+            "caishen-max",
+            "0CFF815EC9582B88ECF4AD9E7562D7DFF32904FA8F09338811397960D62FD7D4",
+        ),
+        (
+            "caishen-readable",
+            "EB1FFD4F2F49137B4AEDDBED435513D42685C8ED9E97DF644C693FD7859CC62D",
+        ),
+        (
+            "export-night",
+            "C312329AABEE84B9A8443B08D4DB64863EC49DEEA3C7F7C942B57E4391B87B59",
+        ),
+        (
+            "global-founder-bright",
+            "EAFB018494225ABABD83AE0E7B940E3F565232CF8F30C53AAFA63E7652178810",
+        ),
+        (
+            "mythic-guardian-noir",
+            "2A57716D0161F7405D713912BCD0CD329038657518537F3EFDB5F7EE53DBAE3D",
+        ),
+    ] {
+        assert_sha256(
+            &format!("assets/inject/upstream/skin-packs/packs/{path}/theme.json"),
+            hash,
+        );
     }
 }

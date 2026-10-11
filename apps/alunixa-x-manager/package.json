@@ -1,12 +1,12 @@
 {
   "name": "alunixa-x-manager",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "tauri dev",
-    "build": "cargo build -p alunixa-x-launcher --release && tauri build",
+    "build": "tauri build",
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --experimental-strip-types --test \"src/*.test.ts\"",
     "vite:dev": "vite --host 127.0.0.1 --port 1420",
@@ -32,6 +32,9 @@
     "vite": "^6.0.0"
   },
   "devDependencies": {
+    "@babel/parser": "7.29.3",
+    "@babel/traverse": "7.29.0",
+    "esbuild": "0.25.12",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
