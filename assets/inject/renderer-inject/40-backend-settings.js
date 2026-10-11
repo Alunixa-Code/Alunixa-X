@@ -1181,7 +1181,7 @@
                   <button type="button" class="alunixa-x-action-button" data-codex-open-devtools="true">打开 DevTools</button>
                 </div>
                 <div class="alunixa-x-row">
-                  <div><div class="alunixa-x-row-title">关于 Alunixa X</div><div class="alunixa-x-about">Alunixa X 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-alunixa-x-build="true">${alunixaXBuild}</span><br>GitHub: <a href="https://github.com/BigPizzaV3/AlunixaX" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/AlunixaX</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/AlunixaX" target="_blank" rel="noreferrer">https://t.me/AlunixaX</a></div></div>
+                  <div><div class="alunixa-x-row-title">关于 Alunixa X</div><div class="alunixa-x-about">Alunixa X 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-alunixa-x-build="true">${alunixaXBuild}</span><br>GitHub: <a href="https://github.com/Alunixa-Code/Alunixa-X" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/AlunixaX" target="_blank" rel="noreferrer">https://t.me/AlunixaX</a></div></div>
                 </div>
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">Discord 社区</div><div class="alunixa-x-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>

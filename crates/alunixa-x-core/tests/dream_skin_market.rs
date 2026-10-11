@@ -19,7 +19,7 @@ fn market_theme(config: &[u8], image: &[u8]) -> DreamSkinMarketTheme {
         author: "Alunixa X".to_string(),
         description: "Test theme".to_string(),
         license: "MIT".to_string(),
-        source_url: "https://github.com/BigPizzaV3/AlunixaX-Themes".to_string(),
+        source_url: "https://github.com/BigPizzaV3/CodexPlusPlus-Themes".to_string(),
         tags: vec!["test".to_string()],
         theme: "themes/market-demo/theme.json".to_string(),
         image: "themes/market-demo/image.png".to_string(),

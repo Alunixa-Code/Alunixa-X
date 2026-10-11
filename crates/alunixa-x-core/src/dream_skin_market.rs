@@ -11,10 +11,10 @@ use crate::dream_skin_library::{DreamSkinThemeDraft, DreamSkinThemeSummary};
 use crate::settings::DreamSkinThemeConfig;
 
 pub const DEFAULT_MARKET_INDEX_URL: &str =
-    "https://raw.githubusercontent.com/BigPizzaV3/AlunixaX-Themes/main/index.json";
+    "https://raw.githubusercontent.com/BigPizzaV3/CodexPlusPlus-Themes/main/index.json";
 pub const DEFAULT_MARKET_RAW_BASE_URL: &str =
-    "https://raw.githubusercontent.com/BigPizzaV3/AlunixaX-Themes/main/";
-pub const DEFAULT_MARKET_REPOSITORY_URL: &str = "https://github.com/BigPizzaV3/AlunixaX-Themes";
+    "https://raw.githubusercontent.com/BigPizzaV3/CodexPlusPlus-Themes/main/";
+pub const DEFAULT_MARKET_REPOSITORY_URL: &str = "https://github.com/BigPizzaV3/CodexPlusPlus-Themes";
 
 const MARKET_CACHE_FILE: &str = "dream-skin/market/index.json";
 const MARKET_INSTALLS_FILE: &str = "dream-skin/market/installed.json";

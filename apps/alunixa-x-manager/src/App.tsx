@@ -75,7 +75,7 @@ import {
 } from "lucide-react";
 import { createPresetPatch } from "@/components/ProviderPresetSelector";
 import { PRESETS, type ProviderPreset } from "./presets";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +85,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { isGitHubRepositoryHomepage } from "./github-repository";
 import { NativeBrowserStatusView, nativeBrowserConsent } from "./native-browser-settings";
+import { ImageModelsScreen } from "@/components/ImageModelsScreen";
+import { WallpaperSettings } from "@/components/WallpaperSettings";
+import { AgentHealthPanel } from "@/components/AgentHealthPanel";
+import { CustomModelsEditor, type CustomModel } from "@/components/CustomModelsEditor";
+const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 import { AgentCachePanel } from "./agent-cache";
 import { PluginMarketScreen } from "./PluginMarketScreen";
 import { McpPage, PageHeader } from "./ManagementPages";
@@ -189,6 +194,7 @@ import {
   type DreamSkinVerificationResult,
 } from "./dream-skin";
 import { hasModelProtocols, parseModelProtocols, modelProtocolForName, modelProtocolKey } from "./model-protocols";
+import { supportsClaudeAdaptive } from "./claude-thinking";
 import { getLanguage, getLocale, t, tf, LANGUAGE_OPTIONS, isLanguage, setLanguage } from "@/i18n";
 import { vlmTestTranslation } from "./vlm-test-translation";
 
@@ -385,6 +391,8 @@ export type RelayProfile = {
   modelWindows: string;
   modelProtocols?: string;
   modelReasoningEfforts?: Record<string, string>;
+  customModels?: CustomModel[];
+  defaultCustomModelId?: string;
   modelAutoCompact: string;
   modelMetadata: string;
   modelVlm: string;
@@ -460,10 +468,10 @@ type CodexContextEntries = {
 type RelayProtocol = "responses" | "chatCompletions" | "completions" | "anthropicMessages" | "geminiGenerateContent";
 type StepwiseProtocol = "auto" | "chat_completions" | "responses" | "anthropic_messages";
 type StepwiseGenerationMode = "auto" | "manual";
-type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate";
+type RelayMode = "official" | "mixedApi" | "pureApi" | "aggregate" | "customModels";
 type RelaySessionProvider = "custom" | "openai";
 const CHAT_UPSTREAM_BASE_URL_KEY = "alunixa_x_chat_base_url";
-const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/BigPizzaV3/AlunixaXScriptMarket";
+const SCRIPT_MARKET_REPOSITORY_URL = "https://github.com/BigPizzaV3/CodexPlusPlusScriptMarket";
 
 const emptyContextSelection = (): RelayContextSelection => ({
   mcpServers: [],
@@ -489,6 +497,7 @@ type UserScriptInventory = {
 };
 
 type SettingsResult = CommandResult<{
+  revision?: string | null;
   settings: BackendSettings;
   settings_path: string;
   user_scripts: UserScriptInventory;
@@ -933,7 +942,7 @@ const TOOL_ICONS: Record<string, string> = {
   claude: new URL("./assets/agents/claude.svg", import.meta.url).href,
 };
 
-type Route = "overview" | "relay" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
+type Route = "imageModels" | "overview" | "relay" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
@@ -948,6 +957,7 @@ const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
  * 新增页面时**必须**想清楚归属：默认可见会让 Codex 专属功能在 Grok 下露出来。
  */
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string; tool?: string }> = [
+  { id: "imageModels", label: t("生图模型"), icon: ImagePlus },
   // 概览在两个工具下都可见：它承载共用的置顶推荐位，以及各自的状态。
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
   { id: "relay", label: t("供应商配置"), icon: KeyRound, tool: "codex" },
@@ -990,7 +1000,7 @@ const navigationSections: Array<{ label: string; routes: Route[]; placement?: "b
 ];
 
 /** 应用级入口放在最左栏；概览仍随当前 Agent 显示各自的状态。 */
-const globalNavigationRoutes: Route[] = ["agentCache", "about", "settings"];
+const globalNavigationRoutes: Route[] = ["imageModels", "agentCache", "about", "settings"];
 
 const defaultSettings: BackendSettings = {
   ...defaultWhaleBalanceSettings(),
@@ -1104,6 +1114,23 @@ const defaultSettings: BackendSettings = {
 };
 
 export function App() {
+  const settingsRevisionRef = useRef<string | null>(null);
+  const committedSettingsRef = useRef<BackendSettings | null>(null);
+  const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const settingsSaveRequestRef = useRef(0);
+
+  const imageModelsPending = useRef({ busy: false, dirty: false });
+  const [signalArchiveOpen, setSignalArchiveOpen] = useState(false);
+  const signalTriggerClicks = useRef<number[]>([]);
+  const handleSignalArchiveTrigger = () => {
+    const now = performance.now();
+    signalTriggerClicks.current = [...signalTriggerClicks.current, now].filter(time => now - time <= 2200);
+    if (signalTriggerClicks.current.length >= 7) {
+      signalTriggerClicks.current = [];
+      setSignalArchiveOpen(true);
+    }
+  };
+
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
   const [enhancementTab, setEnhancementTab] = useState<EnhancementTab>("general");
@@ -1244,6 +1271,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setSettingsForm(normalizeSettings(result.settings));
       // 先保存 Agent 选择，再离开通用页；失败时保留原页面与布局。
       if (globalNavigationRoutes.includes(route)) await navigate("overview");
@@ -1274,6 +1305,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("load_settings"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       const normalized = normalizeSettings(result.settings);
       setSettingsForm(normalized);
       // 侧栏聚焦的工具以后端存的为准，避免刷新后跳回 codex。
@@ -1329,6 +1364,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("refresh_user_script_inventory"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
     }
     return result;
@@ -1338,6 +1377,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("reload_user_scripts"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地拓展"), result);
     }
@@ -1365,6 +1408,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("set_user_script_enabled", { key, enabled }));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地拓展"), result);
       await refreshUserScriptInventory();
@@ -1378,6 +1425,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("delete_user_script", { key }));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
       showResultNotice(t("本地拓展"), result);
       await refreshUserScriptInventory();
@@ -1447,6 +1498,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("import_ccs_providers"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setSettingsForm(normalizeSettings(result.settings));
       showResultNotice(t("cc-switch 导入"), result);
       await refreshCcsProviders(true);
@@ -1467,6 +1522,10 @@ export function App() {
     if (result) {
       setPendingProviderImport(null);
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setSettingsForm(normalizeSettings(result.settings));
       showResultNotice(t("Alunixa X 导入"), result);
       await refreshCcsProviders(true);
@@ -1993,6 +2052,10 @@ export function App() {
   };
 
   const navigate = async (next: Route, skipDreamSkinDraftGuard = false) => {
+    if (route === "imageModels" && next !== route) {
+      if (imageModelsPending.current.busy) return;
+      if (imageModelsPending.current.dirty && !window.confirm(t("有未保存的模型修改，确定放弃吗？"))) return;
+    }
     if (!skipDreamSkinDraftGuard && route === "dreamSkin" && next !== "dreamSkin" && dreamSkinDraftDirty) {
       runAfterDreamSkinDraftGuard(() => void navigate(next, true));
       return;
@@ -2270,49 +2333,35 @@ export function App() {
     }
   };
 
-  const saveSettings = async () => {
-    const next = normalizeSettings(settingsForm);
-    const whaleIssue = whaleBalanceValidationMessage(whaleBalanceSettingsIssue(next));
-    if (whaleIssue) {
-      showNotice(t("Codex 用量挂件"), whaleIssue, "failed");
-      return;
-    }
-    const dictationIssue = dictationSettingsValidationMessage(dictationSettingsIssue(next.dictation));
-    if (dictationIssue) {
-      showNotice(t("语音输入"), dictationIssue, "failed");
-      return;
-    }
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
-    if (result) {
-      setSettings(result);
-      setSettingsForm(normalizeSettings(result.settings));
-      showNotice(t("设置保存"), result.message, result.status);
-    }
-  };
+  const saveSettings = async () => { await saveSettingsValue(settingsForm, false); };
 
-  const saveSettingsValue = async (next: BackendSettings, silent = true) => {
+  const saveSettingsValue = async (next: BackendSettings, silent = true): Promise<BackendSettings | null> => {
     const normalized = normalizeSettings(next);
-    const whaleIssue = whaleBalanceValidationMessage(whaleBalanceSettingsIssue(normalized));
-    if (whaleIssue) {
-      showNotice(t("Codex 用量挂件"), whaleIssue, "failed");
+    const issue = whaleBalanceValidationMessage(whaleBalanceSettingsIssue(normalized))
+      || dictationSettingsValidationMessage(dictationSettingsIssue(normalized.dictation));
+    if (issue) { showNotice(t("设置保存"), issue, "failed"); return null; }
+    const requestId = ++settingsSaveRequestRef.current;
+    const persist = async () => {
+      const result = await run(() => call<SettingsResult>("save_settings", {
+        settings: normalized, expectedRevision: settingsRevisionRef.current,
+      }));
+      if (result && isSuccessStatus(result.status)) {
+        settingsRevisionRef.current = result.revision ?? null;
+        const saved = normalizeSettings(result.settings);
+        committedSettingsRef.current = saved;
+        if (requestId === settingsSaveRequestRef.current) { setSettings(result); setSettingsForm(saved); }
+        if (!silent) showNotice(t("设置保存"), result.message, result.status);
+        return saved;
+      }
+      if (requestId === settingsSaveRequestRef.current) {
+        setSettingsForm(normalizeSettings(committedSettingsRef.current ?? settings?.settings ?? defaultSettings));
+      }
+      if (result) showNotice(t("设置保存"), result.message, result.status);
       return null;
-    }
-    const dictationIssue = dictationSettingsValidationMessage(dictationSettingsIssue(normalized.dictation));
-    if (dictationIssue) {
-      showNotice(t("语音输入"), dictationIssue, "failed");
-      return null;
-    }
-    const result = await run(() => call<SettingsResult>("save_settings", { settings: normalized }));
-    if (result && isSuccessStatus(result.status)) {
-      const saved = normalizeSettings(result.settings);
-      setSettings(result);
-      setSettingsForm(saved);
-      if (!silent) showNotice(t("设置保存"), result.message, result.status);
-      return saved;
-    }
-    if (result) showNotice(t("设置保存"), result.message, result.status);
-    await refreshSettings(true);
-    return null;
+    };
+    const queued = settingsSaveQueueRef.current.then(persist, persist);
+    settingsSaveQueueRef.current = queued.then(() => undefined, () => undefined);
+    return await queued;
   };
 
   const beginWeixinQrLogin = async () => {
@@ -2376,6 +2425,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("reset_settings"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setSettingsForm(normalizeSettings(result.settings));
       showNotice(t("设置重置"), result.message, result.status);
     }
@@ -2385,6 +2438,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("reset_image_overlay_settings"));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       setSettingsForm(normalizeSettings(result.settings));
       showNotice(t("图片覆盖层"), result.message, result.status);
     }
@@ -3068,6 +3125,10 @@ export function App() {
     const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
     if (result) {
       setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
       const normalized = normalizeSettings(result.settings);
       setSettingsForm(normalized);
       setLaunchForm((current) => ({ ...current, appPath: normalized.codexAppPath }));
@@ -3183,6 +3244,10 @@ export function App() {
         const result = await run(() => call<SettingsResult>("save_settings", { settings: next }));
         if (result) {
           setSettings(result);
+      if (result.status === "ok") {
+        settingsRevisionRef.current = result.revision ?? null;
+        committedSettingsRef.current = normalizeSettings(result.settings);
+      }
           setSettingsForm(normalizeSettings(result.settings));
           setLaunchForm((current) => ({ ...current, appPath: "" }));
           showNotice(t("Codex 应用路径"), t("已清除保存路径，后续启动会回到自动探测。"), result.status);
@@ -3348,6 +3413,9 @@ export function App() {
       />
       {!isGlobalPage ? (
         <aside className="sidebar">
+          <button className="ax-brand-caption" onClick={handleSignalArchiveTrigger} type="button" aria-label="Agent control system">
+            <strong>ALUNIXA X</strong><small>AGENT CONTROL SYSTEM</small>
+          </button>
           <nav className="nav" aria-label={t("主导航")}>
             {navigationSections.map((section) => {
               // 按当前工具过滤：只留下属于这个工具、或与工具无关的页面。
@@ -3417,6 +3485,7 @@ export function App() {
           </div>
         </header>
         <section className="screen" key={route}>
+          {route === "imageModels" ? <ImageModelsScreen onPendingChange={state => { imageModelsPending.current = state; }} /> : null}
           {route === "overview" ? (
             <OverviewScreen
               overview={overview}
@@ -3547,8 +3616,19 @@ export function App() {
               actions={actions}
             />
           ) : null}
+                  {route === "dreamSkin" ? <WallpaperSettings value={{
+            ...settingsForm,
+            codexAppWallpaperMuted: (settingsForm as any).codexAppWallpaperMuted ?? true,
+            codexAppWallpaperPaused: (settingsForm as any).codexAppWallpaperPaused ?? false,
+            codexAppWallpaperEnginePath: "",
+          }} onChange={patch => setSettingsForm(current => ({...current,...patch}))}
+            onSave={() => actions.saveSettingsValue(settingsForm, false)}
+            onReset={() => actions.saveSettingsValue({...settingsForm,codexAppImageOverlayEnabled:false,codexAppImageOverlayPath:""},false)} /> : null}
+          {route === "enhance" ? <AgentHealthPanel autoRepair={(settingsForm as any).codexAppPackagedProxyRepair ?? true}
+            onAutoRepairChange={value => setSettingsForm(current => ({...current,codexAppPackagedProxyRepair:value}))} /> : null}
         </section>
       </main>
+      {signalArchiveOpen ? <Suspense fallback={null}><SignalArchive onClose={() => setSignalArchiveOpen(false)} /></Suspense> : null}
       {notice ? (
         <NoticeDialog
           key={`${notice.title}-${notice.message}-${notice.status ?? ""}`}
@@ -5499,7 +5579,7 @@ function DreamSkinScreen({
                     <RefreshCw className="h-4 w-4" />
                     {t("刷新市场")}
                   </Button>
-                  <Button onClick={() => void actions.openExternalUrl(market?.repositoryUrl || "https://github.com/BigPizzaV3/AlunixaX-Themes")} variant="outline">
+                  <Button onClick={() => void actions.openExternalUrl(market?.repositoryUrl || "https://github.com/BigPizzaV3/CodexPlusPlus-Themes")} variant="outline">
                     <Github className="h-4 w-4" />
                     {t("投稿主题")}
                   </Button>
@@ -6873,10 +6953,10 @@ function AboutScreen({
           <div className="metric-list">
             <Metric label={t("Alunixa X 版本")} value={overview?.current_version ?? update?.currentVersion ?? "-"} />
             <Metric label={t("Codex 版本")} value={overview?.codex_version ?? t("未检测到")} />
-            <Metric label={t("项目地址")} value="github.com/BigPizzaV3/AlunixaX" />
+            <Metric label={t("项目地址")} value="github.com/Alunixa-Code/Alunixa-X" />
           </div>
           <Toolbar>
-            <Button onClick={() => void actions.openExternalUrl("https://github.com/BigPizzaV3/AlunixaX")} variant="secondary">
+            <Button onClick={() => void actions.openExternalUrl("https://github.com/Alunixa-Code/Alunixa-X")} variant="secondary">
               <ExternalLink className="h-4 w-4" />
               {t("打开项目主页")}
             </Button>
@@ -8229,6 +8309,9 @@ function RelayProfileEditor({
   };
   return (
     <div className="relay-profile-editor">
+      {profile.relayMode === "customModels" ? <CustomModelsEditor models={profile.customModels || []}
+        defaultId={profile.defaultCustomModelId || profile.customModels?.[0]?.id || ""}
+        onChange={(customModels, defaultCustomModelId) => updateDraft({customModels,defaultCustomModelId})} /> : null}
       <div className="relay-fields">
         <section className="relay-config-section relay-basic-section">
           <div className="relay-config-section-head">
@@ -8250,6 +8333,7 @@ function RelayProfileEditor({
                 options={[
                   { value: "official", label: t("官方登录") },
                   { value: "pureApi", label: t("纯 API") },
+                  { value: "customModels", label: t("自定义多模型") },
                 ]}
               />
             </Field>
@@ -8436,6 +8520,18 @@ function RelayProfileEditor({
                               onBlur={() => commitModelSlug(index)}
                               placeholder="deepseek/deepseek-v4-flash"
                             />
+                            <select aria-label={t("模型最高思考等级")}
+                              value={profile.modelReasoningEfforts?.[modelProtocolKey(row.model)] ?? "xhigh"}
+                              onChange={event => updateDraft({modelReasoningEfforts: {
+                                ...profile.modelReasoningEfforts,
+                                [modelProtocolKey(row.model)]: event.currentTarget.value,
+                              }})}>
+                              {["low", "medium", "high", "xhigh", "max", "ultra", "adaptive"].map(effort =>
+                                <option key={effort} value={effort}
+                                  disabled={effort === "adaptive" && !supportsClaudeAdaptive(row.model, row.protocol || profile.protocol, profile.relayMode)}>
+                                  {effort === "adaptive" ? t("自适应思维") : effort}
+                                </option>)}
+                            </select>
                           </div>
                           <div className="relay-model-cell relay-model-cell-protocol">
                             <span className="relay-model-cell-label">{t("模型协议")}</span>
@@ -11195,6 +11291,7 @@ function routeTitle(route: Route) {
 
 function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
+    imageModels: t("配置独立 API、Key 和默认生图模型"),
     overview: t("检查问题、启动与快速修复"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
     grok: t("管理 Grok CLI 的模型与 API 端点"),
@@ -12154,6 +12251,7 @@ function ccsProviderSummary(result: CcsProvidersResult | null): string {
 }
 
 function normalizeRelayMode(mode: RelayMode | undefined): RelayMode {
+  if (mode === "customModels" || mode === "mixedApi") return mode;
   if (mode === "aggregate") return mode;
   if (mode === "pureApi") return mode;
   return "official";
@@ -12191,6 +12289,7 @@ function normalizeContextSelection(
 }
 
 function relayModeLabel(mode: RelayMode): string {
+  if (mode === "customModels") return t("自定义多模型");
   if (mode === "aggregate") return t("聚合供应商");
   if (mode === "pureApi") return t("纯 API");
   return t("官方登录");
@@ -12347,6 +12446,7 @@ function buildOfficialRelayAuthJson(contents: string): string {
 }
 
 function deriveRelayProfileFromFiles(profile: RelayProfile): RelayProfile {
+  if (profile.relayMode === "customModels") return profile;
   if (isAggregateRelayProfile(profile)) {
     return normalizeAggregateRelayProfile(profile, null);
   }

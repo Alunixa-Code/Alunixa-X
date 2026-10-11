@@ -10,15 +10,15 @@ pub mod windows;
 // 保留旧名称供存量安装识别；新入口统一使用 APP_*。
 pub const APP_NAME: &str = "Alunixa X";
 pub const APP_BINARY: &str = "alunixa-x-plus";
-pub const APP_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus";
+pub const APP_BUNDLE_ID: &str = "io.github.alunixacode.alunixax";
 pub const MACOS_APP_EXECUTABLE: &str = "AlunixaX";
 pub const SILENT_NAME: &str = "Alunixa X";
 pub const MANAGER_NAME: &str = "Alunixa X 管理工具";
 pub const SILENT_BINARY: &str = "alunixa-x-plus";
 pub const MACOS_SILENT_EXECUTABLE: &str = "AlunixaX";
 pub const MANAGER_BINARY: &str = "alunixa-x-plus-manager";
-pub const SILENT_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus";
-pub const MANAGER_BUNDLE_ID: &str = "com.bigpizzav3.codexplusplus.manager";
+pub const SILENT_BUNDLE_ID: &str = "io.github.alunixacode.alunixax";
+pub const MANAGER_BUNDLE_ID: &str = "io.github.alunixacode.alunixax.manager";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

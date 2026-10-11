@@ -22,9 +22,9 @@ const requiredMarkers = new Map([
   ["README.md", ["# Alunixa X", "assets/brand/alunixa-x-icon.png", "docs/images/alunixa-x-dashboard.png", "https://github.com/Alunixa-Code/Alunixa-X/releases/latest"]],
   ["README_EN.md", ["<h1 align=\"center\">Alunixa X</h1>", "assets/brand/alunixa-x-social.png", "https://github.com/Alunixa-Code/Alunixa-X/issues"]],
   ["CONTRIBUTING.md", ["https://github.com/Alunixa-Code/Alunixa-X.git"]],
-  ["apps/alunixa-x-manager/src/App.tsx", ["ALUNIXA X", "AGENT CONTROL SYSTEM", "AGENT RAIL", "https://github.com/Alunixa-Code/Alunixa-X"]],
+  ["apps/alunixa-x-manager/src/App.tsx", ["ALUNIXA X", "AGENT CONTROL SYSTEM", "ApplicationRail", "https://github.com/Alunixa-Code/Alunixa-X"]],
   ["apps/alunixa-x-manager/src-tauri/tauri.conf.json", ['"productName": "Alunixa X"', '"identifier": "io.github.alunixacode.alunixax"']],
-  ["crates/alunixa-x-core/src/update.rs", ['"Alunixa-Code/Alunixa-X"', "https://api.github.com/repos/Alunixa-Code/Alunixa-X/releases/latest"]],
+  ["crates/alunixa-x-core/src/update.rs", ['"Alunixa-Code/Alunixa-X"', "https://github.com/Alunixa-Code/Alunixa-X/releases/latest/download/latest.json"]],
   ["assets/inject/renderer-inject.js", ["Alunixa X", "https://github.com/Alunixa-Code/Alunixa-X"]],
   [".github/ISSUE_TEMPLATE/config.yml", ["https://github.com/Alunixa-Code/Alunixa-X/discussions"]],
 ]);

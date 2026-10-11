@@ -12,7 +12,7 @@
   <rect width="1200" height="760" fill="#202526"/>
 
   <g font-family="SF Pro Display, PingFang SC, Helvetica Neue, Arial, sans-serif" text-anchor="middle">
-    <text x="600" y="108" fill="#f2f4f7" font-size="34" font-weight="600">Alunixa X 安装指南</text>
+    <text x="600" y="108" fill="#f2f4f7" font-size="34" font-weight="600">Alunixa X (AX) 安装指南</text>
     <text x="600" y="148" fill="#aeb7c2" font-size="18">将 Alunixa X 拖入 Applications 文件夹即可完成安装</text>
     <path d="M 160 180 H 1040" stroke="#ffffff" stroke-opacity="0.12"/>
 
@@ -40,7 +40,7 @@
     <rect x="380" y="500" width="160" height="30" rx="15" fill="#e7edf2" fill-opacity="0.9"/>
     <rect x="875" y="500" width="250" height="30" rx="15" fill="#e7edf2" fill-opacity="0.9"/>
 
-    <text x="600" y="630" fill="#aeb7c2" font-size="15">旧版升级：先退出两个旧应用，再拖入并替换同名 Alunixa X</text>
+    <text x="600" y="630" fill="#aeb7c2" font-size="15">旧版升级：先退出旧应用，再安装新版；原入口与用户数据不会被安装包删除</text>
     <text x="600" y="670" fill="#8e99a5" font-size="15">首次打开若出现安全提示，请在“系统设置 → 隐私与安全性”中允许打开</text>
   </g>
 </svg>

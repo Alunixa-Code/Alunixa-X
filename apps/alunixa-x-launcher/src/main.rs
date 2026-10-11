@@ -16,6 +16,10 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 type NavigationHandler = Arc<dyn Fn(Value) -> Result<()> + Send + Sync>;
 static NAVIGATION_HANDLER: OnceLock<Mutex<Option<NavigationHandler>>> = OnceLock::new();
 
+pub fn blocking_runtime_for_cli() -> anyhow::Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread().enable_all().build()?)
+}
+
 /// 显示同一进程中的主窗口；宿主可消费 pending navigation 后通知前端。
 pub fn set_navigation_handler(handler: impl Fn(Value) -> Result<()> + Send + Sync + 'static) {
     *NAVIGATION_HANDLER
@@ -1084,6 +1088,10 @@ impl LaunchHooks for LauncherHooks {
     ) -> anyhow::Result<()> {
         self.core.apply_active_relay_profile(settings).await
     }
+    fn managed_launch_preparation_enabled(&self) -> bool { !self.attach_only }
+    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
+        self.core.wait_for_native_ui(debug_port).await
+    }
 
     async fn ensure_active_protocol_proxy_config(
         &self,
@@ -1585,9 +1593,8 @@ async fn try_inject_with_context(
         script,
         alunixa_x_core::user_scripts::BOOTSTRAP_SCRIPT.to_string(),
     ];
-    alunixa_x_core::bridge::install_bridge(
+    alunixa_x_core::bridge::install_renderer_bridge(
         websocket_url,
-        alunixa_x_core::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
             Box::pin(async move {
@@ -1595,6 +1602,7 @@ async fn try_inject_with_context(
             })
         }),
         &new_document_scripts,
+        &settings,
     )
     .await
 }

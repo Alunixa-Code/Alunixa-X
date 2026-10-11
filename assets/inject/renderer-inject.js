@@ -238,6 +238,152 @@
     conversationViewFooter: "[data-thread-scroll-footer]",
   };
   const headerContextButtonClass = "border-token-border user-select-none no-drag cursor-interaction flex items-center gap-1 border whitespace-nowrap focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 rounded-lg border-token-border text-token-button-tertiary-foreground bg-token-bg-fog enabled:hover:bg-token-list-hover-background data-[state=open]:bg-token-list-hover-background border h-token-button-composer px-2 py-0 text-base leading-[18px]";
+
+  function installAlunixaXImageOverlay() {
+    const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
+    const source = config.dataUrl || config.sourceUrl || "";
+    const signature = JSON.stringify(config);
+    const old = window.__alunixaXWallpaperRuntime;
+    if (old?.signature === signature && old.element?.isConnected) return;
+    old?.cleanup?.();
+    document.getElementById?.(alunixaXImageOverlayId)?.remove();
+    if (!config.enabled || !source) {
+      if (config.error) sendAlunixaXDiagnostic("wallpaper_failed", { message: config.error });
+      return;
+    }
+    const root = document?.documentElement;
+    if (!root || typeof document?.createElement !== "function") return;
+    const opacity = Math.min(1, Math.max(0.01, Number(config.opacity) || 0.35));
+    const fitMode = ["fill", "fit", "stretch", "tile", "center"].includes(config.fitMode)
+      ? config.fitMode
+      : "fit";
+    const fitStyles = {
+      fill: { size: "cover", position: "center center", repeat: "no-repeat" },
+      fit: { size: "contain", position: "center center", repeat: "no-repeat" },
+      stretch: { size: "100% 100%", position: "center center", repeat: "no-repeat" },
+      tile: { size: "auto", position: "left top", repeat: "repeat" },
+      center: { size: "auto", position: "center center", repeat: "no-repeat" },
+    }[fitMode];
+    const overlay = document.createElement("div");
+    overlay.id = alunixaXImageOverlayId;
+    overlay.setAttribute("aria-hidden", "true");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      width: "100vw",
+      height: "100vh",
+      opacity: String(opacity),
+      pointerEvents: "none",
+      zIndex: "2147483646",
+      userSelect: "none",
+      overflow: "hidden",
+    });
+    root.appendChild(overlay);
+    let stopped = false;
+    let video = null;
+    let notice = null;
+    let image = null;
+    let ready = false;
+    let blobUrl = null;
+    const reportReady = () => {
+      if (stopped || ready) return;
+      ready = true;
+      sendAlunixaXDiagnostic("wallpaper_ready", { kind: config.kind || "image" });
+    };
+    const reportFailure = (message) => {
+      if (stopped || notice) return;
+      sendAlunixaXDiagnostic("wallpaper_failed", { kind: config.kind, message });
+      notice = document.createElement("button");
+      notice.type = "button";
+      notice.textContent = `${message} · ×`;
+      notice.setAttribute("role", "status");
+      Object.assign(notice.style, { position:"fixed", right:"16px", bottom:"16px", zIndex:"2147483647",
+        maxWidth:"420px", padding:"10px 14px", borderRadius:"8px", background:"#252525",
+        color:"#fff", border:"1px solid #777", cursor:"pointer", font:"13px system-ui" });
+      notice.onclick = () => notice.remove();
+      root.appendChild(notice);
+    };
+    const loadMediaSource = async () => {
+      if (config.dataUrl || typeof window.__codexSessionDeleteBridge !== "function") return source;
+      const result = await window.__codexSessionDeleteBridge("/wallpaper/media", {});
+      if (result?.status !== "ok" || !String(result.sourceUrl || "").startsWith("blob:"))
+        throw new Error(result?.message || "壁纸文件无法读取，请重新选择");
+      if (stopped) { URL.revokeObjectURL(result.sourceUrl); return ""; }
+      blobUrl = result.sourceUrl;
+      return blobUrl;
+    };
+    const syncPlayback = () => {
+      if (!video || stopped) return;
+      if (document.hidden || config.paused) video.pause();
+      else video.play().catch(error => {
+        if (!stopped && !document.hidden && !config.paused && error?.name !== "AbortError")
+          reportFailure("壁纸播放失败，请检查视频编码或静音设置");
+      });
+    };
+    const cleanup = () => {
+      stopped = true;
+      document.removeEventListener("visibilitychange", syncPlayback);
+      window.removeEventListener("pagehide", cleanup);
+      if (image) { image.onload = image.onerror = null; image.src = ""; }
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (video) {
+        video.pause();
+        video.srcObject = null;
+        video.removeAttribute("src");
+        video.load();
+      }
+      overlay.remove();
+      notice?.remove();
+      if (window.__alunixaXWallpaperRuntime?.element === overlay) delete window.__alunixaXWallpaperRuntime;
+    };
+    window.__alunixaXWallpaperRuntime = { signature, element: overlay, cleanup };
+    window.addEventListener("pagehide", cleanup, { once: true });
+    if (config.kind === "video") {
+      video = document.createElement("video");
+      video.autoplay = !config.paused && !document.hidden;
+      video.loop = true;
+      video.muted = config.muted !== false;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.disablePictureInPicture = true;
+      video.setAttribute("aria-hidden", "true");
+      Object.assign(video.style, { width:"100%", height:"100%", pointerEvents:"none",
+        objectFit: ({ fill:"cover", stretch:"fill", center:"none", tile:"contain" })[fitMode] || "contain" });
+      video.onerror = () => reportFailure("视频无法解码，请使用 MP4（H.264）或 WebM");
+      video.onloadedmetadata = syncPlayback;
+      video.onloadeddata = reportReady;
+      video.onplaying = reportReady;
+      overlay.appendChild(video);
+      document.addEventListener("visibilitychange", syncPlayback);
+      void loadMediaSource().then(url => {
+        if (stopped) return;
+        video.src = url;
+        syncPlayback();
+      }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
+    } else {
+      image = new Image();
+      image.onload = reportReady;
+      image.onerror = () => reportFailure("壁纸图片无法加载，请重新选择有效的图片");
+      void loadMediaSource().then(url => {
+        if (stopped) return;
+        Object.assign(overlay.style, {
+          backgroundImage: `url("${url.replace(/"/g, "%22")}")`,
+          backgroundSize: fitStyles.size, backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
+        });
+        image.src = url;
+      }).catch(error => reportFailure(error?.message || "壁纸文件读取失败"));
+    }
+    sendAlunixaXDiagnostic("image_overlay_installed", { opacity, fitMode, kind:config.kind || "image" });
+  }
+
+  function scheduleAlunixaXImageOverlay() {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", installAlunixaXImageOverlay, { once: true });
+      return;
+    }
+    installAlunixaXImageOverlay();
+    setTimeout(installAlunixaXImageOverlay, 250);
+  }
   /**
    * 拓展注册中心。
    *
@@ -5997,7 +6143,7 @@
                   <button type="button" class="alunixa-x-action-button" data-codex-open-devtools="true">打开 DevTools</button>
                 </div>
                 <div class="alunixa-x-row">
-                  <div><div class="alunixa-x-row-title">关于 Alunixa X</div><div class="alunixa-x-about">Alunixa X 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-alunixa-x-build="true">${alunixaXBuild}</span><br>GitHub: <a href="https://github.com/BigPizzaV3/AlunixaX" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/AlunixaX</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/AlunixaX" target="_blank" rel="noreferrer">https://t.me/AlunixaX</a></div></div>
+                  <div><div class="alunixa-x-row-title">关于 Alunixa X</div><div class="alunixa-x-about">Alunixa X 是通过外部 launcher 注入的增强菜单，不修改 Codex App 原始安装文件。<br>Build: <span data-alunixa-x-build="true">${alunixaXBuild}</span><br>GitHub: <a href="https://github.com/Alunixa-Code/Alunixa-X" target="_blank" rel="noreferrer">https://github.com/BigPizzaV3/CodexPlusPlus</a><br>Discord: <a href="https://discord.gg/y96kX7A76v" target="_blank" rel="noreferrer">https://discord.gg/y96kX7A76v</a><br>Telegram: <a href="https://t.me/AlunixaX" target="_blank" rel="noreferrer">https://t.me/AlunixaX</a></div></div>
                 </div>
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">Discord 社区</div><div class="alunixa-x-row-description">加入 Discord 获取更新消息、反馈问题或交流使用体验。</div></div>

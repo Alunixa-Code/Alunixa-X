@@ -27,6 +27,7 @@
         "enable": true,
         "scope": [
           "$HOME/.codex-session-delete/dream-skin/**",
+          "$HOME/.codex-session-delete/wallpapers/**",
           "$HOME/.codex-session-delete/wallpapers/**"
         ]
       }

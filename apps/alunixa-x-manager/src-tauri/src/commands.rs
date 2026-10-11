@@ -16,6 +16,7 @@ use alunixa_x_core::status::{LaunchStatus, StatusStore};
 use alunixa_x_core::user_scripts::UserScriptManager;
 use serde::Serialize;
 use serde_json::{Value, json};
+use tauri::Manager;
 use tauri::Emitter;
 
 use crate::install::{self, InstallActionResult, InstallOptions};
@@ -151,6 +152,8 @@ pub struct OverviewPayload {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SettingsPayload {
+    pub revision: Option<String>,
+    #[serde(serialize_with = "serialize_manager_settings")]
     pub settings: BackendSettings,
     pub settings_path: String,
     pub user_scripts: Value,
@@ -1985,63 +1988,165 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
 }
 
 #[tauri::command]
-pub fn save_settings(settings: BackendSettings) -> CommandResult<SettingsPayload> {
-    let settings = normalize_settings_before_save(settings);
-    let Ok(_guard) = relay_switch_mutex().lock() else {
+pub async fn save_settings(
+    settings: BackendSettings,
+    expected_revision: Option<String>,
+    capability_writes: Option<Vec<String>>,
+) -> CommandResult<SettingsPayload> {
+    if expected_revision.is_none() {
         return failed(
-            "供应商切换锁已损坏，请重启管理器后再试。",
-            SettingsPayload {
-                settings,
-                settings_path: alunixa_x_core::paths::default_settings_path()
-                    .to_string_lossy()
-                    .to_string(),
-                user_scripts: user_script_inventory(),
-            },
-        );
-    };
-    let store = SettingsStore::default();
-    let previous = store.load().unwrap_or_default();
-    let dream_skin_enabled = settings.enhancements_enabled && settings.codex_app_dream_skin_enabled;
-    if let Err(error) = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-        dream_skin_enabled,
-        &settings.codex_app_dream_skin_theme_config,
-    ) {
-        return failed(
-            &format!("保存皮肤基础主题失败：{error}"),
-            SettingsPayload {
-                settings,
-                settings_path: alunixa_x_core::paths::default_settings_path()
-                    .to_string_lossy()
-                    .to_string(),
-                user_scripts: user_script_inventory(),
-            },
+            "缺少配置修订号，请刷新后重试；未覆盖当前配置",
+            fallback_settings_payload(),
         );
     }
-    match store.save(&settings) {
+    let previous = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("读取原设置失败，未保存任何修改：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    };
+    let settings = normalize_settings_before_save(settings);
+    let native_baseline = match alunixa_x_core::agent_capabilities::native_edit_baseline(
+        &previous,
+        &settings,
+        capability_writes.as_deref().unwrap_or_default(),
+    ) {
+        Ok(value) => value,
+        Err(error) => return failed(&error.to_string(), fallback_settings_payload()),
+    };
+    if settings.codex_app_fast_mode != native_baseline.codex_app_fast_mode
+        || settings.codex_goals_enabled != native_baseline.codex_goals_enabled
+    {
+        let cli = alunixa_x_core::official_remote::find_codex_cli_executable(Some(
+            &settings.codex_app_path,
+        ));
+        let features = alunixa_x_core::agent_capabilities::discover_features(cli.as_deref()).await;
+        if let Err(error) = alunixa_x_core::agent_capabilities::validate_native_feature_changes(
+            &native_baseline,
+            &settings,
+            &features,
+        ) {
+            return failed(&error.to_string(), fallback_settings_payload());
+        }
+    }
+    if settings.codex_app_path != previous.codex_app_path && !settings.codex_app_path.is_empty() {
+        let executable =
+            alunixa_x_core::app_paths::build_codex_executable(Path::new(&settings.codex_app_path));
+        if !executable.is_file() {
+            return failed(
+                "Codex 应用路径不存在或无法访问，未保存",
+                fallback_settings_payload(),
+            );
+        }
+    }
+    let wallpaper_changed = settings.codex_app_image_overlay_enabled
+        != previous.codex_app_image_overlay_enabled
+        || settings.codex_app_image_overlay_path != previous.codex_app_image_overlay_path;
+    if wallpaper_changed && settings.codex_app_image_overlay_enabled {
+        let validation = alunixa_x_core::wallpaper::resolve(Path::new(
+            settings.codex_app_image_overlay_path.trim(),
+        ));
+        if let Err(error) = validation {
+            return failed(
+                &format!("壁纸配置无效，未保存：{error}"),
+                fallback_settings_payload(),
+            );
+        }
+    }
+    let save_result = alunixa_x_core::config_transaction::run(
+        &alunixa_x_core::paths::default_settings_path(),
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+        expected_revision.as_deref(),
+        || {
+            let home = alunixa_x_core::relay_config::default_codex_home_dir();
+            alunixa_x_core::agent_capabilities::validate_profile_feature_changes_in_home(
+                &home,
+                &native_baseline,
+                &settings,
+            )?;
+            SettingsStore::default()
+                .save_preserving_runtime_model_selection(&settings)
+                .and_then(|_| {
+                    if settings.codex_app_sub_agent_max_threads
+                        == previous.codex_app_sub_agent_max_threads
+                    {
+                        return Ok(());
+                    }
+                    alunixa_x_core::relay_config::set_codex_sub_agent_max_threads_in_home(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                        settings.codex_app_sub_agent_max_threads,
+                    )
+                    .map(|_| ())
+                })
+                .and_then(|_| {
+                    if settings.codex_app_fast_mode == native_baseline.codex_app_fast_mode {
+                        return Ok(());
+                    }
+                    alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                        settings.codex_app_fast_mode,
+                    )
+                    .map(|_| ())
+                })
+                .and_then(|_| {
+                    if settings.codex_goals_enabled == native_baseline.codex_goals_enabled {
+                        return Ok(());
+                    }
+                    alunixa_x_core::relay_config::set_codex_goals_feature_in_home(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                        settings.codex_goals_enabled,
+                    )
+                })
+                .and_then(|_| {
+                    if settings.codex_app_disable_wss == native_baseline.codex_app_disable_wss {
+                        return Ok(());
+                    }
+                    alunixa_x_core::relay_config::apply_wss_policy_to_home(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                        settings.codex_app_disable_wss,
+                    )
+                    .map(|_| ())
+                })
+                .and_then(|_| remove_retired_context_config())
+                .and_then(|_| {
+                    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    )
+                    .map(|_| ())
+                })
+                .and_then(|_| {
+                    alunixa_x_core::codex_instructions::sync_model_instructions_after_settings_save(
+                        &alunixa_x_core::relay_config::default_codex_home_dir(),
+                        &previous,
+                        &settings,
+                    )
+                })
+                .and_then(|_| apply_codex_hook_policy(&settings))
+                .and_then(|_| {
+                    alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+                        settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
+                        &settings.codex_app_dream_skin_theme_config,
+                    )
+                })
+        },
+    );
+    match save_result {
         Ok(()) => {
             if let Ok(runtime) = weixin_runtime().lock()
-                && let Some(runtime) = runtime.as_ref()
-            {
+                && let Some(runtime) = runtime.as_ref() {
                 runtime.codex_path.set(&settings.weixin_connect_codex_path);
             }
-            settings_payload("设置已保存。", "设置保存后重新读取失败")
-        }
-        Err(error) => {
-            let _ = alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-                previous.enhancements_enabled && previous.codex_app_dream_skin_enabled,
-                &previous.codex_app_dream_skin_theme_config,
-            );
-            failed(
-                &format!("保存设置失败：{error}"),
-                SettingsPayload {
-                    settings,
-                    settings_path: alunixa_x_core::paths::default_settings_path()
-                        .to_string_lossy()
-                        .to_string(),
-                    user_scripts: user_script_inventory(),
-                },
-            )
-        }
+            settings_payload(
+            "设置已保存；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用。",
+            "设置保存后重新读取失败",
+        ) },
+        Err(error) => failed(
+            &format!("保存设置失败：{error}"),
+            fallback_settings_payload(),
+        ),
     }
 }
 
@@ -3082,13 +3187,13 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
                 .collect::<Vec<_>>(),
         }),
     );
-    let result = alunixa_x_data::delete_local_from_paths(
+    let result = alunixa_x_data::delete_local_from_paths_with_home(
         candidate_paths.clone(),
         alunixa_x_data::BackupStore::new(
             alunixa_x_core::paths::default_app_state_dir().join("backups"),
         ),
         &session,
-        Some(&home),
+        &home,
     );
     log_manager_event(
         "manager.delete_local_session.finish",
@@ -3894,6 +3999,7 @@ pub async fn refresh_user_script_inventory() -> CommandResult<SettingsPayload> {
     ok(
         message,
         SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
             settings: SettingsStore::default().load().unwrap_or_default(),
             settings_path: alunixa_x_core::paths::default_settings_path()
                 .to_string_lossy()
@@ -3919,6 +4025,7 @@ pub async fn reload_user_scripts() -> CommandResult<SettingsPayload> {
                 .as_array()
                 .is_some_and(|scripts| scripts.iter().any(|script| script["status"] == "failed"));
             let payload = SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
                 settings: SettingsStore::default().load().unwrap_or_default(),
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -4580,6 +4687,7 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
         Err(error) => failed(
             &format!("重置设置失败：{error}"),
             SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -4605,6 +4713,7 @@ pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
         Err(error) => failed(
             &format!("重置图片覆盖层失败：{error}"),
             SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -5572,6 +5681,9 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
             match profile.protocol {
                 alunixa_x_core::settings::RelayProtocol::Responses => "Responses API",
                 alunixa_x_core::settings::RelayProtocol::ChatCompletions => "Chat Completions",
+                alunixa_x_core::settings::RelayProtocol::Completions => "Completions",
+                alunixa_x_core::settings::RelayProtocol::AnthropicMessages => "Anthropic Messages",
+                alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent => "Gemini Generate Content",
             }
         ),
     });
@@ -6272,6 +6384,7 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
         .to_string();
     match store.load() {
         Ok(settings) => Ok(SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
             settings,
             settings_path,
             user_scripts: user_script_inventory(),
@@ -6279,6 +6392,7 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
         Err(error) => Err((
             error,
             SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
                 settings: BackendSettings::default(),
                 settings_path,
                 user_scripts: user_script_inventory(),
@@ -6289,6 +6403,7 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
 
 fn fallback_settings_payload() -> SettingsPayload {
     SettingsPayload {
+                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
         settings: SettingsStore::default().load().unwrap_or_default(),
         settings_path: alunixa_x_core::paths::default_settings_path()
             .to_string_lossy()
@@ -8754,4 +8869,137 @@ model_reasoning_effort = "high"
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("只允许打开 http 或 https 链接"));
     }
+}
+
+#[tauri::command]
+pub fn load_image_models() -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
+    SettingsStore::default()
+        .load()
+        .map(|settings| alunixa_x_core::image_models::snapshot(&settings.image_models))
+        .map_err(|_| "读取生图模型配置失败，原有配置未被替换".to_string())
+}
+
+#[tauri::command]
+pub fn save_image_models(
+    revision: String,
+    models: Vec<alunixa_x_core::image_models::ImageModelEdit>,
+) -> Result<alunixa_x_core::image_models::ImageModelsSnapshot, String> {
+    SettingsStore::default()
+        .save_image_models(&revision, models)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn import_wallpaper_media(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+    let source = tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_core::wallpaper::import_media(
+            Path::new(&path),
+            &alunixa_x_core::paths::default_app_state_dir(),
+        )
+    })
+    .await
+    .map_err(|_| "导入壁纸任务失败".to_string())?
+    .map_err(|e| e.to_string())?;
+    app.asset_protocol_scope()
+        .allow_file(&source.entry)
+        .map_err(|e| e.to_string())?;
+    Ok(source)
+}
+
+#[tauri::command]
+pub fn inspect_wallpaper(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<alunixa_x_core::wallpaper::WallpaperSource, String> {
+    let source = alunixa_x_core::wallpaper::resolve(Path::new(&path)).map_err(|e| e.to_string())?;
+    if matches!(source.kind.as_str(), "image" | "video") {
+        app.asset_protocol_scope()
+            .allow_file(&source.entry)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(source)
+}
+
+#[tauri::command]
+pub fn repair_codex_feature_config() -> Result<bool, String> {
+    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+    )
+    .map_err(|_| "配置修复失败，未替换为默认配置；请检查 TOML 语法和文件权限".into())
+}
+
+#[tauri::command]
+pub async fn inspect_agent_capabilities()
+-> Result<alunixa_x_core::agent_capabilities::CapabilityAudit, String> {
+    alunixa_x_core::agent_capabilities::inspect()
+        .await
+        .map_err(|error| {
+            alunixa_x_core::agent_capabilities::inspection_error_message(&error).into()
+        })
+}
+
+#[tauri::command]
+pub async fn packaged_proxy_action(
+    action: String,
+    expected_revision: Option<String>,
+    backup_id: Option<String>,
+) -> Result<alunixa_x_core::packaged_proxy::ProxyReport, String> {
+    if !["inspect", "repair", "restore"].contains(&action.as_str()) {
+        return Err("不支持的代理操作".into());
+    }
+    let settings = SettingsStore::default()
+        .load()
+        .map_err(|_| "无法读取设置")?;
+    let app = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+        None,
+        Some(&settings.codex_app_path),
+    )
+    .ok_or("无法定位 Codex 应用包")?;
+    let launcher = alunixa_x_core::install::option_or_current_exe(&None, "alunixa-x-plus");
+    let result = alunixa_x_core::packaged_proxy::inspect_or_repair(
+        &app,
+        &launcher,
+        &action,
+        expected_revision,
+        backup_id,
+    )
+    .await;
+    log_manager_event(
+        "manager.packaged_proxy",
+        serde_json::to_value(&result).unwrap_or_default(),
+    );
+    Ok(result)
+}
+
+fn serialize_manager_settings<S: serde::Serializer>(
+    settings: &BackendSettings,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    manager_settings_value(settings)
+        .map_err(serde::ser::Error::custom)?
+        .serialize(serializer)
+}
+
+fn manager_settings_value(settings: &BackendSettings) -> serde_json::Result<Value> {
+    let mut value = serde_json::to_value(settings)?;
+    // This independently managed section is only exposed through its redacted snapshot.
+    if let Some(object) = value.as_object_mut() {
+        object.remove("imageModels");
+    }
+    Ok(value)
+}
+
+fn apply_codex_hook_policy(settings: &BackendSettings) -> anyhow::Result<()> {
+    let launcher_path = alunixa_x_core::install::option_or_current_exe(&None, "alunixa-x-plus");
+    alunixa_x_core::codex_hooks::apply_alunixa_x_hooks(settings, &launcher_path).map(|_| ())
+}
+
+fn remove_retired_context_config() -> anyhow::Result<()> {
+    alunixa_x_core::retired_context::remove_from_home(
+        &alunixa_x_core::relay_config::default_codex_home_dir(),
+    )
+    .map(|_| ())
 }

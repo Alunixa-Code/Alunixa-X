@@ -7,14 +7,23 @@ ${Using:StrFunc} UnStrStr
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
-!define ROOT "..\..\.."
+!ifndef ROOT
+  !define ROOT "..\..\.."
+!endif
+!ifndef APPDIR
+  !define APPDIR "${ROOT}\dist\windows\app"
+!endif
 
 Name "Alunixa X"
+!ifdef OUTPUT_FILE
+OutFile "${OUTPUT_FILE}"
+!else
 OutFile "${ROOT}\dist\windows\Alunixa-X-${VERSION}-windows-x64-setup.exe"
+!endif
 InstallDir "$LOCALAPPDATA\Programs\Alunixa X"
 ; 沿用旧安装目录登记，覆盖升级继续安装到原目录。
 InstallDirRegKey HKCU "Software\Alunixa X" "InstallDir"
-RequestExecutionLevel admin
+RequestExecutionLevel user
 SetCompressor /SOLID lzma
 Var ExistingInstall
 Var HadDesktopEntry
@@ -45,6 +54,8 @@ Var HadDesktopEntry
     nsExec::ExecToStack '$SYSDIR\tasklist.exe /FI "IMAGENAME eq $1" /NH'
     Pop $0
     Pop $9
+    ; A failed enumeration is not proof that the process exited.
+    StrCmp $0 "0" 0 wait_prompt
     !if "${UNSTR}" == ""
       ${StrStr} $8 "$9" "$1"
     !else
@@ -56,7 +67,7 @@ Var HadDesktopEntry
     Sleep 500
     Goto wait_loop
   wait_prompt:
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "请从系统托盘退出 Alunixa X，等待后台服务清理完成后重试。" IDRETRY wait_retry IDCANCEL wait_cancel
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "请退出 Alunixa X 和正在使用生图 MCP 的调用者，等待后台服务清理完成后重试。" IDRETRY wait_retry IDCANCEL wait_cancel
   wait_retry:
     StrCpy $2 0
     Goto wait_loop
@@ -79,16 +90,19 @@ Section "Install"
 
   Push "alunixa-x-plus.exe"
   Call WaitForProcessExit
+  Push "alunixa-x-imagegen-mcp.exe"
+  Call WaitForProcessExit
+  Push "alunixa-x.exe"
+  Call WaitForProcessExit
+  Push "alunixa-x-manager.exe"
+  Call WaitForProcessExit
   Push "alunixa-x-plus-manager.exe"
   Call WaitForProcessExit
 
-  ; 双程序版本升级时只保留统一应用；清理失败则停止，避免残留旧管理工具。
-  Delete "$INSTDIR\alunixa-x-plus-manager.exe"
-  IfFileExists "$INSTDIR\alunixa-x-plus-manager.exe" 0 legacy_binary_removed
-    MessageBox MB_OK|MB_ICONSTOP "旧管理工具仍被占用。请退出 Alunixa X 后重新安装。"
-    Abort
-  legacy_binary_removed:
-  File "${ROOT}\dist\windows\app\alunixa-x-plus.exe"
+  ; The new entry is unified; old executables and user data are preserved.
+  ; No sherpa-onnx DLL is required by the statically-linked SDK.
+  File "${APPDIR}\alunixa-x-plus.exe"
+  File "${APPDIR}\alunixa-x-imagegen-mcp.exe"
 
   ; 只迁移确实存在的桌面入口，用户删掉的入口在升级时仍不补建（issue #2376）。
   StrCpy $HadDesktopEntry 0
@@ -98,14 +112,6 @@ Section "Install"
   desktop_entry_found:
   StrCpy $HadDesktopEntry 1
   desktop_entry_checked:
-  Delete "$DESKTOP\Alunixa X.lnk"
-  Delete "$DESKTOP\Alunixa X 管理工具.lnk"
-  Delete "$DESKTOP\Alunixa X 绠＄悊宸ュ叿.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\Alunixa X.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\Alunixa X 管理工具.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\Alunixa X 绠＄悊宸ュ叿.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\卸载 Alunixa X.lnk"
-
   StrCmp $ExistingInstall "" desktop_entry_create 0
   StrCmp $HadDesktopEntry 1 desktop_entry_create desktop_entry_done
   desktop_entry_create:
@@ -113,8 +119,19 @@ Section "Install"
   desktop_entry_done:
   CreateDirectory "$SMPROGRAMS\Alunixa X"
   CreateShortcut "$SMPROGRAMS\Alunixa X\Alunixa X.lnk" "$INSTDIR\alunixa-x-plus.exe" "" "$INSTDIR\alunixa-x-plus.exe"
+  CreateShortcut "$SMPROGRAMS\Alunixa X\AX - Alunixa X.lnk" "$INSTDIR\alunixa-x-plus.exe" "" "$INSTDIR\alunixa-x-plus.exe"
   CreateShortcut "$SMPROGRAMS\Alunixa X\卸载 Alunixa X.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\alunixa-x-plus.exe"
 
+  ; Keep the prior uninstaller as a rollback artifact before replacing it.
+  IfFileExists "$INSTDIR\uninstall.exe" 0 write_uninstaller
+  IfFileExists "$INSTDIR\legacy-migrations\uninstall-before-${VERSION}.exe" write_uninstaller 0
+  CreateDirectory "$INSTDIR\legacy-migrations"
+  ClearErrors
+  CopyFiles /SILENT "$INSTDIR\uninstall.exe" "$INSTDIR\legacy-migrations\uninstall-before-${VERSION}.exe"
+  IfErrors 0 write_uninstaller
+    MessageBox MB_OK|MB_ICONSTOP "无法保存旧版卸载程序。原安装未被删除，请检查目录权限后重试。"
+    Abort
+  write_uninstaller:
   WriteUninstaller "$INSTDIR\uninstall.exe"
   WriteRegStr HKCU "Software\Alunixa X" "InstallDir" "$INSTDIR"
   ; 卸载项键名统一到运行时的正式键 AlunixaX（issue #2339）。
@@ -125,7 +142,7 @@ Section "Install"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Alunixa X"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayName" "Alunixa X"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "Publisher" "BigPizzaV3"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "Publisher" "Alunixa-Code"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "DisplayIcon" "$INSTDIR\alunixa-x-plus.exe"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\AlunixaX" "UninstallString" "$INSTDIR\uninstall.exe"
@@ -154,20 +171,17 @@ SectionEnd
 Section "Uninstall"
   Push "alunixa-x-plus.exe"
   Call un.WaitForProcessExit
-  Push "alunixa-x-plus-manager.exe"
+  Push "alunixa-x-imagegen-mcp.exe"
   Call un.WaitForProcessExit
 
   Delete "$DESKTOP\Alunixa X.lnk"
-  Delete "$DESKTOP\Alunixa X Launch.lnk"
   Delete "$SMPROGRAMS\Alunixa X\Alunixa X.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\卸载 Alunixa X.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\Alunixa X 管理工具.lnk"
-  Delete "$SMPROGRAMS\Alunixa X\Alunixa X 绠＄悊宸ュ叿.lnk"
+  Delete "$SMPROGRAMS\Alunixa X\AX - Alunixa X.lnk"
   Delete "$SMPROGRAMS\Alunixa X\卸载 Alunixa X.lnk"
   RMDir "$SMPROGRAMS\Alunixa X"
 
   Delete "$INSTDIR\alunixa-x-plus.exe"
-  Delete "$INSTDIR\alunixa-x-plus-manager.exe"
+  Delete "$INSTDIR\alunixa-x-imagegen-mcp.exe"
 
   ; NSIS 的 Delete 遇到被占用文件会静默失败，用户会误以为卸载干净。
   ; 残留检测提示用户先从托盘退出，避免“卸载后重装”继续失败（issue #2362）。
@@ -185,6 +199,18 @@ Section "Uninstall"
 
   ; 清理安装器注册的 URL 协议（与 install::windows::uninstall_shortcuts 行为一致）。
   ; 仅删除本产品自有键，不影响用户其他协议注册。
+  ; Do not remove a URL handler another app/user changed after installation.
+  ReadRegStr $0 HKCU "Software\Classes\codexplusplus\shell\open\command" ""
+  StrCmp $0 '"$INSTDIR\alunixa-x-plus.exe" "%1"' 0 keep_codexplusplus_protocol
   DeleteRegKey HKCU "Software\Classes\codexplusplus"
+  keep_codexplusplus_protocol:
+  ReadRegStr $0 HKCU "Software\Classes\dreamskin\shell\open\command" ""
+  StrCmp $0 '"$INSTDIR\alunixa-x-plus.exe" "%1"' 0 keep_dreamskin_protocol
   DeleteRegKey HKCU "Software\Classes\dreamskin"
+  keep_dreamskin_protocol:
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AlunixaXWatcher"
+  StrCmp $0 '"$INSTDIR\alunixa-x-plus.exe" --autostart' 0 keep_watcher_run
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "AlunixaXWatcher"
+  Delete "$SMSTARTUP\AlunixaXWatcher.lnk"
+  keep_watcher_run:
 SectionEnd

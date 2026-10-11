@@ -33,6 +33,29 @@ pub type BridgeHandler = Arc<
 >;
 pub type BridgeDisconnect = tokio::sync::oneshot::Receiver<String>;
 
+pub async fn install_renderer_bridge(
+    websocket_url: &str,
+    handler: BridgeHandler,
+    new_document_scripts: &[String],
+    settings: &crate::settings::BackendSettings,
+) -> anyhow::Result<()> {
+    let target = websocket_url.to_owned();
+    let settings = settings.clone();
+    let handler: BridgeHandler = Arc::new(move |path, payload| {
+        let fallback = handler.clone();
+        let settings = settings.clone();
+        let target = target.clone();
+        Box::pin(async move {
+            if path.starts_with("/wallpaper/") {
+                crate::wallpaper::handle_bridge_request(&path, &target, &settings).await
+            } else {
+                fallback(path, payload).await
+            }
+        })
+    });
+    install_bridge(websocket_url, BRIDGE_BINDING_NAME, handler, new_document_scripts).await
+}
+
 static NEXT_MESSAGE_ID: AtomicU64 = AtomicU64::new(100);
 
 /// Bridge 会话按注入目标分代。

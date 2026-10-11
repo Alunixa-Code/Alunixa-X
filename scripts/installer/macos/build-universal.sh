@@ -9,7 +9,7 @@ set -euo pipefail
 VERSION="${1:-0.0.0}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 UNIVERSAL_DIR="$ROOT/target/universal/release"
-BINARIES=(alunixa-x-plus alunixa-x-legacy-shim)
+BINARIES=(alunixa-x-plus alunixa-x-imagegen-mcp alunixa-x-legacy-shim)
 
 # 前端产物要由调用方先构建好（vite:build），统一应用会把 dist 嵌进二进制。
 for target in x86_64-apple-darwin aarch64-apple-darwin; do
@@ -24,7 +24,7 @@ cd "$ROOT"
 
 for target in x86_64-apple-darwin aarch64-apple-darwin; do
   echo "==> 构建 $target" >&2
-  cargo build --release --target "$target"
+  cargo build --release --locked --target "$target"
 done
 
 rm -rf "$UNIVERSAL_DIR"

@@ -7,7 +7,7 @@ export function shouldBackfillRelayProfileBeforeSwitch(
 }
 
 export type RelayProfileFileSnapshot = {
-  relayMode: "official" | "pureApi" | "mixedApi" | "aggregate";
+  relayMode: "official" | "pureApi" | "mixedApi" | "aggregate" | "customModels";
   authContents: string;
 };
 

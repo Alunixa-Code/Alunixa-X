@@ -11,12 +11,30 @@ DMG="$DIST/Alunixa-X-${VERSION}-macos-${ARCH}.dmg"
 ICON_SOURCE="$ROOT/apps/alunixa-x-manager/src-tauri/icons/icon.png"
 ICON_NAME="alunixa-x.icns"
 ICON_ICNS="$DIST/$ICON_NAME"
+BACKGROUND_SOURCE="$ROOT/assets/installer/macos/dmg-background.svg"
+BACKGROUND_PATH="$STAGE/.background/background.png"
 
-rm -rf "$DIST"
-mkdir -p "$STAGE"
+prepare_background() {
+  mkdir -p "$(dirname "$BACKGROUND_PATH")"
+
+  if sips -s format png "$BACKGROUND_SOURCE" --out "$BACKGROUND_PATH" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Older macOS versions do not let sips decode SVG, so use Quick Look as a fallback.
+  local preview_dir="$DIST/background-preview"
+  local preview_path="$preview_dir/$(basename "$BACKGROUND_SOURCE").png"
+  mkdir -p "$preview_dir"
+  qlmanage -t -s 1200 -o "$preview_dir" "$BACKGROUND_SOURCE" >/dev/null 2>&1
+  if [ ! -f "$preview_path" ]; then
+    echo "error: failed to render DMG background: $BACKGROUND_SOURCE" >&2
+    return 1
+  fi
+  cp "$preview_path" "$BACKGROUND_PATH"
+}
 
 prepare_icon() {
-  local iconset="$DIST/alunixa-x.iconset"
+  local iconset="$DIST/alunixa-x-plus.iconset"
   rm -rf "$iconset"
   mkdir -p "$iconset"
 
@@ -41,6 +59,9 @@ create_app() {
   local bundle_id="$4"
   local lsui_element="${5:-false}"
   local app_dir="$STAGE/$app_name.app"
+  local url_types=""
+  local display_name="$app_name"
+  local microphone_usage=""
 
   if [ ! -x "$binary_path" ]; then
     echo "error: binary not found or not executable: $binary_path" >&2
@@ -54,6 +75,9 @@ create_app() {
   chmod +x "$app_dir/Contents/MacOS/$executable_name"
   printf 'APPL????' > "$app_dir/Contents/PkgInfo"
   if [ "$executable_name" = "AlunixaX" ]; then
+    display_name="Alunixa X (AX)"
+    microphone_usage='  <key>NSMicrophoneUsageDescription</key>
+  <string>Alunixa X uses the microphone when you start voice dictation.</string>'
     url_types='  <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -75,7 +99,7 @@ create_app() {
   <key>CFBundleName</key>
   <string>$app_name</string>
   <key>CFBundleDisplayName</key>
-  <string>$app_name</string>
+  <string>$display_name</string>
   <key>CFBundleIdentifier</key>
   <string>$bundle_id</string>
   <key>CFBundleVersion</key>
@@ -94,6 +118,8 @@ create_app() {
   <string>$executable_name</string>
   <key>CFBundleIconFile</key>
   <string>$ICON_NAME</string>
+$url_types
+$microphone_usage
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>NSHighResolutionCapable</key>
@@ -135,7 +161,13 @@ sign_app() {
   if [ -n "$SIGNING_IDENTITY" ] && [ -f "$ENTITLEMENTS" ]; then
     extra=(--entitlements "$ENTITLEMENTS")
   fi
-  codesign --force "${SIGN_ARGS[@]}" ${extra[@]+"${extra[@]}"} "$app_dir/Contents/MacOS/$executable"
+  # Sign every executable, including the AX image-generation MCP companion,
+  # before sealing the bundle.
+  local binary
+  for binary in "$app_dir/Contents/MacOS/"*; do
+    [ -f "$binary" ] || continue
+    codesign --force "${SIGN_ARGS[@]}" ${extra[@]+"${extra[@]}"} "$binary"
+  done
   codesign --force "${SIGN_ARGS[@]}" "$app_dir"
 }
 
@@ -190,57 +222,148 @@ verify_app() {
   fi
   # 正式签名时用 --verify --deep --strict 真正校验签名有效性（含资源密封、
   # 信任链、时间戳）；仅 codesign -dv 只能证明"有签名"，证明不了"签名有效"。
-  if [ -n "$SIGNING_IDENTITY" ]; then
-    codesign --verify --deep --strict --verbose=2 "$app_dir" || {
-      echo "error: codesign --verify failed for $app_dir" >&2
-      return 1
-    }
-  else
-    codesign -dv "$app_dir" >/dev/null 2>&1 || {
-      echo "error: codesign verification failed for $app_dir" >&2
-      return 1
-    }
-  fi
+  codesign --verify --deep --strict --verbose=2 "$app_dir" || {
+    echo "error: codesign verification failed for $app_dir" >&2
+    return 1
+  }
 }
 
+stage_apps() {
+  local binary
+  for binary in alunixa-x-plus alunixa-x-imagegen-mcp alunixa-x-legacy-shim; do
+    if [ ! -x "$BINARY_DIR/$binary" ]; then
+      echo "error: binary not found or not executable: $BINARY_DIR/$binary" >&2
+      return 1
+    fi
+  done
+  create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-plus" "io.github.alunixacode.alunixax" "false"
+  cp "$BINARY_DIR/alunixa-x-imagegen-mcp" "$STAGE/Alunixa X.app/Contents/MacOS/alunixa-x-imagegen-mcp"
+  chmod +x "$STAGE/Alunixa X.app/Contents/MacOS/alunixa-x-imagegen-mcp"
+  # This valid, hidden native process is only an updater compatibility payload.
+  # It never replaces or deletes an existing installation.
+  create_app "Alunixa X 管理工具" "AlunixaXManager" "$BINARY_DIR/alunixa-x-legacy-shim" "io.github.alunixacode.alunixax.manager" "true"
+  printf '%s\n' "Alunixa X 管理工具.app" > "$STAGE/.hidden"
+  chflags hidden "$STAGE/Alunixa X 管理工具.app"
+}
+
+main() {
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+  echo "error: invalid package version" >&2; return 1;
+}
+case "$ARCH" in
+  x86_64) ARCH=x64 ;;
+  aarch64) ARCH=arm64 ;;
+  x64|arm64|universal) ;;
+  *) echo "error: unsupported package architecture: $ARCH" >&2; return 1 ;;
+esac
+DMG="$DIST/Alunixa-X-${VERSION}-macos-${ARCH}.dmg"
+# Only the build output is recreated; /Applications and existing apps are untouched.
+rm -rf "$DIST"
+mkdir -p "$STAGE"
 prepare_icon
 prepare_background
-create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-plus" "com.bigpizzav3.codexplusplus" "false"
-# 旧版 1.7.x 更新器要求第二个 manager bundle。它使用独立的小型兼容壳，
-# 启动后立即退出；新版启动主 app 后会把这个壳归档到 legacy-migrations。
-create_app "Alunixa X 管理工具" "AlunixaXManager" "$BINARY_DIR/alunixa-x-legacy-shim" "com.bigpizzav3.codexplusplus.manager" "true"
+stage_apps
 
-sign_app "$STAGE/Alunixa X Launch (AX).app"
-sign_app "$STAGE/Alunixa X (AX).app"
+sign_app "$STAGE/Alunixa X.app"
+sign_app "$STAGE/Alunixa X 管理工具.app"
 
-verify_app "$STAGE/Alunixa X Launch (AX).app"
-verify_app "$STAGE/Alunixa X (AX).app"
-
-# Finder 隐藏兼容壳；旧更新器按精确路径读取它，不能改名或放入子目录。
-printf '%s\n' "Alunixa X 管理工具.app" > "$STAGE/.hidden"
-chflags hidden "$STAGE/Alunixa X 管理工具.app"
+verify_app "$STAGE/Alunixa X.app"
+verify_app "$STAGE/Alunixa X 管理工具.app"
 
 ln -s /Applications "$STAGE/Applications"
+python3 "$ROOT/scripts/installer/macos/verify-package.py" "$STAGE" --arch "$ARCH" --version "$VERSION" --require-applications
 
-DMG_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alunixa-x-dmg.XXXXXX")"
+DMG_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/alunixa-x-plus-dmg.XXXXXX")"
 DMG_WORK_PATH="$DMG_WORK_DIR/$(basename "$DMG")"
 DMG_CREATED=false
+MOUNT_POINT=""
+MOUNT_DEVICE=""
+
+release_dmg_holders() {
+  local target="$1"
+  local pids=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -t -- "$target" 2>/dev/null || true)"
+  fi
+  # Never kill all diskimages-helper processes: only CI holders of this private
+  # build image qualify, and no Finder/application process is terminated.
+  [ "${GITHUB_ACTIONS:-}" = "true" ] || return 0
+  local pid command
+  for pid in $pids; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    command="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+    case "$command" in
+      diskimages-helper|*/diskimages-helper) kill -TERM "$pid" >/dev/null 2>&1 || true ;;
+    esac
+  done
+}
+
+detach_dmg() {
+  local target="$1"
+  local attempt
+  local device_info
+
+  # target: /dev/disk4 或一个挂载点。判「设备是否仍注册」只在 /dev/* 时成立，
+  # 挂载点路径不会出现在 hdiutil info 的设备列里。
+  target_is_gone() {
+    [[ "$target" == /dev/* ]] || return 1
+    device_info="$(hdiutil info 2>/dev/null)" || return 1
+    ! printf '%s\n' "$device_info" | awk -v t="$target" '$1 == t { found = 1 } END { exit !found }'
+  }
+
+  [ -z "$target" ] && return 0
+  for attempt in 1 2 3 4; do
+    if hdiutil detach "$target" >/dev/null 2>&1; then
+      return 0
+    fi
+
+    # hdiutil can report a transient failure even though the device detached
+    # while the command was returning. Treat an already-gone device as done.
+    if target_is_gone; then
+      return 0
+    fi
+
+    # 普通 detach 失败后立刻补一次强制卸载：CI runner 上常见「卷已消失、
+    # 设备仍注册」的中间态，只靠普通的 detach 重试永远不会成功，必须 -force。
+    # 这一步曾在 e55c58b1 被移出循环，导致 macOS x64 打包稳定失败。
+    if hdiutil detach "$target" -force >/dev/null 2>&1; then
+      return 0
+    fi
+    if target_is_gone; then
+      return 0
+    fi
+
+    release_dmg_holders "$target"
+
+    sleep "$attempt"
+  done
+
+  echo "error: failed to detach DMG device: $target" >&2
+  return 1
+}
 
 cleanup_dmg_work_dir() {
+  if [ -n "$MOUNT_DEVICE" ]; then
+    detach_dmg "$MOUNT_DEVICE" || true
+  elif [ -n "$MOUNT_POINT" ]; then
+    detach_dmg "$MOUNT_POINT" || true
+  fi
   rm -f "$DMG_WORK_PATH"
   rmdir "$DMG_WORK_DIR" 2>/dev/null || true
 }
 
 trap cleanup_dmg_work_dir EXIT
 
-for attempt in 1 2 3; do
-  if hdiutil create -volname "Alunixa X" -srcfolder "$STAGE" -ov -format UDZO "$DMG_WORK_PATH"; then
-    mv "$DMG_WORK_PATH" "$DMG"
+DMG_CREATED=false
+for attempt in 1 2 3 4 5; do
+  if hdiutil create -volname "Alunixa X" -srcfolder "$STAGE" -ov -format UDRW "$DMG_WORK_PATH"; then
     DMG_CREATED=true
     break
   fi
 
-  if [ "$attempt" -lt 3 ]; then
+  rm -f "$DMG_WORK_PATH"
+  if [ "$attempt" -lt 5 ]; then
     sleep "$((attempt * 2))"
   fi
 done
@@ -339,3 +462,8 @@ sign_dmg "$DMG"
 notarize_dmg "$DMG"
 
 echo "$DMG"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

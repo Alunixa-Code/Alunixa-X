@@ -1,4 +1,4 @@
-const repository = "BigPizzaV3/AlunixaX";
+const repository = "BigPizzaV3/CodexPlusPlus";
 const fallbackVersion = "1.2.46";
 
 const translations = {

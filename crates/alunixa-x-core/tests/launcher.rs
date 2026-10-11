@@ -1899,6 +1899,7 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             channel_requests_per_minute:
                 alunixa_x_core::settings::default_channel_requests_per_minute(),
             cooldown_error_statuses: alunixa_x_core::settings::default_cooldown_error_statuses(),
+            ..RelayProfile::default()
         }],
         active_relay_id: "relay-chat".to_string(),
         ..BackendSettings::default()

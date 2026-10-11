@@ -169,6 +169,7 @@ fn responses_to_chat_completions_for_wire(body: Value, wire: &str) -> anyhow::Re
         append_responses_input(input, &mut messages)?;
     }
     normalize_chat_messages(&mut messages);
+    relocate_interleaved_non_tool_messages(&mut messages);
     let messages = collapse_system_messages_to_head(messages);
     result["messages"] = json!(messages);
 
@@ -750,7 +751,7 @@ fn chat_completion_to_response_with_context(
         }
     }
     copy_response_request_fields(&mut response, original_request);
-    if message.get("reasoning_details").is_some() {
+    if message.get("reasoning_details").is_some() || message["tool_calls"].as_array().is_some_and(|calls| calls.iter().any(|call| tool_call_extra_content(call).is_some())) {
         fidelity::attach_replay(&mut response, "chat", message.clone());
     }
 
@@ -2929,6 +2930,11 @@ async fn upstream_request_parts(
     preserve_native_request: bool,
 ) -> anyhow::Result<(String, Value, UpstreamWireApi, bool)> {
     if let Some(model) = model_override { request_json["model"] = json!(model); }
+    let compact = request_has_compaction_trigger(&request_json) || is_responses_compact_proxy_path(request_path);
+    let synthetic_compaction = compact && !preserve_native_request;
+    if synthetic_compaction {
+        request_json = rewrite_request_for_compaction(strip_compaction_trigger(request_json));
+    }
     let model = request_json["model"].as_str().unwrap_or("").trim();
     if relay.reasoning_effort_for_model(model) == crate::settings::ReasoningEffort::Adaptive {
         if !is_claude_model(model)
@@ -2956,22 +2962,23 @@ async fn upstream_request_parts(
     match relay.protocol {
         RelayProtocol::Responses => {
             let mut body = request_json;
+            if relay.web_search_history_compat_enabled() && compact && !is_responses_compact_proxy_path(request_path) { ensure_web_search_tool_for_history(&mut body); }
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
                 responses_url(&relay.base_url),
                 body,
                 UpstreamWireApi::Responses,
-                false,
+                synthetic_compaction,
             ))
         }
         RelayProtocol::ChatCompletions => {
-            let mut body = responses_to_chat_completions(request_json)?;
+            let mut body = responses_to_chat_completions_with_options(request_json, relay.standard_openai_protocol)?;
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
                 chat_completions_url(&relay.base_url),
                 body,
                 UpstreamWireApi::ChatCompletions,
-                false,
+                synthetic_compaction,
             ))
         }
         RelayProtocol::Completions => {
@@ -2981,7 +2988,7 @@ async fn upstream_request_parts(
                 completions_url(&relay.base_url),
                 responses_to_completions(source)?,
                 UpstreamWireApi::Completions,
-                false,
+                synthetic_compaction,
             ))
         }
         RelayProtocol::AnthropicMessages => {
@@ -2991,7 +2998,7 @@ async fn upstream_request_parts(
                 anthropic_messages_url(&relay.base_url),
                 responses_to_anthropic_messages(source)?,
                 UpstreamWireApi::AnthropicMessages,
-                false,
+                synthetic_compaction,
             ))
         }
         RelayProtocol::GeminiGenerateContent => {
@@ -3010,7 +3017,7 @@ async fn upstream_request_parts(
                 gemini_generate_content_url(&relay.base_url, &model, is_stream),
                 responses_to_gemini_generate_content(source)?,
                 UpstreamWireApi::GeminiGenerateContent,
-                false,
+                synthetic_compaction,
             ))
         }
     }
@@ -3300,7 +3307,12 @@ fn upstream_request_builder(
     let mut builder = client
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
-    builder = with_relay_auth(builder, relay);
+    builder = match relay.protocol {
+        RelayProtocol::AnthropicMessages => builder.header("x-api-key", relay.api_key.trim()).header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => builder.header("x-goog-api-key", relay.api_key.trim()),
+        _ => with_relay_auth(builder, relay),
+    };
+    builder = crate::relay_headers::apply_headers(builder, &relay.custom_headers);
     if is_stream {
         builder = builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -6268,7 +6280,7 @@ fn namespace_tool_to_chat_tools(namespace_tool: &Value, context: &CodexToolConte
 
 fn normalize_chat_tool_parameters(parameters: &Value) -> Value {
     let mut normalized = if parameters.is_object() {
-        parameters.clone()
+        flatten_top_level_combinators(inline_ref_siblings(parameters))
     } else {
         json!({})
     };
@@ -6910,6 +6922,24 @@ fn response_tool_call_item(
     arguments: &str,
     tool_context: &CodexToolContext,
 ) -> Value {
+    if tool_context.is_builtin_web_search_proxy(name) {
+        return json!({
+            "id": web_search_item_id(call_id),
+            "type": "web_search_call",
+            "status": "completed",
+            "action": web_search_action_from_arguments(arguments)
+        });
+    }
+    if tool_context.is_tool_search_proxy(name) {
+        return json!({
+            "id": format!("ts_{call_id}"),
+            "type": "tool_search_call",
+            "status": "completed",
+            "call_id": call_id,
+            "execution": "client",
+            "arguments": serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| json!({}))
+        });
+    }
     if tool_context.is_custom_tool_proxy(name) {
         let (display_name, namespace) = tool_context.openai_name_for_custom_tool(name);
         let mut item = json!({
@@ -7950,124 +7980,36 @@ fn input_has_encrypted_agent_content(input: &Value) -> bool {
     }
 }
 
-pub fn responses_to_chat_completions_with_options(
-    mut body: Value,
-    standard: bool,
-) -> anyhow::Result<Value> {
+pub fn responses_to_chat_completions_with_options(mut body: Value, standard: bool) -> anyhow::Result<Value> {
     expand_local_compaction_history(&mut body);
     if input_has_native_compaction(&body) {
         return Err(NativeCompactionUnsupported::history().into());
     }
-    // agent 加密内容没有 Chat 文本映射。发送前明确拒绝；不按字段名猜测明文，
-    // 也不遍历工具参数/输出里的用户 JSON。reasoning 和 compaction 保持原契约。
     if body.get("input").is_some_and(input_has_encrypted_agent_content) {
         return Err(UnsupportedEncryptedAgentContent.into());
     }
-    let mut result = json!({});
-
-    if let Some(model) = body.get("model") {
-        result["model"] = model.clone();
+    let mut result = responses_to_chat_completions(body.clone())?;
+    let model = body.get("model").and_then(Value::as_str).unwrap_or_default();
+    if let Some(messages) = result["messages"].as_array_mut() {
+        relocate_interleaved_non_tool_messages(messages);
+        relocate_tool_output_images(messages);
+        ensure_tool_call_reasoning_content(messages);
+        normalize_image_data_urls_for_model(messages, model);
     }
-
-    let mut messages = Vec::new();
-    if let Some(instructions) = body.get("instructions") {
-        let text = instruction_text(instructions);
-        if !text.is_empty() {
-            messages.push(json!({ "role": "system", "content": text }));
+    let mut context = build_codex_tool_context(body.get("tools"));
+    let namespaces = collect_tool_search_output_namespaces(&body);
+    for namespace in &namespaces { add_namespace_tools_to_context(&mut context, namespace); }
+    let mut tools = body.get("tools").and_then(Value::as_array)
+        .map(|tools| responses_tools_to_chat_tools(tools, &context)).unwrap_or_default();
+    for namespace in &namespaces { tools.extend(namespace_tool_to_chat_tools(namespace, &context)); }
+    dedup_chat_tools_by_name(&mut tools);
+    if !tools.is_empty() { result["tools"] = json!(tools); }
+    if standard && !is_claude_model(model) {
+        if let Some(effort) = body.pointer("/reasoning/effort") { result["reasoning_effort"] = effort.clone(); }
+        if let Some(object) = result.as_object_mut() {
+            object.remove("thinking"); object.remove("enable_thinking"); object.remove("reasoning_split");
         }
     }
-
-    if let Some(input) = body.get("input") {
-        append_responses_input(input, &mut messages);
-    }
-    // 必须在 enforce_tool_call_pairing 之前：配对一旦被错误摘除就无法恢复。
-    relocate_interleaved_non_tool_messages(&mut messages);
-    enforce_tool_call_pairing(&mut messages);
-    // 配对判定之后仍有无主 tool 消息（上游会直接 400），降级成 user 保住内容。
-    degrade_unpaired_tool_messages(&mut messages);
-    // 必须在 enforce_tool_call_pairing 之后：它依赖 tool 消息的连续性，
-    // 而这一步会往中间插入 user 消息。
-    relocate_tool_output_images(&mut messages);
-    ensure_tool_call_reasoning_content(&mut messages);
-    normalize_chat_messages(&mut messages);
-    let model = body.get("model").and_then(Value::as_str).unwrap_or("");
-    normalize_image_data_urls_for_model(&mut messages, model);
-    let messages = collapse_system_messages_to_head(messages);
-    result["messages"] = json!(messages);
-    if let Some(value) = body.get("max_output_tokens") {
-        if is_openai_o_series(model) {
-            result["max_completion_tokens"] = value.clone();
-        } else {
-            result["max_tokens"] = value.clone();
-        }
-    }
-    if let Some(value) = body.get("max_tokens") {
-        result["max_tokens"] = value.clone();
-    }
-    if let Some(value) = body.get("max_completion_tokens") {
-        result["max_completion_tokens"] = value.clone();
-    }
-
-    for key in ["temperature", "top_p", "stream"] {
-        if let Some(value) = body.get(key) {
-            result[key] = value.clone();
-        }
-    }
-    if body.get("stream").and_then(Value::as_bool).unwrap_or(false) {
-        let mut stream_options = body
-            .get("stream_options")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        stream_options["include_usage"] = json!(true);
-        result["stream_options"] = stream_options;
-    }
-
-    apply_chat_reasoning_options(&mut result, &body, model);
-
-    let mut tool_context = build_codex_tool_context(body.get("tools"));
-    // Codex 客户端把 tool_search 命中的 MCP 命名空间挂在历史里的 tool_search_output
-    // item 上，却不会把它们提升进下一轮请求的 tools 数组。这里补上这一跳：先登记进
-    // tool context（模型调用回来时才能还原 namespace），再用既有 namespace 链路展开
-    // 成 mcp__<server>__<tool>，否则上游只看到命名空间外壳，调不到内层工具。
-    let harvested_namespaces = collect_tool_search_output_namespaces(&body);
-    for namespace_tool in &harvested_namespaces {
-        add_namespace_tools_to_context(&mut tool_context, namespace_tool);
-    }
-    let mut has_chat_tools = false;
-    let mut converted = Vec::new();
-    if let Some(tools) = body.get("tools").and_then(Value::as_array) {
-        converted = responses_tools_to_chat_tools(tools, &tool_context);
-    }
-    for namespace_tool in &harvested_namespaces {
-        converted.extend(namespace_tool_to_chat_tools(namespace_tool, &tool_context));
-    }
-    dedup_chat_tools_by_name(&mut converted);
-    if !converted.is_empty() {
-        has_chat_tools = true;
-        result["tools"] = json!(converted);
-    }
-
-    if has_chat_tools {
-        if let Some(tool_choice) = body
-            .get("tool_choice")
-            .and_then(|value| responses_tool_choice_to_chat(value, &tool_context))
-        {
-            result["tool_choice"] = tool_choice;
-        }
-        if let Some(value) = body.get("parallel_tool_calls") {
-            result["parallel_tool_calls"] = value.clone();
-        }
-    }
-
-    for key in EXTRA_CHAT_PASSTHROUGH_FIELDS {
-        if *key == "stream_options" && result.get("stream_options").is_some() {
-            continue;
-        }
-        if let Some(value) = body.get(*key) {
-            result[*key] = value.clone();
-        }
-    }
-
     Ok(result)
 }
 
@@ -9786,7 +9728,7 @@ impl CompactionSseConverter {
     /// 喂入上游流式响应的一个网络 chunk。SSE 事件可能被 TCP 拆开，
     /// 内部按 `\n\n` 边界缓冲；残缺块留在缓冲区等下一个 chunk。
     pub fn push_upstream_bytes(&mut self, bytes: &[u8]) {
-        append_utf8_safe(&mut self.sse_buffer, &mut self.sse_utf8_remainder, bytes);
+        if let Err(error) = append_utf8_safe(&mut self.sse_buffer, &mut self.sse_utf8_remainder, bytes) { self.fail(error.to_string(), Some("invalid_utf8".into())); return; }
         while let Some(block) = take_sse_block(&mut self.sse_buffer) {
             if block.trim().is_empty() {
                 continue;
@@ -10249,4 +10191,60 @@ fn upstream_request_builder_for_wire(client: reqwest::Client, endpoint: &str, ke
  let protocol=match wire { UpstreamWireApi::AnthropicMessages => RelayProtocol::AnthropicMessages, UpstreamWireApi::GeminiGenerateContent => RelayProtocol::GeminiGenerateContent, _ => RelayProtocol::ChatCompletions };
  let relay=crate::settings::RelayProfile { api_key:key.into(), protocol, ..Default::default() };
  upstream_request_builder(client, endpoint, &relay, stream, body)
+}
+
+pub fn ensure_web_search_tool_for_history(request_json: &mut Value) -> bool {
+    let Some(input) = request_json.get("input").and_then(Value::as_array) else {
+        return false;
+    };
+    if !input
+        .iter()
+        .any(|item| item.get("type").and_then(Value::as_str) == Some("web_search_call"))
+    {
+        return false;
+    }
+    let is_web_search = |tool: &Value| {
+        matches!(
+            tool.get("type").and_then(Value::as_str),
+            Some("web_search" | "web_search_preview" | "web_search_preview_2025_03_11")
+        )
+    };
+    let mut has_other_tools = false;
+    for tool in input
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("additional_tools"))
+        .filter_map(|item| item.get("tools").and_then(Value::as_array))
+        .flatten()
+    {
+        if is_web_search(tool) {
+            return false;
+        }
+        has_other_tools = true;
+    }
+    match request_json.get("tools") {
+        None | Some(Value::Null) => {}
+        Some(Value::Array(tools)) => {
+            if tools.iter().any(is_web_search) {
+                return false;
+            }
+            has_other_tools |= !tools.is_empty();
+        }
+        _ => return false,
+    }
+    let tool = json!({"type": "web_search", "external_web_access": false});
+    if let Some(tools) = request_json.get_mut("tools").and_then(Value::as_array_mut) {
+        tools.push(tool);
+    } else {
+        request_json["tools"] = json!([tool]);
+    }
+    if !has_other_tools
+        && (matches!(request_json.get("tool_choice"), None | Some(Value::Null))
+            || matches!(
+                request_json.get("tool_choice").and_then(Value::as_str),
+                Some("auto" | "none")
+            ))
+    {
+        request_json["tool_choice"] = json!("none");
+    }
+    true
 }

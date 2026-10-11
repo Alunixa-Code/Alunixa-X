@@ -36,12 +36,12 @@ impl Source {
         match value {
             "public" => Ok(Self {
                 id: "public",
-                repository: "BigPizzaV3/AlunixaXPluginCache",
+                repository: "BigPizzaV3/CodexPlusPlusPluginCache",
                 private: false,
             }),
             "full" => Ok(Self {
                 id: "full",
-                repository: "BigPizzaV3/AlunixaXFullPluginCache",
+                repository: "BigPizzaV3/CodexPlusPlusFullPluginCache",
                 private: true,
             }),
             _ => bail!("未知插件市场来源，请选择 public 或 full"),
@@ -1950,7 +1950,7 @@ mod tests {
     async fn git_proxy_lookup_reads_only_proxy_and_respects_environment_explicit_direct_and_system_fallback()
      {
         let temp = tempfile::tempdir().unwrap();
-        let url = "https://github.com/BigPizzaV3/AlunixaXPluginCache.git";
+        let url = "https://github.com/BigPizzaV3/CodexPlusPlusPluginCache.git";
         let git = fake_git(
             &temp,
             r#"

@@ -8,7 +8,7 @@ describe("GitHub repository homepage detection", () => {
       "https://github.com/0xTotoroX/codex-hide-usage-alert",
       "https://www.github.com/0xTotoroX/tux-toolbar-buddy/",
       "https://github.com/0xTotoroX/codex-hide-usage-alert.git",
-      "https://github.com/BigPizzaV3/AlunixaX?tab=readme-ov-file#readme",
+      "https://github.com/BigPizzaV3/CodexPlusPlus?tab=readme-ov-file#readme",
     ];
 
     for (const url of urls) assert.equal(isGitHubRepositoryHomepage(url), true, url);

@@ -1,6 +1,16 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    if args.first().map(String::as_str) == Some("--alunixa-x-proxy-probe") {
+        let result = args.get(1).ok_or_else(|| anyhow::anyhow!("proxy_probe_request_missing"))
+            .and_then(|path| alunixa_x_core::packaged_proxy::run_probe_request(std::path::Path::new(path)));
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
+    if args.iter().any(|arg| arg == "--alunixa-x-hook" || arg == "--alunixa-x-shared-terminal") {
+        let result = tokio_runtime_blocking_cli(args);
+        std::process::exit(if result.is_ok() { 0 } else { 1 });
+    }
     #[cfg(target_os = "macos")]
     if launched_from_legacy_manager_compat_bundle() {
         // 旧版更新器要求 DMG 中有第二个 manager bundle，并会在替换后打开它。
@@ -73,6 +83,24 @@ fn main() {
         }
     }
     alunixa_x_manager_lib::run();
+}
+
+fn tokio_runtime_blocking_cli(args: Vec<String>) -> anyhow::Result<()> {
+    // CLI dispatch must precede Tauri/single-instance setup: stdout belongs to
+    // the invoking Codex child, not another already-open GUI instance.
+    let runtime = alunixa_x_launcher::blocking_runtime_for_cli()?;
+    runtime.block_on(async move {
+        if args.iter().any(|arg| arg == "--alunixa-x-hook") {
+            return alunixa_x_core::codex_hooks::run_hook_from_stdio().await;
+        }
+        use std::io::Write;
+        let request = alunixa_x_core::shared_terminal::parse_proxy_request(args.iter())?;
+        let result = alunixa_x_core::shared_terminal::run_proxy(request).await?;
+        std::io::stdout().write_all(result.output.as_bytes())?;
+        if !result.error.is_empty() { std::io::stderr().write_all(result.error.as_bytes())?; }
+        std::io::stdout().flush()?;
+        std::process::exit(result.exit_code.clamp(0,255));
+    })
 }
 
 #[cfg(target_os = "macos")]

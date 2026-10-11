@@ -712,10 +712,10 @@ fn model_template_entry(slug: &str) -> (Value, bool) {
     if let Some(metadata) = resolve_builtin_metadata(slug) {
         return (metadata.entry, true);
     }
-    (
-        first_bundled_template_entry().unwrap_or_else(|| json!({})),
-        false,
-    )
+    let mut fallback = first_bundled_template_entry().unwrap_or_else(|| json!({}));
+    // An unknown vendor model must not inherit GPT's native deferred tool search.
+    fallback["supports_search_tool"] = json!(false);
+    (fallback, false)
 }
 
 /// 从用户本机 codex 官方缓存读取同 slug 条目。

@@ -1087,6 +1087,7 @@ impl BackendSettings {
             || (profile.relay_mode == RelayMode::Official && profile.official_mix_api_key)
             || profile.has_model_routes()
             || profile.has_model_protocols()
+            || profile.uses_no_auth() || profile.web_search_history_compat_enabled()
     }
 }
 
@@ -1419,6 +1420,9 @@ impl RelayProfile {
     pub fn reasoning_effort_for_model(&self, model: &str) -> ReasoningEffort {
         self.model_reasoning_efforts
             .get(model.trim())
+            .or_else(|| self.model_reasoning_efforts.iter()
+                .find(|(name, _)| crate::model_suffix::parse_model_suffix(name).0.eq_ignore_ascii_case(model.trim()))
+                .map(|(_, effort)| effort))
             .copied()
             .unwrap_or_default()
     }
@@ -1667,6 +1671,34 @@ impl Default for SettingsStore {
 }
 
 impl SettingsStore {
+    fn read_contents(&self) -> anyhow::Result<Option<String>> {
+        let file = match File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).context("failed to open settings"),
+        };
+        let reject_large_file = || {
+            anyhow::anyhow!(
+                "settings {} 超过 16 MiB 上限，拒绝读取或覆盖；请保留原文件并先修复",
+                self.path.display()
+            )
+        };
+        let length = file.metadata()?.len();
+        if length > MAX_SETTINGS_FILE_BYTES as u64 {
+            return Err(reject_large_file());
+        }
+        let mut bytes = Vec::with_capacity(length as usize);
+        // metadata 检查后文件仍可能增长，实际读取也必须有上限。
+        file.take(MAX_SETTINGS_FILE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > MAX_SETTINGS_FILE_BYTES {
+            return Err(reject_large_file());
+        }
+        Ok(Some(
+            String::from_utf8(bytes).context("settings 不是有效 UTF-8，原文件未修改")?,
+        ))
+    }
+
     pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
@@ -1686,16 +1718,7 @@ impl SettingsStore {
     }
 
     fn load_unlocked(&self) -> anyhow::Result<BackendSettings> {
-        let contents = match fs::read_to_string(&self.path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(BackendSettings::default());
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read settings {}", self.path.display()));
-            }
-        };
+        let contents = match self.read_contents()? { Some(value) => value, None => return Ok(BackendSettings::default()) };
 
         let mut value = serde_json::from_str::<Value>(&contents).with_context(|| {
             format!(
@@ -1762,6 +1785,11 @@ impl SettingsStore {
     }
 
     fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
+        serialize_settings_bounded(settings)?;
+        let previous = self.load_raw_object()?;
+        let count = previous.get("relayProfiles").and_then(Value::as_array).map_or(0, Vec::len);
+        anyhow::ensure!(!(settings.relay_profiles.is_empty() && count > 0), "Refusing to erase existing providers");
+        anyhow::ensure!(!(is_default_single_profile(&settings.relay_profiles) && count > 1), "Refusing to collapse saved providers to defaults");
         let mut settings = normalize_settings_config_sections(settings.clone())?;
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
         let mut raw = self.load_raw_object()?;
@@ -1770,7 +1798,7 @@ impl SettingsStore {
         }
         let mut value = Value::Object(raw);
         crate::retired_context::strip_settings_value(&mut value)?;
-        let bytes = serde_json::to_vec_pretty(&value)?;
+        let bytes = serialize_settings_bounded(&value)?;
         atomic_write_unique(&self.path, &bytes)
     }
 
@@ -1791,6 +1819,7 @@ impl SettingsStore {
     }
 
     fn update_unlocked(&self, payload: Value) -> anyhow::Result<BackendSettings> {
+        serialize_settings_bounded(&payload)?;
         let Value::Object(payload) = payload else {
             return self.load_unlocked();
         };
@@ -1807,6 +1836,7 @@ impl SettingsStore {
             serde_json::from_value(Value::Object(raw.clone()))
                 .context("invalid settings update")?,
         )?;
+        raw.insert("tools".into(), serde_json::to_value(&settings.tools)?);
         raw.insert(
             "relayCommonConfigContents".to_string(),
             Value::String(settings.relay_common_config_contents.clone()),
@@ -1815,7 +1845,7 @@ impl SettingsStore {
             "relayContextConfigContents".to_string(),
             Value::String(settings.relay_context_config_contents.clone()),
         );
-        let bytes = serde_json::to_vec_pretty(&Value::Object(raw))?;
+        let bytes = serialize_settings_bounded(&Value::Object(raw))?;
         atomic_write_unique(&self.path, &bytes)?;
         Ok(settings)
     }
@@ -1869,16 +1899,7 @@ impl SettingsStore {
     }
 
     fn load_raw_object(&self) -> anyhow::Result<Map<String, Value>> {
-        let contents = match fs::read_to_string(&self.path) {
-            Ok(contents) => contents,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(settings_to_object(&BackendSettings::default()));
-            }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read settings {}", self.path.display()));
-            }
-        };
+        let contents = match self.read_contents()? { Some(value) => value, None => return Ok(settings_to_object(&BackendSettings::default())) };
 
         match serde_json::from_str::<Value>(&contents)? {
             Value::Object(map) => Ok(map),
@@ -1924,6 +1945,7 @@ fn preserve_runtime_model_selection(settings: &mut BackendSettings, current: &Ba
 }
 
 fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    merge_latest_setting_fields(target, source);
     if let Some(value) = source.get("codexAppPath").and_then(Value::as_str) {
         target.insert("codexAppPath".to_string(), Value::String(value.to_string()));
     }
@@ -3325,6 +3347,8 @@ experimental_bearer_token = "sk-existing""#
             active_relay_id: "agg".to_string(),
             aggregate_relay_profiles: vec![AggregateRelayProfile {
                 id: "agg".to_string(),
+                routes: Vec::new(),
+                session_provider: RelaySessionProvider::Custom,
                 name: "聚合".to_string(),
                 strategy: AggregateRelayStrategy::WeightedRoundRobin,
                 members: vec![
@@ -4265,3 +4289,389 @@ impl BackendSettings {
 }
 
 pub const MAX_RELAY_CUSTOM_HEADERS: usize = 32;
+
+impl BackendSettings {
+    pub fn active_relay_transport_uses_protocol_proxy(&self) -> bool {
+        let profile = self.active_relay_profile();
+        self.active_aggregate_relay_profile().is_some()
+            || profile.protocol != RelayProtocol::Responses
+            || profile.relay_mode == RelayMode::CustomModels
+            || profile.has_model_routes() || profile.has_model_protocols()
+            || profile.web_search_history_compat_enabled()
+    }
+}
+
+fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    if let Some(patch) = source.get("dictation").and_then(Value::as_object) {
+        let mut dictation = target
+            .get("dictation")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        merge_bool_setting(&mut dictation, patch, "enabled");
+        for key in ["baseUrl", "apiKey", "apiKeyEnv", "model", "language"] {
+            if let Some(value) = patch.get(key).and_then(Value::as_str) {
+                dictation.insert(key.to_string(), Value::String(value.trim().to_string()));
+            }
+        }
+        if let Some(value) = patch.get("timeoutSeconds").and_then(Value::as_u64) {
+            dictation.insert(
+                "timeoutSeconds".to_string(),
+                Value::from(value.clamp(1, 600)),
+            );
+        }
+        target.insert("dictation".to_string(), Value::Object(dictation));
+    }
+    target.remove("codexAppPluginAutoExpand");
+    target.remove("computerUseGuardEnabled");
+    if let Some(value) = source.get("codexAppPath").and_then(Value::as_str) {
+        target.insert("codexAppPath".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(value) = source.get("codexExtraArgs").and_then(Value::as_array) {
+        let args = value
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        target.insert(
+            "codexExtraArgs".to_string(),
+            Value::Array(
+                normalize_codex_extra_args(&args)
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(value) = source.get("providerSyncEnabled").and_then(Value::as_bool) {
+        target.insert("providerSyncEnabled".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = source.get("ccsDbPath").and_then(Value::as_str) {
+        target.insert(
+            "ccsDbPath".to_string(),
+            Value::String(value.trim().to_string()),
+        );
+    }
+    if let Some(value) = source.get("relayProfilesEnabled").and_then(Value::as_bool) {
+        target.insert("relayProfilesEnabled".to_string(), Value::Bool(value));
+    }
+    if let Some(value) = source.get("enhancementsEnabled").and_then(Value::as_bool) {
+        target.insert("enhancementsEnabled".to_string(), Value::Bool(value));
+    }
+    merge_bool_setting(target, source, "codexAppPluginMarketplaceUnlock");
+    merge_bool_setting(target, source, "codexAppModelWhitelistUnlock");
+    merge_bool_setting(target, source, "codexAppSessionDelete");
+    merge_bool_setting(target, source, "codexAppMarkdownExport");
+    merge_bool_setting(target, source, "codexAppSessionShare");
+    merge_bool_setting(target, source, "codexAppPasteFix");
+    if let Some(value @ ("off" | "rainbow" | "fireworks" | "stars")) =
+        source.get("codexAppTypingEffect").and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppTypingEffect".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    merge_bool_setting(target, source, "codexAppThreadIdBadge");
+    merge_bool_setting(target, source, "codexAppConversationView");
+    merge_bool_setting(target, source, "codexAppThreadScrollRestore");
+    merge_bool_setting(target, source, "codexAppNativeMenuPlacement");
+    merge_bool_setting(target, source, "codexAppNativeBrowserRequireIdentification");
+    merge_bool_setting(target, source, "codexAppServiceTierControls");
+    merge_bool_setting(target, source, "codexAppPetRealMouseLook");
+    merge_bool_setting(target, source, "codexAppWhaleWidgetEnabled");
+    if let Some(value @ ("auto" | "custom" | "off")) =
+        source.get("codexAppWhaleBalanceProtocol").and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppWhaleBalanceProtocol".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    for key in [
+        "codexAppWhaleBalancePath",
+        "codexAppWhaleBalanceField",
+        "codexAppWhaleBalanceCurrency",
+    ] {
+        if let Some(value) = source.get(key).and_then(Value::as_str) {
+            target.insert(key.to_string(), Value::String(value.trim().to_string()));
+        }
+    }
+    if let Some(value) = source
+        .get("codexAppWhaleBalanceScale")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        target.insert("codexAppWhaleBalanceScale".to_string(), Value::from(value));
+    }
+    merge_bool_setting(target, source, "codexAppStepwiseEnabled");
+    if let Some(value) = source
+        .get("codexAppStepwiseGenerationMode")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppStepwiseGenerationMode".to_string(),
+            Value::String(normalize_stepwise_generation_mode(value)),
+        );
+    }
+    merge_bool_setting(target, source, "codexAppAnswerOutlineEnabled");
+    merge_bool_setting(target, source, "codexAppStepwiseDirectSend");
+    if let Some(value) = source
+        .get("codexAppStepwiseBaseUrl")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppStepwiseBaseUrl".to_string(),
+            Value::String(value.trim().trim_end_matches('/').to_string()),
+        );
+    }
+    if let Some(value) = source.get("codexAppStepwiseApiKey").and_then(Value::as_str) {
+        target.insert(
+            "codexAppStepwiseApiKey".to_string(),
+            Value::String(value.trim().to_string()),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseApiKeyEnv")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppStepwiseApiKeyEnv".to_string(),
+            Value::String(if value.trim().is_empty() {
+                default_stepwise_api_key_env()
+            } else {
+                value.trim().to_string()
+            }),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseProtocol")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppStepwiseProtocol".to_string(),
+            Value::String(normalize_stepwise_protocol(value)),
+        );
+    }
+    if let Some(value) = source.get("codexAppStepwiseModel").and_then(Value::as_str) {
+        target.insert(
+            "codexAppStepwiseModel".to_string(),
+            Value::String(value.trim().to_string()),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseMaxItems")
+        .and_then(Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+    {
+        target.insert(
+            "codexAppStepwiseMaxItems".to_string(),
+            Value::Number(serde_json::Number::from(clamp_stepwise_max_items(value))),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseMaxInputChars")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        target.insert(
+            "codexAppStepwiseMaxInputChars".to_string(),
+            Value::Number(serde_json::Number::from(clamp_stepwise_max_input_chars(
+                value,
+            ))),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseMaxOutputTokens")
+        .and_then(Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        target.insert(
+            "codexAppStepwiseMaxOutputTokens".to_string(),
+            Value::Number(serde_json::Number::from(clamp_stepwise_max_output_tokens(
+                value,
+            ))),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppStepwiseTimeoutMs")
+        .and_then(Value::as_u64)
+    {
+        target.insert(
+            "codexAppStepwiseTimeoutMs".to_string(),
+            Value::Number(serde_json::Number::from(clamp_stepwise_timeout_ms(value))),
+        );
+    }
+    merge_bool_setting(target, source, "codexAppImageOverlayEnabled");
+    if let Some(value) = source
+        .get("codexAppImageOverlayPath")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppImageOverlayPath".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppImageOverlayOpacity")
+        .and_then(Value::as_u64)
+        .and_then(|value| u8::try_from(value).ok())
+    {
+        target.insert(
+            "codexAppImageOverlayOpacity".to_string(),
+            Value::Number(serde_json::Number::from(clamp_image_overlay_opacity(value))),
+        );
+    }
+    if let Some(value) = source
+        .get("codexAppImageOverlayFitMode")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppImageOverlayFitMode".to_string(),
+            Value::String(normalize_image_overlay_fit_mode(value)),
+        );
+    }
+    merge_bool_setting(target, source, "codexAppDreamSkinEnabled");
+    merge_bool_setting(target, source, "codexAppDreamSkinPaused");
+    if let Some(value) = source.get("codexAppDreamSkinTheme").and_then(Value::as_str) {
+        target.insert(
+            "codexAppDreamSkinTheme".to_string(),
+            Value::String(normalize_dream_skin_theme(value)),
+        );
+    }
+    if let Some(value) = source.get("codexAppDreamSkinThemeConfig")
+        && serde_json::from_value::<DreamSkinThemeConfig>(value.clone()).is_ok()
+    {
+        target.insert("codexAppDreamSkinThemeConfig".to_string(), value.clone());
+    }
+    if let Some(value) = source
+        .get("codexAppDreamSkinImagePath")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "codexAppDreamSkinImagePath".to_string(),
+            Value::String(value.trim().to_string()),
+        );
+    }
+    if let Some(value) = source.get("codexGoalsEnabled").and_then(Value::as_bool) {
+        target.insert("codexGoalsEnabled".to_string(), Value::Bool(value));
+    }
+    merge_bool_setting(target, source, "weixinConnectEnabled");
+    for key in [
+        "weixinConnectBaseUrl",
+        "weixinConnectToken",
+        "weixinConnectAccountId",
+        "weixinConnectAllowFrom",
+        "weixinConnectRouteTag",
+        "weixinConnectWorkDir",
+        "weixinConnectModel",
+        "weixinConnectSandbox",
+        "weixinConnectCodexPath",
+    ] {
+        if let Some(value) = source.get(key).and_then(Value::as_str) {
+            target.insert(key.to_string(), Value::String(value.trim().to_string()));
+        }
+    }
+    if let Some(value) = source.get("relayBaseUrl").and_then(Value::as_str) {
+        target.insert("relayBaseUrl".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(value) = source.get("relayApiKey").and_then(Value::as_str) {
+        target.insert("relayApiKey".to_string(), Value::String(value.to_string()));
+    }
+    if let Some(value) = source.get("relayProfiles").and_then(Value::as_array) {
+        // 逐个反序列化：单个坏条目只丢自己，不能把整份供应商列表清空。
+        // 历史实现用 serde_json::from_value::<Vec<RelayProfile>>(...).unwrap_or_default()，
+        // 任一 profile 字段不匹配就会让整个数组变空，随后被 update 写回磁盘。
+        let mut profiles = Vec::with_capacity(value.len());
+        let mut dropped = 0usize;
+        for entry in value {
+            match serde_json::from_value::<RelayProfile>(entry.clone()) {
+                Ok(profile) => profiles.push(profile),
+                Err(_) => dropped += 1,
+            }
+        }
+        if dropped > 0 {
+            eprintln!(
+                "alunixa-x settings: {dropped} 个供应商条目反序列化失败已跳过（共 {} 个）",
+                value.len()
+            );
+        }
+        // 新列表为空、或退化为仅剩默认 profile，而现有列表非空时，保留现有列表。
+        // 空列表和「默认单条」都是 load 失败后默认设置被原样回写的形态。
+        let existing_count = target
+            .get("relayProfiles")
+            .and_then(Value::as_array)
+            .map(|existing| existing.len())
+            .unwrap_or(0);
+        let should_reject = (profiles.is_empty() && existing_count > 0)
+            || (is_default_single_profile(&profiles) && existing_count > 1);
+        if should_reject {
+            eprintln!(
+                "alunixa-x settings: 新供应商列表退化为 {} 条，现有 {} 条，已拒绝覆盖",
+                profiles.len(),
+                existing_count
+            );
+        } else {
+            preserve_official_mix_bearer_tokens(&mut profiles, target);
+            target.insert(
+                "relayProfiles".to_string(),
+                serde_json::to_value(profiles).unwrap_or_else(|_| Value::Array(Vec::new())),
+            );
+        }
+    }
+    if let Some(value) = source
+        .get("relayCommonConfigContents")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "relayCommonConfigContents".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = source
+        .get("relayContextConfigContents")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "relayContextConfigContents".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = source.get("activeRelayId").and_then(Value::as_str) {
+        target.insert(
+            "activeRelayId".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = source
+        .get("aggregateRelayProfiles")
+        .and_then(Value::as_array)
+    {
+        target.insert(
+            "aggregateRelayProfiles".to_string(),
+            Value::Array(value.clone()),
+        );
+    }
+    if let Some(value) = source.get("activeAggregateRelayId").and_then(Value::as_str) {
+        target.insert(
+            "activeAggregateRelayId".to_string(),
+            Value::String(value.to_string()),
+        );
+    }
+    if let Some(value) = source.get("relayTestModel").and_then(Value::as_str) {
+        target.insert(
+            "relayTestModel".to_string(),
+            Value::String(if value.trim().is_empty() {
+                default_relay_test_model()
+            } else {
+                value.trim().to_string()
+            }),
+        );
+    }
+    if let Some(value) = source.get("activeTool").and_then(Value::as_str) {
+        target.insert(
+            "activeTool".to_string(),
+            Value::String(ToolId::parse(value).as_str().to_string()),
+        );
+    }
+}

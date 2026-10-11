@@ -126,7 +126,7 @@ struct WeixinSendResponse {
 
 impl WeixinClient {
     pub fn new(base_url: &str, token: &str, route_tag: &str) -> anyhow::Result<Self> {
-        let base_url = normalize_base_url(base_url);
+        let base_url = normalize_service_base_url(base_url)?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             .build()
@@ -137,6 +137,16 @@ impl WeixinClient {
             route_tag: route_tag.trim().to_string(),
             client,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_unchecked_for_tests(base_url: &str) -> Self {
+        Self {
+            base_url: base_url.trim_end_matches('/').to_string(),
+            token: "test-token".to_string(),
+            route_tag: String::new(),
+            client: reqwest::Client::new(),
+        }
     }
 
     pub async fn fetch_qr_code(base_url: &str, route_tag: &str) -> anyhow::Result<WeixinQrCode> {
@@ -429,17 +439,25 @@ fn message_item_text(item: &WeixinMessageItem) -> Option<String> {
 
 pub fn normalize_service_base_url(value: &str) -> anyhow::Result<String> {
     let value = value.trim().trim_end_matches('/');
-    if value.is_empty() {
-        Ok(super::DEFAULT_WEIXIN_BASE_URL.to_string())
+    let value = if value.is_empty() {
+        super::DEFAULT_WEIXIN_BASE_URL
     } else {
-        let parsed = url::Url::parse(value)?;
-        anyhow::ensure!(matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some(), "invalid Weixin service URL");
-        Ok(value.to_string())
+        value
+    };
+    let url = reqwest::Url::parse(value).context("微信服务地址无效")?;
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    let official_host = host == "ilinkai.weixin.qq.com" || host.ends_with(".weixin.qq.com");
+    if url.scheme() != "https"
+        || !official_host
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        bail!("微信服务地址必须使用微信官方 HTTPS 域名");
     }
-}
-
-fn normalize_base_url(value: &str) -> String {
-    normalize_service_base_url(value).unwrap_or_else(|_| super::DEFAULT_WEIXIN_BASE_URL.to_string())
+    Ok(format!("https://{host}"))
 }
 
 fn random_wechat_uin() -> String {
@@ -515,5 +533,20 @@ mod tests {
         let svg = render_qr_svg("https://example.test/login").unwrap();
         assert!(svg.starts_with("<?xml"));
         assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn only_accepts_official_weixin_service_hosts() {
+        assert_eq!(
+            normalize_service_base_url("").unwrap(),
+            super::super::DEFAULT_WEIXIN_BASE_URL
+        );
+        assert_eq!(
+            normalize_service_base_url("https://edge.weixin.qq.com/").unwrap(),
+            "https://edge.weixin.qq.com"
+        );
+        assert!(normalize_service_base_url("https://example.test").is_err());
+        assert!(normalize_service_base_url("http://ilinkai.weixin.qq.com").is_err());
+        assert!(normalize_service_base_url("https://ilinkai.weixin.qq.com:8443").is_err());
     }
 }

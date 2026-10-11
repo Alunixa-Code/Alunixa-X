@@ -290,6 +290,8 @@ pub trait LaunchHooks: Send + Sync {
     async fn apply_active_relay_profile(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
+    fn managed_launch_preparation_enabled(&self) -> bool { false }
+    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> { Ok(()) }
     async fn ensure_active_protocol_proxy_config(
         &self,
         _settings: &BackendSettings,
@@ -592,6 +594,21 @@ where
         let home = crate::relay_config::default_codex_home_dir();
         timeline.mark("cleanup_unsupported_config", 10);
         hooks.cleanup_unsupported_config()?;
+        if hooks.managed_launch_preparation_enabled() {
+            timeline.mark("apply_managed_configuration", 12);
+            hooks.apply_active_relay_profile(&settings).await?;
+            crate::relay_config::apply_preferred_model_to_home(&home, &settings.active_relay_profile())?;
+            crate::relay_config::repair_stale_feature_entries_in_home(&home)?;
+            crate::codex_instructions::apply_model_instructions_policy(
+                &home, settings.codex_app_instructions_enabled, &settings.codex_app_instructions,
+            )?;
+            if settings.enhancements_enabled {
+                let imagegen = crate::install::companion_binary_path("alunixa-x-imagegen-mcp");
+                if imagegen.is_file() {
+                    crate::relay_config::set_codex_imagegen_mcp_in_home(&home, &imagegen, helper_port, true)?;
+                }
+            }
+        }
         crate::relay_config::ensure_windows_sandbox_usable_for_current_user(&home)?;
         if settings.provider_sync_enabled {
             timeline.mark("provider_sync", 15);
@@ -709,7 +726,7 @@ where
                 .await;
             timeline.mark("ensure_injection_done", 95);
             if injection_ready {
-                keep_launched_on_error = false;
+                keep_launched_on_error = true;
                 // 注入成功后页面已加载，此时可以通过 CDP 清理 Electron Local Storage
                 // 中残留的带后缀模型名，避免模型选择器继续显示废弃项。
                 crate::codex_local_storage::sanitize_local_storage_model_suffixes_nonfatal(
@@ -734,7 +751,18 @@ where
         // 注入降级或只启用协议代理也要固定身份；后台重注入不能为旧启动器换绑实例。
         hooks.capture_injected_launch_identity(debug_port).await;
         if settings.enhancements_enabled && !injection_degraded {
-            hooks.start_bridge_watchdog(debug_port, helper_port).await?;
+            if hooks.wait_for_native_ui(debug_port).await.is_err()
+                || hooks.start_bridge_watchdog(debug_port, helper_port).await.is_err() {
+                injection_degraded = true;
+                let degraded = launch_status(
+                    "running_degraded",
+                    "Native UI readiness was not verified; the Codex window and local services are preserved.",
+                    debug_port, helper_port, &app_dir,
+                );
+                options.status_store.save_latest(&degraded)?;
+                status_started_at_ms = degraded.started_at_ms;
+                hooks.write_status("running_degraded").await;
+            }
         }
 
         if !settings.enhancements_enabled || !injection_degraded {
@@ -767,6 +795,22 @@ where
     match result {
         Ok(handle) => Ok(handle),
         Err(error) => {
+            if let Some(launch) = launched.clone().filter(|_| keep_launched_on_error) {
+                let degraded = launch_status(
+                    "running_degraded", "Codex is running; post-launch integration needs recovery.",
+                    debug_port, helper_port, &app_dir,
+                );
+                let _ = options.status_store.save_latest(&degraded);
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "launcher.post_launch_degraded",
+                    serde_json::json!({"stage":"post_launch","category":"integration_failed"}),
+                );
+                return Ok(LaunchHandle {
+                    debug_port, helper_port, app_dir, launch,
+                    status_store, status_started_at_ms: degraded.started_at_ms,
+                    helper_started, hooks: Arc::clone(&hooks),
+                });
+            }
             hooks.stop_native_browser_compatibility().await;
             if helper_started {
                 hooks.shutdown_helper(helper_port).await;
@@ -869,6 +913,10 @@ fn helper_bind_host() -> String {
 
 #[async_trait(?Send)]
 impl LaunchHooks for DefaultLaunchHooks {
+    fn managed_launch_preparation_enabled(&self) -> bool { true }
+    async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
+        crate::runtime_health::wait_for_native_ui(debug_port).await
+    }
     fn resolve_app_dir(
         &self,
         app_dir: Option<&Path>,
@@ -1025,6 +1073,14 @@ impl LaunchHooks for DefaultLaunchHooks {
                     build_packaged_activation(&app_user_model_id, debug_port, &launch_extra_args)
                 });
             if let Some(activation) = activation {
+                #[cfg(windows)]
+                {
+                    let executable = crate::install::companion_binary_path(crate::install::APP_BINARY);
+                    let report = crate::packaged_proxy::inspect_or_repair(
+                        app_dir, &executable, "enforce_at_startup", None, None,
+                    ).await;
+                    anyhow::ensure!(report.status == "ok", "packaged_proxy_prelaunch_verification_failed");
+                }
                 let CodexLaunch::PackagedActivation {
                     app_user_model_id,
                     arguments,
@@ -3465,9 +3521,8 @@ async fn try_inject(debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
         debug_port,
         StatusStore::default(),
     )));
-    crate::bridge::install_bridge(
+    crate::bridge::install_renderer_bridge(
         websocket_url,
-        crate::bridge::BRIDGE_BINDING_NAME,
         Arc::new(move |path, payload| {
             let ctx = ctx.clone();
             Box::pin(
@@ -3475,6 +3530,7 @@ async fn try_inject(debug_port: u16, helper_port: u16) -> anyhow::Result<()> {
             )
         }),
         &[script],
+        &settings,
     )
     .await
 }

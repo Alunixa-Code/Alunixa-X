@@ -12,8 +12,8 @@ if (!directory || !output || !["public", "full"].includes(source)) {
 }
 const root = path.resolve(directory);
 const repository = source === "full"
-  ? "BigPizzaV3/AlunixaXFullPluginCache"
-  : "BigPizzaV3/AlunixaXPluginCache";
+  ? "BigPizzaV3/CodexPlusPlusFullPluginCache"
+  : "BigPizzaV3/CodexPlusPlusPluginCache";
 const git = (...args) => execFileSync("git", ["-C", root, ...args], {
   encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
 });

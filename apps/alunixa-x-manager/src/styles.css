@@ -9849,3 +9849,11 @@ select {
 .claude-localization-status-grid .metric { min-width: 0; }
 .claude-localization-list { margin: 0; padding-left: 20px; color: var(--muted-foreground); display: grid; gap: 8px; line-height: 1.55; }
 @media (max-width: 760px) { .claude-localization-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ax-brand-caption {
+  display: flex; flex-direction: column; gap: 3px; padding: 12px 8px 14px;
+  text-align: left; color: var(--foreground); cursor: pointer;
+}
+.ax-brand-caption strong { font-size: 15px; letter-spacing: 0; }
+.ax-brand-caption small { font-size: 9px; opacity: .6; }
+.rail-language-select { width: 58px; max-width: 100%; font-size: 11px; background: transparent; color: inherit; border: 0; }
+.relay-model-cell-protocol select { width: 100%; min-width: 0; height: 32px; color: inherit; background: var(--input-background, transparent); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
