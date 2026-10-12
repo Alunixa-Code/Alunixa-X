@@ -273,7 +273,7 @@ mod macos_install {
         std::fs::create_dir_all(contents.join("_CodeSignature")).unwrap();
         std::fs::create_dir_all(contents.join("Resources")).unwrap();
         let plist = contents.join("Info.plist");
-        std::fs::write(&plist, "<plist><dict><key>CodexPlusUnifiedApp</key><true/><key>CFBundleName</key><string>Alunixa X</string><key>CFBundleIdentifier</key><string>com.bigpizzav3.codexplusplus</string><key>CFBundleExecutable</key><string>AlunixaX</string><key>CFBundleIconFile</key><string>native.icns</string><key>LSUIElement</key><false/></dict></plist>").unwrap();
+        std::fs::write(&plist, format!("<plist><dict><key>CodexPlusUnifiedApp</key><true/><key>CFBundleName</key><string>Alunixa X</string><key>CFBundleIdentifier</key><string>{APP_BUNDLE_ID}</string><key>CFBundleExecutable</key><string>AlunixaX</string><key>CFBundleIconFile</key><string>native.icns</string><key>LSUIElement</key><false/></dict></plist>")).unwrap();
         let signature = contents.join("_CodeSignature/CodeResources");
         std::fs::write(&signature, b"sealed resource sentinel").unwrap();
         let icon = contents.join("Resources/native.icns");

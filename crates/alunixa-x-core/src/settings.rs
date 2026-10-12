@@ -2778,6 +2778,73 @@ mod tests {
     }
 
     #[test]
+    fn atomic_writers_reject_readonly_targets_without_invoking_stream_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session_index.jsonl");
+        fs::write(&path, b"original").unwrap();
+        let permissions = fs::metadata(&path).unwrap().permissions();
+        let mut readonly = permissions.clone();
+        readonly.set_readonly(true);
+        fs::set_permissions(&path, readonly).unwrap();
+        let mut invoked = false;
+        let streamed = atomic_write_with(&path, |file| {
+            invoked = true;
+            file.write_all(b"replacement")
+        });
+        let buffered = atomic_write(&path, b"replacement");
+        fs::set_permissions(&path, permissions).unwrap();
+
+        assert!(streamed.unwrap_err().to_string().contains("只读"));
+        assert!(buffered.unwrap_err().to_string().contains("只读"));
+        assert!(!invoked);
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn stream_atomic_write_failure_preserves_original_and_unrelated_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session_index.jsonl");
+        let unrelated = dir.path().join("session_index.jsonl.tmp");
+        fs::write(&path, b"original").unwrap();
+        fs::write(&unrelated, b"another writer").unwrap();
+        let error = atomic_write_with(&path, |file| {
+            file.write_all(b"partial replacement")?;
+            Err(std::io::Error::other("fixture write failure"))
+        })
+        .unwrap_err();
+
+        assert!(format!("{error:#}").contains("fixture write failure"));
+        assert_eq!(fs::read(&path).unwrap(), b"original");
+        assert_eq!(fs::read(&unrelated).unwrap(), b"another writer");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    #[test]
+    fn stream_atomic_write_preserves_permissions_and_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session_index.jsonl");
+        fs::write(&path, b"original").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        }
+        atomic_write_with(&path, |file| file.write_all(b"replacement")).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"replacement");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o640
+            );
+        }
+    }
+
+    #[test]
     fn settings_default_matches_expected_behavior() {
         let settings = BackendSettings::default();
         assert!(!settings.provider_sync_enabled);
@@ -4215,25 +4282,39 @@ pub fn atomic_write_with(
 
     // 保留原文件权限：临时文件默认权限不一定和它一致。
     let existing_permissions = match fs::metadata(path) {
-        Ok(metadata) => Some(metadata.permissions()),
+        Ok(metadata) => {
+            let permissions = metadata.permissions();
+            if permissions.readonly() {
+                anyhow::bail!("目标配置只读，未覆盖原文件");
+            }
+            Some(permissions)
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => {
             return Err(error)
                 .with_context(|| format!("failed to read permissions for {}", path.display()));
         }
     };
-    let temp_path = temp_path_for(path);
+    let temp_path = unique_temp_path_for(path);
+    let mut owns_temp_file = false;
     let write_result = (|| -> std::io::Result<()> {
-        let mut temp_file = File::create(&temp_path)?;
+        let mut temp_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
+        owns_temp_file = true;
         write_contents(&mut temp_file)?;
         temp_file.flush()?;
         if let Some(permissions) = existing_permissions {
             temp_file.set_permissions(permissions)?;
         }
+        temp_file.sync_all()?;
         Ok(())
     })();
     if let Err(error) = write_result {
-        let _ = fs::remove_file(&temp_path);
+        if owns_temp_file {
+            let _ = fs::remove_file(&temp_path);
+        }
         return Err(error)
             .with_context(|| format!("failed to write temp file {}", temp_path.display()));
     }
@@ -4248,16 +4329,6 @@ pub fn atomic_write_with(
         });
     }
     Ok(())
-}
-
-fn temp_path_for(path: &Path) -> PathBuf {
-    let mut temp_path = path.to_path_buf();
-    let extension = path.extension().and_then(|value| value.to_str());
-    temp_path.set_extension(match extension {
-        Some(extension) => format!("{extension}.tmp"),
-        None => "tmp".to_string(),
-    });
-    temp_path
 }
 
 impl Default for DictationSettings {

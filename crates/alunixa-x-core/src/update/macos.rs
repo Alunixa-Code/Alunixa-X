@@ -340,7 +340,8 @@ mod runtime {
         let result = output(program, args)?;
         if !result.status.success() {
             bail!(
-                "更新命令失败 {program}：{}",
+                "更新命令失败 {program}（{}）：{}",
+                result.status,
                 String::from_utf8_lossy(&result.stderr).trim()
             );
         }
@@ -832,7 +833,24 @@ mod runtime {
         let binary = path.join("Contents/MacOS").join(spec.executable);
         fs::create_dir_all(binary.parent().unwrap())?;
         fs::create_dir_all(path.join("Contents/Resources/nested"))?;
-        fs::copy("/usr/bin/true", &binary)?;
+        // 使用与 AX 相同的普通架构程序，不将 Apple 系统二进制重新签名作应用替身。
+        let source = path.with_extension("c");
+        fs::write(&source, "int main(void) { return 0; }\n")?;
+        let architecture = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else {
+            "x86_64"
+        };
+        checked(
+            "/usr/bin/clang",
+            &[
+                "-arch".as_ref(),
+                architecture.as_ref(),
+                source.as_os_str(),
+                "-o".as_ref(),
+                binary.as_os_str(),
+            ],
+        )?;
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))?;
         fs::write(
             path.join("Contents/Resources/test.dat"),
