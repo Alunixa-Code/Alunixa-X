@@ -151,6 +151,10 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 validate_content(item.get("content").unwrap_or(&Value::Null), wire)?;
             }
             "function_call" | "custom_tool_call" | "tool_call" | "tool_search_call" => {
+                if wire == "anthropic" && item["status"] == "incomplete" {
+                    // cc-switch discards interrupted calls when rebuilding native history.
+                    continue;
+                }
                 if kind == "tool_call" && item.get("tool_use").is_none() {
                     return reject("legacy tool_call requires tool_use");
                 }
@@ -181,7 +185,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
             }
             "tool_search_output" => {
                 let id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
-                if !calls.contains(id) || !outputs.insert(id.to_string()) {
+                if (wire != "anthropic" && !calls.contains(id)) || !outputs.insert(id.to_string()) {
                     return reject("orphan or duplicate tool search output");
                 }
                 let Some(tools) = item.get("tools").and_then(Value::as_array) else {
@@ -205,7 +209,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .or_else(|| item.pointer("/content/tool_use_id"))
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                if !calls.contains(id) || !outputs.insert(id.to_string()) {
+                if (wire != "anthropic" && !calls.contains(id)) || !outputs.insert(id.to_string()) {
                     return reject(
                         "orphan or duplicate tool output; matching call history is required",
                     );
@@ -230,6 +234,14 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 }
             }
             "reasoning" => {
+                if wire == "anthropic"
+                    && item["encrypted_content"]
+                        .as_str()
+                        .and_then(anthropic::decode_anthropic_thinking_block)
+                        .is_some()
+                {
+                    continue;
+                }
                 if item.get("encrypted_content").is_some_and(|v| !v.is_null()) {
                     return reject(
                         "opaque reasoning belongs to a different or unavailable native protocol",
@@ -242,10 +254,13 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     return reject("native reasoning requires its original signed replay item");
                 }
             }
+            "input_text" | "input_image" if wire == "anthropic" => {
+                validate_content(&json!([item]), wire)?;
+            }
             _ => return reject(&format!("unsupported input item type {kind}")),
         }
     }
-    if calls != outputs {
+    if wire != "anthropic" && calls != outputs {
         return reject(
             "unanswered tool calls require their original results; history was not discarded",
         );
@@ -263,7 +278,7 @@ fn validate_content(content: &Value, wire: &str) -> anyhow::Result<()> {
     for part in parts {
         match part["type"].as_str() {
             Some("text" | "input_text" | "output_text") => {}
-            Some("refusal") if wire == "chat" => {}
+            Some("refusal") if matches!(wire, "chat" | "anthropic") => {}
             Some("input_image" | "image_url") if wire != "completions" => {
                 if part.get("image_url").is_none() {
                     return reject("image file_id has no cross-provider representation");
@@ -277,6 +292,13 @@ fn validate_content(content: &Value, wire: &str) -> anyhow::Result<()> {
                 }
             }
             Some("input_audio" | "input_file") if wire == "chat" => {}
+            Some("input_file") if wire == "anthropic" => {
+                if part.get("file_id").is_some()
+                    || anthropic::document_block_from_input_file(part).is_none()
+                {
+                    return reject("Anthropic documents require a URL or inline file data");
+                }
+            }
             _ => return reject("unsupported content part"),
         }
     }

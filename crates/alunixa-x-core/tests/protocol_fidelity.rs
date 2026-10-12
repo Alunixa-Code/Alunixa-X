@@ -320,7 +320,8 @@ fn anthropic_signed_and_redacted_thinking_round_trip_without_becoming_text() {
     input.push(json!({"type":"function_call_output","call_id":"call_x","output":"stdout"}));
     let replay =
         responses_to_anthropic_messages(json!({"model":"claude-test","input":input})).unwrap();
-    assert_eq!(replay["messages"][0]["content"], content);
+    assert_eq!(replay["messages"][0]["role"], "user");
+    assert_eq!(replay["messages"][1]["content"], content);
 }
 
 #[test]
@@ -445,25 +446,34 @@ fn anthropic_stream_signatures_and_redacted_blocks_round_trip() {
     input.push(json!({"type":"function_call_output","call_id":"call_native","output":"stdout"}));
     let request = responses_to_anthropic_messages(json!({"input":input})).unwrap();
     assert_eq!(
-        request["messages"][0]["content"],
+        request["messages"][1]["content"],
         json!([
             {"type":"thinking","thinking":"private","signature":"signed-thinking"},
             {"type":"redacted_thinking","data":"opaque-data"},
             {"type":"tool_use","id":"call_native","name":"exec","input":{"cmd":"pwd"}}
         ])
     );
-    assert_eq!(request["messages"][1]["content"][0]["type"], "tool_result");
+    assert_eq!(request["messages"][2]["content"][0]["type"], "tool_result");
 }
 
 #[test]
 fn opaque_replay_cannot_cross_protocols_or_silently_override_edited_history() {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+
     let response = anthropic_message_to_response_with_request(
-        json!({"content":[{"type":"text","text":"original"}],"stop_reason":"end_turn"}),
+        json!({"content":[{"type":"thinking","thinking":"private","signature":"signed"},{"type":"text","text":"original"}],"stop_reason":"end_turn"}),
         &json!({}),
     )
     .unwrap();
     assert!(responses_to_chat_completions(json!({"input":response["output"]})).is_err());
-    let mut input = response["output"].clone();
+    // Previously saved AX whole-response envelopes must still reject edited covered items.
+    let message = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"original"}]});
+    let payload =
+        json!({"wire":"anthropic","native":[{"type":"text","text":"original"}],"items":[message]});
+    let legacy = json!({"type":"reasoning","summary":[],"encrypted_content":format!("alunixa-x-replay-v1:{}",STANDARD.encode(payload.to_string()))});
+    let mut input = json!([message, legacy]);
+    let unedited = responses_to_anthropic_messages(json!({"input":input})).unwrap();
+    assert_eq!(unedited["messages"][1]["content"][0]["text"], "original");
     input[0]["content"][0]["text"] = json!("edited");
     assert!(responses_to_anthropic_messages(json!({"input":input})).is_err());
 }
@@ -526,9 +536,10 @@ fn unsupported_native_stream_events_fail_instead_of_disappearing() {
 
 #[test]
 fn native_reasoning_controls_are_forwarded_or_explicitly_rejected() {
-    let anthropic =
-        responses_to_anthropic_messages(json!({"input":"hello","reasoning":{"effort":"high"}}))
-            .unwrap();
+    let anthropic = responses_to_anthropic_messages(
+        json!({"model":"claude-opus-4-6","input":"hello","reasoning":{"effort":"high"}}),
+    )
+    .unwrap();
     assert_eq!(anthropic["thinking"]["type"], "adaptive");
     assert_eq!(anthropic["output_config"]["effort"], "high");
     let gemini =
@@ -621,11 +632,11 @@ fn message_fragments_and_native_multimodal_tool_outputs_keep_their_content() {
         {"type":"function_call_output","call_id":"x","output":[{"type":"input_image","image_url":"data:image/png;base64,eA=="}]}
     ]})).unwrap();
     assert_eq!(
-        native["messages"][1]["content"][0]["content"][0]["type"],
+        native["messages"][2]["content"][0]["content"][0]["type"],
         "image"
     );
     assert_eq!(
-        native["messages"][1]["content"][0]["content"][0]["source"]["data"],
+        native["messages"][2]["content"][0]["content"][0]["source"]["data"],
         "eA=="
     );
 }

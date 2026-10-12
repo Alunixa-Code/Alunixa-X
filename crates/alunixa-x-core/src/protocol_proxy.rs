@@ -12,6 +12,9 @@ use serde_json::{Map, Value, json};
 use crate::relay_rotation::{RotationContext, RotationEvent};
 use crate::settings::{RelayProtocol, SettingsStore};
 
+mod anthropic;
+mod anthropic_sse;
+mod anthropic_stream;
 mod fidelity;
 
 pub fn is_protocol_conversion_error(error: &anyhow::Error) -> bool {
@@ -345,146 +348,7 @@ pub fn responses_to_completions(body: Value) -> anyhow::Result<Value> {
 }
 
 pub fn responses_to_anthropic_messages(body: Value) -> anyhow::Result<Value> {
-    let native_options = fidelity::native_reasoning_options(&body, "anthropic")?;
-    let body = fidelity::prepare_history(body, "anthropic")?;
-    let chat = responses_to_chat_completions_for_wire(body, "anthropic", false)?;
-    if chat
-        .get("response_format")
-        .is_some_and(|v| v["type"] != "text")
-        || chat.get("verbosity").is_some()
-    {
-        return fidelity::reject("Anthropic text options require a native provider configuration");
-    }
-    let mut system = Vec::new();
-    let mut messages = Vec::new();
-    for message in chat
-        .get("messages")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-    {
-        let role = message
-            .get("role")
-            .and_then(Value::as_str)
-            .unwrap_or("user");
-        if role == "system" {
-            let text = chat_content_text(message.get("content").unwrap_or(&Value::Null));
-            if !text.is_empty() {
-                system.push(text);
-            }
-            continue;
-        }
-        if role == "tool" {
-            messages.push(json!({
-                "role": "user",
-                "content": [{
-                    "type": "tool_result",
-                    "tool_use_id": message.get("tool_call_id").and_then(Value::as_str).unwrap_or(""),
-                    "content": message.get("content").filter(|v| v.is_array())
-                        .map(anthropic_content_parts).map(Value::Array)
-                        .unwrap_or_else(|| json!(chat_content_text(message.get("content").unwrap_or(&Value::Null))))
-                }]
-            }));
-            continue;
-        }
-
-        if let Some(native) = message.get("_native") {
-            messages.push(json!({"role":"assistant","content":native}));
-            continue;
-        }
-        let mut content = anthropic_content_parts(message.get("content").unwrap_or(&Value::Null));
-        if role == "assistant" {
-            if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
-                for tool_call in tool_calls {
-                    let function = tool_call.get("function").unwrap_or(&Value::Null);
-                    content.push(json!({
-                        "type": "tool_use",
-                        "id": tool_call.get("id").and_then(Value::as_str).unwrap_or(""),
-                        "name": function.get("name").and_then(Value::as_str).unwrap_or(""),
-                        "input": parse_json_or_string(
-                            function.get("arguments").and_then(Value::as_str).unwrap_or("")
-                        )
-                    }));
-                }
-            }
-        }
-        if content.is_empty() {
-            content.push(json!({ "type": "text", "text": "" }));
-        }
-        messages.push(json!({
-            "role": if role == "assistant" { "assistant" } else { "user" },
-            "content": content
-        }));
-    }
-
-    let mut result = json!({
-        "model": chat.get("model").cloned().unwrap_or(Value::Null),
-        "max_tokens": chat
-            .get("max_tokens")
-            .or_else(|| chat.get("max_completion_tokens"))
-            .cloned()
-            .unwrap_or_else(|| json!(4096)),
-        "messages": messages,
-        "stream": chat.get("stream").cloned().unwrap_or_else(|| json!(false))
-    });
-    result
-        .as_object_mut()
-        .unwrap()
-        .extend(native_options.as_object().unwrap().clone());
-    if !system.is_empty() {
-        result["system"] = json!(system.join("\n\n"));
-    }
-    if let Some(value) = chat.get("temperature") {
-        result["temperature"] = value.clone();
-    }
-    if let Some(value) = chat.get("top_p") {
-        result["top_p"] = value.clone();
-    }
-    if let Some(stop) = chat.get("stop") {
-        result["stop_sequences"] = if stop.is_array() {
-            stop.clone()
-        } else {
-            json!([stop])
-        };
-    }
-    if let Some(tools) = chat.get("tools").and_then(Value::as_array) {
-        let converted = tools
-            .iter()
-            .filter_map(|tool| {
-                let function = tool.get("function")?;
-                Some(json!({
-                    "name": function.get("name").cloned().unwrap_or(Value::Null),
-                    "description": function.get("description").cloned().unwrap_or(Value::Null),
-                    "input_schema": function.get("parameters").cloned().unwrap_or_else(|| json!({
-                        "type": "object",
-                        "properties": {}
-                    }))
-                }))
-            })
-            .collect::<Vec<_>>();
-        if !converted.is_empty() {
-            result["tools"] = json!(converted);
-        }
-    }
-    if let Some(tool_choice) = chat.get("tool_choice") {
-        result["tool_choice"] = match tool_choice {
-            Value::String(value) if value == "required" => json!({ "type": "any" }),
-            Value::String(value) if value == "none" => json!({ "type": "none" }),
-            Value::Object(_) => tool_choice
-                .pointer("/function/name")
-                .and_then(Value::as_str)
-                .map(|name| json!({ "type": "tool", "name": name }))
-                .unwrap_or_else(|| json!({ "type": "auto" })),
-            _ => json!({ "type": "auto" }),
-        };
-    }
-    if chat.get("parallel_tool_calls") == Some(&json!(false)) {
-        if result.get("tool_choice").is_none() {
-            result["tool_choice"] = json!({"type":"auto"});
-        }
-        result["tool_choice"]["disable_parallel_tool_use"] = json!(true);
-    }
-    Ok(result)
+    anthropic::responses_request_to_anthropic(body)
 }
 
 pub fn responses_to_gemini_generate_content(body: Value) -> anyhow::Result<Value> {
@@ -699,14 +563,7 @@ pub fn anthropic_message_to_response_with_request(
     body: Value,
     original_request: &Value,
 ) -> anyhow::Result<Value> {
-    let native = body.get("content").cloned().unwrap_or_else(|| json!([]));
-    validate_anthropic_blocks(&native)?;
-    let mut response = chat_completion_to_response_with_request(
-        anthropic_message_to_chat_completion(body),
-        original_request,
-    )?;
-    fidelity::attach_replay(&mut response, "anthropic", native);
-    Ok(response)
+    anthropic::anthropic_response_to_responses(body, original_request)
 }
 
 pub fn gemini_generate_content_to_response_with_request(
@@ -828,78 +685,6 @@ fn completion_to_chat_completion(body: Value) -> Value {
         "model": body.get("model").cloned().unwrap_or_else(|| json!("")),
         "choices": choices,
         "usage": body.get("usage").cloned().unwrap_or(Value::Null)
-    })
-}
-
-fn anthropic_message_to_chat_completion(body: Value) -> Value {
-    let mut text = String::new();
-    let mut reasoning = String::new();
-    let mut tool_calls = Vec::new();
-    for (index, block) in body
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        match block.get("type").and_then(Value::as_str).unwrap_or("") {
-            "text" => {
-                if let Some(value) = block.get("text").and_then(Value::as_str) {
-                    text.push_str(value);
-                }
-            }
-            "thinking" | "redacted_thinking" => {
-                if let Some(value) = block
-                    .get("thinking")
-                    .or_else(|| block.get("text"))
-                    .and_then(Value::as_str)
-                {
-                    reasoning.push_str(value);
-                }
-            }
-            "tool_use" => {
-                tool_calls.push(json!({
-                    "id": block
-                        .get("id")
-                        .cloned()
-                        .unwrap_or_else(|| json!(format!("call_{index}"))),
-                    "type": "function",
-                    "function": {
-                        "name": block.get("name").cloned().unwrap_or_else(|| json!("tool")),
-                        "arguments": serde_json::to_string(
-                            block.get("input").unwrap_or(&json!({}))
-                        ).unwrap_or_else(|_| "{}".to_string())
-                    }
-                }));
-            }
-            _ => {}
-        }
-    }
-    let mut message = json!({
-        "role": "assistant",
-        "content": text
-    });
-    if !reasoning.is_empty() {
-        message["reasoning_content"] = json!(reasoning);
-    }
-    if !tool_calls.is_empty() {
-        message["tool_calls"] = json!(tool_calls);
-    }
-    let finish_reason = anthropic_finish_reason(
-        body.get("stop_reason")
-            .and_then(Value::as_str)
-            .unwrap_or(""),
-    );
-    json!({
-        "id": body.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
-        "created": 0,
-        "model": body.get("model").cloned().unwrap_or_else(|| json!("")),
-        "choices": [{
-            "index": 0,
-            "message": message,
-            "finish_reason": finish_reason
-        }],
-        "usage": anthropic_usage_to_chat_usage(body.get("usage"))
     })
 }
 
@@ -1215,10 +1000,8 @@ pub struct NativeSseToResponsesConverter {
     failed: bool,
     next_tool_index: usize,
     sequence_number: u64,
-    native_blocks: BTreeMap<usize, Value>,
-    native_arguments: BTreeMap<usize, String>,
+    anthropic: Option<anthropic_stream::AnthropicSseConverter>,
     native_parts: Vec<Value>,
-    native_usage: Value,
 }
 
 impl NativeSseToResponsesConverter {
@@ -1231,14 +1014,16 @@ impl NativeSseToResponsesConverter {
             failed: false,
             next_tool_index: 0,
             sequence_number: 0,
-            native_blocks: BTreeMap::new(),
-            native_arguments: BTreeMap::new(),
+            anthropic: (wire_api == UpstreamWireApi::AnthropicMessages)
+                .then(|| anthropic_stream::AnthropicSseConverter::with_request(original_request)),
             native_parts: Vec::new(),
-            native_usage: json!({}),
         }
     }
 
     pub fn push_bytes(&mut self, bytes: &[u8]) -> Vec<u8> {
+        if let Some(converter) = &mut self.anthropic {
+            return converter.push_bytes(bytes);
+        }
         if self.is_completed() {
             return Vec::new();
         }
@@ -1262,6 +1047,9 @@ impl NativeSseToResponsesConverter {
     }
 
     pub fn finish(&mut self) -> Vec<u8> {
+        if let Some(converter) = &mut self.anthropic {
+            return converter.finish();
+        }
         if self.is_completed() {
             return Vec::new();
         }
@@ -1295,6 +1083,9 @@ impl NativeSseToResponsesConverter {
     }
 
     pub fn fail(&mut self, message: String, error_type: Option<String>) -> Vec<u8> {
+        if let Some(converter) = &mut self.anthropic {
+            return converter.fail(message, error_type);
+        }
         let mut output = String::new();
         self.state.failed_into(&mut output, message, error_type);
         self.failed = true;
@@ -1302,6 +1093,9 @@ impl NativeSseToResponsesConverter {
     }
 
     pub fn is_completed(&self) -> bool {
+        if let Some(converter) = &self.anthropic {
+            return converter.is_completed();
+        }
         self.failed || self.state.completed
     }
 
@@ -1331,9 +1125,6 @@ impl NativeSseToResponsesConverter {
         }
         match self.wire_api {
             UpstreamWireApi::Completions => self.handle_completion_chunk(&value, output),
-            UpstreamWireApi::AnthropicMessages => {
-                self.handle_anthropic_event(event_name.as_deref(), &value, output)
-            }
             UpstreamWireApi::GeminiGenerateContent => self.handle_gemini_chunk(&value, output),
             _ => {}
         }
@@ -1364,220 +1155,6 @@ impl NativeSseToResponsesConverter {
             "usage": value.get("usage").cloned().unwrap_or(Value::Null)
         });
         self.state.handle_chat_chunk_into(&chunk, output);
-    }
-
-    fn handle_anthropic_event(
-        &mut self,
-        event_name: Option<&str>,
-        value: &Value,
-        output: &mut String,
-    ) {
-        let event_type = event_name
-            .or_else(|| value.get("type").and_then(Value::as_str))
-            .unwrap_or("");
-        match event_type {
-            "message_start" => {
-                let message = value.get("message").unwrap_or(value);
-                self.native_usage = message.get("usage").cloned().unwrap_or_else(|| json!({}));
-                self.state.handle_chat_chunk_into(
-                    &json!({
-                        "id": message.get("id").cloned().unwrap_or_else(|| json!("msg_compat")),
-                        "model": message.get("model").cloned().unwrap_or_else(|| json!("")),
-                        "choices": [],
-                        "usage": anthropic_usage_to_chat_usage(message.get("usage"))
-                    }),
-                    output,
-                );
-            }
-            "content_block_start" => {
-                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                let block = value.get("content_block").unwrap_or(&Value::Null);
-                if validate_anthropic_blocks(&json!([block])).is_err()
-                    || self.native_blocks.insert(index, block.clone()).is_some()
-                {
-                    self.state.failed_into(
-                        output,
-                        "Unsupported or duplicate Anthropic block".into(),
-                        Some("invalid_stream_event".into()),
-                    );
-                    return;
-                }
-                match block.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "text" => {
-                        if let Some(text) = block.get("text").and_then(Value::as_str) {
-                            self.push_chat_text_delta(text, output);
-                        }
-                    }
-                    "thinking" => {
-                        if let Some(text) = block.get("thinking").and_then(Value::as_str) {
-                            self.push_chat_reasoning_delta(text, output);
-                        }
-                    }
-                    "tool_use" => {
-                        let arguments = block
-                            .get("input")
-                            .filter(|input| {
-                                !input.is_null()
-                                    && input.as_object().is_none_or(|object| !object.is_empty())
-                            })
-                            .map(|input| serde_json::to_string(input).unwrap_or_default())
-                            .unwrap_or_default();
-                        self.push_chat_tool_delta(
-                            index,
-                            block.get("id").and_then(Value::as_str),
-                            block.get("name").and_then(Value::as_str),
-                            &arguments,
-                            output,
-                        );
-                    }
-                    _ => {}
-                }
-            }
-            "content_block_delta" => {
-                let index = value.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                let delta = value.get("delta").unwrap_or(&Value::Null);
-                let Some(block) = self.native_blocks.get_mut(&index) else {
-                    self.state.failed_into(
-                        output,
-                        "Anthropic delta has no matching block".into(),
-                        Some("invalid_stream_event".into()),
-                    );
-                    return;
-                };
-                let (field, delta_field) = match delta["type"].as_str() {
-                    Some("text_delta") => ("text", "text"),
-                    Some("thinking_delta") => ("thinking", "thinking"),
-                    Some("signature_delta") => ("signature", "signature"),
-                    Some("input_json_delta") => ("", "partial_json"),
-                    _ => {
-                        self.state.failed_into(
-                            output,
-                            "Unsupported Anthropic delta type".into(),
-                            Some("unsupported_stream_event".into()),
-                        );
-                        return;
-                    }
-                };
-                let fragment = delta[delta_field].as_str().unwrap_or("");
-                let expected = match field {
-                    "text" => "text",
-                    "thinking" | "signature" => "thinking",
-                    _ => "tool_use",
-                };
-                if block["type"] != expected {
-                    self.state.failed_into(
-                        output,
-                        "Anthropic delta type does not match its block".into(),
-                        Some("invalid_stream_event".into()),
-                    );
-                    return;
-                }
-                if field.is_empty() {
-                    self.native_arguments
-                        .entry(index)
-                        .or_default()
-                        .push_str(fragment);
-                } else {
-                    block[field] = json!(format!(
-                        "{}{}",
-                        block[field].as_str().unwrap_or(""),
-                        fragment
-                    ));
-                }
-                match delta.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "text_delta" => self.push_chat_text_delta(
-                        delta.get("text").and_then(Value::as_str).unwrap_or(""),
-                        output,
-                    ),
-                    "thinking_delta" => self.push_chat_reasoning_delta(
-                        delta.get("thinking").and_then(Value::as_str).unwrap_or(""),
-                        output,
-                    ),
-                    "input_json_delta" => self.push_chat_tool_delta(
-                        index,
-                        None,
-                        None,
-                        delta
-                            .get("partial_json")
-                            .and_then(Value::as_str)
-                            .unwrap_or(""),
-                        output,
-                    ),
-                    _ => {}
-                }
-            }
-            "message_delta" => {
-                let stop_reason = value
-                    .pointer("/delta/stop_reason")
-                    .and_then(Value::as_str)
-                    .map(anthropic_finish_reason);
-                let mut chunk = json!({
-                    "choices": [{
-                        "delta": {},
-                        "finish_reason": stop_reason
-                    }]
-                });
-                if let Some(usage) = value.get("usage") {
-                    if let (Some(target), Some(incoming)) =
-                        (self.native_usage.as_object_mut(), usage.as_object())
-                    {
-                        target.extend(incoming.clone());
-                    }
-                    chunk["usage"] = anthropic_usage_to_chat_usage(Some(&self.native_usage));
-                }
-                self.state.handle_chat_chunk_into(&chunk, output);
-            }
-            "message_stop" => {
-                for (index, arguments) in &self.native_arguments {
-                    let Ok(input) = serde_json::from_str::<Value>(arguments) else {
-                        self.state.failed_into(
-                            output,
-                            "Invalid Anthropic tool input JSON".into(),
-                            Some("invalid_tool_arguments".into()),
-                        );
-                        return;
-                    };
-                    if let Some(block) = self.native_blocks.get_mut(index) {
-                        block["input"] = input;
-                    }
-                }
-                self.state.native_replay = Some((
-                    "anthropic",
-                    json!(self.native_blocks.values().collect::<Vec<_>>()),
-                ));
-                self.state.finalize_into(output);
-            }
-            "content_block_stop" => {
-                let index = value["index"].as_u64().unwrap_or(0) as usize;
-                if self
-                    .native_blocks
-                    .get(&index)
-                    .is_some_and(|b| b["type"] == "tool_use")
-                {
-                    if self.tools_arguments_empty(index) {
-                        self.push_chat_tool_delta(index, None, None, "{}", output);
-                    }
-                }
-            }
-            "ping" => {}
-            "error" => {
-                let (message, error_type) = extract_chat_sse_error(value);
-                self.state.failed_into(output, message, error_type);
-                self.failed = true;
-            }
-            _ => self.state.failed_into(
-                output,
-                "Unsupported Anthropic event".into(),
-                Some("unsupported_stream_event".into()),
-            ),
-        }
-    }
-
-    fn tools_arguments_empty(&self, index: usize) -> bool {
-        self.state
-            .tools
-            .get(&index)
-            .is_some_and(|t| t.arguments.is_empty())
     }
 
     fn handle_gemini_chunk(&mut self, value: &Value, output: &mut String) {
@@ -1774,14 +1351,27 @@ impl UpstreamSseToResponsesConverter {
         }
     }
 
+    pub fn has_failed(&self) -> bool {
+        match self {
+            Self::Chat(converter) => converter.failed || converter.state.failed,
+            Self::Native(converter) => converter
+                .anthropic
+                .as_ref()
+                .map_or(converter.failed || converter.state.failed, |native| {
+                    native.has_failed()
+                }),
+        }
+    }
+
     pub fn is_waiting_for_terminal_event(&self) -> bool {
         match self {
             Self::Chat(converter) => {
                 !converter.is_completed() && converter.state.finish_reason.is_some()
             }
-            Self::Native(converter) => {
-                !converter.is_completed() && converter.state.finish_reason.is_some()
-            }
+            Self::Native(converter) => converter.anthropic.as_ref().map_or_else(
+                || !converter.is_completed() && converter.state.finish_reason.is_some(),
+                |native| native.is_waiting_for_terminal_event(),
+            ),
         }
     }
 }
@@ -4008,6 +3598,13 @@ pub fn chat_sse_to_responses_sse_with_request(input: &str, original_request: &Va
 
 /// A provider may answer a streaming request with JSON. Keep the downstream wire contract.
 pub fn response_to_sse(response: &Value) -> anyhow::Result<Vec<u8>> {
+    response_to_sse_for_wire(response, UpstreamWireApi::Responses)
+}
+
+pub fn response_to_sse_for_wire(
+    response: &Value,
+    wire_api: UpstreamWireApi,
+) -> anyhow::Result<Vec<u8>> {
     let mut output = String::new();
     let mut initial = response.clone();
     initial["status"] = json!("in_progress");
@@ -4024,7 +3621,7 @@ pub fn response_to_sse(response: &Value) -> anyhow::Result<Vec<u8>> {
         let kind = item["type"].as_str().unwrap_or("");
         if !matches!(
             kind,
-            "message" | "reasoning" | "function_call" | "custom_tool_call"
+            "message" | "reasoning" | "function_call" | "custom_tool_call" | "tool_search_call"
         ) {
             return fidelity::reject("unsupported response item in JSON-to-SSE conversion");
         }
@@ -4121,6 +3718,8 @@ pub fn response_to_sse(response: &Value) -> anyhow::Result<Vec<u8>> {
                 json!({"type":format!("{event}.done"),"item_id":item["id"],"output_index":index});
             done[field] = item[field].clone();
             push_sse(&mut output, &format!("{event}.done"), done);
+        } else if kind == "tool_search_call" {
+            // Its complete structured arguments travel in output_item.done.
         } else {
             continue;
         }
@@ -4132,6 +3731,9 @@ pub fn response_to_sse(response: &Value) -> anyhow::Result<Vec<u8>> {
     }
     let event = match response["status"].as_str() {
         Some("completed") => "response.completed",
+        Some("incomplete") if wire_api == UpstreamWireApi::AnthropicMessages => {
+            "response.completed"
+        }
         Some("incomplete") => "response.incomplete",
         _ => "response.failed",
     };
@@ -4213,6 +3815,7 @@ struct ToolCallState {
 struct ChatSseState {
     response_started: bool,
     completed: bool,
+    failed: bool,
     response_id: String,
     model: String,
     created_at: u64,
@@ -4234,6 +3837,7 @@ impl Default for ChatSseState {
         Self {
             response_started: false,
             completed: false,
+            failed: false,
             response_id: format!("resp_{}", uuid::Uuid::new_v4().simple()),
             model: String::new(),
             created_at: 0,
@@ -4969,6 +4573,7 @@ impl ChatSseState {
         self.finalize_reasoning_into(output);
         self.finalize_text_into(output);
         self.completed = true;
+        self.failed = true;
         let mut error = json!({ "message": message });
         if let Some(error_type) = error_type.filter(|value| !value.is_empty()) {
             error["type"] = json!(error_type);
@@ -5146,45 +4751,6 @@ fn chat_content_text(content: &Value) -> String {
     }
 }
 
-fn anthropic_content_parts(content: &Value) -> Vec<Value> {
-    match content {
-        Value::String(text) if !text.is_empty() => vec![json!({ "type": "text", "text": text })],
-        Value::String(_) => Vec::new(),
-        Value::Array(parts) => parts
-            .iter()
-            .filter_map(|part| match part.get("type").and_then(Value::as_str) {
-                Some("text") => Some(json!({
-                    "type": "text",
-                    "text": part.get("text").and_then(Value::as_str).unwrap_or("")
-                })),
-                Some("image_url") => {
-                    let url = part
-                        .pointer("/image_url/url")
-                        .or_else(|| part.get("image_url"))
-                        .and_then(Value::as_str)?;
-                    if let Some((media_type, data)) = split_data_url(url) {
-                        Some(json!({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": data
-                            }
-                        }))
-                    } else {
-                        Some(json!({
-                            "type": "image",
-                            "source": { "type": "url", "url": url }
-                        }))
-                    }
-                }
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
 fn gemini_content_parts(content: &Value) -> Vec<Value> {
     match content {
         Value::String(text) if !text.is_empty() => vec![json!({ "text": text })],
@@ -5240,44 +4806,6 @@ fn parse_json_or_string(value: &str) -> Value {
     }
 }
 
-fn anthropic_usage_to_chat_usage(usage: Option<&Value>) -> Value {
-    let usage = usage.unwrap_or(&Value::Null);
-    let input_tokens = usage
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output_tokens = usage
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let cache_read = usage
-        .get("cache_read_input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let cache_creation = usage
-        .get("cache_creation_input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let mut result = if usage.is_object() {
-        usage.clone()
-    } else {
-        json!({})
-    };
-    result["prompt_tokens"] = json!(
-        input_tokens
-            .saturating_add(cache_read)
-            .saturating_add(cache_creation)
-    );
-    result["completion_tokens"] = json!(output_tokens);
-    result["total_tokens"] = json!(
-        input_tokens
-            .saturating_add(cache_read)
-            .saturating_add(cache_creation)
-            .saturating_add(output_tokens)
-    );
-    result
-}
-
 fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
     let usage = usage.unwrap_or(&Value::Null);
     let prompt_tokens = usage
@@ -5318,15 +4846,6 @@ fn gemini_usage_to_chat_usage(usage: Option<&Value>) -> Value {
         .unwrap()
         .extend(normalized.as_object().unwrap().clone());
     result
-}
-
-fn anthropic_finish_reason(reason: &str) -> &'static str {
-    match reason {
-        "max_tokens" => "length",
-        "tool_use" => "tool_calls",
-        "end_turn" | "stop_sequence" => "stop",
-        _ => "content_filter",
-    }
 }
 
 fn gemini_finish_reason(reason: &str, has_tools: bool) -> &'static str {
@@ -10415,7 +9934,7 @@ const IMAGE_DATA_URL_PREFIX: &str = "data:image/";
 
 impl ChatSseToResponsesConverter {
     pub fn has_failed(&self) -> bool {
-        self.failed
+        self.failed || self.state.failed
     }
     pub fn has_terminal_event(&self) -> bool {
         self.failed || self.state.completed

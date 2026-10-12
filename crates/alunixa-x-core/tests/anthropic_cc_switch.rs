@@ -5,7 +5,10 @@ use alunixa_x_core::protocol_proxy::{
 use serde_json::{Value, json};
 
 fn frame(value: Value) -> String {
-    format!("event: {}\ndata: {value}\n\n", value["type"].as_str().unwrap())
+    format!(
+        "event: {}\ndata: {value}\n\n",
+        value["type"].as_str().unwrap()
+    )
 }
 
 fn events(bytes: &[u8]) -> Vec<Value> {
@@ -68,7 +71,10 @@ fn resumed_history_has_a_leading_user_and_no_empty_text_blocks() {
         request["messages"][0]["content"][0]["text"],
         "(continuing the conversation)"
     );
-    assert_eq!(request["messages"][1]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        request["messages"][1]["content"].as_array().unwrap().len(),
+        1
+    );
 }
 
 #[test]
@@ -140,7 +146,10 @@ fn old_claude_uses_a_budget_that_leaves_answer_headroom() {
     }))
     .unwrap();
     assert_eq!(request["max_tokens"], 4096);
-    assert_eq!(request["thinking"], json!({"type":"enabled","budget_tokens":2048}));
+    assert_eq!(
+        request["thinking"],
+        json!({"type":"enabled","budget_tokens":2048})
+    );
     assert!(request.get("output_config").is_none());
 }
 
@@ -152,8 +161,16 @@ fn codex_transport_cache_fields_do_not_block_anthropic_requests() {
         "client_metadata":{"session_id":"fixture"}
     }))
     .unwrap();
-    for field in ["prompt_cache_key", "prompt_cache_retention", "client_metadata", "service_tier"] {
-        assert!(request.get(field).is_none(), "{field} is not an Anthropic wire field");
+    for field in [
+        "prompt_cache_key",
+        "prompt_cache_retention",
+        "client_metadata",
+        "service_tier",
+    ] {
+        assert!(
+            request.get(field).is_none(),
+            "{field} is not an Anthropic wire field"
+        );
     }
 }
 
@@ -180,11 +197,20 @@ fn max_tokens_finishes_with_the_codex_completed_envelope() {
     let last = terminal(&result);
     assert_eq!(last["type"], "response.completed");
     assert_eq!(last["response"]["status"], "incomplete");
-    assert_eq!(last["response"]["incomplete_details"]["reason"], "max_output_tokens");
+    assert_eq!(
+        last["response"]["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
     assert_eq!(last["response"]["usage"]["input_tokens"], 19);
     assert_eq!(last["response"]["usage"]["output_tokens"], 5);
-    assert_eq!(last["response"]["usage"]["input_tokens_details"]["cached_tokens"], 3);
-    assert_eq!(last["response"]["usage"]["input_tokens_details"]["cache_write_tokens"], 4);
+    assert_eq!(
+        last["response"]["usage"]["input_tokens_details"]["cached_tokens"],
+        3
+    );
+    assert_eq!(
+        last["response"]["usage"]["input_tokens_details"]["cache_write_tokens"],
+        4
+    );
 }
 
 #[test]
@@ -193,8 +219,13 @@ fn content_blocks_close_independently_and_keep_wire_order() {
         NativeSseToResponsesConverter::with_request(UpstreamWireApi::AnthropicMessages, &json!({}));
     let mut output = converter.push_bytes(frame(start()).as_bytes());
     output.extend(converter.push_bytes(frame(json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"before"}})).as_bytes()));
-    let closed = converter.push_bytes(frame(json!({"type":"content_block_stop","index":0})).as_bytes());
-    assert!(events(&closed).iter().any(|e| e["type"] == "response.output_item.done"));
+    let closed =
+        converter.push_bytes(frame(json!({"type":"content_block_stop","index":0})).as_bytes());
+    assert!(
+        events(&closed)
+            .iter()
+            .any(|e| e["type"] == "response.output_item.done")
+    );
     output.extend(closed);
     for value in [
         json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"x","name":"exec","input":{}}}),
@@ -231,7 +262,12 @@ fn streamed_arguments_override_the_gateway_start_input() {
     let result = stream(values, json!({}));
     assert_eq!(terminal(&result)["type"], "response.completed");
     assert_eq!(
-        serde_json::from_str::<Value>(terminal(&result)["response"]["output"][0]["arguments"].as_str().unwrap()).unwrap(),
+        serde_json::from_str::<Value>(
+            terminal(&result)["response"]["output"][0]["arguments"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap(),
         json!({"cmd":"actual"})
     );
 }
@@ -248,10 +284,25 @@ fn truncated_tool_arguments_are_preserved_but_never_executable() {
     let result = stream(values, json!({}));
     assert_eq!(terminal(&result)["type"], "response.completed");
     assert_eq!(terminal(&result)["response"]["status"], "incomplete");
-    assert_eq!(terminal(&result)["response"]["output"][0]["arguments"], "{\"cmd\":");
-    assert_eq!(terminal(&result)["response"]["output"][0]["status"], "incomplete");
-    assert!(!result.iter().any(|e| e["type"] == "response.function_call_arguments.done"));
-    assert!(!result.iter().any(|e| e["type"] == "response.output_item.done" && e["item"]["type"] == "function_call"));
+    assert_eq!(
+        terminal(&result)["response"]["output"][0]["arguments"],
+        "{\"cmd\":"
+    );
+    assert_eq!(
+        terminal(&result)["response"]["output"][0]["status"],
+        "incomplete"
+    );
+    assert!(
+        !result
+            .iter()
+            .any(|e| e["type"] == "response.function_call_arguments.done")
+    );
+    assert!(
+        !result
+            .iter()
+            .any(|e| e["type"] == "response.output_item.done"
+                && e["item"]["type"] == "function_call")
+    );
 }
 
 #[test]
@@ -269,29 +320,45 @@ fn signed_reasoning_is_closed_and_replayed_in_the_same_tool_turn() {
     values.extend(end("tool_use"));
     let result = stream(values, json!({"model":"claude-opus-4-6"}));
     let items = terminal(&result)["response"]["output"].as_array().unwrap();
-    assert_eq!(items.len(), 2, "one reasoning item per native block, no synthetic whole-response replay");
-    assert!(items[0]["encrypted_content"].as_str().unwrap().starts_with("ccswitch-anthropic-thinking-v1:"));
+    assert_eq!(
+        items.len(),
+        2,
+        "one reasoning item per native block, no synthetic whole-response replay"
+    );
+    assert!(
+        items[0]["encrypted_content"]
+            .as_str()
+            .unwrap()
+            .starts_with("ccswitch-anthropic-thinking-v1:")
+    );
     let mut input = vec![json!({"role":"user","content":"inspect"})];
     input.extend(items.clone());
     input.push(json!({"type":"function_call_output","call_id":"x","output":"ok"}));
     let replay = responses_to_anthropic_messages(json!({
         "model":"claude-opus-4-6","reasoning":{"effort":"high"},"input":input
-    })).unwrap();
+    }))
+    .unwrap();
     assert_eq!(replay["thinking"]["type"], "adaptive");
-    assert_eq!(replay["messages"][1]["content"][0],
-        json!({"type":"thinking","thinking":"思考🐱","signature":"signed-thinking"}));
+    assert_eq!(
+        replay["messages"][1]["content"][0],
+        json!({"type":"thinking","thinking":"思考🐱","signature":"signed-thinking"})
+    );
     assert_eq!(replay["messages"][1]["content"][1]["id"], "x");
 }
 
 #[test]
 fn json_conversion_does_not_flatten_separate_native_content_blocks() {
-    let response = anthropic_message_to_response_with_request(json!({
-        "id":"msg_fixture","content":[
-            {"type":"text","text":"before"},
-            {"type":"thinking","thinking":"thought","signature":"signed"},
-            {"type":"text","text":"after"}
-        ],"stop_reason":"end_turn"
-    }), &json!({})).unwrap();
+    let response = anthropic_message_to_response_with_request(
+        json!({
+            "id":"msg_fixture","content":[
+                {"type":"text","text":"before"},
+                {"type":"thinking","thinking":"thought","signature":"signed"},
+                {"type":"text","text":"after"}
+            ],"stop_reason":"end_turn"
+        }),
+        &json!({}),
+    )
+    .unwrap();
     let output = response["output"].as_array().unwrap();
     assert_eq!(output.len(), 3);
     assert_eq!(output[0]["content"][0]["text"], "before");
@@ -301,9 +368,14 @@ fn json_conversion_does_not_flatten_separate_native_content_blocks() {
 
 #[test]
 fn stream_failures_and_duplicate_terminal_events_never_become_success() {
-    for data in [b"data: {broken}\n\n".as_slice(), b"data: \xff\n\n".as_slice()] {
-        let mut converter =
-            NativeSseToResponsesConverter::with_request(UpstreamWireApi::AnthropicMessages, &json!({}));
+    for data in [
+        b"data: {broken}\n\n".as_slice(),
+        b"data: \xff\n\n".as_slice(),
+    ] {
+        let mut converter = NativeSseToResponsesConverter::with_request(
+            UpstreamWireApi::AnthropicMessages,
+            &json!({}),
+        );
         let mut output = converter.push_bytes(data);
         output.extend(converter.finish());
         assert_eq!(terminal(&events(&output))["type"], "response.failed");
@@ -311,12 +383,24 @@ fn stream_failures_and_duplicate_terminal_events_never_become_success() {
     let mut converter =
         NativeSseToResponsesConverter::with_request(UpstreamWireApi::AnthropicMessages, &json!({}));
     let mut output = converter.push_bytes(frame(start()).as_bytes());
-    output.extend(converter.push_bytes(frame(json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}})).as_bytes()));
+    output.extend(converter.push_bytes(
+        frame(json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}})).as_bytes(),
+    ));
     assert!(!converter.is_completed());
     output.extend(converter.push_bytes(frame(json!({"type":"message_stop"})).as_bytes()));
     assert!(converter.is_completed());
-    assert!(converter.push_bytes(frame(json!({"type":"message_stop"})).as_bytes()).is_empty());
+    assert!(
+        converter
+            .push_bytes(frame(json!({"type":"message_stop"})).as_bytes())
+            .is_empty()
+    );
     assert!(converter.fail("late failure".into(), None).is_empty());
     assert!(converter.finish().is_empty());
-    assert_eq!(events(&output).iter().filter(|e| e["type"] == "response.completed").count(), 1);
+    assert_eq!(
+        events(&output)
+            .iter()
+            .filter(|e| e["type"] == "response.completed")
+            .count(),
+        1
+    );
 }
