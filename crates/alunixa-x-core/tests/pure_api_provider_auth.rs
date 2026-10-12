@@ -106,7 +106,11 @@ fn pure_api_backfill_keeps_archived_provider_auth_instead_of_live_credentials() 
             .config_contents
             .contains(r#"experimental_bearer_token = "fixture-provider-key""#)
     );
-    assert!(!profile.config_contents.contains("fixture-unrelated-live-key"));
+    assert!(
+        !profile
+            .config_contents
+            .contains("fixture-unrelated-live-key")
+    );
     assert!(!profile.auth_contents.contains("fixture-oauth"));
     apply_relay_profile_to_home_with_switch_rules(temp.path(), &profile, "").unwrap();
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();

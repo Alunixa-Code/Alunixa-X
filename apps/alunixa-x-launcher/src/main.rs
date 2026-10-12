@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 pub use alunixa_x_core::launcher::LaunchOptions;
 use alunixa_x_core::launcher::{
     BridgeReinjector, DefaultLaunchHooks, LaunchHandle, LaunchHooks, launch_and_inject_with_hooks,
@@ -7,6 +6,7 @@ use alunixa_x_core::models::{DeleteResult, ExportResult, SessionRef};
 use alunixa_x_core::routes::{BridgeContext, BridgeDataService, BridgeRuntimeService};
 use alunixa_x_core::status::LaunchStatus;
 use alunixa_x_core::user_scripts::UserScriptManager;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -17,7 +17,9 @@ type NavigationHandler = Arc<dyn Fn(Value) -> Result<()> + Send + Sync>;
 static NAVIGATION_HANDLER: OnceLock<Mutex<Option<NavigationHandler>>> = OnceLock::new();
 
 pub fn blocking_runtime_for_cli() -> anyhow::Result<tokio::runtime::Runtime> {
-    Ok(tokio::runtime::Builder::new_multi_thread().enable_all().build()?)
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?)
 }
 
 /// 显示同一进程中的主窗口；宿主可消费 pending navigation 后通知前端。
@@ -207,7 +209,10 @@ impl RuntimeWorker {
                 tokio::task::LocalSet::new()
                     .block_on(&runtime, runtime_commands(receiver, runner, activate));
             })?;
-        if let Err(error) = initialized.recv().context("Alunixa X 后台运行时初始化失败")? {
+        if let Err(error) = initialized
+            .recv()
+            .context("Alunixa X 后台运行时初始化失败")?
+        {
             let _ = thread.join();
             return Err(error);
         }
@@ -325,7 +330,9 @@ fn shutdown_worker(current: RuntimeWorker) -> Result<()> {
         .send(RuntimeCommand::Shutdown(reply))
         .is_ok();
     let cleanup = if sent {
-        result.recv().context("Alunixa X 后台运行时未返回退出结果")?
+        result
+            .recv()
+            .context("Alunixa X 后台运行时未返回退出结果")?
     } else {
         Ok(())
     };
@@ -916,8 +923,7 @@ impl LaunchHooks for LauncherHooks {
         // 为空或被截断）失败时，provider sync 返回 Skipped 并带上底层 serde_json 原文；
         // 以前这里用 `?` 把它变成致命的，用户看到一句无从下手的英文就直接退出了。
         // 口径与 run_activation_provider_sync 一致：失败只记诊断日志，不阻断启动。
-        let outcome =
-            tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None)).await;
+        let outcome = tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None)).await;
         match outcome {
             Ok(result) => {
                 if let Err(error) = require_completed_provider_sync(&result.status, &result.message)
@@ -1088,7 +1094,9 @@ impl LaunchHooks for LauncherHooks {
     ) -> anyhow::Result<()> {
         self.core.apply_active_relay_profile(settings).await
     }
-    fn managed_launch_preparation_enabled(&self) -> bool { !self.attach_only }
+    fn managed_launch_preparation_enabled(&self) -> bool {
+        !self.attach_only
+    }
     async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
         self.core.wait_for_native_ui(debug_port).await
     }
@@ -1374,7 +1382,6 @@ impl BridgeDataService for LauncherDataService {
         .await
         .map_err(|error| anyhow::anyhow!("Remote Control session recovery task failed: {error}"))?
     }
-
 }
 
 impl LauncherDataService {
@@ -1399,7 +1406,6 @@ impl LauncherDataService {
         .with_allowed_db_paths(allowed_db_paths)
         .with_codex_home(alunixa_x_core::codex_sqlite::default_codex_home_dir())
     }
-
 }
 
 struct LauncherRuntimeService {
@@ -2103,9 +2109,7 @@ mod tests {
             app_dir: Some(PathBuf::from("/test/Codex.app")),
             debug_port: 9333,
             helper_port: 57322,
-            status_store: alunixa_x_core::status::StatusStore::new(
-                temp.path().join("latest.json"),
-            ),
+            status_store: alunixa_x_core::status::StatusStore::new(temp.path().join("latest.json")),
         };
         let request = LaunchStatus {
             status: "starting".into(),

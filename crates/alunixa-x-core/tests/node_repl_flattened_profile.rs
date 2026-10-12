@@ -48,7 +48,11 @@ CODEX_HOME = 'C:\Users\shizi\.codex'
 fn flattened_profile_must_be_repaired_from_live() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(temp.path().join("config.toml"), LIVE).unwrap();
-    fs::write(temp.path().join("auth.json"), r#"{"OPENAI_API_KEY":"sk-test"}"#).unwrap();
+    fs::write(
+        temp.path().join("auth.json"),
+        r#"{"OPENAI_API_KEY":"sk-test"}"#,
+    )
+    .unwrap();
 
     let profile = RelayProfile {
         id: "relay-test".to_string(),

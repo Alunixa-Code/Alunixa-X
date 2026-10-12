@@ -454,8 +454,7 @@ impl TrackedWindowsProcess {
         } else if result == WAIT_TIMEOUT {
             Ok(true)
         } else {
-            Err(std::io::Error::last_os_error())
-                .context("failed to probe tracked Windows process")
+            Err(std::io::Error::last_os_error()).context("failed to probe tracked Windows process")
         }
     }
 }
@@ -540,7 +539,10 @@ pub(crate) fn loopback_listener_process_ids(port: u16) -> anyhow::Result<Vec<u32
 #[cfg(any(windows, test))]
 fn unique_listener_process_id(ids: &[u32]) -> anyhow::Result<Option<u32>> {
     let first = ids.first().copied();
-    anyhow::ensure!(ids.iter().all(|pid| Some(*pid) == first), "ambiguous Windows debug listener owners across address families");
+    anyhow::ensure!(
+        ids.iter().all(|pid| Some(*pid) == first),
+        "ambiguous Windows debug listener owners across address families"
+    );
     Ok(first)
 }
 

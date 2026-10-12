@@ -2575,10 +2575,7 @@ exit 1
             &BTreeMap::new(),
         );
         assert_eq!(payload["marketplaces"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            payload["marketplaces"][0]["name"],
-            "alunixa-x-index-public"
-        );
+        assert_eq!(payload["marketplaces"][0]["name"], "alunixa-x-index-public");
         assert_eq!(
             payload["marketplaceLoadErrors"].as_array().unwrap().len(),
             1

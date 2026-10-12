@@ -86,7 +86,9 @@ function fixture(layout = "sidebar") {
       archiveNav: "[data-archive-nav]", pluginNavButton: 'nav[role="navigation"] button.h-token-nav-row.w-full', pluginSvgPath: "path[data-plugin-icon]", disabledInstallButton: "[data-disabled-install]" },
     codexPluginMarketplacePatchEnabled: () => false, nodeOrAncestorLooksLikeCodexUserBubble: () => false, nodeLooksLikeCodexUserBubble: () => false,
   });
-  const functions = [
+  const footer = fragment("90-action-groups.js").match(/^  const codexServiceTierComposerFooterSelector = .*;$/m)?.[0];
+  assert.ok(footer, "scan fixture must import the production footer selector");
+  const functions = [footer,
     extract(adapter, "alunixaXNativePluginNavigationEntry"), extract(adapter, "openCodexPlusNativePluginMarket"),
     ...["alunixaXRailTemplateButton", "alunixaXRailPrimaryAnchor", "createCodexPlusRailButton", "installCodexPlusRailNavigation", "installCodexPlusSidebarNavigation", "detachCodexPlusSidebarNavigation", "removeCodexPlusRailNavigation"].map(name => extract(navigation, name)),
     extract(entryNavigation, "installCodexPlusNavigationEntries"),

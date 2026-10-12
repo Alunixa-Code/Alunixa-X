@@ -154,10 +154,20 @@ fn model_ui_metadata_map_with_overrides(models: &[String], user_json: &str) -> V
     let mut metadata = Map::new();
     for model in models {
         let slug = crate::model_suffix::parse_model_suffix(model).0;
-        let user_override = user.as_object().and_then(|entries| entries.iter()
-            .find(|(key, value)| value.is_object() && crate::model_suffix::parse_model_suffix(key).0.eq_ignore_ascii_case(&slug))
-            .map(|(_, value)| value));
-        if let Some(value) = crate::model_suffix::model_ui_metadata_with_override(model, user_override) {
+        let user_override = user.as_object().and_then(|entries| {
+            entries
+                .iter()
+                .find(|(key, value)| {
+                    value.is_object()
+                        && crate::model_suffix::parse_model_suffix(key)
+                            .0
+                            .eq_ignore_ascii_case(&slug)
+                })
+                .map(|(_, value)| value)
+        });
+        if let Some(value) =
+            crate::model_suffix::model_ui_metadata_with_override(model, user_override)
+        {
             metadata.insert(model.clone(), value);
         }
     }
@@ -1045,7 +1055,11 @@ mod model_fetch_tests {
         assert_eq!(metadata["grok-custom"]["serviceTiers"][0]["id"], "flex");
         assert_eq!(metadata["grok-custom"]["serviceTiers"][1]["id"], "priority");
         assert!(metadata.get("grok-unknown").is_none());
-        assert!(metadata["grok-custom"].get("alunixa_x_fast_support").is_none());
+        assert!(
+            metadata["grok-custom"]
+                .get("alunixa_x_fast_support")
+                .is_none()
+        );
     }
 
     #[test]

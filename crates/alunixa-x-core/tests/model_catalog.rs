@@ -160,29 +160,46 @@ async fn model_catalog_uses_active_relay_profile_model_list_for_display() {
     assert_eq!(result["status"], "ok");
     assert_eq!(result["model_provider"], "relay-a");
     assert_eq!(result["provider_name"], "Relay A");
-    assert_eq!(result["model"], "deepseek-coder");
-    assert_eq!(result["default_model"], "deepseek-coder");
+    // The effective default follows the explicit selected model; list order stays independent.
+    assert_eq!(result["model"], "qwen3-coder");
+    assert_eq!(result["default_model"], "qwen3-coder");
     assert_eq!(
         result["models"],
         json!([
-            "deepseek-coder",
             "qwen3-coder",
+            "deepseek-coder",
             "claude-compatible",
             "gpt-5.6-sol"
         ])
     );
+    let pinned: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../assets/gpt56-model-metadata-compat.json"
+    ))
+    .unwrap();
+    let expected = pinned["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["slug"] == "gpt-5.6-sol")
+        .unwrap();
     assert_eq!(
         result["modelMetadata"]["gpt-5.6-sol"]["defaultReasoningEffort"],
-        "low"
+        expected["default_reasoning_level"]
     );
+    let expected_efforts = expected["supported_reasoning_levels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            json!({
+                "reasoningEffort": entry["effort"],
+                "description": entry["description"],
+            })
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        result["modelMetadata"]["gpt-5.6-sol"]["supportedReasoningEfforts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|entry| entry["reasoningEffort"].as_str())
-            .collect::<Vec<_>>(),
-        ["low", "medium", "high", "xhigh"]
+        result["modelMetadata"]["gpt-5.6-sol"]["supportedReasoningEfforts"],
+        json!(expected_efforts)
     );
     assert_eq!(result["sources"][0]["type"], "relay_profile_model_list");
 }

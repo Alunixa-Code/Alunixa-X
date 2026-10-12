@@ -3,8 +3,8 @@
 //! 后缀语法：`deepseek-v4-pro[1M]` 表示 slug=deepseek-v4-pro、context_window=1000000。
 //! 单位 K/k=1000、M/m=1000000；纯数字也接受。后缀在生成 catalog 时剥离。
 
-use serde_json::{Value, json};
 use crate::settings::ReasoningEffort;
+use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -334,9 +334,13 @@ pub fn model_ui_metadata_with_override(slug: &str, user_override: Option<&Value>
     if resolved.is_none() && user_override.is_none() {
         return None;
     }
-    let normalized_slug = resolved.as_ref().map(|entry| entry.slug.clone())
+    let normalized_slug = resolved
+        .as_ref()
+        .map(|entry| entry.slug.clone())
         .unwrap_or_else(|| normalized_model_slug(slug));
-    let mut metadata = resolved.map(|entry| entry.entry).unwrap_or_else(|| json!({}));
+    let mut metadata = resolved
+        .map(|entry| entry.entry)
+        .unwrap_or_else(|| json!({}));
     if let Some(user) = user_override
         && let Some(model) = metadata.as_object_mut()
     {
@@ -408,10 +412,19 @@ pub fn model_ui_metadata_with_override(slug: &str, user_override: Option<&Value>
         let declaration = match fast_mode.and_then(Value::as_str) {
             Some("supported") => Some(true),
             Some("unsupported") => Some(false),
-            _ => user.get("service_tiers").and_then(Value::as_array)
-                .map(|tiers| tiers.iter().any(|tier| model_speed_tier_is(tier, "priority")))
-                .or_else(|| user.get("additional_speed_tiers").and_then(Value::as_array)
-                    .map(|tiers| tiers.iter().any(|tier| model_speed_tier_is(tier, "fast")))),
+            _ => user
+                .get("service_tiers")
+                .and_then(Value::as_array)
+                .map(|tiers| {
+                    tiers
+                        .iter()
+                        .any(|tier| model_speed_tier_is(tier, "priority"))
+                })
+                .or_else(|| {
+                    user.get("additional_speed_tiers")
+                        .and_then(Value::as_array)
+                        .map(|tiers| tiers.iter().any(|tier| model_speed_tier_is(tier, "fast")))
+                }),
         };
         if let Some(supported) = declaration {
             ui["prioritySupportOverride"] = json!(supported);
@@ -421,7 +434,8 @@ pub fn model_ui_metadata_with_override(slug: &str, user_override: Option<&Value>
 }
 
 fn model_speed_tier_is(tier: &Value, expected: &str) -> bool {
-    tier.as_str().or_else(|| tier.get("id").and_then(Value::as_str))
+    tier.as_str()
+        .or_else(|| tier.get("id").and_then(Value::as_str))
         .is_some_and(|id| id.trim().eq_ignore_ascii_case(expected))
 }
 
@@ -433,13 +447,24 @@ pub(crate) fn apply_model_fast_support(model: &mut Value, declaration: Option<&V
         _ => return,
     };
     for (field, tier, added) in [
-        ("service_tiers", "priority", json!({"id":"priority", "name":"Fast", "description":"Priority processing declared for this provider."})),
+        (
+            "service_tiers",
+            "priority",
+            json!({"id":"priority", "name":"Fast", "description":"Priority processing declared for this provider."}),
+        ),
         ("additional_speed_tiers", "fast", json!("fast")),
     ] {
-        let mut values = model.get(field).and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut values = model
+            .get(field)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         if supported {
             if field == "service_tiers" {
-                for value in values.iter_mut().filter(|value| model_speed_tier_is(value, tier)) {
+                for value in values
+                    .iter_mut()
+                    .filter(|value| model_speed_tier_is(value, tier))
+                {
                     let mut entry = value.as_object().cloned().unwrap_or_default();
                     for key in ["id", "name", "description"] {
                         if entry.get(key).is_none_or(|value| !value.is_string()) {
@@ -449,7 +474,9 @@ pub(crate) fn apply_model_fast_support(model: &mut Value, declaration: Option<&V
                     *value = Value::Object(entry);
                 }
             }
-            if !values.iter().any(|value| model_speed_tier_is(value, tier)) { values.push(added); }
+            if !values.iter().any(|value| model_speed_tier_is(value, tier)) {
+                values.push(added);
+            }
         } else {
             values.retain(|value| !model_speed_tier_is(value, tier));
         }
@@ -560,7 +587,11 @@ pub fn builtin_model_metadata_index() -> Vec<Value> {
     if let Some(models) = runtime_models_catalog() {
         collect_candidates(&models, &mut candidate_seen, &mut candidate_slugs);
     }
-    collect_candidates(bundled_catalog_models(), &mut candidate_seen, &mut candidate_slugs);
+    collect_candidates(
+        bundled_catalog_models(),
+        &mut candidate_seen,
+        &mut candidate_slugs,
+    );
 
     let mut seen = HashSet::new();
     let mut index = Vec::new();
@@ -818,13 +849,12 @@ pub fn fallback_template_info() -> Option<(String, u64)> {
 
 /// 缓存每份静态 catalog 的解析结果，但只在锁内完成查找并返回 owned Value。
 fn catalog_metadata_entry(catalog_json: &'static str, slug: &str) -> Option<Value> {
-    with_catalog_metadata_models(catalog_json, |models| find_catalog_entry(models, slug).cloned())
+    with_catalog_metadata_models(catalog_json, |models| {
+        find_catalog_entry(models, slug).cloned()
+    })
 }
 
-fn with_catalog_metadata_models<T>(
-    catalog_json: &'static str,
-    f: impl FnOnce(&[Value]) -> T,
-) -> T {
+fn with_catalog_metadata_models<T>(catalog_json: &'static str, f: impl FnOnce(&[Value]) -> T) -> T {
     static INDEXES: OnceLock<Mutex<HashMap<&'static str, Vec<Value>>>> = OnceLock::new();
     let indexes = INDEXES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut indexes = indexes

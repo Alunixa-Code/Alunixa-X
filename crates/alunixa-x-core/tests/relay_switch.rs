@@ -122,11 +122,7 @@ base_url = "https://b.example/v1"
     let error = switch_relay_profile_in_home(&store, &home, next, "a")
         .expect_err("missing api key should fail post-write status check");
 
-    assert!(
-        error
-            .to_string()
-            .contains("纯 API 配置写入后未检测到完整 custom provider")
-    );
+    assert!(error.to_string().contains("配置保存失败"));
     assert_eq!(store.load().unwrap(), persisted_original);
     assert_eq!(
         std::fs::read(temp.path().join("settings.json")).unwrap(),

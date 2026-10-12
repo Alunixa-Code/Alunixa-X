@@ -211,6 +211,7 @@ fn legacy_macos_layout_redirects_companions_to_unified_app() {
             assert!(
                 companion_binary_path_from_exe(Path::new(old), binary)
                     .to_string_lossy()
+                    .replace('\\', "/")
                     .eq_ignore_ascii_case("/Applications/Alunixa X.app/Contents/MacOS/AlunixaX")
             );
             assert_eq!(

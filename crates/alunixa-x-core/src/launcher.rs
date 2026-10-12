@@ -290,8 +290,12 @@ pub trait LaunchHooks: Send + Sync {
     async fn apply_active_relay_profile(&self, _settings: &BackendSettings) -> anyhow::Result<()> {
         Ok(())
     }
-    fn managed_launch_preparation_enabled(&self) -> bool { false }
-    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> { Ok(()) }
+    fn managed_launch_preparation_enabled(&self) -> bool {
+        false
+    }
+    async fn wait_for_native_ui(&self, _debug_port: u16) -> anyhow::Result<()> {
+        Ok(())
+    }
     async fn ensure_active_protocol_proxy_config(
         &self,
         _settings: &BackendSettings,
@@ -797,8 +801,11 @@ where
         Err(error) => {
             if let Some(launch) = launched.clone().filter(|_| keep_launched_on_error) {
                 let degraded = launch_status(
-                    "running_degraded", "Codex is running; post-launch integration needs recovery.",
-                    debug_port, helper_port, &app_dir,
+                    "running_degraded",
+                    "Codex is running; post-launch integration needs recovery.",
+                    debug_port,
+                    helper_port,
+                    &app_dir,
                 );
                 let _ = options.status_store.save_latest(&degraded);
                 let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -806,9 +813,14 @@ where
                     serde_json::json!({"stage":"post_launch","category":"integration_failed"}),
                 );
                 return Ok(LaunchHandle {
-                    debug_port, helper_port, app_dir, launch,
-                    status_store, status_started_at_ms: degraded.started_at_ms,
-                    helper_started, hooks: Arc::clone(&hooks),
+                    debug_port,
+                    helper_port,
+                    app_dir,
+                    launch,
+                    status_store,
+                    status_started_at_ms: degraded.started_at_ms,
+                    helper_started,
+                    hooks: Arc::clone(&hooks),
                 });
             }
             hooks.stop_native_browser_compatibility().await;
@@ -913,7 +925,9 @@ fn helper_bind_host() -> String {
 
 #[async_trait(?Send)]
 impl LaunchHooks for DefaultLaunchHooks {
-    fn managed_launch_preparation_enabled(&self) -> bool { true }
+    fn managed_launch_preparation_enabled(&self) -> bool {
+        true
+    }
     async fn wait_for_native_ui(&self, debug_port: u16) -> anyhow::Result<()> {
         crate::runtime_health::wait_for_native_ui(debug_port).await
     }
@@ -1064,8 +1078,8 @@ impl LaunchHooks for DefaultLaunchHooks {
         extra_args: &[String],
     ) -> anyhow::Result<CodexLaunch> {
         let launch_extra_args = normalize_codex_extra_args(extra_args);
-        let isolated_multi_instance = std::env::var_os("ALUNIXA_X_MULTI_INSTANCE")
-            .is_some_and(|value| value == "1");
+        let isolated_multi_instance =
+            std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").is_some_and(|value| value == "1");
         if cfg!(windows) && !isolated_multi_instance {
             // AUMID 解析留在调用点：它要查系统里的 Store 注册表（#2140），是有副作用
             // 的一步；下面的构造函数只做纯拼接。解析不出来（目录名像包、但系统里没
@@ -1077,11 +1091,20 @@ impl LaunchHooks for DefaultLaunchHooks {
             if let Some(activation) = activation {
                 #[cfg(windows)]
                 {
-                    let executable = crate::install::companion_binary_path(crate::install::APP_BINARY);
+                    let executable =
+                        crate::install::companion_binary_path(crate::install::APP_BINARY);
                     let report = crate::packaged_proxy::inspect_or_repair(
-                        app_dir, &executable, "enforce_at_startup", None, None,
-                    ).await;
-                    anyhow::ensure!(report.status == "ok", "packaged_proxy_prelaunch_verification_failed");
+                        app_dir,
+                        &executable,
+                        "enforce_at_startup",
+                        None,
+                        None,
+                    )
+                    .await;
+                    anyhow::ensure!(
+                        report.status == "ok",
+                        "packaged_proxy_prelaunch_verification_failed"
+                    );
                 }
                 let CodexLaunch::PackagedActivation {
                     app_user_model_id,
@@ -1097,19 +1120,20 @@ impl LaunchHooks for DefaultLaunchHooks {
                         {
                             let executable = crate::app_paths::build_codex_executable(app_dir);
                             // 立即持有激活 PID，不能在漫长注入之后再按旧 PID 打开进程。
-                            let process = match crate::windows_integration::TrackedWindowsProcess::capture(
-                                process_id,
-                                &executable,
-                            ) {
-                                Ok(process) => process,
-                                Err(error) => {
-                                    let _ = crate::diagnostic_log::append_diagnostic_log(
-                                        "launcher.packaged_process_wait_failed_nonfatal",
-                                        serde_json::json!({ "process_id": process_id, "message": format!("{error:#}") }),
-                                    );
-                                    None
-                                }
-                            };
+                            let process =
+                                match crate::windows_integration::TrackedWindowsProcess::capture(
+                                    process_id,
+                                    &executable,
+                                ) {
+                                    Ok(process) => process,
+                                    Err(error) => {
+                                        let _ = crate::diagnostic_log::append_diagnostic_log(
+                                            "launcher.packaged_process_wait_failed_nonfatal",
+                                            serde_json::json!({ "process_id": process_id, "message": format!("{error:#}") }),
+                                        );
+                                        None
+                                    }
+                                };
                             *self.packaged_executable.lock().await = Some(executable);
                             *self.packaged_activation_process.lock().await = process;
                             *self.packaged_launch_identity.lock().await = None;
@@ -1224,13 +1248,20 @@ impl LaunchHooks for DefaultLaunchHooks {
         #[cfg(windows)]
         {
             let mut identity = self.packaged_launch_identity.lock().await;
-            if identity.is_some() { return; }
-            let Some(executable) = self.packaged_executable.lock().await.clone() else { return; };
+            if identity.is_some() {
+                return;
+            }
+            let Some(executable) = self.packaged_executable.lock().await.clone() else {
+                return;
+            };
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
             let mut last_discovery_error = None;
             loop {
                 let browser_id = validated_codex_browser_id(debug_port).await;
-                let mut process = match crate::windows_integration::capture_debug_listener(debug_port, &executable) {
+                let mut process = match crate::windows_integration::capture_debug_listener(
+                    debug_port,
+                    &executable,
+                ) {
                     Ok(process) => process,
                     Err(error) => {
                         let message = format!("{error:#}");
@@ -1245,15 +1276,22 @@ impl LaunchHooks for DefaultLaunchHooks {
                     }
                 };
                 let activation = self.packaged_activation_process.lock().await;
-                let activation_matches = activation.as_ref().zip(process.as_ref()).is_some_and(|(activation, process)| {
-                    activation.process_id == process.process_id && activation.birth_id == process.birth_id
-                });
+                let activation_matches = activation.as_ref().zip(process.as_ref()).is_some_and(
+                    |(activation, process)| {
+                        activation.process_id == process.process_id
+                            && activation.birth_id == process.birth_id
+                    },
+                );
                 drop(activation);
                 // target 列表、UUID 和 listener 查询之间可能发生替换；只接受稳定的 Codex UUID。
                 let browser_still_matches = if let Some(initial) = browser_id.as_deref() {
                     validated_codex_browser_id(debug_port).await.as_deref() == Some(initial)
-                } else { false };
-                if browser_id.is_some() && !activation_matches && !browser_still_matches { process = None; }
+                } else {
+                    false
+                };
+                if browser_id.is_some() && !activation_matches && !browser_still_matches {
+                    process = None;
+                }
                 let browser_id = browser_id.filter(|_| browser_still_matches);
                 // 无 CDP 页时，已验证可执行文件和句柄的 listener 仍可作为本次进程身份。
                 if browser_id.is_some() || process.is_some() {
@@ -1266,10 +1304,15 @@ impl LaunchHooks for DefaultLaunchHooks {
                             "birth_id": process.as_ref().map(|process| process.birth_id),
                         }),
                     );
-                    *identity = Some(PackagedLaunchIdentity { browser_id, process });
+                    *identity = Some(PackagedLaunchIdentity {
+                        browser_id,
+                        process,
+                    });
                     return;
                 }
-                if tokio::time::Instant::now() >= deadline { return; }
+                if tokio::time::Instant::now() >= deadline {
+                    return;
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
         }
@@ -1351,13 +1394,27 @@ impl LaunchHooks for DefaultLaunchHooks {
             CodexLaunch::PackagedActivation { process_id, .. } => {
                 #[cfg(windows)]
                 {
-                    let executable = self.packaged_executable.lock().await.take()
+                    let executable = self
+                        .packaged_executable
+                        .lock()
+                        .await
+                        .take()
                         .context("missing packaged Codex executable identity")?;
                     let activation = self.packaged_activation_process.lock().await.take();
-                    let identity = self.packaged_launch_identity.lock().await.take().unwrap_or_default();
+                    let identity = self
+                        .packaged_launch_identity
+                        .lock()
+                        .await
+                        .take()
+                        .unwrap_or_default();
                     return wait_for_windows_packaged_exit(
-                        &executable, *process_id, activation, identity, debug_port,
-                    ).await;
+                        &executable,
+                        *process_id,
+                        activation,
+                        identity,
+                        debug_port,
+                    )
+                    .await;
                 }
                 #[cfg(not(windows))]
                 if let Some(process_id) = process_id {
@@ -1940,41 +1997,48 @@ async fn handle_protocol_proxy_connection(
     remote_addr_text: Option<String>,
 ) -> anyhow::Result<()> {
     let request_json = serde_json::from_str::<serde_json::Value>(request_body).ok();
-    let mut upstream = match crate::protocol_proxy::open_responses_proxy_request_for_path_with_session_headers(
-        request_body,
-        request_user_agent,
-        path,
-        request_beta_features,
-        session_headers,
-    )
-    .await
-    {
-        Ok(upstream) => upstream,
-        Err(error) => {
-            let unsupported = error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
-            let search = error.downcast_ref::<crate::protocol_proxy::UnsupportedNativeWebSearch>();
-            let status = if unsupported.is_some() || search.is_some() { "400 Bad Request" } else { "502 Bad Gateway" };
-            let body = serde_json::to_vec(&unsupported.map(|error| error.response_body()).or_else(|| search.map(|error| error.response_body())).unwrap_or_else(|| {
-                serde_json::json!({"status":"failed","message":error.to_string()})
-            }))?;
-            write_http_response(
-                stream,
-                status,
-                "application/json; charset=utf-8",
-                &body,
-            )
-            .await?;
-            log_helper_proxy_failure(
-                "helper.protocol_proxy_failed",
-                method,
-                path,
-                &error.to_string(),
-                remote_addr_text,
-            );
-            stream.shutdown().await?;
-            return Ok(());
-        }
-    };
+    let mut upstream =
+        match crate::protocol_proxy::open_responses_proxy_request_for_path_with_session_headers(
+            request_body,
+            request_user_agent,
+            path,
+            request_beta_features,
+            session_headers,
+        )
+        .await
+        {
+            Ok(upstream) => upstream,
+            Err(error) => {
+                let unsupported =
+                    error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
+                let search =
+                    error.downcast_ref::<crate::protocol_proxy::UnsupportedNativeWebSearch>();
+                let status = if unsupported.is_some() || search.is_some() {
+                    "400 Bad Request"
+                } else {
+                    "502 Bad Gateway"
+                };
+                let body = serde_json::to_vec(
+                    &unsupported
+                        .map(|error| error.response_body())
+                        .or_else(|| search.map(|error| error.response_body()))
+                        .unwrap_or_else(
+                            || serde_json::json!({"status":"failed","message":error.to_string()}),
+                        ),
+                )?;
+                write_http_response(stream, status, "application/json; charset=utf-8", &body)
+                    .await?;
+                log_helper_proxy_failure(
+                    "helper.protocol_proxy_failed",
+                    method,
+                    path,
+                    &error.to_string(),
+                    remote_addr_text,
+                );
+                stream.shutdown().await?;
+                return Ok(());
+            }
+        };
     if !upstream.is_success() {
         let status = upstream.status();
         let upstream_content_type = upstream.content_type.clone();
@@ -3181,7 +3245,11 @@ fn owned_launcher_target_alive(owned_process_alive: bool, debug_port_open: bool)
 async fn validated_codex_browser_id(debug_port: u16) -> Option<String> {
     let targets = crate::cdp::list_targets(debug_port).await.ok()?;
     crate::cdp::pick_injectable_codex_page_target(&targets).ok()?;
-    crate::cdp::browser_identity(debug_port).await.ok()?.browser_id().ok()
+    crate::cdp::browser_identity(debug_port)
+        .await
+        .ok()?
+        .browser_id()
+        .ok()
 }
 
 #[cfg(any(windows, test))]
@@ -3227,10 +3295,15 @@ struct PackagedBrowserBinding {
 #[cfg(any(windows, test))]
 impl PackagedBrowserBinding {
     fn owns(&mut self, current_id: Option<&str>) -> bool {
-        if self.replaced { return false; }
+        if self.replaced {
+            return false;
+        }
         match (self.initial_id.as_deref(), current_id) {
             (Some(initial), Some(current)) if initial == current => true,
-            (Some(_), Some(_)) => { self.replaced = true; false }
+            (Some(_), Some(_)) => {
+                self.replaced = true;
+                false
+            }
             _ => false,
         }
     }
@@ -3246,7 +3319,10 @@ async fn wait_for_windows_packaged_exit(
 ) -> anyhow::Result<()> {
     use crate::windows_integration::{TrackedWindowsProcess, capture_debug_listener};
     let mut tracked = identity.process;
-    let mut browser = PackagedBrowserBinding { initial_id: identity.browser_id, replaced: false };
+    let mut browser = PackagedBrowserBinding {
+        initial_id: identity.browser_id,
+        replaced: false,
+    };
     let mut grace = PackagedExitGrace::default();
     let mut last_discovery_error: Option<String> = None;
     let started_waiting = std::time::Instant::now();
@@ -3254,27 +3330,38 @@ async fn wait_for_windows_packaged_exit(
         let mut owned_browser = false;
         if tracked.is_none() {
             let current_browser_id = if browser.initial_id.is_some() && !browser.replaced {
-                crate::cdp::browser_identity(debug_port).await.ok()
+                crate::cdp::browser_identity(debug_port)
+                    .await
+                    .ok()
                     .and_then(|identity| identity.browser_id().ok())
-            } else { None };
+            } else {
+                None
+            };
             owned_browser = browser.owns(current_browser_id.as_deref());
             let discovery = if browser.replaced {
                 Ok(None)
             } else {
-                capture_debug_listener(debug_port, executable).map(|process| process.filter(|process| {
-                    // 重新查询只能沿用初始 browser，或启动时已持有的同一个内核进程。
-                    owned_browser || activation.as_ref().is_some_and(|activation| {
-                        activation.process_id == process.process_id && activation.birth_id == process.birth_id
+                capture_debug_listener(debug_port, executable).map(|process| {
+                    process.filter(|process| {
+                        // 重新查询只能沿用初始 browser，或启动时已持有的同一个内核进程。
+                        owned_browser
+                            || activation.as_ref().is_some_and(|activation| {
+                                activation.process_id == process.process_id
+                                    && activation.birth_id == process.birth_id
+                            })
                     })
-                }))
+                })
             };
             let discovery = match discovery {
                 Ok(Some(process)) => {
                     let activation_matches = activation.as_ref().is_some_and(|activation| {
-                        activation.process_id == process.process_id && activation.birth_id == process.birth_id
+                        activation.process_id == process.process_id
+                            && activation.birth_id == process.birth_id
                     });
                     if !activation_matches {
-                        let confirmation = crate::cdp::browser_identity(debug_port).await.ok()
+                        let confirmation = crate::cdp::browser_identity(debug_port)
+                            .await
+                            .ok()
                             .and_then(|identity| identity.browser_id().ok());
                         owned_browser = browser.owns(confirmation.as_deref());
                     }
@@ -4204,19 +4291,38 @@ mod tests {
         // discovery 失败，没有真实句柄，activation 已退出后原路径降级为 None。
         let process_alive = Some(false).filter(|alive| *alive);
         for seconds in [0, 2, 4, 6, 8] {
-            assert!(grace.keep_waiting(process_alive, binding.owns(Some("replacement")), now + std::time::Duration::from_secs(seconds)));
+            assert!(grace.keep_waiting(
+                process_alive,
+                binding.owns(Some("replacement")),
+                now + std::time::Duration::from_secs(seconds)
+            ));
         }
-        assert!(!grace.keep_waiting(process_alive, binding.owns(Some("replacement")), now + std::time::Duration::from_secs(10)));
+        assert!(!grace.keep_waiting(
+            process_alive,
+            binding.owns(Some("replacement")),
+            now + std::time::Duration::from_secs(10)
+        ));
     }
 
     #[test]
     fn packaged_browser_fallback_without_initial_identity_is_bounded() {
         let now = std::time::Instant::now();
-        let mut binding = PackagedBrowserBinding { initial_id: None, replaced: false };
+        let mut binding = PackagedBrowserBinding {
+            initial_id: None,
+            replaced: false,
+        };
         let mut grace = PackagedExitGrace::default();
         assert!(grace.keep_waiting(None, binding.owns(Some("unbound")), now));
-        assert!(grace.keep_waiting(None, binding.owns(Some("unbound")), now + std::time::Duration::from_secs(2)));
-        assert!(!grace.keep_waiting(None, binding.owns(Some("unbound")), now + std::time::Duration::from_secs(10)));
+        assert!(grace.keep_waiting(
+            None,
+            binding.owns(Some("unbound")),
+            now + std::time::Duration::from_secs(2)
+        ));
+        assert!(!grace.keep_waiting(
+            None,
+            binding.owns(Some("unbound")),
+            now + std::time::Duration::from_secs(10)
+        ));
     }
 
     #[tokio::test]
@@ -4240,30 +4346,50 @@ mod tests {
                         serde_json::json!([{ "id":"page", "type":"page", "title":"fixture", "url":url,
                             "webSocketDebuggerUrl":format!("ws://127.0.0.1:{port}/devtools/page/fixture-page") }])
                     }.to_string();
-                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
                     stream.write_all(response.as_bytes()).await.unwrap();
                 }
             });
             let identity = validated_codex_browser_id(port).await;
             server.await.unwrap();
             assert_eq!(identity.as_deref(), accepted.then_some("fixture-browser"));
-            assert_eq!(requests.lock().unwrap().as_slice(), if accepted { &["/json", "/json/version"][..] } else { &["/json"][..] });
+            assert_eq!(
+                requests.lock().unwrap().as_slice(),
+                if accepted {
+                    &["/json", "/json/version"][..]
+                } else {
+                    &["/json"][..]
+                }
+            );
         }
     }
 
     #[test]
     fn packaged_browser_fallback_after_discovery_error_keeps_only_same_initial_browser() {
         let now = std::time::Instant::now();
-        let mut binding = PackagedBrowserBinding { initial_id: Some("original".to_string()), replaced: false };
+        let mut binding = PackagedBrowserBinding {
+            initial_id: Some("original".to_string()),
+            replaced: false,
+        };
         let mut grace = PackagedExitGrace::default();
         let process_alive = Some(false).filter(|alive| *alive);
         for seconds in [0, 10, 60, 3600] {
-            assert!(grace.keep_waiting(process_alive, binding.owns(Some("original")), now + std::time::Duration::from_secs(seconds)));
+            assert!(grace.keep_waiting(
+                process_alive,
+                binding.owns(Some("original")),
+                now + std::time::Duration::from_secs(seconds)
+            ));
         }
         assert!(!binding.owns(None));
         assert!(binding.owns(Some("original")));
         assert!(!binding.owns(Some("replacement")));
-        assert!(!binding.owns(Some("original")), "实例替换后不能重新绑定旧 ID");
+        assert!(
+            !binding.owns(Some("original")),
+            "实例替换后不能重新绑定旧 ID"
+        );
     }
 
     #[test]
@@ -4276,8 +4402,8 @@ mod tests {
         let mut grace = PackagedExitGrace::default();
         for seconds in [0, 10, 30, 60, 3600] {
             let elapsed = std::time::Duration::from_secs(seconds);
-            let activation_alive = Some(false)
-                .filter(|alive| activation_process_is_startup_evidence(*alive, elapsed));
+            let activation_alive =
+                Some(false).filter(|alive| activation_process_is_startup_evidence(*alive, elapsed));
             assert!(grace.keep_waiting(
                 activation_alive,
                 binding.owns(Some("captured-degraded-browser")),
@@ -4290,11 +4416,18 @@ mod tests {
     #[test]
     fn packaged_tracked_process_remains_authoritative_when_browser_probe_fails() {
         let now = std::time::Instant::now();
-        let mut binding = PackagedBrowserBinding { initial_id: Some("original".to_string()), replaced: false };
+        let mut binding = PackagedBrowserBinding {
+            initial_id: Some("original".to_string()),
+            replaced: false,
+        };
         let mut grace = PackagedExitGrace::default();
         assert!(grace.keep_waiting(Some(true), binding.owns(None), now));
         assert!(grace.keep_waiting(Some(true), binding.owns(Some("replacement")), now));
-        assert!(grace.keep_waiting(Some(true), false, now + std::time::Duration::from_secs(3600)));
+        assert!(grace.keep_waiting(
+            Some(true),
+            false,
+            now + std::time::Duration::from_secs(3600)
+        ));
     }
 
     #[test]
@@ -4909,15 +5042,24 @@ mod tests {
                 crate::paths::set_settings_path_for_tests(self.0.take());
             }
         }
-        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(settings_path.clone())));
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(
+            settings_path.clone(),
+        )));
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         let address = listener.local_addr().unwrap();
-        std::fs::write(settings_path, serde_json::to_vec(&serde_json::json!({
-            "activeRelayId":"encrypted-agent-test",
-            "relayProfiles":[{"id":"encrypted-agent-test","name":"Encrypted agent test",
-                "baseUrl":format!("http://{address}/v1"),"apiKey":"fixture-api-key",
-                "protocol":"chatCompletions","relayMode":"mixedApi"}]
-        })).unwrap()).unwrap();
+        std::fs::write(
+            settings_path,
+            serde_json::to_vec(&serde_json::json!({
+                "activeRelayId":"encrypted-agent-test",
+                "relayProfiles":[{"id":"encrypted-agent-test","name":"Encrypted agent test",
+                    "baseUrl":format!("http://{address}/v1"),"apiKey":"fixture-api-key",
+                    "protocol":"chatCompletions","relayMode":"mixedApi"}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
         let upstream = tokio::spawn(async move {
             tokio::select! {
@@ -4939,11 +5081,17 @@ mod tests {
         let _ = stop.send(());
         let contacted = upstream.await.unwrap();
         let response = String::from_utf8(response).unwrap();
-        assert!(response.starts_with("HTTP/1.1 400 Bad Request"), "{response}");
+        assert!(
+            response.starts_with("HTTP/1.1 400 Bad Request"),
+            "{response}"
+        );
         let body = response.split_once("\r\n\r\n").unwrap().1;
         let error: serde_json::Value = serde_json::from_str(body).unwrap();
         assert_eq!(error["error"]["type"], "invalid_request_error");
-        assert_eq!(error["error"]["code"], "unsupported_encrypted_agent_content");
+        assert_eq!(
+            error["error"]["code"],
+            "unsupported_encrypted_agent_content"
+        );
         assert!(!response.contains("fixture-private-payload"));
         assert!(!response.contains("fixture-api-key"));
         assert!(!contacted);
@@ -4952,7 +5100,8 @@ mod tests {
         let response = send_raw_helper_request(b"POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 1\r\nConnection: close\r\n\r\n{").await;
         let response = String::from_utf8(response).unwrap();
         assert!(response.starts_with("HTTP/1.1 502 Bad Gateway"));
-        let body: serde_json::Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
         assert_eq!(body["status"], "failed");
         assert!(!response.contains("unsupported_encrypted_agent_content"));
     }
@@ -5084,7 +5233,11 @@ mod proxy_stream_tests {
     use crate::protocol_proxy::UpstreamWireApi;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    async fn forward_fixture(body: &str, truncated: bool, wire: UpstreamWireApi) -> (Option<String>, String) {
+    async fn forward_fixture(
+        body: &str,
+        truncated: bool,
+        wire: UpstreamWireApi,
+    ) -> (Option<String>, String) {
         let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = upstream.local_addr().unwrap();
         let body = body.to_owned();
@@ -5094,20 +5247,37 @@ mod proxy_stream_tests {
             loop {
                 let byte = socket.read_u8().await.unwrap();
                 request.push(byte);
-                if request.ends_with(b"\r\n\r\n") { break; }
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
             }
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
-            socket.write_all(format!("{:X}\r\n{}\r\n", body.len(), body).as_bytes()).await.unwrap();
-            if !truncated { socket.write_all(b"0\r\n\r\n").await.unwrap(); }
+            socket
+                .write_all(format!("{:X}\r\n{}\r\n", body.len(), body).as_bytes())
+                .await
+                .unwrap();
+            if !truncated {
+                socket.write_all(b"0\r\n\r\n").await.unwrap();
+            }
             socket.shutdown().await.unwrap();
         });
-        let response = reqwest::Client::builder().no_proxy().build().unwrap()
-            .get(format!("http://{address}/stream?key=fixture-secret")).send().await.unwrap();
+        let response = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/stream?key=fixture-secret"))
+            .send()
+            .await
+            .unwrap();
         let downstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let mut reader = tokio::net::TcpStream::connect(downstream.local_addr().unwrap()).await.unwrap();
+        let mut reader = tokio::net::TcpStream::connect(downstream.local_addr().unwrap())
+            .await
+            .unwrap();
         let (mut writer, _) = downstream.accept().await.unwrap();
         let forwarded = tokio::spawn(async move {
-            let result = forward_protocol_proxy_stream(&mut writer, response, wire, None).await.unwrap();
+            let result = forward_protocol_proxy_stream(&mut writer, response, wire, None)
+                .await
+                .unwrap();
             writer.shutdown().await.unwrap();
             result
         });
@@ -5122,8 +5292,11 @@ mod proxy_stream_tests {
     async fn transport_errors_are_failures_for_native_and_chat_streams() {
         for wire in [UpstreamWireApi::Responses, UpstreamWireApi::ChatCompletions] {
             let (failure, output) = forward_fixture(
-                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n", true, wire,
-            ).await;
+                "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
+                true,
+                wire,
+            )
+            .await;
             let failure = failure.expect("truncated transfer must not log stream_ok");
             assert!(!failure.contains("fixture-secret"));
             assert!(!output.contains("event: response.completed"));
@@ -5139,7 +5312,8 @@ mod proxy_stream_tests {
             "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n",
             "event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n",
         ] {
-            let (failure, output) = forward_fixture(body, false, UpstreamWireApi::ChatCompletions).await;
+            let (failure, output) =
+                forward_fixture(body, false, UpstreamWireApi::ChatCompletions).await;
             assert!(failure.is_some());
             assert!(output.contains("event: response.failed"));
             assert!(!output.contains("event: response.completed"));
@@ -5149,9 +5323,18 @@ mod proxy_stream_tests {
     #[tokio::test]
     async fn native_responses_failure_events_are_observed_without_rewriting_or_echoing_payload() {
         for (body, event_type) in [
-            ("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"private-upstream-error\"},\"output\":[{\"encrypted_content\":\"private-payload\"}]}}\n\n", "response.failed"),
-            ("data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"private-upstream-error\"}}}\n\n", "response.incomplete"),
-            ("event: error\ndata: {\"error\":{\"message\":\"private-upstream-error\"}}\r\n\r\n", "error"),
+            (
+                "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"private-upstream-error\"},\"output\":[{\"encrypted_content\":\"private-payload\"}]}}\n\n",
+                "response.failed",
+            ),
+            (
+                "data: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"private-upstream-error\"}}}\n\n",
+                "response.incomplete",
+            ),
+            (
+                "event: error\ndata: {\"error\":{\"message\":\"private-upstream-error\"}}\r\n\r\n",
+                "error",
+            ),
         ] {
             let (failure, output) = forward_fixture(body, false, UpstreamWireApi::Responses).await;
             let failure = failure.expect("原生失败事件不得记成 stream_ok");
@@ -5166,7 +5349,11 @@ mod proxy_stream_tests {
     async fn native_responses_clean_http_eof_without_completed_is_diagnosed_without_replay() {
         let body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: [DONE]\n\n";
         let (failure, output) = forward_fixture(body, false, UpstreamWireApi::Responses).await;
-        assert!(failure.expect("HTTP EOF 和 DONE 均不能代替 response.completed").contains("完成事件"));
+        assert!(
+            failure
+                .expect("HTTP EOF 和 DONE 均不能代替 response.completed")
+                .contains("完成事件")
+        );
         assert_eq!(output, body);
     }
 

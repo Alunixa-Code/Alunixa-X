@@ -112,6 +112,11 @@ fn write_rollout(path: &Path, provider: &str, thread_id: &str, cwd: &str) {
     fs::write(path, format!("{first}\n{event}\n")).unwrap();
 }
 
+fn write_catalog_rollout(path: &Path) {
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, "").unwrap();
+}
+
 fn session_index_line(id: &str, title: &str) -> String {
     json!({
         "id": id,
@@ -726,12 +731,14 @@ fn provider_sync_repairs_missing_local_thread_catalog_rows_from_threads() {
         [],
     )
     .unwrap();
+    let rollout_path = home.join("sessions/catalog-repair/rollout-thread-1.jsonl");
+    write_catalog_rollout(&rollout_path);
     db.execute(
         "INSERT INTO threads VALUES (
             'thread-1', 'old-provider', 0, 1, 'C:/workspace', 'Thread One',
-            'C:/rollout.jsonl', 'cli', 100000, 200000, 'user', 'main'
+            ?1, 'cli', 100000, 200000, 'user', 'main'
         )",
-        [],
+        [rollout_path.to_string_lossy().to_string()],
     )
     .unwrap();
     drop(db);
@@ -768,7 +775,7 @@ fn provider_sync_repairs_missing_local_thread_catalog_rows_from_threads() {
     assert_eq!(row.2, 200.0);
     assert_eq!(row.3, "C:/workspace");
     assert_eq!(row.4, "cli");
-    assert_eq!(row.5, "C:/rollout.jsonl");
+    assert_eq!(row.5, rollout_path.to_string_lossy());
     assert_eq!(row.6, "apigather");
     assert_eq!(row.7, "main");
     assert_eq!(row.8, "user");
@@ -803,13 +810,21 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
         [],
     )
     .unwrap();
+    let rollout_dir = home.join("sessions/catalog-eligibility");
     for (id, source, thread_source, updated_at) in [
         ("user-one", "vscode", "user", 200000_i64),
+        ("explicit-user", "subagent_review", "user", 205000_i64),
         (
-            "explicit-user",
+            "guardian-user",
+            r#"{"subagent":{"other":"guardian"}}"#,
+            "user",
+            207000_i64,
+        ),
+        (
+            "structured-user",
             r#"{"sub_agent":{"other":"review"}}"#,
             "user",
-            205000_i64,
+            208000_i64,
         ),
         ("marked-child", "vscode", "subagent", 210000_i64),
         (
@@ -819,6 +834,8 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
             215000_i64,
         ),
     ] {
+        let rollout_path = rollout_dir.join(format!("{id}.jsonl"));
+        write_catalog_rollout(&rollout_path);
         db.execute(
             "INSERT INTO threads VALUES (
                 ?1, 'apigather', 0, 1, 'C:/workspace', 'Same title',
@@ -826,7 +843,7 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
             )",
             rusqlite::params![
                 id,
-                format!("C:/{id}.jsonl"),
+                rollout_path.to_string_lossy().to_string(),
                 source,
                 updated_at,
                 thread_source
@@ -834,13 +851,15 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
         )
         .unwrap();
     }
+    let null_source_rollout = rollout_dir.join("null-source-child.jsonl");
+    write_catalog_rollout(&null_source_rollout);
     db.execute(
         "INSERT INTO threads VALUES (
             'null-source-child', 'apigather', 0, 1, 'C:/workspace', 'Same title',
-            'C:/null-source-child.jsonl', '{\"sub_agent\":{\"other\":\"guardian\"}}',
+            ?1, '{\"sub_agent\":{\"other\":\"guardian\"}}',
             100000, 217000, NULL, 'main'
         )",
-        [],
+        [null_source_rollout.to_string_lossy().to_string()],
     )
     .unwrap();
     drop(db);
@@ -877,12 +896,19 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
         ),
         ("edge-child", "cli", 240000_i64),
     ] {
+        let rollout_path = rollout_dir.join(format!("{id}.jsonl"));
+        write_catalog_rollout(&rollout_path);
         db.execute(
             "INSERT INTO threads VALUES (
                 ?1, 'apigather', 0, 1, 'C:/workspace', 'Same title',
                 ?2, ?3, 100000, ?4, 'main'
             )",
-            rusqlite::params![id, format!("C:/{id}.jsonl"), source, updated_at],
+            rusqlite::params![
+                id,
+                rollout_path.to_string_lossy().to_string(),
+                source,
+                updated_at
+            ],
         )
         .unwrap();
     }
@@ -962,12 +988,20 @@ fn provider_sync_prunes_existing_local_subagent_catalog_rows() {
     )
     .unwrap();
     for (id, thread_source) in [("root", "user"), ("child", "subagent")] {
+        let rollout_path = home
+            .join("sessions/catalog-prune")
+            .join(format!("{id}.jsonl"));
+        write_catalog_rollout(&rollout_path);
         db.execute(
             "INSERT INTO threads VALUES (
                 ?1, 'apigather', 0, 1, 'C:/workspace', ?1,
                 ?2, 'vscode', 100000, 200000, ?3, 'main'
             )",
-            rusqlite::params![id, format!("C:/{id}.jsonl"), thread_source],
+            rusqlite::params![
+                id,
+                rollout_path.to_string_lossy().to_string(),
+                thread_source
+            ],
         )
         .unwrap();
     }
@@ -2063,7 +2097,33 @@ fn provider_sync_recovers_lock_owned_by_dead_process() {
             .unwrap()
             .contains("provider_sync.stale_lock_recovered")
     );
-    assert!(fs::read_dir(home.join("tmp")).unwrap().next().is_none());
+    let lifecycle_path = home.join("tmp/provider-sync.lifecycle.lock");
+    assert!(lifecycle_path.is_file());
+    let remaining = fs::read_dir(home.join("tmp"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        remaining,
+        vec![OsString::from("provider-sync.lifecycle.lock")]
+    );
+    assert_eq!(
+        alunixa_x_data::inspect_provider_sync_lock(Some(&home)),
+        alunixa_x_data::ProviderSyncLockState::Free
+    );
+    // The persistent inode must be unlocked, not removed: unlinking it would
+    // let another process lock a different inode and bypass mutual exclusion.
+    let guard = alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(&home)).unwrap();
+    assert!(lock_dir.join("owner.json").is_file());
+    let busy = alunixa_x_data::try_acquire_provider_sync_lifecycle_guard(Some(&home)).unwrap_err();
+    assert_eq!(busy.kind(), std::io::ErrorKind::WouldBlock);
+    guard.release().unwrap();
+    assert!(!lock_dir.exists());
+    assert!(lifecycle_path.is_file());
+    assert_eq!(
+        alunixa_x_data::inspect_provider_sync_lock(Some(&home)),
+        alunixa_x_data::ProviderSyncLockState::Free
+    );
 }
 
 #[test]

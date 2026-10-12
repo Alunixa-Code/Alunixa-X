@@ -282,8 +282,7 @@ base_url = "https://relay.example.test/v1"
     drop(_guard_a);
 
     // ── B 段：复制本机真实官方缓存（只读），真实重叠 slug 的组合验证 ──
-    let real_cache =
-        alunixa_x_core::codex_home::default_codex_home_dir().join("models_cache.json");
+    let real_cache = alunixa_x_core::codex_home::default_codex_home_dir().join("models_cache.json");
     let real_cache_text = std::fs::read_to_string(&real_cache).ok();
     let codex = codex_bin();
     let mut composed_home: Option<tempfile::TempDir> = None;

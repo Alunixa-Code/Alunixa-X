@@ -716,8 +716,7 @@ fn route_target_outside_aggregate_members_is_skipped_even_if_relay_exists() {
     assert_eq!(selected.id, "relay-b");
 
     // 全部规则指向非成员 → 走原 strategy
-    settings.aggregate_relay_profiles[0].routes =
-        vec![route("deepseek-*", "relay-standalone", 10)];
+    settings.aggregate_relay_profiles[0].routes = vec![route("deepseek-*", "relay-standalone", 10)];
     let mut selector = RelayRotationSelector::from_settings(&settings).unwrap();
     let selected = selector
         .select(&settings, context(Some("deepseek-chat")))
@@ -860,14 +859,53 @@ fn route_wildcard_matches_standard_glob_semantics() {
         rec(&p, &m)
     }
     let patterns = [
-        "a", "b", "c", "a*", "*a", "a*b", "*a*", "a*b*c", "a*a", "*ab*",
-        "ab*cd*ef", "*a*b*a", "**", "*", "a**b", "ab*ab", "*ab*ab*", "a*b*a*c",
-        "**a**", "*a*a*a*", "deepseek-*", "*-v3", "gpt-*",
+        "a",
+        "b",
+        "c",
+        "a*",
+        "*a",
+        "a*b",
+        "*a*",
+        "a*b*c",
+        "a*a",
+        "*ab*",
+        "ab*cd*ef",
+        "*a*b*a",
+        "**",
+        "*",
+        "a**b",
+        "ab*ab",
+        "*ab*ab*",
+        "a*b*a*c",
+        "**a**",
+        "*a*a*a*",
+        "deepseek-*",
+        "*-v3",
+        "gpt-*",
     ];
     let models = [
-        "", "a", "b", "ab", "ba", "aa", "aab", "aba", "abb", "abc", "aabb",
-        "abab", "abxa", "aabxa", "abcabc", "abcc", "cba", "baab", "ababa",
-        "deepseek-chat", "gpt-5.4", "glm-4-v3",
+        "",
+        "a",
+        "b",
+        "ab",
+        "ba",
+        "aa",
+        "aab",
+        "aba",
+        "abb",
+        "abc",
+        "aabb",
+        "abab",
+        "abxa",
+        "aabxa",
+        "abcabc",
+        "abcc",
+        "cba",
+        "baab",
+        "ababa",
+        "deepseek-chat",
+        "gpt-5.4",
+        "glm-4-v3",
     ];
     let mismatches = patterns
         .iter()
@@ -904,10 +942,12 @@ fn route_skips_highest_priority_target_missing_key_and_hits_next_valid_route() {
         api_key: String::new(),
         ..RelayProfile::default()
     });
-    settings.aggregate_relay_profiles[0].members.push(AggregateRelayMember {
-        relay_id: "relay-empty-key".to_string(),
-        weight: 1,
-    });
+    settings.aggregate_relay_profiles[0]
+        .members
+        .push(AggregateRelayMember {
+            relay_id: "relay-empty-key".to_string(),
+            weight: 1,
+        });
     settings.aggregate_relay_profiles[0].routes = vec![
         route("deepseek-*", "relay-empty-key", 100),
         route("deepseek-chat", "relay-b", 50),
@@ -945,10 +985,12 @@ fn route_all_targets_invalid_falls_back_to_aggregate_strategy() {
         api_key: String::new(),
         ..RelayProfile::default()
     });
-    settings.aggregate_relay_profiles[0].members.push(AggregateRelayMember {
-        relay_id: "relay-empty-key".to_string(),
-        weight: 1,
-    });
+    settings.aggregate_relay_profiles[0]
+        .members
+        .push(AggregateRelayMember {
+            relay_id: "relay-empty-key".to_string(),
+            weight: 1,
+        });
     settings.aggregate_relay_profiles[0].routes = vec![
         route("deepseek-*", "relay-empty-key", 100),
         route("deepseek-chat", "relay-empty-key", 50),
@@ -1037,9 +1079,7 @@ fn route_hit_does_not_advance_failover_rotation_index() {
     assert_eq!(second.id, "relay-b");
 
     // 切换到未命中路由的模型，仍应回到 failover 当前指向的 relay-a（索引未被路由推进）
-    let fallback = selector
-        .select(&settings, context(Some("glm-4")))
-        .unwrap();
+    let fallback = selector.select(&settings, context(Some("glm-4"))).unwrap();
     assert_eq!(fallback.id, "relay-a");
 }
 

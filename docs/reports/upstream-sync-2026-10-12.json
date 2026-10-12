@@ -1,0 +1,3882 @@
+{
+  "upstreamRepository": "BigPizzaV3/CodexPlusPlus",
+  "upstreamCommit": "e53549ca8c2b2b1edf4199084460af0919f2ded4",
+  "range": {
+    "from": "2026-04-11",
+    "through": "2026-10-12",
+    "commitCount": 1456
+  },
+  "fileCount": 656,
+  "rows": [
+    {
+      "source": ".cargo/config.toml",
+      "destination": ".cargo/config.toml",
+      "resolution": "integrated",
+      "sha256": "3895c2d6df19af4c603bbad680ef7fcf34eadb8f33b00616c8075b4f6e227003"
+    },
+    {
+      "source": ".gitattributes",
+      "destination": ".gitattributes",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "efd24f4c60ab1d8326664e2b35d608d88d58fda26ae57ff431110ec1cbd52b40"
+    },
+    {
+      "source": ".github/ISSUE_TEMPLATE/bug_report.yml",
+      "destination": ".github/ISSUE_TEMPLATE/bug_report.yml",
+      "resolution": "integrated",
+      "sha256": "d003d34e88c818ddcc2ad3f5f89770b246d07b9c93acd507c128b31c33722774"
+    },
+    {
+      "source": ".github/ISSUE_TEMPLATE/config.yml",
+      "destination": ".github/ISSUE_TEMPLATE/config.yml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "50ef53fd0ab6b5cbeb35b1943f0ed14673483ea98f69e98adc9f495fbb45b2a9"
+    },
+    {
+      "source": ".github/ISSUE_TEMPLATE/feature_request.yml",
+      "destination": ".github/ISSUE_TEMPLATE/feature_request.yml",
+      "resolution": "integrated",
+      "sha256": "9a988a2be1936cd74a8d6e0d5c3fbfb6e97a2283e128eeae4f667c0b58fe27bd"
+    },
+    {
+      "source": ".github/ISSUE_TEMPLATE/provider_config.yml",
+      "destination": ".github/ISSUE_TEMPLATE/provider_config.yml",
+      "resolution": "integrated",
+      "sha256": "b49237cbe52b94a97ef01ae2c02499f361eb5329d0e9c84ec3c7ad5017b83970"
+    },
+    {
+      "source": ".github/ISSUE_TEMPLATE/question.yml",
+      "destination": ".github/ISSUE_TEMPLATE/question.yml",
+      "resolution": "integrated",
+      "sha256": "0af4620f79a7967755f08535b32622b6eb05f764e27c87fdc614eb6ac1dd831a"
+    },
+    {
+      "source": ".github/workflows/issue-triage.yml",
+      "destination": ".github/workflows/issue-triage.yml",
+      "resolution": "integrated",
+      "sha256": "80cc60e24cb44ad79e138d7eaf1445b02530d9a65687cbeda4eec2b8d9db3e8a"
+    },
+    {
+      "source": ".github/workflows/pr-build.yml",
+      "destination": ".github/workflows/pr-build.yml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "55ea2ba71c2afcff818c52ed780764ff87e7c162c663cf14ad71d2be644230b2"
+    },
+    {
+      "source": ".github/workflows/release-assets.yml",
+      "destination": ".github/workflows/release-assets.yml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "f3b162f65dcb98df83b4c43243d71d8152f9fd809c0a3c73628669c39f9354c4"
+    },
+    {
+      "source": ".github/workflows/sync-official-models.yml",
+      "destination": ".github/workflows/sync-official-models.yml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "43d3139764a2f2b286af9fcd1f56e53bb26cd9eef6e8a600caf5c34e7af01f54"
+    },
+    {
+      "source": ".gitignore",
+      "destination": ".gitignore",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "027dcdfd30d68713a7d3524b2f8d4da11d09911ba78377794e1a082ce0098200"
+    },
+    {
+      "source": "AGENTS.md",
+      "destination": "AGENTS.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "CHANGELOG.md",
+      "destination": "CHANGELOG.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d64ee62ee7626ca98251b2c9eddae5998634250a2a41d1a865864df168279981"
+    },
+    {
+      "source": "CONTRIBUTING.md",
+      "destination": "CONTRIBUTING.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9163b29a31b5f964be6840d1a907756031cc6e0553bec1dabff82b655da4f4cf"
+    },
+    {
+      "source": "Cargo.lock",
+      "destination": "Cargo.lock",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "38eea5f4d5fbbaf65013ec643bd37b3cf28f86550361879ed3f799c406d7e93a"
+    },
+    {
+      "source": "Cargo.toml",
+      "destination": "Cargo.toml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4b9ef8a224716dca1e56e159e63722b26abd342a62112956fba749b419366262"
+    },
+    {
+      "source": "EXTENSIONS.md",
+      "destination": "EXTENSIONS.md",
+      "resolution": "integrated",
+      "sha256": "aa1fd59899c661c862a3c5ccd441d30d05c4dc5f0f2c68c304683561e7d2e42d"
+    },
+    {
+      "source": "HANDOVER.md",
+      "destination": "HANDOVER.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "e9996a47482bfa38a80b43119fbdd345e4fb541ba1550db8482ab373116e9b6b"
+    },
+    {
+      "source": "LICENSE",
+      "destination": "LICENSE",
+      "resolution": "integrated",
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+    },
+    {
+      "source": "README.md",
+      "destination": "README.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "fa686411cca140c1eb5577050da3d065735c2053b47ca3d564eb69df8b9c67b6"
+    },
+    {
+      "source": "README_EN.md",
+      "destination": "README_EN.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "22cd11b640315073a1d34afe5b79190288d28a54c081223eb2bc5e449f445038"
+    },
+    {
+      "source": "THIRD_PARTY_NOTICES.md",
+      "destination": "THIRD_PARTY_NOTICES.md",
+      "resolution": "integrated",
+      "sha256": "2c97df4264c9dfad2a1a50987502a8030124e4289a34946ce70e6c16dc213604"
+    },
+    {
+      "source": "apps/codex-plus-launcher/Cargo.toml",
+      "destination": "apps/alunixa-x-launcher/Cargo.toml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e14a2b04f46fbe65b5ad77589620468cccfbd67f1fe7c0b94071b1fdb09c8dd9"
+    },
+    {
+      "source": "apps/codex-plus-launcher/build.rs",
+      "destination": "apps/alunixa-x-launcher/build.rs",
+      "resolution": "integrated",
+      "sha256": "d17391377ada8896e4f172fcdb4bf55880e516e1741352bf6342af10b700e2da"
+    },
+    {
+      "source": "apps/codex-plus-launcher/src/main.rs",
+      "destination": "apps/alunixa-x-launcher/src/main.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5cab0577616d2fec1654cbaf5b9713dbb8c2ce1d2cb91a59c82e46f303ac1448"
+    },
+    {
+      "source": "apps/codex-plus-manager/components.json",
+      "destination": "apps/alunixa-x-manager/components.json",
+      "resolution": "integrated",
+      "sha256": "cf591303ed0e7427b89eed2c53cca8a2bfdbe185b80f79629cf9bfef9e70c7bf"
+    },
+    {
+      "source": "apps/codex-plus-manager/index.html",
+      "destination": "apps/alunixa-x-manager/index.html",
+      "resolution": "integrated",
+      "sha256": "6c499b6ee6c2190ce1f7418157ac7b455e22471ebc5b47a7d0a48475bb2603e7"
+    },
+    {
+      "source": "apps/codex-plus-manager/package-lock.json",
+      "destination": "apps/alunixa-x-manager/package-lock.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "b3513a8904529d653384112f1b179a36f114eb765fce9aa1156786328565a277"
+    },
+    {
+      "source": "apps/codex-plus-manager/package.json",
+      "destination": "apps/alunixa-x-manager/package.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8600c12516b4c3dde0637b45400a5110d77a6da644887e7dfe7d364aa3a4a061"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/Cargo.toml",
+      "destination": "apps/alunixa-x-manager/src-tauri/Cargo.toml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "da65fe3f32c05167c44bbdd9a7bb26c6079c25dc9b1472327169d21965774098"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/Info.plist",
+      "destination": "apps/alunixa-x-manager/src-tauri/Info.plist",
+      "resolution": "integrated",
+      "sha256": "bbcab48e81e26803dd54459ae4f4c3130e219b262bfea3d83898f473bcbd974b"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/build.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/build.rs",
+      "resolution": "integrated",
+      "sha256": "517edb478cf03d425998b335072ceda81fa97036bbad85b90731f0192562191c"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/capabilities/default.json",
+      "destination": "apps/alunixa-x-manager/src-tauri/capabilities/default.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "6bcf15637b65d1566098299815d551926a3003cd08086f2ef179815fa532a650"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/icons/icon.ico",
+      "destination": "apps/alunixa-x-manager/src-tauri/icons/icon.ico",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c3a90c7a8dfa83a1e2a7c1311e396181e2faf4b6427105a842f03e57f91189f8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/icons/icon.png",
+      "destination": "apps/alunixa-x-manager/src-tauri/icons/icon.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c50bc2a4911bdf1452d4c32d78b39f54809e89062f3bfff44d82084a0e9ddc5a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/commands.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/commands.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "40f46c8492d58e876f74be70469fc38d47c3a2c07edc3fa07481cc7035015bb7"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/install.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/install.rs",
+      "resolution": "integrated",
+      "sha256": "83a0b996849ecac437154c8ad2cbb7c69a63e635be0052c8cc15d8b9905c236c"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/legacy_shim.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/legacy_shim.rs",
+      "resolution": "integrated",
+      "sha256": "2c68a1ecadb9f1eb23affecab58c9cef6e063eee1990640fb41cee85a82e5801"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/lib.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/lib.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3f7f08545d67aa5453b35f849ea7499a35a1a1b399fae3127d7943d6a4600067"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/main.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/main.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7bd8bdbdec267e717264360a1c2c83dcfbcdb2a2fc26b6b74dd8af66227c632c"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/src/runtime_health.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/src/runtime_health.rs",
+      "resolution": "integrated",
+      "sha256": "9c995be47cdb490b48e9123403870256d089db58e5a37b800ec6a3d22e70dace"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/tauri.conf.json",
+      "destination": "apps/alunixa-x-manager/src-tauri/tauri.conf.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e865a8aa6c9a81a59c58f8cfedb33aa1f1f9f586b622ff8d36780c32deb6b42b"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/tests/windows_subsystem.rs",
+      "destination": "apps/alunixa-x-manager/src-tauri/tests/windows_subsystem.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "aa39040ea07598e651ba6e6db917ef57ff45be79f4d7ef8fdb0b20856f8ffe1b"
+    },
+    {
+      "source": "apps/codex-plus-manager/src-tauri/windows-app-manifest.xml",
+      "destination": "apps/alunixa-x-manager/src-tauri/windows-app-manifest.xml",
+      "resolution": "integrated",
+      "sha256": "8f760407764d3c6e4d03143219fe82371f048ceef1b5744e97366515c7ba313d"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/App.tsx",
+      "destination": "apps/alunixa-x-manager/src/App.tsx",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ccfb9da104c73e579b6d03472e90f21033b27c70f106e27b8b7af911436b7a62"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/ManagementExtra.tsx",
+      "destination": "apps/alunixa-x-manager/src/ManagementExtra.tsx",
+      "resolution": "integrated",
+      "sha256": "ca61c8dbf9b5e0132f7bdd58c285161bf5eed294d3a39a8f59ae7e4d35b2c00e"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/ManagementPages.css",
+      "destination": "apps/alunixa-x-manager/src/ManagementPages.css",
+      "resolution": "integrated",
+      "sha256": "92cbff7318b8ee00572d792db6974e8f08f2219d5c1bae52a550b805a18354ed"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/ManagementPages.tsx",
+      "destination": "apps/alunixa-x-manager/src/ManagementPages.tsx",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "efc0f93cf636a81f7feec574aa62dbff99be5d41394b2659fec93d2fb6362cb4"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/PluginMarketScreen.css",
+      "destination": "apps/alunixa-x-manager/src/PluginMarketScreen.css",
+      "resolution": "integrated",
+      "sha256": "e2be6b2379e92e332ef9acae17b6b88edb9c249665a48245d79fceb98c8dfb22"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/PluginMarketScreen.tsx",
+      "destination": "apps/alunixa-x-manager/src/PluginMarketScreen.tsx",
+      "resolution": "integrated",
+      "sha256": "7287afc015c6ac9448584f0aba079018aef6926b2d410be4a0063aad401cf73a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/agent-cache-model.test.ts",
+      "destination": "apps/alunixa-x-manager/src/agent-cache-model.test.ts",
+      "resolution": "integrated",
+      "sha256": "405df3765a199f93322aff858ddf90b3580e5a5fb07f1e2bbfaf43298e95c11b"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/agent-cache-model.ts",
+      "destination": "apps/alunixa-x-manager/src/agent-cache-model.ts",
+      "resolution": "integrated",
+      "sha256": "c8e85e75777660516a6de7ad0423224d398fc914fba5f5e0397b3e97edfc8ff9"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/agent-cache.tsx",
+      "destination": "apps/alunixa-x-manager/src/agent-cache.tsx",
+      "resolution": "integrated",
+      "sha256": "d837b719f863465919883ffda4682ba56ec98df9bf192ef723fc75cff5bdd125"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/aggregate-routes.test.ts",
+      "destination": "apps/alunixa-x-manager/src/aggregate-routes.test.ts",
+      "resolution": "integrated",
+      "sha256": "bed53a55eb5dc88ea90990d094a2a838e90c31288d7d0999aa9dde5228bc6265"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/aggregate-routes.ts",
+      "destination": "apps/alunixa-x-manager/src/aggregate-routes.ts",
+      "resolution": "integrated",
+      "sha256": "e750f7ffae81e68493204ada6206e580cccba87d9d1fd6656afe3193f6e05762"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/assets/agents/LICENSE.txt",
+      "destination": "apps/alunixa-x-manager/src/assets/agents/LICENSE.txt",
+      "resolution": "integrated",
+      "sha256": "48f4339c2973cb0c6ebba3a3ee526a42b0ac9f34d27909e2805900ef5f1a3424"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/assets/agents/chatgpt.svg",
+      "destination": "apps/alunixa-x-manager/src/assets/agents/chatgpt.svg",
+      "resolution": "integrated",
+      "sha256": "802335af1ddb4e135468f689aabe7ac7798a3177c1b71bbd4549fc602e9264ed"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/assets/agents/claude.svg",
+      "destination": "apps/alunixa-x-manager/src/assets/agents/claude.svg",
+      "resolution": "integrated",
+      "sha256": "365a70a7eb3956d9b9a96086058ebe04e1dbd8e291a756ad964e8a283fbd6d38"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/assets/agents/codex.svg",
+      "destination": "apps/alunixa-x-manager/src/assets/agents/codex.svg",
+      "resolution": "integrated",
+      "sha256": "4a2f43ce46b5b6e3722c95088f88d26ef91e6a8c2e598e70642a1c54367386e4"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/assets/agents/grok.svg",
+      "destination": "apps/alunixa-x-manager/src/assets/agents/grok.svg",
+      "resolution": "integrated",
+      "sha256": "9175fc90c22655160231976c849f25a03b888d7cc0e04c5f1b987b659bb07c95"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/auto-compact.ts",
+      "destination": "apps/alunixa-x-manager/src/auto-compact.ts",
+      "resolution": "integrated",
+      "sha256": "191e3f6055efb088de0ce55a06201237ba89ae8a02179eca9f0481cb466cf103"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/ccs-import-settings.test.ts",
+      "destination": "apps/alunixa-x-manager/src/ccs-import-settings.test.ts",
+      "resolution": "integrated",
+      "sha256": "48c697fa9d7ed83f2a70e0bb46674a70fc1d87e57fb5e833f52817dd8b7df4f4"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/code-highlight.test.ts",
+      "destination": "apps/alunixa-x-manager/src/code-highlight.test.ts",
+      "resolution": "integrated",
+      "sha256": "a7b30abfaad47f4dbc705ff2bd6b81a6624ff6a00c5baef29e7cd3c7b4a57bf1"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/code-highlight.ts",
+      "destination": "apps/alunixa-x-manager/src/code-highlight.ts",
+      "resolution": "integrated",
+      "sha256": "a4c62444e56fb4666a23ab40532068943461832ca001915a46a7581ea63d2d67"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ProviderPresetSelector.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ProviderPresetSelector.tsx",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5555dcde4e8b6f395e9c33cbd3dc0506ea2357bff05339359ae74c26f004a902"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/badge.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/badge.tsx",
+      "resolution": "integrated",
+      "sha256": "d91d9fe5dcf33095405a5c63539d12e31eb7bc9f0e9006127e91fb5652277091"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/button.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/button.tsx",
+      "resolution": "integrated",
+      "sha256": "688fc2983c3be22130d686a6985bb6fbfc424839c4ccdf209c2bae50e6ff05cf"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/card.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/card.tsx",
+      "resolution": "integrated",
+      "sha256": "9e4d5e1555631777894e6a8298f7c9f3ae492eff4f6d916e6601012afeafb2a6"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/input.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/input.tsx",
+      "resolution": "integrated",
+      "sha256": "60703f8b71983bacffc70b4e0fe3a0c2a75b9df2cac0b9192865d29dd74b8b38"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/label.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/label.tsx",
+      "resolution": "integrated",
+      "sha256": "4dfc1dfac936331bda5f0caddc02e4facd6fa6334417006ec406a50c1fffd936"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/components/ui/textarea.tsx",
+      "destination": "apps/alunixa-x-manager/src/components/ui/textarea.tsx",
+      "resolution": "integrated",
+      "sha256": "9bbef1dcb4bdef2da27b45a50d14f13ec0bd6fed050f9da18e53647b8a414dd7"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/dictation-runtime.test.ts",
+      "destination": "apps/alunixa-x-manager/src/dictation-runtime.test.ts",
+      "resolution": "integrated",
+      "sha256": "e33d1cb81f5b90315a4b6ccac4cc433e4876ceeff893ecee57019be88f88393f"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/dictation-settings.test.ts",
+      "destination": "apps/alunixa-x-manager/src/dictation-settings.test.ts",
+      "resolution": "integrated",
+      "sha256": "4f5736e373eb5faff011473b5eb87dd736478dfcd3adc90e07e21b08f3b253e5"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/dictation-settings.ts",
+      "destination": "apps/alunixa-x-manager/src/dictation-settings.ts",
+      "resolution": "integrated",
+      "sha256": "9dfa072517061d20491569a0691a7565a23a85baab826c9fd45443f093965106"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/dream-skin.test.ts",
+      "destination": "apps/alunixa-x-manager/src/dream-skin.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0931d55c6272887b9a54a718a1d0ebb9e475a172179ff97898c7e3d3a09fe41e"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/dream-skin.ts",
+      "destination": "apps/alunixa-x-manager/src/dream-skin.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "a97af8924a0756fd5e546fef0ce47a31597d8b164caf506fb004a1165d36e6a9"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/enhancement-navigation.test.ts",
+      "destination": "apps/alunixa-x-manager/src/enhancement-navigation.test.ts",
+      "resolution": "integrated",
+      "sha256": "1512527f2f387cdc8e7c9f8a7934c06b57d84cec1e8688b69a97a8cf9226b24a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/enhancement-navigation.ts",
+      "destination": "apps/alunixa-x-manager/src/enhancement-navigation.ts",
+      "resolution": "integrated",
+      "sha256": "25f2d66a86a88c0200da8dad66303c1e0632bece515696eea516524271a16064"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/enhancement-settings.test.ts",
+      "destination": "apps/alunixa-x-manager/src/enhancement-settings.test.ts",
+      "resolution": "integrated",
+      "sha256": "3ddf483ce691e56a5a4ee9fe021cd50b58c63fc666c12bf9c52fe80d7e5995fe"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/fast-support.test.ts",
+      "destination": "apps/alunixa-x-manager/src/fast-support.test.ts",
+      "resolution": "integrated",
+      "sha256": "c02f7d991d6f4cb5a4f725c1a9322c702be17f34ad5488192544ea5ae9e0b5aa"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/github-repository.test.ts",
+      "destination": "apps/alunixa-x-manager/src/github-repository.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e3b997ce67d66e037c298a59c267c86f212d9fd31f6f3570e227e71d06a20de9"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/github-repository.ts",
+      "destination": "apps/alunixa-x-manager/src/github-repository.ts",
+      "resolution": "integrated",
+      "sha256": "a6577f4ed7d561241baee07de109e92a630413606ec32e7fa493b9c48daa4438"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/goals-config.test.ts",
+      "destination": "apps/alunixa-x-manager/src/goals-config.test.ts",
+      "resolution": "integrated",
+      "sha256": "a9f975f25f9dd896f3db36af89f277c7d9434f37ab63c46e0aedbcf84365a94d"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/goals-config.ts",
+      "destination": "apps/alunixa-x-manager/src/goals-config.ts",
+      "resolution": "integrated",
+      "sha256": "3ca07d1e8783deee2524be1caa516b835b61a5f248698281908920364d20e51b"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/i18n-en.ts",
+      "destination": "apps/alunixa-x-manager/src/i18n-en.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c0d01f85fccae83bd0588d35d8ab322ddfd5c937ddd7b3edb1b60886806613dd"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/i18n.ts",
+      "destination": "apps/alunixa-x-manager/src/i18n.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "380f69e6e9587cac87ff9ebb4f8f00e81dfa9259e603b121adcf57a7593a78ab"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/launch-status.test.ts",
+      "destination": "apps/alunixa-x-manager/src/launch-status.test.ts",
+      "resolution": "integrated",
+      "sha256": "aacb032de764bb97c1625bb4a0fbb8f239e7c0d565c68e22165fec1d84f65712"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/launch-status.ts",
+      "destination": "apps/alunixa-x-manager/src/launch-status.ts",
+      "resolution": "integrated",
+      "sha256": "ea715098afe73e4f567c982bcef22720e75d056e169628ca9c2b4648871fc811"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/lib/utils.ts",
+      "destination": "apps/alunixa-x-manager/src/lib/utils.ts",
+      "resolution": "integrated",
+      "sha256": "d1f1e0d62cb8d8d1e04c26e14de842d8a151f75812d81b046c65b5d1fe8e4b27"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/macos-dmg.test.ts",
+      "destination": "apps/alunixa-x-manager/src/macos-dmg.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2c36b67cf618c5f2dc7ff9601eaab4c859965558464d3eef9da58231c5eadfac"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/main.tsx",
+      "destination": "apps/alunixa-x-manager/src/main.tsx",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "409803a419cd9918a24dbbc02c0e5e10304c271ec6da48583f5c1323b587a64a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/management-model.ts",
+      "destination": "apps/alunixa-x-manager/src/management-model.ts",
+      "resolution": "integrated",
+      "sha256": "fb002ca995c8f5408a01bb36f8b939bd47e4cbbbf6acd5bfc705fa8a1c2753f6"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/mcp-presets.test.ts",
+      "destination": "apps/alunixa-x-manager/src/mcp-presets.test.ts",
+      "resolution": "integrated",
+      "sha256": "40b9e0a00a02a19edcd48375c48055bbec9412bdf59c9186bf6fe528d85bb9b3"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/mcp-presets.ts",
+      "destination": "apps/alunixa-x-manager/src/mcp-presets.ts",
+      "resolution": "integrated",
+      "sha256": "7801b1800657fc12ff98cb87e3aba24f54f6b4b4b1ce1ef943c62f83390b15ba"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-groups.test.ts",
+      "destination": "apps/alunixa-x-manager/src/model-groups.test.ts",
+      "resolution": "integrated",
+      "sha256": "9a6778bf377904f17f3062caa09ce12118cf390f61fed81e890eac4e44eb2de1"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-groups.ts",
+      "destination": "apps/alunixa-x-manager/src/model-groups.ts",
+      "resolution": "integrated",
+      "sha256": "e7862eaca9ed4e9c3e940d9590253a8cca8c9da6872ddd0de003f7c6a3fd52c8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-metadata.test.ts",
+      "destination": "apps/alunixa-x-manager/src/model-metadata.test.ts",
+      "resolution": "integrated",
+      "sha256": "9f0ed1f33fcdbc7a0a5027b7fe247fe29659dffa220475c47a9fd41690c149d1"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-metadata.ts",
+      "destination": "apps/alunixa-x-manager/src/model-metadata.ts",
+      "resolution": "integrated",
+      "sha256": "25a50ebc6d4f3a8449ab42ab8c95e617b6190cd566e867cf44f671e61733dcd2"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-routes.test.ts",
+      "destination": "apps/alunixa-x-manager/src/model-routes.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "cf1c933f5bf699fb1845c84f8ef47510b0e1d5e7ac044065282027d736913be8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-routes.ts",
+      "destination": "apps/alunixa-x-manager/src/model-routes.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0882ac3e5bb5be80cfc39e0934862221dd41722e8c23b006f60e98664a6d6844"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-windows.test.ts",
+      "destination": "apps/alunixa-x-manager/src/model-windows.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "1314e71ecd1439807cd21921600421adb7ba50ea0effeb0cd65df3184e153fc8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/model-windows.ts",
+      "destination": "apps/alunixa-x-manager/src/model-windows.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "463bd400d11733a2a58f18f6322e2da718dbbcd0f84429e7cdef7f18be954c75"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/native-browser-contract.test.ts",
+      "destination": "apps/alunixa-x-manager/src/native-browser-contract.test.ts",
+      "resolution": "integrated",
+      "sha256": "233a2cef10d676a24e815932618b61352651013ac1ec9387d268b15a632f3bcb"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/native-browser-helper.test.ts",
+      "destination": "apps/alunixa-x-manager/src/native-browser-helper.test.ts",
+      "resolution": "integrated",
+      "sha256": "874de7a5391bfd0d9e27293daf2ed7c58d2f114b8eaa8f37e4f470ffa108f2a0"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/native-browser-settings.tsx",
+      "destination": "apps/alunixa-x-manager/src/native-browser-settings.tsx",
+      "resolution": "integrated",
+      "sha256": "5650fad2cad3843ce22e1b5c37b8cffe5f47d97991484e6abde90dfec3f68021"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/native-browser-status.test.ts",
+      "destination": "apps/alunixa-x-manager/src/native-browser-status.test.ts",
+      "resolution": "integrated",
+      "sha256": "ee1918346d9bd2eb9aa34ad103e5c133d8a37671a059ab62248fdf609c83cdc8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/native-browser-status.ts",
+      "destination": "apps/alunixa-x-manager/src/native-browser-status.ts",
+      "resolution": "integrated",
+      "sha256": "2e9c8f780c268bbaf9a1239d8ecb18d6963fbfd6d947861ccc33778e8b5f3e10"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/overview-health.test.ts",
+      "destination": "apps/alunixa-x-manager/src/overview-health.test.ts",
+      "resolution": "integrated",
+      "sha256": "5e2727344986c2f5f2a7770c4b9dce6ddb42f1eeb6f9daa25d60a3f8650959b2"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/plugin-catalog-recovery.test.ts",
+      "destination": "apps/alunixa-x-manager/src/plugin-catalog-recovery.test.ts",
+      "resolution": "integrated",
+      "sha256": "43fe95fe032027ab537a9fcb3a339c2023cc3a1ab819e38cfc9be7d55d937917"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/plugin-market-model.test.ts",
+      "destination": "apps/alunixa-x-manager/src/plugin-market-model.test.ts",
+      "resolution": "integrated",
+      "sha256": "e5e29b098044de9aed62a13264bec126e5c228c288bdd4756a2a2c8c6fdba449"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/plugin-market-model.ts",
+      "destination": "apps/alunixa-x-manager/src/plugin-market-model.ts",
+      "resolution": "integrated",
+      "sha256": "db50d0a7642fe4adab66b20b5239cf6cab84d87262d0bbcd563ee4521f387de5"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/presets.test.ts",
+      "destination": "apps/alunixa-x-manager/src/presets.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "bdbef8a9c9bd7b3a626afc144fc0756de79b813c9e348813b12960e3bac0f3bb"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/presets.ts",
+      "destination": "apps/alunixa-x-manager/src/presets.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "a5be5f059de6828eed6f442da6ffdec1d3574f38d0319d5d39c04632078107a4"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-name.test.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-name.test.ts",
+      "resolution": "integrated",
+      "sha256": "13e3ba44e4ce2202a57ab137c846bc4f7bbc10e182d3bbabde019f0563d9178a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-name.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-name.ts",
+      "resolution": "integrated",
+      "sha256": "f9d68c46ddcf60dbf5a507cf1745317d33973bba475f905df1fb6ffc3ba88bd6"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-sync-flow.test.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-sync-flow.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "11f7510b791c2a039d6d680030f310ae8379180c084e81819e81a173be1061bb"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-sync-flow.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-sync-flow.ts",
+      "resolution": "integrated",
+      "sha256": "59ce8f530829df7d2a758ab5a241a47f0de32b575e422af9951951210ead2434"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-sync-target.test.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-sync-target.test.ts",
+      "resolution": "integrated",
+      "sha256": "ca725c603781585f1f9e3ad12cb2a87c2906344bf28b3bc5e5d3fde92a49cdc0"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/provider-sync-target.ts",
+      "destination": "apps/alunixa-x-manager/src/provider-sync-target.ts",
+      "resolution": "integrated",
+      "sha256": "7ee1aacfc88e5031d17de99e92f4e8b03df6f88e6ad3ec7251a0fb61ae54aa21"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/pure-api-auth.test.ts",
+      "destination": "apps/alunixa-x-manager/src/pure-api-auth.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "bada91fb45ab128128cfb9ef59355ed730c69397069e928f3b79b06d3a5cb0fc"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-fold.test.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-fold.test.ts",
+      "resolution": "integrated",
+      "sha256": "8f4fddecfb7c41c5f85acc04ace1a5c3adfe43dc1eef32ee64d3ff7bd276c7a6"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-headers.test.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-headers.test.ts",
+      "resolution": "integrated",
+      "sha256": "5f9ca4ed97c3faf6c115db61c427b7a21b5b40726793ac1d00eeeab23767b24a"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-headers.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-headers.ts",
+      "resolution": "integrated",
+      "sha256": "c0737bbe4c4ea3a6afc8ef13cb544121aa6fad01e2997c6e9f9ca47ae093567f"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-live-files.test.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-live-files.test.ts",
+      "resolution": "integrated",
+      "sha256": "3ffa6c93d10afd105b5cb35340be15c49477619df8be4c8ce98bc237900c4f9f"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-live-files.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-live-files.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "6e142a7cbf445dea7d72d9873c8dff532b66e801a81b5862178f9dfed3789068"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-session.test.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-session.test.ts",
+      "resolution": "integrated",
+      "sha256": "9b636cda1b5817cca07ee49cb6829aa0bc3097dde38acb7476d493af1f59776f"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/relay-session.ts",
+      "destination": "apps/alunixa-x-manager/src/relay-session.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9b246bc89ad1671f4d39c1d12368b01861eb122d5291bf7b12a8141de903d8e1"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/renderer-inject.test.ts",
+      "destination": "apps/alunixa-x-manager/src/renderer-inject.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c268afc47b6f1829c20a067a2ce09a607c1be34dfcd429c6c7acabae903218c2"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/retired-layout.test.ts",
+      "destination": "apps/alunixa-x-manager/src/retired-layout.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "b6f77cad29a64e98d45f3497879fd77e3d0cb1009f47c678d1be329525a4c9b8"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/session-delete-runtime.test.ts",
+      "destination": "apps/alunixa-x-manager/src/session-delete-runtime.test.ts",
+      "resolution": "integrated",
+      "sha256": "8441fd571dd192a116e14dfa6472561a7c033ce35fd2f52496cdac8150335e29"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/session-index-repair-report.test.ts",
+      "destination": "apps/alunixa-x-manager/src/session-index-repair-report.test.ts",
+      "resolution": "integrated",
+      "sha256": "48d3514c23d561dcd717e2d9cfbc1ca920e92660d4c3a8c459d8a4566dc4c254"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/session-share-runtime.test.ts",
+      "destination": "apps/alunixa-x-manager/src/session-share-runtime.test.ts",
+      "resolution": "integrated",
+      "sha256": "282cc8a2d8e08d289f8f0344db2fee5e4c6a3a52e577ef2df60d18efa946034f"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/styles.css",
+      "destination": "apps/alunixa-x-manager/src/styles.css",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "bb51fd26ee498ee1dda62ac6045cd7f65ded2cd21024c22a00e78e372cba9933"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/typing-effects-runtime.test.ts",
+      "destination": "apps/alunixa-x-manager/src/typing-effects-runtime.test.ts",
+      "resolution": "integrated",
+      "sha256": "4f39e2097d382cb045b0f129bca6ed83cf2306e12097bf4111d43a4d80b1ab15"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/typing-effects-settings.test.ts",
+      "destination": "apps/alunixa-x-manager/src/typing-effects-settings.test.ts",
+      "resolution": "integrated",
+      "sha256": "4047734f971bb19fcedfd6eb3d85cd299836764e720d8c9745483e6fab94210c"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/vlm-test-translation.test.ts",
+      "destination": "apps/alunixa-x-manager/src/vlm-test-translation.test.ts",
+      "resolution": "integrated",
+      "sha256": "1555f7d420199dc66834c3b3996e4b1335e14ebc9058919af22ada83eb062a12"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/vlm-test-translation.ts",
+      "destination": "apps/alunixa-x-manager/src/vlm-test-translation.ts",
+      "resolution": "integrated",
+      "sha256": "db12c35d9cffe942df8957551404a1809559ef2b463ab89b0933ff837de51e93"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/web-search-history.test.ts",
+      "destination": "apps/alunixa-x-manager/src/web-search-history.test.ts",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "02ef7d60cf0f1b06063f727219df60176455a8dc7e1d81202f49b4f543995036"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/whale-balance-settings.test.ts",
+      "destination": "apps/alunixa-x-manager/src/whale-balance-settings.test.ts",
+      "resolution": "integrated",
+      "sha256": "ea750197801090f81bef8b1c1d079d5cfb792137dd7ed482d403b02a086236fb"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/whale-settings.ts",
+      "destination": "apps/alunixa-x-manager/src/whale-settings.ts",
+      "resolution": "integrated",
+      "sha256": "355f3b9806e22b24137404619e36810d162c0b02fe71e0fc6bee7d10a1bd3aec"
+    },
+    {
+      "source": "apps/codex-plus-manager/src/whale-widget.test.ts",
+      "destination": "apps/alunixa-x-manager/src/whale-widget.test.ts",
+      "resolution": "integrated",
+      "sha256": "6eb8f1e8f4a2509e266c9b788bfe29ec16cde0f3f576c6ef2eccd511f6f5dce7"
+    },
+    {
+      "source": "apps/codex-plus-manager/tsconfig.json",
+      "destination": "apps/alunixa-x-manager/tsconfig.json",
+      "resolution": "integrated",
+      "sha256": "fba0bbf9736315a14ff4c6c3940d240e75b0e68631045df7548a0d29f9ed9891"
+    },
+    {
+      "source": "apps/codex-plus-manager/vite.config.ts",
+      "destination": "apps/alunixa-x-manager/vite.config.ts",
+      "resolution": "integrated",
+      "sha256": "ff63791d8c9a38b5169eb2324f591645a12fb33f73f8ddddf75c0ac04cf3597c"
+    },
+    {
+      "source": "apps/codex-plus-mobile-relay/Cargo.toml",
+      "destination": "apps/alunixa-x-mobile-relay/Cargo.toml",
+      "resolution": "integrated",
+      "sha256": "e71b0b720d22b3b4d8a0221978d158fddd422d0eaa5f8112630510f88bb251b6"
+    },
+    {
+      "source": "apps/codex-plus-mobile-relay/src/main.rs",
+      "destination": "apps/alunixa-x-mobile-relay/src/main.rs",
+      "resolution": "integrated",
+      "sha256": "84814ab1d82c33672f4aeeba7dd6c016bcc8f94b3440fe53b005857d4d93ddf6"
+    },
+    {
+      "source": "assets/astra-model-metadata-compat.json",
+      "destination": "assets/astra-model-metadata-compat.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3e0e45439c5c91eff2d9e62513c20ccc4469b452e0a99543508851d066f324c3"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v2-prompt.txt",
+      "destination": "assets/branding/codexplusplus-logo-v2-prompt.txt",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v2.png",
+      "destination": "assets/branding/codexplusplus-logo-v2.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v3-prompt.txt",
+      "destination": "assets/branding/codexplusplus-logo-v3-prompt.txt",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v3.png",
+      "destination": "assets/branding/codexplusplus-logo-v3.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v4-prompt.txt",
+      "destination": "assets/branding/codexplusplus-logo-v4-prompt.txt",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v4.png",
+      "destination": "assets/branding/codexplusplus-logo-v4.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v5-prompt.txt",
+      "destination": "assets/branding/codexplusplus-logo-v5-prompt.txt",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/branding/codexplusplus-logo-v5.png",
+      "destination": "assets/branding/codexplusplus-logo-v5.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/claude-localization/build-copy.ps1",
+      "destination": "assets/claude-localization/build-copy.ps1",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "beb0a3c56e0fa84e7eeded6f7c2a9e55ff293de24af062cb5244ccba40216333"
+    },
+    {
+      "source": "assets/claude-localization/build-copy.py",
+      "destination": "assets/claude-localization/build-copy.py",
+      "resolution": "integrated",
+      "sha256": "e238e92964871535c44961a970e8bdf5f00df283317057c46382ab48529edf02"
+    },
+    {
+      "source": "assets/claude-localization/catalogs/dynamic/zh-Hans.json",
+      "destination": "assets/claude-localization/catalogs/dynamic/zh-Hans.json",
+      "resolution": "integrated",
+      "sha256": "684b0c92fef00fb93dedfb6e340f7e66da5d8304495d35f559598fa993973d43"
+    },
+    {
+      "source": "assets/claude-localization/catalogs/zh-Hans.json",
+      "destination": "assets/claude-localization/catalogs/zh-Hans.json",
+      "resolution": "integrated",
+      "sha256": "7ee95791203a378c5ff66588f37c0a3512151936985beb91f16ede03214b619b"
+    },
+    {
+      "source": "assets/claude-localization/catalogs/zh-Hans.overrides.json",
+      "destination": "assets/claude-localization/catalogs/zh-Hans.overrides.json",
+      "resolution": "integrated",
+      "sha256": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+    },
+    {
+      "source": "assets/claude-localization/hook.js",
+      "destination": "assets/claude-localization/hook.js",
+      "resolution": "integrated",
+      "sha256": "3078586a1949cb1a020a10c615deebea44849a8695526b3dc6c0f4230626edb7"
+    },
+    {
+      "source": "assets/claude-localization/inject-cn.js",
+      "destination": "assets/claude-localization/inject-cn.js",
+      "resolution": "integrated",
+      "sha256": "4da5e436729c29078324e83cebdcb9be82b513e00ef6d7944ed45bbc486ae83d"
+    },
+    {
+      "source": "assets/claude-localization/inject-cn.ps1",
+      "destination": "assets/claude-localization/inject-cn.ps1",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "23fcf57689df8eee3c383c39566cd104b4a9af94ced1656a1aa6f53ec02dd7f4"
+    },
+    {
+      "source": "assets/claude-localization/page-shim.js",
+      "destination": "assets/claude-localization/page-shim.js",
+      "resolution": "integrated",
+      "sha256": "c067821f51eee26596ff495e1712b6ec2ea4986ff181af415eca395d25931ba0"
+    },
+    {
+      "source": "assets/claude-localization/sign-copy.py",
+      "destination": "assets/claude-localization/sign-copy.py",
+      "resolution": "integrated",
+      "sha256": "10b61b50ce1d2e11898eabd13bf695ee245448e5ceda741e2f7f651044c92780"
+    },
+    {
+      "source": "assets/codex-models.json",
+      "destination": "assets/codex-models.json",
+      "resolution": "integrated",
+      "sha256": "f867e9d3bf495042026ff7c1c2ef4dc41af437e27f1cf1dc084c595102eb048e"
+    },
+    {
+      "source": "assets/deepseek-model-metadata.json",
+      "destination": "assets/deepseek-model-metadata.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7a72fd86931ddd2b06c71ad3c41c3bfc02bcb28b6b6cc6eb254a81f392931399"
+    },
+    {
+      "source": "assets/doubao-model-metadata.json",
+      "destination": "assets/doubao-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "12b65e476e07b782e21b745d5a60146eeb9b6ca7daa08614c832d8724ad541d0"
+    },
+    {
+      "source": "assets/gemini-model-metadata.json",
+      "destination": "assets/gemini-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "1124ba794565d3fce5760ed87ddb5d4e17211f79502b1f1a09bab829a4db040f"
+    },
+    {
+      "source": "assets/glm-model-metadata.json",
+      "destination": "assets/glm-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "1e289cdd3d9fa457fdadbf059386312dff5d9883bb0f6f98e4df42871e8104ec"
+    },
+    {
+      "source": "assets/gpt56-model-metadata-compat.json",
+      "destination": "assets/gpt56-model-metadata-compat.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5eb860988b3c6e57a65320be51b469d010411721eb7b4e5eea705c3faae1935f"
+    },
+    {
+      "source": "assets/gpt6-sol-luna-model-metadata-compat.json",
+      "destination": "assets/gpt6-sol-luna-model-metadata-compat.json",
+      "resolution": "integrated",
+      "sha256": "8630777b66eb8a61fd5aa2f79d7c879be5bb07a99ae77bc2b774d845f9a54c61"
+    },
+    {
+      "source": "assets/gpt61-sol-model-metadata-compat.json",
+      "destination": "assets/gpt61-sol-model-metadata-compat.json",
+      "resolution": "integrated",
+      "sha256": "ec0dc2328b6814bc5cc54748322aea50ee4922adc690fa5f59c92e73cb298ac3"
+    },
+    {
+      "source": "assets/gptoss-model-metadata.json",
+      "destination": "assets/gptoss-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "d919241d3606e52e3b17619b20fff4966fa6948049b3a44959421778a14b89cf"
+    },
+    {
+      "source": "assets/grok-model-metadata.json",
+      "destination": "assets/grok-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "e5bebac4cc0578813c346d107b8397c8ffae5a7184c820f2027faf54b7c15472"
+    },
+    {
+      "source": "assets/images/codex-plus-plus.ico",
+      "destination": "assets/images/alunixa-x-plus.ico",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ddefdf4c3d4a646682b1cd13c22f87e7c6bb17a5b88310c9a97fdcbba57cc70c"
+    },
+    {
+      "source": "assets/images/codex-plus-plus.png",
+      "destination": "assets/images/alunixa-x-plus.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8c24b4b9a9bad50b6513e999c09cb6714623a4539750bc60ee1021c477a33663"
+    },
+    {
+      "source": "assets/images/rawchat-sponsor.jpg",
+      "destination": "assets/images/rawchat-sponsor.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/images/sponsor-alipay.jpg",
+      "destination": "assets/images/sponsor-alipay.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/images/sponsor-wechat.jpg",
+      "destination": "assets/images/sponsor-wechat.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "assets/inject/api-quota-gate.js",
+      "destination": "assets/inject/api-quota-gate.js",
+      "resolution": "integrated",
+      "sha256": "65710a70704d2eda1d83deb7f730264821dca3ef3f30b47451e33354db059f27"
+    },
+    {
+      "source": "assets/inject/api-quota-gate.test.cjs",
+      "destination": "assets/inject/api-quota-gate.test.cjs",
+      "resolution": "integrated",
+      "sha256": "802a96d42693e387ae12256ab15c88f00ce7fb3820b5042217ae6e3cfd5d79e6"
+    },
+    {
+      "source": "assets/inject/composer-readiness.js",
+      "destination": "assets/inject/composer-readiness.js",
+      "resolution": "integrated",
+      "sha256": "34ae596367ffd0443c8d5e78b5460ca684f47f15ea2f925015972ad1c8d7b3a9"
+    },
+    {
+      "source": "assets/inject/composer-readiness.test.cjs",
+      "destination": "assets/inject/composer-readiness.test.cjs",
+      "resolution": "integrated",
+      "sha256": "47b316667eb10b48ee16bbf9a1dab7c1af84b03adb42539c9eb948cae954344e"
+    },
+    {
+      "source": "assets/inject/conversation-view.test.cjs",
+      "destination": "assets/inject/conversation-view.test.cjs",
+      "resolution": "integrated",
+      "sha256": "7f84244107262ffa514045bbfaec6c53c5f611b4a3c3e9f3212e5cd1bc5ba235"
+    },
+    {
+      "source": "assets/inject/dictation.test.cjs",
+      "destination": "assets/inject/dictation.test.cjs",
+      "resolution": "integrated",
+      "sha256": "c929c9a24b9b90f471d6137cf742dc7f97f1ff0b3e7c1aa21bd10ae887bb5d9f"
+    },
+    {
+      "source": "assets/inject/dream-skin-default.png",
+      "destination": "assets/inject/dream-skin-default.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "50916025676e453da33bb4b278421d04732dd6cf7b1607feb9f32f07753e83d4"
+    },
+    {
+      "source": "assets/inject/floating-panel-inject.js",
+      "destination": "assets/inject/floating-panel-inject.js",
+      "resolution": "integrated",
+      "sha256": "fff8382ce95d0edb4c8aaad6432c5edee8e58eab20eb649a4030889247dae66f"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/appearance-runtime.js",
+      "destination": "assets/inject/floating-panel/core/appearance-runtime.js",
+      "resolution": "integrated",
+      "sha256": "ce0dafe1b02b2eaa5e00f8107979cf3f089684f5fc1013836f68cc829175b2e7"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/appearance.js",
+      "destination": "assets/inject/floating-panel/core/appearance.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "52572db0b5e4e34fcb41be2eadb760d1fba8a3b8d4227f9eafa15b9ed9464d28"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/geometry.js",
+      "destination": "assets/inject/floating-panel/core/geometry.js",
+      "resolution": "integrated",
+      "sha256": "ccaa80f10f0aa49c4791c1119dd83467a430de09c4d82478e59338401554da89"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/host.js",
+      "destination": "assets/inject/floating-panel/core/host.js",
+      "resolution": "integrated",
+      "sha256": "017ef42fbadf5a76e38a6307a21839806d05f8fbe7fa24ee2f380ba1ad7d88c4"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/interaction.js",
+      "destination": "assets/inject/floating-panel/core/interaction.js",
+      "resolution": "integrated",
+      "sha256": "bdc54f59e3cb9e0aa23353b5a374cb764cfd118702ac8ab6b0d60bf58f34c9ad"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/scroll-state.js",
+      "destination": "assets/inject/floating-panel/core/scroll-state.js",
+      "resolution": "integrated",
+      "sha256": "6edf82fd02a672187cdfa1398feddbf845aa435d66686d8b9c5c4653d02f2e5e"
+    },
+    {
+      "source": "assets/inject/floating-panel/core/views.js",
+      "destination": "assets/inject/floating-panel/core/views.js",
+      "resolution": "integrated",
+      "sha256": "250c6b4892a4529e98495a5ddf99c934535651c6ef161e005eaf22c4292b84f6"
+    },
+    {
+      "source": "assets/inject/floating-panel/outline/feature.js",
+      "destination": "assets/inject/floating-panel/outline/feature.js",
+      "resolution": "integrated",
+      "sha256": "0ba47d8fde187f61e9c5ef1b44c3c56d84136e4b27ae8bf36a10a354ca002102"
+    },
+    {
+      "source": "assets/inject/floating-panel/outline/navigation.js",
+      "destination": "assets/inject/floating-panel/outline/navigation.js",
+      "resolution": "integrated",
+      "sha256": "908c52a05e9ff411831a2db5e576a9fbfbd1d317aa7c62ddea736a12dedbe0a8"
+    },
+    {
+      "source": "assets/inject/floating-panel/outline/parser.js",
+      "destination": "assets/inject/floating-panel/outline/parser.js",
+      "resolution": "integrated",
+      "sha256": "703625160b3d254cabfee8a8cbae7566d5c60a1b623516b1bca7e1386517299a"
+    },
+    {
+      "source": "assets/inject/floating-panel/outline/view.js",
+      "destination": "assets/inject/floating-panel/outline/view.js",
+      "resolution": "integrated",
+      "sha256": "43615f41eb918ab8dc96af836fa8c77f0d185f8cd1023f58d90c8a6d9265912a"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/answer-context.js",
+      "destination": "assets/inject/floating-panel/runtime/answer-context.js",
+      "resolution": "integrated",
+      "sha256": "c12c79b37bb8bdbd0e35b611d1395fae22eff99a85db656126fb0fa3978f7703"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/bridge-client.js",
+      "destination": "assets/inject/floating-panel/runtime/bridge-client.js",
+      "resolution": "integrated",
+      "sha256": "b51bd275581b34eb88bee349f6e1413808982ad25815fc726090536bea285a8f"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/dom.js",
+      "destination": "assets/inject/floating-panel/runtime/dom.js",
+      "resolution": "integrated",
+      "sha256": "7b568810ea661f9fc52ac8df418f151397e241e15d7bc830fc937e7a6bcd9b64"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/lifecycle.js",
+      "destination": "assets/inject/floating-panel/runtime/lifecycle.js",
+      "resolution": "integrated",
+      "sha256": "7cb599cf1dccc15c9cce80a78eb6cab25dfa91e0ae20f31d97ccc846cdf7a260"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/settings.js",
+      "destination": "assets/inject/floating-panel/runtime/settings.js",
+      "resolution": "integrated",
+      "sha256": "e71b6fac963c37fe700364a76a1a4d0505a443b44dd07096c801aaf9f3e1ba73"
+    },
+    {
+      "source": "assets/inject/floating-panel/runtime/state.js",
+      "destination": "assets/inject/floating-panel/runtime/state.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4419b2d61074a3b8b5b03f06d228c1f36648f906776bdc6eba38b7976c2c6467"
+    },
+    {
+      "source": "assets/inject/floating-panel/stepwise/generation.js",
+      "destination": "assets/inject/floating-panel/stepwise/generation.js",
+      "resolution": "integrated",
+      "sha256": "63bbe8867d78db16058aa10e3055d3bcff9816613a2a8d58f101df97e723ccf7"
+    },
+    {
+      "source": "assets/inject/floating-panel/stepwise/suggestions.js",
+      "destination": "assets/inject/floating-panel/stepwise/suggestions.js",
+      "resolution": "integrated",
+      "sha256": "791750540ff5bce2ec2fa9c612a97cc8b267f0dfb93b1b08887ed96bc7325d61"
+    },
+    {
+      "source": "assets/inject/official-usage-lifecycle.test.cjs",
+      "destination": "assets/inject/official-usage-lifecycle.test.cjs",
+      "resolution": "integrated",
+      "sha256": "150a0e31b2c170fa686b055d2c1447192701aa63c8e758a8d1f6e76adf8956f2"
+    },
+    {
+      "source": "assets/inject/pet-real-mouse-inject.js",
+      "destination": "assets/inject/pet-real-mouse-inject.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "1962494fa3e229674a102e7a923c1733b92ad3d08205dbd10ad25a5b15884cf7"
+    },
+    {
+      "source": "assets/inject/plugin-market-adapter.test.cjs",
+      "destination": "assets/inject/plugin-market-adapter.test.cjs",
+      "resolution": "integrated",
+      "sha256": "bbb6200a04fd4321c91a9479e5d9226c9617bdcbbd6543e301c44fd35e970ff3"
+    },
+    {
+      "source": "assets/inject/plugin-market-navigation.test.cjs",
+      "destination": "assets/inject/plugin-market-navigation.test.cjs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "eb67121dc1b49422c54f76f516b34ae6a880c416808850e456e6d08ecd314110"
+    },
+    {
+      "source": "assets/inject/plugin-market-ui.test.cjs",
+      "destination": "assets/inject/plugin-market-ui.test.cjs",
+      "resolution": "integrated",
+      "sha256": "26ac857ef7e6502598ceca14cbefb0ff00702138c002197727842174733e1166"
+    },
+    {
+      "source": "assets/inject/renderer-inject.js",
+      "destination": "assets/inject/renderer-inject.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0fa05fb4c64e6fb87bc5857c04f20d7088163826b0247137ba46ccefdc75d081"
+    },
+    {
+      "source": "assets/inject/renderer-inject/00-prelude.js",
+      "destination": "assets/inject/renderer-inject/00-prelude.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "218843bcbd55b4931614aa3fe52577e16edb6455f0c0df5301a30ffcea63656a"
+    },
+    {
+      "source": "assets/inject/renderer-inject/01-registry.js",
+      "destination": "assets/inject/renderer-inject/01-registry.js",
+      "resolution": "integrated",
+      "sha256": "37a2fe8ec53d4b0ca7b43f7c6db9a715b40542880bb990b9c1dd750bf8d4f009"
+    },
+    {
+      "source": "assets/inject/renderer-inject/10-style.js",
+      "destination": "assets/inject/renderer-inject/10-style.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "f75e85c964924c8989972b4aecbf531105d335ecb3be505cd7cc26b777c5f660"
+    },
+    {
+      "source": "assets/inject/renderer-inject/20-menu.js",
+      "destination": "assets/inject/renderer-inject/20-menu.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "70cfd5171a511c67bd927310805ad6b4c3e46d7297fdd088ae0a5d8ec54575a9"
+    },
+    {
+      "source": "assets/inject/renderer-inject/30-service-tier.js",
+      "destination": "assets/inject/renderer-inject/30-service-tier.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ade13d14c8b03897744847bfd41003343993fb2a5889243099d839632781fa73"
+    },
+    {
+      "source": "assets/inject/renderer-inject/40-backend-settings.js",
+      "destination": "assets/inject/renderer-inject/40-backend-settings.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "febf48cbe7264b054d4f3013f30fe1e5eba5988bd30da2cdc31df894770e4c98"
+    },
+    {
+      "source": "assets/inject/renderer-inject/50-navigation.js",
+      "destination": "assets/inject/renderer-inject/50-navigation.js",
+      "resolution": "integrated",
+      "sha256": "4895206bad48fc92d3098bd2f3de9f1e5181098223b203466de9bf4d1e52d1d4"
+    },
+    {
+      "source": "assets/inject/renderer-inject/60-plugin-marketplace.js",
+      "destination": "assets/inject/renderer-inject/60-plugin-marketplace.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2ea98791db6a7e27b55b6b5008c447984a55b81998145233c003e023771a427e"
+    },
+    {
+      "source": "assets/inject/renderer-inject/61-plugin-market-ui.js",
+      "destination": "assets/inject/renderer-inject/61-plugin-market-ui.js",
+      "resolution": "integrated",
+      "sha256": "3072e4675ac69bd9b7efa93537765e732c6c18813d1aa98e8b45e7d7d8665d24"
+    },
+    {
+      "source": "assets/inject/renderer-inject/62-plugin-market-adapter.js",
+      "destination": "assets/inject/renderer-inject/62-plugin-market-adapter.js",
+      "resolution": "integrated",
+      "sha256": "f3713081747967d01acc5ca40069e62b4daf47f0beea3345b658dad3dd2749a5"
+    },
+    {
+      "source": "assets/inject/renderer-inject/70-model-catalog.js",
+      "destination": "assets/inject/renderer-inject/70-model-catalog.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "77970bc91c7728010780cbbb4aaf017eaf2b9022f64d71d60fbc307f5dc697d8"
+    },
+    {
+      "source": "assets/inject/renderer-inject/80-session-share.js",
+      "destination": "assets/inject/renderer-inject/80-session-share.js",
+      "resolution": "integrated",
+      "sha256": "9b8aa72f4c2bbe0ee86752f83d651702af1915484cac5fb53454cfa6dfcb4a72"
+    },
+    {
+      "source": "assets/inject/renderer-inject/90-action-groups.js",
+      "destination": "assets/inject/renderer-inject/90-action-groups.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "105092a5145966fda64e813666d19a4a3df741bff25fb981c4ee5a9fc3ac8baf"
+    },
+    {
+      "source": "assets/inject/renderer-inject/91-extension-api.js",
+      "destination": "assets/inject/renderer-inject/91-extension-api.js",
+      "resolution": "integrated",
+      "sha256": "dd84c838b6f112d41e19d3543e7ef5fd4ac7752961e8d2688bf205b695933d3c"
+    },
+    {
+      "source": "assets/inject/renderer-inject/92-extension-host.js",
+      "destination": "assets/inject/renderer-inject/92-extension-host.js",
+      "resolution": "integrated",
+      "sha256": "4e0c6a6c186c1e022c15ab0e0b4063daadaebc0f0eaebfcd714d1c1317397442"
+    },
+    {
+      "source": "assets/inject/renderer-inject/93-dictation.js",
+      "destination": "assets/inject/renderer-inject/93-dictation.js",
+      "resolution": "integrated",
+      "sha256": "1b7731d518df955fb424325530fc574790ac3911d8d9139d738240efe18d9b3f"
+    },
+    {
+      "source": "assets/inject/renderer-inject/94-typing-effects.js",
+      "destination": "assets/inject/renderer-inject/94-typing-effects.js",
+      "resolution": "integrated",
+      "sha256": "cb382fc5f9995289bcfdd8a63943c434e932abb670e153618f21d51697db7d94"
+    },
+    {
+      "source": "assets/inject/renderer-inject/95-conversation-view.js",
+      "destination": "assets/inject/renderer-inject/95-conversation-view.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "18c59f38ce9730014cd8bf8aa6a0e8ee076810489e583b96359b428f20eb5fba"
+    },
+    {
+      "source": "assets/inject/renderer-inject/96-whale-compat.js",
+      "destination": "assets/inject/renderer-inject/96-whale-compat.js",
+      "resolution": "integrated",
+      "sha256": "e1355c70d8426ebdec320f05bdb80c11479a8c3628537e585d1f9061e911cd24"
+    },
+    {
+      "source": "assets/inject/renderer-inject/97-whale-widget.js",
+      "destination": "assets/inject/renderer-inject/97-whale-widget.js",
+      "resolution": "integrated",
+      "sha256": "ac03c0d6dd5fe927e0afc6d24658de9e225bb9250249c92652155466d505335b"
+    },
+    {
+      "source": "assets/inject/renderer-inject/98-scan-schedule.js",
+      "destination": "assets/inject/renderer-inject/98-scan-schedule.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "856d5f5731a170ff38b8fc7f02a397eb9cbfd009e33f6c5d3191f30f66315268"
+    },
+    {
+      "source": "assets/inject/renderer-inject/99-startup.js",
+      "destination": "assets/inject/renderer-inject/99-startup.js",
+      "resolution": "integrated",
+      "sha256": "f94d88d9fa76b05e3154b35db82062f138a16ed09f12d93903ed87d46dd218af"
+    },
+    {
+      "source": "assets/inject/renderer-inject/99-tail.js",
+      "destination": "assets/inject/renderer-inject/99-tail.js",
+      "resolution": "integrated",
+      "sha256": "64af0bfa11f29eef26897d0e5497af9f4896b6eaaf78333812340ee32e7fc596"
+    },
+    {
+      "source": "assets/inject/renderer-inject/manifest.json",
+      "destination": "assets/inject/renderer-inject/manifest.json",
+      "resolution": "integrated",
+      "sha256": "0123e1288a07bc3c179a6db377c027f8a0e78b601d489ee65bfb65cf0fdb5366"
+    },
+    {
+      "source": "assets/inject/renderer-inject/zz-paste-fix.js",
+      "destination": "assets/inject/renderer-inject/zz-paste-fix.js",
+      "resolution": "integrated",
+      "sha256": "63888bbf2b8f6a6ced2b7b35bac71be7942ebdcab51ca97c51fc8522c3334fb5"
+    },
+    {
+      "source": "assets/inject/retired-features.test.cjs",
+      "destination": "assets/inject/retired-features.test.cjs",
+      "resolution": "integrated",
+      "sha256": "f3625cf55edf22fae0144a1d4f66fae9d57166044cb203e4c1667fc1e65cacf9"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/LICENSE",
+      "destination": "assets/inject/upstream/cidala-tiger/LICENSE",
+      "resolution": "integrated",
+      "sha256": "7b0f1855e7e716bdb2069b9c8b834f8d07430e748a4abec9534b6bec48e61a98"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/macos/dream-skin.css",
+      "destination": "assets/inject/upstream/cidala-tiger/macos/dream-skin.css",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "45506ca7c71d4e9867287ae2358c4380c0993f0d04039c29fee6dbee20495148"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/macos/renderer-inject.js",
+      "destination": "assets/inject/upstream/cidala-tiger/macos/renderer-inject.js",
+      "resolution": "integrated",
+      "sha256": "19202c8a37c7512e65f950a5516a314867fdf305b74b313f0abcea8cf7347f59"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/macos/theme.json",
+      "destination": "assets/inject/upstream/cidala-tiger/macos/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "50fcd415b210bec9fda9ca6ded3660b3730877c94b9c72a14b7b3e452b5cb229"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/windows/dream-skin.css",
+      "destination": "assets/inject/upstream/cidala-tiger/windows/dream-skin.css",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0c371b7d794c4783648d1733661e8fa8674c872296ce5cf9898b28eb1765425c"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/windows/renderer-inject.js",
+      "destination": "assets/inject/upstream/cidala-tiger/windows/renderer-inject.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "cca3a09b3e46aaf538cb121abe7e6d43b6663f9bcead090767f55c2ee1d96c62"
+    },
+    {
+      "source": "assets/inject/upstream/cidala-tiger/windows/theme.json",
+      "destination": "assets/inject/upstream/cidala-tiger/windows/theme.json",
+      "resolution": "integrated",
+      "sha256": "5209589c642804534f886c62202c35a46099d9558907dc965f510bc644d01d8c"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/LICENSE",
+      "destination": "assets/inject/upstream/dream-skin/LICENSE",
+      "resolution": "integrated",
+      "sha256": "18f8478d0f9efd45307e5f17790194593b116658145c758ced3166398eb05b21"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/macos/dream-skin.css",
+      "destination": "assets/inject/upstream/dream-skin/macos/dream-skin.css",
+      "resolution": "integrated",
+      "sha256": "f8f944ab2d8e7c409ae7ae7f2f079dc79d6674f729129798a7281b492d8d8da6"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/macos/portal-hero.png",
+      "destination": "assets/inject/upstream/dream-skin/macos/portal-hero.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "50916025676e453da33bb4b278421d04732dd6cf7b1607feb9f32f07753e83d4"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/macos/renderer-inject.js",
+      "destination": "assets/inject/upstream/dream-skin/macos/renderer-inject.js",
+      "resolution": "integrated",
+      "sha256": "1f1e408f8b89bef6b83de0a5ee047bfb1f8dfd0165628398d520b8897083ffd7"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/macos/theme.json",
+      "destination": "assets/inject/upstream/dream-skin/macos/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "50fcd415b210bec9fda9ca6ded3660b3730877c94b9c72a14b7b3e452b5cb229"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/windows/dream-reference.jpg",
+      "destination": "assets/inject/upstream/dream-skin/windows/dream-reference.jpg",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "313652fb523573c6d817c47ff6ccea6c9653dc369086695ea5b2650eb75e3cec"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/windows/dream-skin.css",
+      "destination": "assets/inject/upstream/dream-skin/windows/dream-skin.css",
+      "resolution": "integrated",
+      "sha256": "f8f944ab2d8e7c409ae7ae7f2f079dc79d6674f729129798a7281b492d8d8da6"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/windows/renderer-inject.js",
+      "destination": "assets/inject/upstream/dream-skin/windows/renderer-inject.js",
+      "resolution": "integrated",
+      "sha256": "1f1e408f8b89bef6b83de0a5ee047bfb1f8dfd0165628398d520b8897083ffd7"
+    },
+    {
+      "source": "assets/inject/upstream/dream-skin/windows/theme.json",
+      "destination": "assets/inject/upstream/dream-skin/windows/theme.json",
+      "resolution": "integrated",
+      "sha256": "9068f781f190d213fe5be180a12ab1ed534fafdd0bfba00276c951a178dfe72a"
+    },
+    {
+      "source": "assets/inject/upstream/glass-vision/LICENSE",
+      "destination": "assets/inject/upstream/glass-vision/LICENSE",
+      "resolution": "integrated",
+      "sha256": "26595abd1084ebbd7173a93998b5293bcf3647a22ccc1ac424c54be5d260ff57"
+    },
+    {
+      "source": "assets/inject/upstream/glass-vision/glass-vision.css",
+      "destination": "assets/inject/upstream/glass-vision/glass-vision.css",
+      "resolution": "integrated",
+      "sha256": "4c37c53544ee4f1cd93ba5d0dc3e174b05d4cb84ec9a436295d11d19f0bb04f1"
+    },
+    {
+      "source": "assets/inject/upstream/glass-vision/renderer-inject.js",
+      "destination": "assets/inject/upstream/glass-vision/renderer-inject.js",
+      "resolution": "integrated",
+      "sha256": "d14943e95db62db81bf29d9cf14fcaf1dd1ea9a9625245c020865127eea295a2"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/LICENSE",
+      "destination": "assets/inject/upstream/skin-packs/LICENSE",
+      "resolution": "integrated",
+      "sha256": "98ce01db7e64d41dd7e70ddc83bdaf0114c5839da3f3479b52d9ccd33412210b"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/caishen-lite/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/caishen-lite/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "cb58204ac17b5d73859193a6c7c1ee4ce33568dee88582d5b9ac2ceb35e0b6d7"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/caishen-max/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/caishen-max/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "af1e5844a8015ec6b8af7abcf28d002a1a3a5af99f95f1d492a42175f096ef84"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/caishen-readable/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/caishen-readable/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9ea843898488827c4a311644f69e2bbe8df3c98f09e24c942ea2b68d8e98d299"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/export-night/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/export-night/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "836738f5ef3c10142463671050d898e90f5b25c7e391fa7a4e0280c7fa391312"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/global-founder-bright/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/global-founder-bright/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0816234b0bc8ae64194b7327168f9c353998fc17e4a5178b8e9bf1984b1820bb"
+    },
+    {
+      "source": "assets/inject/upstream/skin-packs/packs/mythic-guardian-noir/theme.json",
+      "destination": "assets/inject/upstream/skin-packs/packs/mythic-guardian-noir/theme.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0d984f68a0b6841e72ce062e6e56830b4fa305e6b8a1808a97a2b21e9f6f0b38"
+    },
+    {
+      "source": "assets/inject/upstream/snow-skin/LICENSE",
+      "destination": "assets/inject/upstream/snow-skin/LICENSE",
+      "resolution": "integrated",
+      "sha256": "714d6a902a51867b0706f62ed2467d4332f787891c04a6bdfe660b1221643b86"
+    },
+    {
+      "source": "assets/inject/upstream/snow-skin/dream-skin.css",
+      "destination": "assets/inject/upstream/snow-skin/dream-skin.css",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "97807de20e40680471d211466b657867cb46280f393ef9d7fbba5ce829ae5599"
+    },
+    {
+      "source": "assets/inject/upstream/snow-skin/renderer-inject.js",
+      "destination": "assets/inject/upstream/snow-skin/renderer-inject.js",
+      "resolution": "integrated",
+      "sha256": "9ae8123b51917975b5d4b91995173a6a4dd3c27c6bd5b465b5670c2c1330955a"
+    },
+    {
+      "source": "assets/inject/upstream/snow-skin/theme.json",
+      "destination": "assets/inject/upstream/snow-skin/theme.json",
+      "resolution": "integrated",
+      "sha256": "7b232c41fac85bccedcf2e7df64e578e43c575244059caaedc72ada3b1ab7842"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/D1.mp3",
+      "destination": "assets/inject/upstream/whale-widget/D1.mp3",
+      "resolution": "integrated",
+      "sha256": "626c0fb5dbfb2529331b98b80fa29961efbcbef6a454b36328481b61d8a0c7be"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/D2.mp3",
+      "destination": "assets/inject/upstream/whale-widget/D2.mp3",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8a3a48949755f43b66d03efe111a68790638c3a82f39fe1c2805958d8e649247"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/DSniang1.png",
+      "destination": "assets/inject/upstream/whale-widget/DSniang1.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "acda82e446b78899d4eaabf865b372d2e9ff33ca8a0ecfe1016ca3ad3b44fe2b"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/LICENSE",
+      "destination": "assets/inject/upstream/whale-widget/LICENSE",
+      "resolution": "integrated",
+      "sha256": "a1e46acc1349f63e9d1e26a8a600823e010fedcaff20fc1eceb6564432bf829b"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/PROVENANCE.md",
+      "destination": "assets/inject/upstream/whale-widget/PROVENANCE.md",
+      "resolution": "integrated",
+      "sha256": "798179d23d620e5f8be4220b75df008c97ebc821d8f69d2842d8af9cf69726e8"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/README.md",
+      "destination": "assets/inject/upstream/whale-widget/README.md",
+      "resolution": "integrated",
+      "sha256": "9dcf275e26e736b7e3184da4a507dc9ebb1e8d8e3c0549b7a60a19b250afcd38"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/Ya1.mp3",
+      "destination": "assets/inject/upstream/whale-widget/Ya1.mp3",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "70c2e41bb2575981084aa015bbe9f8d821a2bb4e2cd2ba614882c63884bb2377"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/Ya2.mp3",
+      "destination": "assets/inject/upstream/whale-widget/Ya2.mp3",
+      "resolution": "integrated",
+      "sha256": "1a8998077e5e306c3088bb442ce36617261dd58200754f457469a520801c565b"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/bubble-money1.gif",
+      "destination": "assets/inject/upstream/whale-widget/bubble-money1.gif",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "a19c7da4c74aabf0fafbcc53d31b6d3796c5a1da861e25dafba6c04ad3af37e5"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/bubble-petpet.gif",
+      "destination": "assets/inject/upstream/whale-widget/bubble-petpet.gif",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7672baf03af076f7d62a0127469997d7bad7bc16c9fe627ff9ee9f5cfcd2ab06"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/full-widget-codex.js",
+      "destination": "assets/inject/upstream/whale-widget/full-widget-codex.js",
+      "resolution": "integrated",
+      "sha256": "8e671194b161a7389165675f84cd9a1ac9113d091c8633491837d51d47eb498d"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/full-widget.js",
+      "destination": "assets/inject/upstream/whale-widget/full-widget.js",
+      "resolution": "integrated",
+      "sha256": "391806b8d4fd7c77a1711e02f58360e641f97b97bfb9085049031365007301b0"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/minecraft-exp-orb.wav",
+      "destination": "assets/inject/upstream/whale-widget/minecraft-exp-orb.wav",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0dfada77fedb5cc9032fbf13922b5b36d12c83f2bc496f63ca968d80ef042205"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/peak-calendar.json",
+      "destination": "assets/inject/upstream/whale-widget/peak-calendar.json",
+      "resolution": "integrated",
+      "sha256": "e9fe4896eb2b2608f35b7d4675a8ef46c9ca8b4ade7c340022d6617ac8afd608"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/provider-templates.json",
+      "destination": "assets/inject/upstream/whale-widget/provider-templates.json",
+      "resolution": "integrated",
+      "sha256": "f184198a8136240c17f9845f9b360da326b4e2565069ead11cfcee04b2800060"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/rua.gif",
+      "destination": "assets/inject/upstream/whale-widget/rua.gif",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7672baf03af076f7d62a0127469997d7bad7bc16c9fe627ff9ee9f5cfcd2ab06"
+    },
+    {
+      "source": "assets/inject/upstream/whale-widget/task-end-a.wav",
+      "destination": "assets/inject/upstream/whale-widget/task-end-a.wav",
+      "resolution": "integrated",
+      "sha256": "6228bbe410658a18f06e5cd42cc055570c54905dd371cb971c0a0df88c47c417"
+    },
+    {
+      "source": "assets/inject/user-scripts-bootstrap.js",
+      "destination": "assets/inject/user-scripts-bootstrap.js",
+      "resolution": "integrated",
+      "sha256": "3a6ee8760d5b08715b4fb97f04b9c84e2a180e8b0e0d26a338084ae2abda4bcb"
+    },
+    {
+      "source": "assets/inject/user-scripts-runtime.js",
+      "destination": "assets/inject/user-scripts-runtime.js",
+      "resolution": "integrated",
+      "sha256": "56ac0150a08aea52bb032992cf52b20570a3d595a0052706eb7f5267b6d3cd14"
+    },
+    {
+      "source": "assets/installer/macos/dmg-background.svg",
+      "destination": "assets/installer/macos/dmg-background.svg",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4aae4a5ec3e970a350e10312526cb5a83d5408b3e482d0d430f9b9573b0c9a02"
+    },
+    {
+      "source": "assets/kimi-model-metadata.json",
+      "destination": "assets/kimi-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "73e0dd93523e3d08c29ca74df04a9e00f8fed5d1e1d67175d1b0794f4a243ec5"
+    },
+    {
+      "source": "assets/mimo-model-metadata.json",
+      "destination": "assets/mimo-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "219df5efb03f1d9fdda7774097f141e930ad788e893d2e6ef4148913eb14e0ec"
+    },
+    {
+      "source": "assets/minimax-model-metadata.json",
+      "destination": "assets/minimax-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "440c34645bd731f7fb30131b5638d16f397f942d32fc119002fa65d75e53da27"
+    },
+    {
+      "source": "assets/mistral-model-metadata.json",
+      "destination": "assets/mistral-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "89b555b5e2fbb62c593127cc63c865b08ffcd1aaf9f3bcd5305102b1986bfdf5"
+    },
+    {
+      "source": "assets/muse-model-metadata.json",
+      "destination": "assets/muse-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "0db5f6adb7749f4fd2c40065189eb9969af01493bfcfb7f2b423c5c0ab198669"
+    },
+    {
+      "source": "assets/native-browser/fixtures/service-specimen.mjs",
+      "destination": "assets/native-browser/fixtures/service-specimen.mjs",
+      "resolution": "integrated",
+      "sha256": "d4997c29ff5665b8c8235ccfe0cae47405db2d795e89d56730797a576d60bf27"
+    },
+    {
+      "source": "assets/native-browser/inspect-service.cjs",
+      "destination": "assets/native-browser/inspect-service.cjs",
+      "resolution": "integrated",
+      "sha256": "e433fc877cd01d44279b4619f5f7470647be32945aea859f36d291e0dea985b4"
+    },
+    {
+      "source": "assets/native-browser/inspect-service.mjs",
+      "destination": "assets/native-browser/inspect-service.mjs",
+      "resolution": "integrated",
+      "sha256": "30b41ade3e038a37c846095351a6b59bc832e22c95a43aa4381e34fa978d096d"
+    },
+    {
+      "source": "assets/native-browser/inspector-NOTICE.txt",
+      "destination": "assets/native-browser/inspector-NOTICE.txt",
+      "resolution": "integrated",
+      "sha256": "b65afca8a2dbbd36f17ceba10b970e2be7f3e48c40dbc32f99faba438d736d7b"
+    },
+    {
+      "source": "assets/native-browser/require-identification.mjs",
+      "destination": "assets/native-browser/require-identification.mjs",
+      "resolution": "integrated",
+      "sha256": "4665de5813c135dcc9aeee7e8deb598c712068d0d770af250c3ba38066cd0822"
+    },
+    {
+      "source": "assets/nvidia-model-metadata.json",
+      "destination": "assets/nvidia-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "9fcca859e9ac6241a6cf5514bbdf6e48fa6d058f520f51fc9ebc73b20dd912dc"
+    },
+    {
+      "source": "assets/plugin-marketplaces/openai-curated-remote.zip",
+      "destination": "assets/plugin-marketplaces/openai-curated-remote.zip",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "24ee75805aa34bb964541168c0a8cb41a0198b11c4458962192e76c69f274e6e"
+    },
+    {
+      "source": "assets/qwen-model-metadata.json",
+      "destination": "assets/qwen-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "399713be7a570f3b0de0adbf961291c3b88effdd9a30b5dc2d916e053a1058a3"
+    },
+    {
+      "source": "assets/stepfun-model-metadata.json",
+      "destination": "assets/stepfun-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "a2209ea35e5a49ddde685833a0a0925773e50ace291f398588cfcb30201a84c4"
+    },
+    {
+      "source": "assets/thinkingmachines-model-metadata.json",
+      "destination": "assets/thinkingmachines-model-metadata.json",
+      "resolution": "integrated",
+      "sha256": "dce768557c6859960118a8963c4827c9045b8dfad7c8f6ac1a752f5b746e88f7"
+    },
+    {
+      "source": "crates/codex-plus-core/Cargo.toml",
+      "destination": "crates/alunixa-x-core/Cargo.toml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "193f33e0917ffbeceb5f8452c3ed32f1cbbecfa396620d07af1faa5d2ddb8d7e"
+    },
+    {
+      "source": "crates/codex-plus-core/assets/codex-models.json",
+      "destination": "crates/alunixa-x-core/assets/codex-models.json",
+      "resolution": "integrated",
+      "sha256": "b21200fd39c430f750cf10030c13bb19a91fdbc07792abdbda09e0ce6479161a"
+    },
+    {
+      "source": "crates/codex-plus-core/examples/dictation_live.rs",
+      "destination": "crates/alunixa-x-core/examples/dictation_live.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0a7278de551774c4fcab950c8c73909231d5c0a74354f321f027007ffda214a2"
+    },
+    {
+      "source": "crates/codex-plus-core/examples/dictation_smoke.rs",
+      "destination": "crates/alunixa-x-core/examples/dictation_smoke.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0bdcc5c0d3a71a03abfbd5aec4e145184932ab35c50d79801cf4238b8f0a6fc8"
+    },
+    {
+      "source": "crates/codex-plus-core/examples/generate_model_catalog.rs",
+      "destination": "crates/alunixa-x-core/examples/generate_model_catalog.rs",
+      "resolution": "integrated",
+      "sha256": "338edfeebfc589257b3a28135037702339b24ddb7214876fbde0c69af6add0c8"
+    },
+    {
+      "source": "crates/codex-plus-core/examples/plugin_market_smoke.rs",
+      "destination": "crates/alunixa-x-core/examples/plugin_market_smoke.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5bab321b3cb056be83960b297c6449c4b6bf73cf8b6edda74db6798038746fbb"
+    },
+    {
+      "source": "crates/codex-plus-core/src/ads.rs",
+      "destination": "crates/alunixa-x-core/src/ads.rs",
+      "resolution": "disabled-advertising-compatibility-envelope",
+      "sha256": "c5a79379a96e314ebe8ac42870e1a5a667931ab6f4c376f598d341ff559637e3"
+    },
+    {
+      "source": "crates/codex-plus-core/src/agent_cache.rs",
+      "destination": "crates/alunixa-x-core/src/agent_cache.rs",
+      "resolution": "integrated",
+      "sha256": "ebf9dc56c55b6ac9637d297bbd838ae83e821e5618a42360489d1648ca120532"
+    },
+    {
+      "source": "crates/codex-plus-core/src/app_paths.rs",
+      "destination": "crates/alunixa-x-core/src/app_paths.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4119431e7233509fe78da772b777eed23372cce9bb191394f5412f1302923fb1"
+    },
+    {
+      "source": "crates/codex-plus-core/src/assets.rs",
+      "destination": "crates/alunixa-x-core/src/assets.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "04231f60a06c7a561bd2995b62d1a0d952f45a1538a34827f75daf04c21bd232"
+    },
+    {
+      "source": "crates/codex-plus-core/src/bridge.rs",
+      "destination": "crates/alunixa-x-core/src/bridge.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d54021373a2c805edbb89ade98c03b978174da2c17153027f620925bccd5d34e"
+    },
+    {
+      "source": "crates/codex-plus-core/src/ccs_import.rs",
+      "destination": "crates/alunixa-x-core/src/ccs_import.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "295f622bce0b550cea241ca0752dbe6cb0943a0dce0571b46d05910fa53e7c75"
+    },
+    {
+      "source": "crates/codex-plus-core/src/cdp.rs",
+      "destination": "crates/alunixa-x-core/src/cdp.rs",
+      "resolution": "integrated",
+      "sha256": "957843239485b62fba4d1c449aa5674c4c0b34aa3cc4e0ede9b2c44a2f21c4d3"
+    },
+    {
+      "source": "crates/codex-plus-core/src/channel_protection.rs",
+      "destination": "crates/alunixa-x-core/src/channel_protection.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d4933c764b47b73df2fa737642a8a783fe6a0fc57c06440d4f0eb836223cf50b"
+    },
+    {
+      "source": "crates/codex-plus-core/src/claude_localization.rs",
+      "destination": "crates/alunixa-x-core/src/claude_localization.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e9ba529c113cfd912e554421391d8d250761532f4796264483d3956d8169650a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/codex_app_state.rs",
+      "destination": "crates/alunixa-x-core/src/codex_app_state.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4c73d8e0fc60264f34e29a0cd2c7ef5c46d4d27eeb66cda2626c0e799da0759e"
+    },
+    {
+      "source": "crates/codex-plus-core/src/codex_home.rs",
+      "destination": "crates/alunixa-x-core/src/codex_home.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "175640019a84bbb9bb349eecc6d47e4b7a5d4e1c97dbbb61e7ef29f47020ec65"
+    },
+    {
+      "source": "crates/codex-plus-core/src/codex_local_storage.rs",
+      "destination": "crates/alunixa-x-core/src/codex_local_storage.rs",
+      "resolution": "integrated",
+      "sha256": "a9747db45627b47e592f9127db7510dad15a332925ede10d3156fdc6eb56bf2b"
+    },
+    {
+      "source": "crates/codex-plus-core/src/codex_sqlite.rs",
+      "destination": "crates/alunixa-x-core/src/codex_sqlite.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8669b364bbd5a1d87f62995e7017bec3851801b3c6b78222a361cac62df77366"
+    },
+    {
+      "source": "crates/codex-plus-core/src/connect/app_server.rs",
+      "destination": "crates/alunixa-x-core/src/connect/app_server.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4543dd4b3e86815e92c554a6aadfa7189febd3aac5190062656b55cb8b532bc0"
+    },
+    {
+      "source": "crates/codex-plus-core/src/connect/mod.rs",
+      "destination": "crates/alunixa-x-core/src/connect/mod.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "dc477769105f54c24dca32b62874b537efeffd91178136c19f3fc07f5b90953d"
+    },
+    {
+      "source": "crates/codex-plus-core/src/connect/session_store.rs",
+      "destination": "crates/alunixa-x-core/src/connect/session_store.rs",
+      "resolution": "integrated",
+      "sha256": "9b3fa8cdbf38c7423390a2e565a8c674f58b0e4137695fdb9f82da3bcc29f7b3"
+    },
+    {
+      "source": "crates/codex-plus-core/src/connect/weixin.rs",
+      "destination": "crates/alunixa-x-core/src/connect/weixin.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ffda839ab3baf8334a1049671a6de0512d1c25384d697d43433ce4bc75ffae62"
+    },
+    {
+      "source": "crates/codex-plus-core/src/diagnostic_log.rs",
+      "destination": "crates/alunixa-x-core/src/diagnostic_log.rs",
+      "resolution": "integrated",
+      "sha256": "0234d999cb1e0a1aaf7f9c82c11ae457a51c1d5ee33e034b275d132ce27065bf"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dictation.rs",
+      "destination": "crates/alunixa-x-core/src/dictation.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "84c47fa4ab95a4dce8f70ecd6b056af6b856b76d05e39d946d0c46fc0afa26e6"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5059887353aeb7b4b8bcf03ee6423348ebd81d7c259ca0a1d3deba9233c49338"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin_community.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin_community.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "80ddd012ea8d210ad35e039858a79cef38d25bae252782a56e7dbd6b5d89904e"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin_library.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin_library.rs",
+      "resolution": "integrated",
+      "sha256": "62c35f29b3d1bae71b6b2337f5eb8b8af3f00e025c67c670a1133cd8337c825f"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin_market.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin_market.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4106f5bed5d83fb184ca4c821fede40ae1ba34d4f68dd0591a0c514603d22ece"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin_package.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin_package.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "10f58f1e23b491df2fc28f95917d8eb915829ffd9ddcc67b450c5a080876193a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/dream_skin_runtime.rs",
+      "destination": "crates/alunixa-x-core/src/dream_skin_runtime.rs",
+      "resolution": "integrated",
+      "sha256": "3aefb861d1711594a29d4fb8845e60f0b60570ade0d2b2b1ad12c65dbf9edd70"
+    },
+    {
+      "source": "crates/codex-plus-core/src/env_conflicts.rs",
+      "destination": "crates/alunixa-x-core/src/env_conflicts.rs",
+      "resolution": "integrated",
+      "sha256": "ce9759fe3dd14102b81778d18d24a60a4199cd8a0299aa8ef2c49271becbc6e4"
+    },
+    {
+      "source": "crates/codex-plus-core/src/grok_config.rs",
+      "destination": "crates/alunixa-x-core/src/grok_config.rs",
+      "resolution": "integrated",
+      "sha256": "d8ac05466e1dc1df4a9d3701810da33a76a0c99b865e78dddc1370b7bea8fd88"
+    },
+    {
+      "source": "crates/codex-plus-core/src/http_client.rs",
+      "destination": "crates/alunixa-x-core/src/http_client.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "35348b1b73ba239ea1e27eb52974f5e248c1a6aa65b1fe60b561c7cc45f58e40"
+    },
+    {
+      "source": "crates/codex-plus-core/src/install/macos.rs",
+      "destination": "crates/alunixa-x-core/src/install/macos.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d7ebc3d1f52f2831e04e91897987e85c137321a0ecb322decb4840a4008728d9"
+    },
+    {
+      "source": "crates/codex-plus-core/src/install/mod.rs",
+      "destination": "crates/alunixa-x-core/src/install/mod.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "445a098e19e8738c3c167110412152060d05c7679c8c128a341d94f0435ed148"
+    },
+    {
+      "source": "crates/codex-plus-core/src/install/windows.rs",
+      "destination": "crates/alunixa-x-core/src/install/windows.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "1c5fb635c9be27300199cf5cd593677191f728b987cbe72f0c408102a1cdb09a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/launcher.rs",
+      "destination": "crates/alunixa-x-core/src/launcher.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7c8cafc61bb2b804b62b027796b83284de4f71d4b1f80859f2c7e2a0f732fa74"
+    },
+    {
+      "source": "crates/codex-plus-core/src/lib.rs",
+      "destination": "crates/alunixa-x-core/src/lib.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "902e727ecd113c8f89dd0fde6693333649d575c2f73dc7b42cbe56878737500e"
+    },
+    {
+      "source": "crates/codex-plus-core/src/manager_navigation.rs",
+      "destination": "crates/alunixa-x-core/src/manager_navigation.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "30e9879b602d4ced0a9f73bedf38ffa3edefa9a7c450c8302eedd3951a5b9644"
+    },
+    {
+      "source": "crates/codex-plus-core/src/mcp_config.rs",
+      "destination": "crates/alunixa-x-core/src/mcp_config.rs",
+      "resolution": "integrated",
+      "sha256": "6aee259a5182e782ec7f0d71163857541e4749bdfa6a7f550f2af98718f80a38"
+    },
+    {
+      "source": "crates/codex-plus-core/src/model_catalog.rs",
+      "destination": "crates/alunixa-x-core/src/model_catalog.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "31937b66847d26d00886839c19d08fb2d02f215088daedb7e824376449c67c00"
+    },
+    {
+      "source": "crates/codex-plus-core/src/model_suffix.rs",
+      "destination": "crates/alunixa-x-core/src/model_suffix.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e78694c0a5129af75903991bfca9ad847b71802f408b2859f5fe7274f2b44369"
+    },
+    {
+      "source": "crates/codex-plus-core/src/models.rs",
+      "destination": "crates/alunixa-x-core/src/models.rs",
+      "resolution": "integrated",
+      "sha256": "c9448c93f4d3fc773df98746debf24ce393b9e8afbf775dfb8dceee4d1818c91"
+    },
+    {
+      "source": "crates/codex-plus-core/src/native_browser.rs",
+      "destination": "crates/alunixa-x-core/src/native_browser.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "51ed898360878c76759233982726c993fe05d807f1a78ea5c24373c748d8d69c"
+    },
+    {
+      "source": "crates/codex-plus-core/src/native_browser_connection.rs",
+      "destination": "crates/alunixa-x-core/src/native_browser_connection.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "f2aa3ed7dedeba0bf5179b1f9635d407f00fe4f34299ad5252cb3ee89365921a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/native_browser_contract.rs",
+      "destination": "crates/alunixa-x-core/src/native_browser_contract.rs",
+      "resolution": "integrated",
+      "sha256": "a8a13257826b3f263b4a1a39e65239393d2d48da743b46d192e473db70b21018"
+    },
+    {
+      "source": "crates/codex-plus-core/src/native_menu.rs",
+      "destination": "crates/alunixa-x-core/src/native_menu.rs",
+      "resolution": "integrated",
+      "sha256": "186297bf2de4492578828ac4d98e3699a4a82c0e6fcf552ea353fca5b451c64f"
+    },
+    {
+      "source": "crates/codex-plus-core/src/paths.rs",
+      "destination": "crates/alunixa-x-core/src/paths.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "35d8b6309f59954e5700f05e906a4ca4ed95cb61d508f37d32892705cd3500f7"
+    },
+    {
+      "source": "crates/codex-plus-core/src/plugin_market.rs",
+      "destination": "crates/alunixa-x-core/src/plugin_market.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "b8f8f50996c2c2168eb2dd639041703b54c2b8e958868d4426457547c63661a0"
+    },
+    {
+      "source": "crates/codex-plus-core/src/plugin_marketplace.rs",
+      "destination": "crates/alunixa-x-core/src/plugin_marketplace.rs",
+      "resolution": "integrated",
+      "sha256": "2146a6dead47204bac2043f841973715a20c75c1989a0ad7d54dee1121545282"
+    },
+    {
+      "source": "crates/codex-plus-core/src/ports.rs",
+      "destination": "crates/alunixa-x-core/src/ports.rs",
+      "resolution": "integrated",
+      "sha256": "0f70b567d73a74b9f16fa99374dd362fb3f5bd2cdb308194daece14b7ebf9175"
+    },
+    {
+      "source": "crates/codex-plus-core/src/protocol_proxy.rs",
+      "destination": "crates/alunixa-x-core/src/protocol_proxy.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "92d1b50a054125ca8a5f6d9e04ea96250186125a567dcb2c6b373c96888b3510"
+    },
+    {
+      "source": "crates/codex-plus-core/src/provider_import.rs",
+      "destination": "crates/alunixa-x-core/src/provider_import.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2892743379fb4635e5f5399ce2bd58ee7c8ba8fe1851d31800ce87406b9bcc37"
+    },
+    {
+      "source": "crates/codex-plus-core/src/proxy.rs",
+      "destination": "crates/alunixa-x-core/src/proxy.rs",
+      "resolution": "integrated",
+      "sha256": "eb11e36d6572164e624a06c478f44c6cb58a8836ec497d442d31261305ed85e5"
+    },
+    {
+      "source": "crates/codex-plus-core/src/relay_config.rs",
+      "destination": "crates/alunixa-x-core/src/relay_config.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ddbb96516852fad8fb048fca6b11a108bdb05d60b168243c5e1621645a571e3f"
+    },
+    {
+      "source": "crates/codex-plus-core/src/relay_environment.rs",
+      "destination": "crates/alunixa-x-core/src/relay_environment.rs",
+      "resolution": "integrated",
+      "sha256": "adffaa354b06c2c06701f8426def1a6e696efedf3d94fe108256ea65c775d127"
+    },
+    {
+      "source": "crates/codex-plus-core/src/relay_headers.rs",
+      "destination": "crates/alunixa-x-core/src/relay_headers.rs",
+      "resolution": "integrated",
+      "sha256": "9824e40fce058ee452011af775cc1541088e4390dde761b05ce7a6c330fd15e6"
+    },
+    {
+      "source": "crates/codex-plus-core/src/relay_rotation.rs",
+      "destination": "crates/alunixa-x-core/src/relay_rotation.rs",
+      "resolution": "integrated",
+      "sha256": "bf016d62f540ef069445cba03708787f5c830ef0f449086241111eb08083aade"
+    },
+    {
+      "source": "crates/codex-plus-core/src/relay_switch.rs",
+      "destination": "crates/alunixa-x-core/src/relay_switch.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3ae90d695de7ecd005709acc743c62450e0bc7878c20041db504e72ffb815276"
+    },
+    {
+      "source": "crates/codex-plus-core/src/remote_control_recovery.rs",
+      "destination": "crates/alunixa-x-core/src/remote_control_recovery.rs",
+      "resolution": "integrated",
+      "sha256": "31751eae6c11a43a5c9d84e4e151fc78cff259bf9bd486f48bd388873cb3ae43"
+    },
+    {
+      "source": "crates/codex-plus-core/src/routes.rs",
+      "destination": "crates/alunixa-x-core/src/routes.rs",
+      "resolution": "integrated",
+      "sha256": "7f1bf658bd868e75f1e9dcfc79070b1501ad4f142dddfc2afa9a05824e686b19"
+    },
+    {
+      "source": "crates/codex-plus-core/src/script_market.rs",
+      "destination": "crates/alunixa-x-core/src/script_market.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4d0ed9dcd0f91f93c8e0874d38b4381a73503c32f527fd16da296aa320c8c0c6"
+    },
+    {
+      "source": "crates/codex-plus-core/src/session_share.rs",
+      "destination": "crates/alunixa-x-core/src/session_share.rs",
+      "resolution": "integrated",
+      "sha256": "ca1f51fe6c4cab1b810646a73bc552145d15397456c215e0cf5bf5304dbe7790"
+    },
+    {
+      "source": "crates/codex-plus-core/src/settings.rs",
+      "destination": "crates/alunixa-x-core/src/settings.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "72e95789e564abc9b66e3c16a28f60a3ca270fe8a13ffe15e351b5dc3441ddb3"
+    },
+    {
+      "source": "crates/codex-plus-core/src/share.rs",
+      "destination": "crates/alunixa-x-core/src/share.rs",
+      "resolution": "integrated",
+      "sha256": "8e6f64aa211cc517c801f63ca8c2aade34e0bf31542f3bb6a941fcd572c708e9"
+    },
+    {
+      "source": "crates/codex-plus-core/src/skills.rs",
+      "destination": "crates/alunixa-x-core/src/skills.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5297bd351282066b76974628feabce4ffff1dc6489f88e82537fa5780a57c51a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/status.rs",
+      "destination": "crates/alunixa-x-core/src/status.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "89ed784a7ed38813db34b7f18c1376a64ac3a0edd41a958da3096158c1814b71"
+    },
+    {
+      "source": "crates/codex-plus-core/src/stepwise.rs",
+      "destination": "crates/alunixa-x-core/src/stepwise.rs",
+      "resolution": "integrated",
+      "sha256": "b62051cb5de9a5ca26aa7227370fd263d5e68b464d876ee8feac94b283641810"
+    },
+    {
+      "source": "crates/codex-plus-core/src/sub2api.rs",
+      "destination": "crates/alunixa-x-core/src/sub2api.rs",
+      "resolution": "integrated",
+      "sha256": "b8810e99945bf887e9bba3904619136ee0efb751b17ce9d1b5c375f7537abaee"
+    },
+    {
+      "source": "crates/codex-plus-core/src/tools/grok.rs",
+      "destination": "crates/alunixa-x-core/src/tools/grok.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "63c53745e043dcf24f6940651af6442f243674139c92e11972ca2e57766d9d38"
+    },
+    {
+      "source": "crates/codex-plus-core/src/tools/mod.rs",
+      "destination": "crates/alunixa-x-core/src/tools/mod.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2db14083869af6cda4001091ca836299e0107f5ec1e464210509ad4d682f3b1d"
+    },
+    {
+      "source": "crates/codex-plus-core/src/update.rs",
+      "destination": "crates/alunixa-x-core/src/update.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3f99bdf9aa663206a95b56f456c89bd471a550198b0fdee54d2e350671af69ac"
+    },
+    {
+      "source": "crates/codex-plus-core/src/update/macos.rs",
+      "destination": "crates/alunixa-x-core/src/update/macos.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4185d5390989318a2c81f027daf509aa4b01519599b91fe376a94225fe97116b"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree.rs",
+      "resolution": "integrated",
+      "sha256": "cc2dd5353daf1b8a7c908ff6ffd28c57b6806bf66fc615277ae115f85423a7a2"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/create.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/create.rs",
+      "resolution": "integrated",
+      "sha256": "0ec609d0584453167526c7b69173d1dcc2d7162728783b1293afcbb08b8160b8"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/defaults.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/defaults.rs",
+      "resolution": "integrated",
+      "sha256": "51f145552d274dd28c3edab00b4aa1f2083bd50847468352f23a106687b5a5a9"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/git.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/git.rs",
+      "resolution": "integrated",
+      "sha256": "b9f9305dc7089c2f980a35e1241fa0ebaabf3ed85499310ee129ed246685c141"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/remote.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/remote.rs",
+      "resolution": "integrated",
+      "sha256": "ce39a75bd35101cb373f990fa12007710c620e8f52648d92be84ca7f1b9d5533"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/remote/tests.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/remote/tests.rs",
+      "resolution": "integrated",
+      "sha256": "f459d8ab9195186798022ad3e6fbb1ed8b9ca038bdeb28bd87e45397b11b3404"
+    },
+    {
+      "source": "crates/codex-plus-core/src/upstream_worktree/types.rs",
+      "destination": "crates/alunixa-x-core/src/upstream_worktree/types.rs",
+      "resolution": "integrated",
+      "sha256": "c089ec168b390d57c4b71e2e21f3bf1e5e1d0663b78ee262eb108dbf81957da1"
+    },
+    {
+      "source": "crates/codex-plus-core/src/user_scripts.rs",
+      "destination": "crates/alunixa-x-core/src/user_scripts.rs",
+      "resolution": "integrated",
+      "sha256": "cbc0a4e3078332a1d92072cec74a663704ebd9e9d8d3f6d65cc20490aeb38568"
+    },
+    {
+      "source": "crates/codex-plus-core/src/version.rs",
+      "destination": "crates/alunixa-x-core/src/version.rs",
+      "resolution": "integrated",
+      "sha256": "36ef93c8a395e214b99fecb11bf179f149076f09183536504ca92a5c5987315c"
+    },
+    {
+      "source": "crates/codex-plus-core/src/vision.rs",
+      "destination": "crates/alunixa-x-core/src/vision.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "659e665db98e087d803624c68764314e5dffa0f3bc65000982ffe1d8da7824e2"
+    },
+    {
+      "source": "crates/codex-plus-core/src/watcher.rs",
+      "destination": "crates/alunixa-x-core/src/watcher.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ca8c765ebeef434720d7c1bb10810cd227ac172b7a5f9a5d63e19de5dd9b1e3a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/whale.rs",
+      "destination": "crates/alunixa-x-core/src/whale.rs",
+      "resolution": "integrated",
+      "sha256": "f3870a1509b89935942b2ac3bc3728d8e55658556f5701e3e5584b20b3cedca5"
+    },
+    {
+      "source": "crates/codex-plus-core/src/whale_full.rs",
+      "destination": "crates/alunixa-x-core/src/whale_full.rs",
+      "resolution": "integrated",
+      "sha256": "179a2e92d864b9025e1a1fdc63bec6601d2c10ac68940a86b25e44318f6ed52a"
+    },
+    {
+      "source": "crates/codex-plus-core/src/windows_integration.rs",
+      "destination": "crates/alunixa-x-core/src/windows_integration.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e06e4435257e2e0abb36e5e1cec46ac348366d7f499fb30e51d5b729068d2018"
+    },
+    {
+      "source": "crates/codex-plus-core/src/zed_remote.rs",
+      "destination": "crates/alunixa-x-core/src/zed_remote.rs",
+      "resolution": "integrated",
+      "sha256": "3c55872a5ce557d377f427a14b7ae49f6109189d089738b6edbe5b45b8150cbe"
+    },
+    {
+      "source": "crates/codex-plus-core/src/zed_remote/fallback.rs",
+      "destination": "crates/alunixa-x-core/src/zed_remote/fallback.rs",
+      "resolution": "integrated",
+      "sha256": "bfed14c215538807de603b9ecb401d9ab46ad5eb5e0ba3c63b73172356ff5bcf"
+    },
+    {
+      "source": "crates/codex-plus-core/src/zed_remote/platform.rs",
+      "destination": "crates/alunixa-x-core/src/zed_remote/platform.rs",
+      "resolution": "integrated",
+      "sha256": "cc3163e568eb193318f5d45790c63a25b28384a58c3d00bfe74228d6d3157a18"
+    },
+    {
+      "source": "crates/codex-plus-core/src/zed_remote/registry.rs",
+      "destination": "crates/alunixa-x-core/src/zed_remote/registry.rs",
+      "resolution": "integrated",
+      "sha256": "406953c30eb43f4a52d26fb65648527e93873d87928f7ca8be6465a75ef22b1c"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/ads.rs",
+      "destination": "crates/alunixa-x-core/tests/ads.rs",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/api_quota_gate.rs",
+      "destination": "crates/alunixa-x-core/tests/api_quota_gate.rs",
+      "resolution": "integrated",
+      "sha256": "288a57ba2824ece951707dae5c6f1be3d9b6594fd370ebac823dc8d2d1d04980"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/bridge_routes.rs",
+      "destination": "crates/alunixa-x-core/tests/bridge_routes.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "daff1687da80e3a1cd2a891578662c10750645aff8324398d76ba708aeeaee0a"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/cdp_bridge.rs",
+      "destination": "crates/alunixa-x-core/tests/cdp_bridge.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "df495dc663f060501d262ca6e1a9883e36d3257480c07c6b136b847013c0016d"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/codex_app_state.rs",
+      "destination": "crates/alunixa-x-core/tests/codex_app_state.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "f90425f8b5adc16fdcb0be3355be0cf2e4a44ec50a68d0e031c5b7e40c9d8fa7"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/codex_sqlite.rs",
+      "destination": "crates/alunixa-x-core/tests/codex_sqlite.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0f9353e4f676dbc597d2261d3589833729b22382f1588164d99670602ac40f5b"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/composer_readiness.rs",
+      "destination": "crates/alunixa-x-core/tests/composer_readiness.rs",
+      "resolution": "integrated",
+      "sha256": "56228187bfc9cb9c1c88ee05eabbf99b8c39ae7e73d5020192e06aba810a2c89"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/dream_skin.rs",
+      "destination": "crates/alunixa-x-core/tests/dream_skin.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e467b5700a2813c9b215ac37e2289b268ddea9ff7d43bc779f18e5ed655bd8f9"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/dream_skin_library.rs",
+      "destination": "crates/alunixa-x-core/tests/dream_skin_library.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "1c70a9d09d863a7e2629c43641ea4e20ae56554c43f417e6c0dafa763e1737d7"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/dream_skin_market.rs",
+      "destination": "crates/alunixa-x-core/tests/dream_skin_market.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c64fa5f5a3658f956566397474893e1f25889605e4443217cdf80bd157bd6d5d"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/dream_skin_package.rs",
+      "destination": "crates/alunixa-x-core/tests/dream_skin_package.rs",
+      "resolution": "integrated",
+      "sha256": "1e4d8d5ac214dd365ae2b4297805fe7a12447d1250877b395db7951f10091e43"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/dream_skin_runtime.rs",
+      "destination": "crates/alunixa-x-core/tests/dream_skin_runtime.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c28466bf5a6a4c20bf7f342a836f33b53533d19303977b4d820445eae8d34606"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/e2e_codex_real_cli.rs",
+      "destination": "crates/alunixa-x-core/tests/e2e_codex_real_cli.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "efc7fcfa16b5a7f37ed484ab65876a963292d0767064b151f475fb1495a3399e"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/floating_panel_appearance.rs",
+      "destination": "crates/alunixa-x-core/tests/floating_panel_appearance.rs",
+      "resolution": "integrated",
+      "sha256": "0a70569f62e5fb47a9079c586973c0214fb167ac61e2ec7f4fd4031aaf557c14"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/floating_panel_core_shell.rs",
+      "destination": "crates/alunixa-x-core/tests/floating_panel_core_shell.rs",
+      "resolution": "integrated",
+      "sha256": "c08e875f067bffd5045bbd4b628067ed36d2077363141ce4c52742b6d3287676"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/floating_panel_outline.rs",
+      "destination": "crates/alunixa-x-core/tests/floating_panel_outline.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7c6eff30de475f26772ed1012cf2a875185231daa44e226b0c4f7e0510fcd4ab"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/floating_panel_runtime.rs",
+      "destination": "crates/alunixa-x-core/tests/floating_panel_runtime.rs",
+      "resolution": "integrated",
+      "sha256": "65ff8d62401cff78d1c0a212803df99d9747783a16e945d31ea94716f260b5db"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/floating_panel_stepwise.rs",
+      "destination": "crates/alunixa-x-core/tests/floating_panel_stepwise.rs",
+      "resolution": "integrated",
+      "sha256": "c359a77519f98f739ad63ce4ca52ac87caf1ed702314a3d29f5d9130ec5b24e3"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/force_chinese_locale_settings.rs",
+      "destination": "crates/alunixa-x-core/tests/force_chinese_locale_settings.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "fa015454f87c3cf7ed7478499b46f26b470656fc272ee90e89a2e845291606d6"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/full_whale_contract.rs",
+      "destination": "crates/alunixa-x-core/tests/full_whale_contract.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5581c1a68ce35d24f525c28e6bfacb44eca5237444af4e268c906590a05e08ec"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/installers.rs",
+      "destination": "crates/alunixa-x-core/tests/installers.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "07a25edd82eea067cb7c353ff527b871e71a9b4004be6ca68ad2addb44559de9"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/launcher.rs",
+      "destination": "crates/alunixa-x-core/tests/launcher.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e73c1722b10ff971f4ad8b8b9fc65c6abdae9809d4591220ac81b05901fd5729"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/live_settings_migration.rs",
+      "destination": "crates/alunixa-x-core/tests/live_settings_migration.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "af76661aa82b0cfd5f41fee7ef8d34daead15ef4f5e3fc323940bceccb6d882d"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/model_catalog.rs",
+      "destination": "crates/alunixa-x-core/tests/model_catalog.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4ca0187bfa1c0b2e455ca89afca722a16fd18d2ba86012c065e3a3f4b76b8095"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/model_suffix.rs",
+      "destination": "crates/alunixa-x-core/tests/model_suffix.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8f7764183af4042f8e266d3e0465111f704ce3d3c3dce208759ab305e584913e"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/native_browser_settings.rs",
+      "destination": "crates/alunixa-x-core/tests/native_browser_settings.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3b389413777f8ecd9a199f4b2bfc3f7acdbd57f35eb0e95bdfb55fead8f3fcee"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/node_repl_flattened_profile.rs",
+      "destination": "crates/alunixa-x-core/tests/node_repl_flattened_profile.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "11ae18a6707d55250bf491043cfe979c3314c6312bc4d34bfd7675f8428ad787"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/official_usage_lifecycle.rs",
+      "destination": "crates/alunixa-x-core/tests/official_usage_lifecycle.rs",
+      "resolution": "integrated",
+      "sha256": "7e01a78429312d14a7ef6a5ffa10b3a5fcacadd5f8a0e2946c69b8eb3ac637c3"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/paste_fix_settings.rs",
+      "destination": "crates/alunixa-x-core/tests/paste_fix_settings.rs",
+      "resolution": "integrated",
+      "sha256": "0ccd328c223aa4414ed52bfa5776cb28297bda0e42b5c16a4dfcb5451548e88f"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/plugin_market_live.rs",
+      "destination": "crates/alunixa-x-core/tests/plugin_market_live.rs",
+      "resolution": "integrated",
+      "sha256": "d26c976a79ffa297dbf7684695a2ef8f2239d6f5610004794f719ceac7233a2c"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/plugin_navigation.rs",
+      "destination": "crates/alunixa-x-core/tests/plugin_navigation.rs",
+      "resolution": "integrated",
+      "sha256": "540b44802ff2c931e50763e2cbbdf9b7eecc7a9f04ce9cbb6d6defb5720af58c"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/protocol_proxy.rs",
+      "destination": "crates/alunixa-x-core/tests/protocol_proxy.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "31c1a1c869e252e8e23e5e38ad19aa878a21277ee22098c0c313dcc0ee708801"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/protocol_proxy_port_env.rs",
+      "destination": "crates/alunixa-x-core/tests/protocol_proxy_port_env.rs",
+      "resolution": "integrated",
+      "sha256": "69cf72ae3aefa54a80b2a01818b98ba6bf6a84e4d9314c6d171c518e7698b99b"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/provider_switch_isolation.rs",
+      "destination": "crates/alunixa-x-core/tests/provider_switch_isolation.rs",
+      "resolution": "integrated",
+      "sha256": "c33460ae6a22f67d9bf8a4718bfd2a97d83c0ae6d114290d3f59fd02d04cd181"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/pure_api_provider_auth.rs",
+      "destination": "crates/alunixa-x-core/tests/pure_api_provider_auth.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "01af7e018cee79f6f5acb33619ba0aa984b3d9b28316f419e85aa430732e013d"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/relay_config.rs",
+      "destination": "crates/alunixa-x-core/tests/relay_config.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "b13ae52cb6f7c461b6df2a41a80d6106bfbd72348b9ad74d9014afc078df573f"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/relay_config_safety.rs",
+      "destination": "crates/alunixa-x-core/tests/relay_config_safety.rs",
+      "resolution": "integrated",
+      "sha256": "1f3df821b44539aa6a7035eb1b691151971998e0d504142cad563f864de2a9f7"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/relay_rotation.rs",
+      "destination": "crates/alunixa-x-core/tests/relay_rotation.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9ad31ce7aab814925b257630963f7601085b68172e399202c1d24e7236338473"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/relay_switch.rs",
+      "destination": "crates/alunixa-x-core/tests/relay_switch.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "b9174d8866fbb32b0d44f9a6a20446232798f0eda1109162157e42899b1dd2dc"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/responses_catalog_identity.rs",
+      "destination": "crates/alunixa-x-core/tests/responses_catalog_identity.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "a86406d08c3c5a0ec627e52f736f42cb1a2f2454e3465dde42cae33b767f70bb"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/retired_layout.rs",
+      "destination": "crates/alunixa-x-core/tests/retired_layout.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7632c9d06e6dc64743f15fdfcbcdda1bd6aa8e38cfa8fc329aeb9887faf75580"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/tool_shards.rs",
+      "destination": "crates/alunixa-x-core/tests/tool_shards.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2ca5fa0e2252a6359cfd86b9f824676dcfdc9535e81fca5098a93c29857708c9"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/typing_effect_settings.rs",
+      "destination": "crates/alunixa-x-core/tests/typing_effect_settings.rs",
+      "resolution": "integrated",
+      "sha256": "34a45657a2f9d28b4bf47c1bf19a857818972893c40fad6fcfa5792ed72759fa"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/ui_issue_regressions.rs",
+      "destination": "crates/alunixa-x-core/tests/ui_issue_regressions.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "f6ef822ba88e1e3e8b821f09c9ea6f8463b7ce64cf48b85a6871a93964b079d3"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/updater.rs",
+      "destination": "crates/alunixa-x-core/tests/updater.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e3633fba9f7d048544e8fc8c1c951a90ad5677b0f59fd61674485e80de840d9a"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/upstream_theme_assets.rs",
+      "destination": "crates/alunixa-x-core/tests/upstream_theme_assets.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4aef91a56c3222e35ecad87ce4393318cdc05ee0c4ab629c8942cc0f29cb6181"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/upstream_worktree.rs",
+      "destination": "crates/alunixa-x-core/tests/upstream_worktree.rs",
+      "resolution": "integrated",
+      "sha256": "3dc8f779dc9520c0f4fd0d3d0f15dfefea26396327f5d187bb44256739a95a83"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/user_scripts_reload.rs",
+      "destination": "crates/alunixa-x-core/tests/user_scripts_reload.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ce640fdbf6841896de5870d120ce6ffce2bc7de8f94c95bcec74da7b78029481"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/watcher.rs",
+      "destination": "crates/alunixa-x-core/tests/watcher.rs",
+      "resolution": "integrated",
+      "sha256": "b2455fd0c92f686b42197b9392c72f543dfeffe506ffa651218c6c1864a9938a"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/whale_settings.rs",
+      "destination": "crates/alunixa-x-core/tests/whale_settings.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "fac736500a74cefd8a0e93df699d089a2990f923e446e5d18f3a749f76b5fe4e"
+    },
+    {
+      "source": "crates/codex-plus-core/tests/zed_remote.rs",
+      "destination": "crates/alunixa-x-core/tests/zed_remote.rs",
+      "resolution": "integrated",
+      "sha256": "3dc8f779dc9520c0f4fd0d3d0f15dfefea26396327f5d187bb44256739a95a83"
+    },
+    {
+      "source": "crates/codex-plus-data/Cargo.toml",
+      "destination": "crates/alunixa-x-data/Cargo.toml",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "279dc331374315a334301ca9bafca3169ad2d652d0df93728520c907da1f798b"
+    },
+    {
+      "source": "crates/codex-plus-data/examples/repair_session_index.rs",
+      "destination": "crates/alunixa-x-data/examples/repair_session_index.rs",
+      "resolution": "integrated",
+      "sha256": "33904a9efe693bcc3ceac654f8f89100e24e85e07b6c15e18f23ce1b026374f9"
+    },
+    {
+      "source": "crates/codex-plus-data/src/backup.rs",
+      "destination": "crates/alunixa-x-data/src/backup.rs",
+      "resolution": "integrated",
+      "sha256": "53d4ed92d6aa9d6b49f1d99437f7252cdecbf44506d2f406e4069b0c7aee7dfa"
+    },
+    {
+      "source": "crates/codex-plus-data/src/lib.rs",
+      "destination": "crates/alunixa-x-data/src/lib.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "86145034bde9fe3eaf3a380771f4d693a01d3bd326255fec208c9cfbbae4698a"
+    },
+    {
+      "source": "crates/codex-plus-data/src/markdown.rs",
+      "destination": "crates/alunixa-x-data/src/markdown.rs",
+      "resolution": "integrated",
+      "sha256": "7cf78f4669e97130e3f73754a948a46e5750cc614efd325e0c0c13cedea2c135"
+    },
+    {
+      "source": "crates/codex-plus-data/src/provider_sync.rs",
+      "destination": "crates/alunixa-x-data/src/provider_sync.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "76706e7b918620b38af255a959722e48236f712171776c75a5cea82bc19d4e47"
+    },
+    {
+      "source": "crates/codex-plus-data/src/session_index_repair.rs",
+      "destination": "crates/alunixa-x-data/src/session_index_repair.rs",
+      "resolution": "integrated",
+      "sha256": "9a9eaf85d010ba24756568bf7dff29e529cc325510270205d84b9d3ff1fd2bb6"
+    },
+    {
+      "source": "crates/codex-plus-data/src/session_index_scan.rs",
+      "destination": "crates/alunixa-x-data/src/session_index_scan.rs",
+      "resolution": "integrated",
+      "sha256": "97399dc5e11000e2bc55d53e74fd05c66bb44cb5c7aa178177852ebaeeb5079b"
+    },
+    {
+      "source": "crates/codex-plus-data/src/storage.rs",
+      "destination": "crates/alunixa-x-data/src/storage.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d6ff3139ecf498f3a3ab03bf70b70adb3873d5e7e2787f4fb88e4dd2f6ec294b"
+    },
+    {
+      "source": "crates/codex-plus-data/src/whale_history.rs",
+      "destination": "crates/alunixa-x-data/src/whale_history.rs",
+      "resolution": "integrated",
+      "sha256": "2b67ab3086d73099a9c1764401ce5d991552d6fc8a3d839bfe04c25ef12fdec9"
+    },
+    {
+      "source": "crates/codex-plus-data/src/whale_usage.rs",
+      "destination": "crates/alunixa-x-data/src/whale_usage.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4e37eb10470a7e39eba867f3e9a2c62b0963c385858c57dec207f72966318636"
+    },
+    {
+      "source": "crates/codex-plus-data/tests/markdown.rs",
+      "destination": "crates/alunixa-x-data/tests/markdown.rs",
+      "resolution": "integrated",
+      "sha256": "7008e0495ab044697bb7011874a777f90fe62e241950d434623fa4c9378e67fb"
+    },
+    {
+      "source": "crates/codex-plus-data/tests/provider_sync.rs",
+      "destination": "crates/alunixa-x-data/tests/provider_sync.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "00fe58df6a3dfebbfef3bff4908568969e8a8cb9f3a3c15accd8fa9ace8b04f5"
+    },
+    {
+      "source": "crates/codex-plus-data/tests/storage_adapter.rs",
+      "destination": "crates/alunixa-x-data/tests/storage_adapter.rs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4056a81fe43f85ffd1081d8c28bcfeab16a44106bfcd261d2463bf6b92f33ce1"
+    },
+    {
+      "source": "crates/codex-plus-data/tests/wsl_rollout_path.rs",
+      "destination": "crates/alunixa-x-data/tests/wsl_rollout_path.rs",
+      "resolution": "integrated",
+      "sha256": "9d12bd6db0bb440febc3205b18f6d9e2d735cc244460600940f7e661a5788224"
+    },
+    {
+      "source": "design-qa.md",
+      "destination": "design-qa.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/.nojekyll",
+      "destination": "docs/.nojekyll",
+      "resolution": "integrated",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "source": "docs/CNAME",
+      "destination": "docs/CNAME",
+      "resolution": "integrated",
+      "sha256": "f08eec1b28f2c6d7593fbbd67509baf181a6500f4ebb70700b40a97434a36f75"
+    },
+    {
+      "source": "docs/changelog.html",
+      "destination": "docs/changelog.html",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9fab5e6df7fd3bc4f5d2e3710275e9bda59d05686795c9fa1d309f425bbcb069"
+    },
+    {
+      "source": "docs/changelog.js",
+      "destination": "docs/changelog.js",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "828c21a425182c3c3282731241e65bb5321c94b1e40d620946b144397f8e9c83"
+    },
+    {
+      "source": "docs/images/backend-status-indicator.png",
+      "destination": "docs/images/backend-status-indicator.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8b93480f7bf40d6bbd1006e481f5de4abc31d07dff3d6046bd6bc8dc22527927"
+    },
+    {
+      "source": "docs/images/codex-plus-plus.ico",
+      "destination": "docs/images/alunixa-x-plus.ico",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ddefdf4c3d4a646682b1cd13c22f87e7c6bb17a5b88310c9a97fdcbba57cc70c"
+    },
+    {
+      "source": "docs/images/codex-plus-plus.png",
+      "destination": "docs/images/alunixa-x-plus.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8c24b4b9a9bad50b6513e999c09cb6714623a4539750bc60ee1021c477a33663"
+    },
+    {
+      "source": "docs/images/discussion-group-qr.jpg",
+      "destination": "docs/images/discussion-group-qr.jpg",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "4abbeac3eb09b1168e85b6eeef7404558eb5237815f1513bdaf8d1487a8646e6"
+    },
+    {
+      "source": "docs/images/issue-1312-product-design-working.png",
+      "destination": "docs/images/issue-1312-product-design-working.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "227c954e5261ac6d5fc178771af01c3687760a18b6571bcd53f070dbdc3728b9"
+    },
+    {
+      "source": "docs/images/macos-damaged-warning.png",
+      "destination": "docs/images/macos-damaged-warning.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "dd8b148d977c777fad99f888d04f10bf1e03e7f4daa4dd99e87dc754cde9b4fb"
+    },
+    {
+      "source": "docs/images/manager-enhancements.jpg",
+      "destination": "docs/images/manager-enhancements.jpg",
+      "resolution": "integrated",
+      "sha256": "56e79fa4baa68c235a03fae6972ff6d31f25ee2ebdb54cd61be069497d31d30e"
+    },
+    {
+      "source": "docs/images/manager-providers.jpg",
+      "destination": "docs/images/manager-providers.jpg",
+      "resolution": "integrated",
+      "sha256": "3deb53a808837af787425630ced7e6d67ba2d9703deff9e27a82bb38e42544a0"
+    },
+    {
+      "source": "docs/images/manager-script-market.jpg",
+      "destination": "docs/images/manager-script-market.jpg",
+      "resolution": "integrated",
+      "sha256": "3e42be13432a76028852973d5ccd9ac8ddd758bff91e8a79bdddc459ba8943fc"
+    },
+    {
+      "source": "docs/images/manager-skin-market.png",
+      "destination": "docs/images/manager-skin-market.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "11ce3a47f26e0c773038e45cffeebc57da0e208b3406accdfffc962cd4b0df45"
+    },
+    {
+      "source": "docs/images/model-suffix-flow.png",
+      "destination": "docs/images/model-suffix-flow.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "27091ed1123ab41540025207e30174029a6d2a149b8ba13cd9bf6308a92ce0b5"
+    },
+    {
+      "source": "docs/images/pain-no-delete-button.png",
+      "destination": "docs/images/pain-no-delete-button.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7825878168257ce4f943c2e486c4d79f943db2b1b2b4aa713200fdbc01702fcf"
+    },
+    {
+      "source": "docs/images/pain-plugin-disabled.png",
+      "destination": "docs/images/pain-plugin-disabled.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "2f27978683463e1b3a9bc1c5a44c705e492526732a6a97fed44cffaf7e33ef48"
+    },
+    {
+      "source": "docs/images/readme-preview/extension-market.png",
+      "destination": "docs/images/readme-preview/extension-market.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/hero.svg",
+      "destination": "docs/images/readme-preview/hero.svg",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/in-app-settings.png",
+      "destination": "docs/images/readme-preview/in-app-settings.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/jojo-banner-v3.png",
+      "destination": "docs/images/readme-preview/jojo-banner-v3.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/manager-enhancements.png",
+      "destination": "docs/images/readme-preview/manager-enhancements.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/typing-effects.png",
+      "destination": "docs/images/readme-preview/typing-effects.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/readme-preview/usage-widget.png",
+      "destination": "docs/images/readme-preview/usage-widget.png",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/images/service-tier-composer-badge.png",
+      "destination": "docs/images/service-tier-composer-badge.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "60a91d3ae3b4754ae6d5e658c789eb640c0d427444c96296a39461e33b974043"
+    },
+    {
+      "source": "docs/images/service-tier-settings.png",
+      "destination": "docs/images/service-tier-settings.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "6960eacf8b668ec0ce141d0086b92e8f1db01e1c26951f2763bbc5920ea08bd6"
+    },
+    {
+      "source": "docs/images/settings-panel.png",
+      "destination": "docs/images/settings-panel.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "33366983bcdcb2641e06158046fe9c283ccdd387adacdfa33aa593d87c599a74"
+    },
+    {
+      "source": "docs/images/solution-plugin-and-delete.png",
+      "destination": "docs/images/solution-plugin-and-delete.png",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "da379659bf5a57eecd040107765ee2473e91442667591ee83eada3cc9cb2dcac"
+    },
+    {
+      "source": "docs/images/sponsor-0029.svg",
+      "destination": "docs/images/sponsor-0029.svg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-aigocode.png",
+      "destination": "docs/images/sponsor-aigocode.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-aihub.jpg",
+      "destination": "docs/images/sponsor-aihub.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-aihub2api.png",
+      "destination": "docs/images/sponsor-aihub2api.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-alipay.jpg",
+      "destination": "docs/images/sponsor-alipay.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-apikey-fun.png",
+      "destination": "docs/images/sponsor-apikey-fun.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-apimart.png",
+      "destination": "docs/images/sponsor-apimart.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-baikewei-ai.jpg",
+      "destination": "docs/images/sponsor-baikewei-ai.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-byteplus.png",
+      "destination": "docs/images/sponsor-byteplus.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-cubence.png",
+      "destination": "docs/images/sponsor-cubence.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-deepkey.png",
+      "destination": "docs/images/sponsor-deepkey.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-ergou-api.png",
+      "destination": "docs/images/sponsor-ergou-api.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-everyapi.png",
+      "destination": "docs/images/sponsor-everyapi.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-fenno-ai.png",
+      "destination": "docs/images/sponsor-fenno-ai.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-grooroute.png",
+      "destination": "docs/images/sponsor-grooroute.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-jojocode.png",
+      "destination": "docs/images/sponsor-jojocode.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-jojocode.svg",
+      "destination": "docs/images/sponsor-jojocode.svg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-maolao-api.jpg",
+      "destination": "docs/images/sponsor-maolao-api.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-packycode.png",
+      "destination": "docs/images/sponsor-packycode.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-qiniu-ai.png",
+      "destination": "docs/images/sponsor-qiniu-ai.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-rawchat.svg",
+      "destination": "docs/images/sponsor-rawchat.svg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-runapi.png",
+      "destination": "docs/images/sponsor-runapi.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-smallice.png",
+      "destination": "docs/images/sponsor-smallice.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-sublyx.png",
+      "destination": "docs/images/sponsor-sublyx.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-sui-xiang-ai-gateway.jpg",
+      "destination": "docs/images/sponsor-sui-xiang-ai-gateway.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-ucloud-compshare.png",
+      "destination": "docs/images/sponsor-ucloud-compshare.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-unity2.png",
+      "destination": "docs/images/sponsor-unity2.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-volcengine.png",
+      "destination": "docs/images/sponsor-volcengine.png",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-wechat.jpg",
+      "destination": "docs/images/sponsor-wechat.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/images/sponsor-yiyun-tech.jpg",
+      "destination": "docs/images/sponsor-yiyun-tech.jpg",
+      "resolution": "excluded-advertising-or-owner-brand-replacement"
+    },
+    {
+      "source": "docs/index.html",
+      "destination": "docs/index.html",
+      "resolution": "adapted-AX-site-without-advertising",
+      "sha256": "35032c79660e2d8d78ffd82fbca08ce2b6d5e0f2a367219c6bccf45a423d5c57"
+    },
+    {
+      "source": "docs/native-browser-identification.md",
+      "destination": "docs/native-browser-identification.md",
+      "resolution": "integrated",
+      "sha256": "2fbeccf31c50257a7d3b8fa473256393083c5302e9ad6b3da77d1ef627da1767"
+    },
+    {
+      "source": "docs/plan/20260527160751519_聚合API供应商轮转实施计划.md",
+      "destination": "docs/plan/20260527160751519_聚合API供应商轮转实施计划.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "291bbc2cce059988928c1ffea1666c90dc5b4e0cd7f5a958e9a4022c3ef98187"
+    },
+    {
+      "source": "docs/plans/2026-06-23-阶段一-model-catalog-原型.md",
+      "destination": "docs/plans/2026-06-23-阶段一-model-catalog-原型.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "0dc55070d6a4c7bf3d87ddb09717151c91c53d54946ebd2f56a2e49409c98892"
+    },
+    {
+      "source": "docs/plans/2026-06-24-前端模型后缀提示.md",
+      "destination": "docs/plans/2026-06-24-前端模型后缀提示.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "e83ba1ae06872b6efac3c3d249c39dc9d48b665d335270fcca72ae00b92f0a6e"
+    },
+    {
+      "source": "docs/plans/2026-06-25-model-list-window-split-plan.md",
+      "destination": "docs/plans/2026-06-25-model-list-window-split-plan.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "7148a81546fe3d8bed75e4af9b5ca5aabd6634430d5728fee32e5c5b190b133c"
+    },
+    {
+      "source": "docs/plans/2026-07-17-stepwise-disabled-injection-design.md",
+      "destination": "docs/plans/2026-07-17-stepwise-disabled-injection-design.md",
+      "resolution": "integrated",
+      "sha256": "206db996bfb1c172b68013fb9c9b57d04b6bf7191c154ec2261f3a1938a3bdd5"
+    },
+    {
+      "source": "docs/plans/2026-08-27-历史会话流式修复实施计划.md",
+      "destination": "docs/plans/2026-08-27-历史会话流式修复实施计划.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c1790958f4513386c7a020b3f8b86dd565cebc1ff71426fc905a9a85fc071659"
+    },
+    {
+      "source": "docs/plans/三阶段计划.md",
+      "destination": "docs/plans/三阶段计划.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "047e9289c0333b3bbe0a18c60970563f8362861ffe3619b491d496a3adfa34ad"
+    },
+    {
+      "source": "docs/plugin-market.md",
+      "destination": "docs/plugin-market.md",
+      "resolution": "integrated",
+      "sha256": "8e2a4ba9951e81e91ef42ad757f6765070a3280c614a7d0749f306d3f23bf14b"
+    },
+    {
+      "source": "docs/release/20260602191421483_token统计历史恢复bridge发布说明.md",
+      "destination": "docs/release/20260602191421483_token统计历史恢复bridge发布说明.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "bcf4622f7d61be5bfa823b54ef41ce820266836eafeb487e35a67c83d36a3ea4"
+    },
+    {
+      "source": "docs/release/v1.5.0-notes.md",
+      "destination": "docs/release/v1.5.0-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.6.0-notes.md",
+      "destination": "docs/release/v1.6.0-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.0-notes.md",
+      "destination": "docs/release/v1.7.0-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.1-notes.md",
+      "destination": "docs/release/v1.7.1-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.2-notes.md",
+      "destination": "docs/release/v1.7.2-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.3-notes.md",
+      "destination": "docs/release/v1.7.3-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.4-notes.md",
+      "destination": "docs/release/v1.7.4-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.5-notes.md",
+      "destination": "docs/release/v1.7.5-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/release/v1.7.6-notes.md",
+      "destination": "docs/release/v1.7.6-notes.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-06-24-阶段一-model-catalog-完成报告.md",
+      "destination": "docs/reports/2026-06-24-阶段一-model-catalog-完成报告.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "05e325c154d977953f430a6bafdbdf14c923d9aa08cb0fc7560fd94a41210045"
+    },
+    {
+      "source": "docs/reports/2026-09-11-issues-fixable-by-open-prs.md",
+      "destination": "docs/reports/2026-09-11-issues-fixable-by-open-prs.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-11-open-pr-and-issue-triage.md",
+      "destination": "docs/reports/2026-09-11-open-pr-and-issue-triage.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-15-open-pr-merge-review.md",
+      "destination": "docs/reports/2026-09-15-open-pr-merge-review.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-16-script-market-merge-log.md",
+      "destination": "docs/reports/2026-09-16-script-market-merge-log.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-16-script-market-open-pr-review.md",
+      "destination": "docs/reports/2026-09-16-script-market-open-pr-review.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-16-three-feature-pr-review.md",
+      "destination": "docs/reports/2026-09-16-three-feature-pr-review.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-17-codebase-bugs.md",
+      "destination": "docs/reports/2026-09-17-codebase-bugs.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-22-codebase-bugs-continued.md",
+      "destination": "docs/reports/2026-09-22-codebase-bugs-continued.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-09-23-pr-merge-log.md",
+      "destination": "docs/reports/2026-09-23-pr-merge-log.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-02-issue-audit-and-fix-plan.md",
+      "destination": "docs/reports/2026-10-02-issue-audit-and-fix-plan.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-03-full-open-issue-audit.md",
+      "destination": "docs/reports/2026-10-03-full-open-issue-audit.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-03-issue-audit-latest-100.md",
+      "destination": "docs/reports/2026-10-03-issue-audit-latest-100.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-07-dictation-design.md",
+      "destination": "docs/reports/2026-10-07-dictation-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-07-script-market-pr-96-review.md",
+      "destination": "docs/reports/2026-10-07-script-market-pr-96-review.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-08-issue-audit-latest-100.md",
+      "destination": "docs/reports/2026-10-08-issue-audit-latest-100.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-08-issue-fix-and-triage-results.md",
+      "destination": "docs/reports/2026-10-08-issue-fix-and-triage-results.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-08-open-issues-pr-audit.csv",
+      "destination": "docs/reports/2026-10-08-open-issues-pr-audit.csv",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-08-open-issues-pr-audit.xlsx",
+      "destination": "docs/reports/2026-10-08-open-issues-pr-audit.xlsx",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-09-issue-fix-results.md",
+      "destination": "docs/reports/2026-10-09-issue-fix-results.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/reports/2026-10-09-latest-open-issue-audit.md",
+      "destination": "docs/reports/2026-10-09-latest-open-issue-audit.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime"
+    },
+    {
+      "source": "docs/research/01-调研结果.md",
+      "destination": "docs/research/01-调研结果.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "9e76a340187916760f3dc9a1acdddf6b23eec8a72131daf8545882d029309896"
+    },
+    {
+      "source": "docs/session-index-repair.md",
+      "destination": "docs/session-index-repair.md",
+      "resolution": "integrated",
+      "sha256": "f878f4fb6b12fd24ffe7494039569a06428b9ff7bcdfe63b6bf44507cb42144a"
+    },
+    {
+      "source": "docs/site.css",
+      "destination": "docs/site.css",
+      "resolution": "adapted-AX-site-without-advertising",
+      "sha256": "b15b68354a03f4de9fa332446c59c63c9294e50fe5c91538ccb89eb0b39f5399"
+    },
+    {
+      "source": "docs/site.js",
+      "destination": "docs/site.js",
+      "resolution": "adapted-AX-site-without-advertising",
+      "sha256": "df467e7d3c63ff5c438a8b446cb707182e590aedc3e02da94c0132c9308ee082"
+    },
+    {
+      "source": "docs/site.sponsors.test.cjs",
+      "destination": "docs/site.sponsors.test.cjs",
+      "resolution": "adapted-AX-site-without-advertising"
+    },
+    {
+      "source": "docs/site.test.cjs",
+      "destination": "docs/site.test.cjs",
+      "resolution": "adapted-AX-site-without-advertising",
+      "sha256": "6cbd0defa00596db54d58786886903b38bb275e577fe3309f5150fd2d7a90b68"
+    },
+    {
+      "source": "docs/specs/2026-06-23-model-catalog-prototype-design.md",
+      "destination": "docs/specs/2026-06-23-model-catalog-prototype-design.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "3bd9ed48e35d6d712aeda12dfe01b5111a90fd68636f6f258e08e4fd08af07a9"
+    },
+    {
+      "source": "docs/specs/2026-06-24-前端模型后缀提示-design.md",
+      "destination": "docs/specs/2026-06-24-前端模型后缀提示-design.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c7e8ce7bde403ff6a0d850e779186999d46cdd578ba51533f301e89eabde7617"
+    },
+    {
+      "source": "docs/specs/2026-06-25-model-list-window-split-design.md",
+      "destination": "docs/specs/2026-06-25-model-list-window-split-design.md",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5294b813af141584f0b21da445a0a061139473df593cfa0f2da5fc5ec686a2ff"
+    },
+    {
+      "source": "docs/specs/2026-09-30-extension-api-design.md",
+      "destination": "docs/specs/2026-09-30-extension-api-design.md",
+      "resolution": "integrated",
+      "sha256": "6c05cdc0607bf3517cbe158e6ab35c4b532eda20648d8d5f1fe29436b37267d6"
+    },
+    {
+      "source": "docs/specs/2026-09-30-ui-extension-api-design.md",
+      "destination": "docs/specs/2026-09-30-ui-extension-api-design.md",
+      "resolution": "integrated",
+      "sha256": "69804054217d5f300cd243612e2ebb0ff6178914f1404bfc9b00f290c3554159"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-05-13-provider-sync.md",
+      "destination": "docs/superpowers/plans/2026-05-13-provider-sync.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "198ca7127f65f4065193cd06183a674fed023c9966766ca458c312d7eb8dd98b"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-05-16-rust-tauri-migration.md",
+      "destination": "docs/superpowers/plans/2026-05-16-rust-tauri-migration.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "5102c8486f402f5ec666dd98d8373f6216414b3b729ff8ace0050edda53d3f7f"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-05-22-upstream-branch-dropdown.md",
+      "destination": "docs/superpowers/plans/2026-05-22-upstream-branch-dropdown.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "319e5fdeb82db5a1b21a005966e52eb42d6dffe5f9ce82c845e440db4f8c8390"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-05-22-upstream-worktree.md",
+      "destination": "docs/superpowers/plans/2026-05-22-upstream-worktree.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "621fe0c918540782980665621a869a6814a9faea060375561d16d2b48762f146"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-05-25-codex-context-management.md",
+      "destination": "docs/superpowers/plans/2026-05-25-codex-context-management.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "0a50e3c65f61d7ff88a7c99c5f12d192d0009b39a22507caef26a1f432382b2e"
+    },
+    {
+      "source": "docs/superpowers/plans/2026-07-23-dream-skin-auxiliary-panels.md",
+      "destination": "docs/superpowers/plans/2026-07-23-dream-skin-auxiliary-panels.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "545164db328e4bfc4d617b837f84be70459131344d0d356dde31d89d5805f902"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-11-user-scripts-design.md",
+      "destination": "docs/superpowers/specs/2026-05-11-user-scripts-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "0f2315c6c927c57467835faabe87920171a93e451821e5e187e4654c46b71281"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-12-conversation-timeline-design.md",
+      "destination": "docs/superpowers/specs/2026-05-12-conversation-timeline-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "290326ced5323d1c31e306405d85a43401e49d7b55d5b1892a62c29820336a0f"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-13-provider-sync-design.md",
+      "destination": "docs/superpowers/specs/2026-05-13-provider-sync-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "3afeac9909b77ec3ef8c38aa11eb6d5ad0cc7ed70e628fea7b04e750660e7542"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-16-rust-tauri-migration-design.md",
+      "destination": "docs/superpowers/specs/2026-05-16-rust-tauri-migration-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "2318afe794ddad6715b9171c809536fabf7d30896b40bc986f20b4864fedc472"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-21-script-market-design.md",
+      "destination": "docs/superpowers/specs/2026-05-21-script-market-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "1bd14983ec9f48d82021976d8623a5d34aa603b5b9f6254d676d7813e2f16ab2"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-22-upstream-branch-dropdown-design.md",
+      "destination": "docs/superpowers/specs/2026-05-22-upstream-branch-dropdown-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "de8ccfca42f53af82f17e7fc18ae7baa5fdb2291d3dd22958ad0b643781aedc0"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-22-upstream-worktree-design.md",
+      "destination": "docs/superpowers/specs/2026-05-22-upstream-worktree-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "e9c94f1c7e33809d3efed62ec1aa91e844d292780701f592b7400d1daf744bfc"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-25-codex-context-management-design.md",
+      "destination": "docs/superpowers/specs/2026-05-25-codex-context-management-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "0d6239c065ed265308358379f8b3563c7d87ffb1f7ab6670b2bcfb18d27b3738"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-05-27-provider-configuration-redesign-design.md",
+      "destination": "docs/superpowers/specs/2026-05-27-provider-configuration-redesign-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "6e3cc8c28878f8d6e54d4867ea97029b8c13baedf68014ebbf7b8ce37aff3e04"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-06-02-pr-build-actions-design.md",
+      "destination": "docs/superpowers/specs/2026-06-02-pr-build-actions-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "98b1636075ecdc49d52ce14e121f74296c9a3e0b0b060fdf546e2f622cfcd851"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-06-04-plugin-entry-unlock-design.md",
+      "destination": "docs/superpowers/specs/2026-06-04-plugin-entry-unlock-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "6082448681e94d4b026fb91eb8c9a14b66ff59a840328f6d755f9aa2c34cb238"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-06-04-provider-sync-target-selection-design.md",
+      "destination": "docs/superpowers/specs/2026-06-04-provider-sync-target-selection-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "0d88703de3975b931e4b13d2e63a21149c9fa57238d006562005d4bc9884bad6"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-06-05-version-gated-plugin-unlock-design.md",
+      "destination": "docs/superpowers/specs/2026-06-05-version-gated-plugin-unlock-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "e07cb7ecd0a66b3c2ef74f215632e603b48a41e63566847a0b51ee6c6e7a87b6"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-07-23-dream-skin-auxiliary-panels-design.md",
+      "destination": "docs/superpowers/specs/2026-07-23-dream-skin-auxiliary-panels-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "6a139a40c95824ecfe7f6352f2df6ae9cdbb52eb65373fbee62510c585b50725"
+    },
+    {
+      "source": "docs/superpowers/specs/2026-08-27-vlm-test-entry-design.md",
+      "destination": "docs/superpowers/specs/2026-08-27-vlm-test-entry-design.md",
+      "resolution": "upstream-maintainer-artifact-not-runtime",
+      "sha256": "56b3bd532127d63295f35893cce12079c5ada4dbe2eb83f6b08ac8f2cb866249"
+    },
+    {
+      "source": "docs/user-script-reload.md",
+      "destination": "docs/user-script-reload.md",
+      "resolution": "integrated",
+      "sha256": "ccbb3ed758b16fe7a50561203a980f39e153e25baea3d90c86b355abbbddec62"
+    },
+    {
+      "source": "docs/whale-parity.md",
+      "destination": "docs/whale-parity.md",
+      "resolution": "integrated",
+      "sha256": "3121e2aa564cd6049e479776232b2943d4657d748fd7d125f9cecbf45ba7ac2b"
+    },
+    {
+      "source": "docs/whale-widget.md",
+      "destination": "docs/whale-widget.md",
+      "resolution": "integrated",
+      "sha256": "f9ca66b099c2b1b52ba7dea758585e7f0dd40e58459443eb4e1e4b438c3ed918"
+    },
+    {
+      "source": "scripts/assemble-native-browser-inspector.mjs",
+      "destination": "scripts/assemble-native-browser-inspector.mjs",
+      "resolution": "integrated",
+      "sha256": "ffc6dac3f40f078cbf70e6f00bd1980bce37c3b1b75f2b6850e48d270e3c436f"
+    },
+    {
+      "source": "scripts/assemble-renderer-inject.mjs",
+      "destination": "scripts/assemble-renderer-inject.mjs",
+      "resolution": "integrated",
+      "sha256": "01f75f1134ac9468a97e2a9ab8cc2124a143bd5f33689d786378db8e005462cf"
+    },
+    {
+      "source": "scripts/assemble-whale-runtime.mjs",
+      "destination": "scripts/assemble-whale-runtime.mjs",
+      "resolution": "integrated",
+      "sha256": "bd208b81512db016952b812a99e70fcd9e14630c387cc7139df067e4a804739c"
+    },
+    {
+      "source": "scripts/build-plugin-market-index.mjs",
+      "destination": "scripts/build-plugin-market-index.mjs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c334b2bbf423c1a1b2a5cafdcdb4279b7794aea2f2ab90ddbbd27767b93e3ce5"
+    },
+    {
+      "source": "scripts/installer/linux/build-deb.sh",
+      "destination": "scripts/installer/linux/build-deb.sh",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "812fe54728a846e1cc2bd5ebbd27b46b35ce9ab262b86fa2fa6f8884d9e83c23"
+    },
+    {
+      "source": "scripts/installer/macos/build-universal.sh",
+      "destination": "scripts/installer/macos/build-universal.sh",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "5594a305831a2377e515842cf1b8aa5e90465c38e86f32352ac3b61cac100281"
+    },
+    {
+      "source": "scripts/installer/macos/package-dmg.sh",
+      "destination": "scripts/installer/macos/package-dmg.sh",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "379f3e909716b2e52421a84161ef0d2dadcf8484430467dbe444487ecc1da5f6"
+    },
+    {
+      "source": "scripts/installer/windows/CodexPlusPlus.nsi",
+      "destination": "scripts/installer/windows/AlunixaX.nsi",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "64b0a1af460ede38052183cb32ceb6dfe2ec64d7fbff03adece99ed42fbc2603"
+    },
+    {
+      "source": "scripts/probe-extension-api-cdp.mjs",
+      "destination": "scripts/probe-extension-api-cdp.mjs",
+      "resolution": "integrated",
+      "sha256": "5ebac20bf9a7734a0663fea28585b28ad5a28a87b28ef66160c7d8a491813d46"
+    },
+    {
+      "source": "scripts/probe-extension-menu-cdp.mjs",
+      "destination": "scripts/probe-extension-menu-cdp.mjs",
+      "resolution": "integrated",
+      "sha256": "45efe4680f58febb2580341a6942b15789cadb012bd23dfa41302fc25c033595"
+    },
+    {
+      "source": "scripts/probe-extensions-cdp.mjs",
+      "destination": "scripts/probe-extensions-cdp.mjs",
+      "resolution": "integrated",
+      "sha256": "4977a9d341e4d5f7ec9179b669b4b30ee0cc4bb5a7d7b5dfabf22676aacf0b2a"
+    },
+    {
+      "source": "scripts/split-renderer-inject.mjs",
+      "destination": "scripts/split-renderer-inject.mjs",
+      "resolution": "integrated",
+      "sha256": "2d691dc88bd44063bf93809d3ee755cbee4bd49726a95a6c0f7a1be8c9b37190"
+    },
+    {
+      "source": "scripts/sync_official_models.py",
+      "destination": "scripts/sync_official_models.py",
+      "resolution": "integrated",
+      "sha256": "3d440d4999aa29336f17270585d799e6086db95eff91792f6f040214dd90b18c"
+    },
+    {
+      "source": "services/share-site/README.md",
+      "destination": "services/share-site/README.md",
+      "resolution": "integrated",
+      "sha256": "06e4007a4b99b0f5f29a1ae42ec119c297ce82bdda42e00df900f2000ae467b6"
+    },
+    {
+      "source": "services/share-site/_worker.js",
+      "destination": "services/share-site/_worker.js",
+      "resolution": "integrated",
+      "sha256": "682b806261745995b026625a726eb2ea5c78d16a83f824b8ee8ab49256191329"
+    },
+    {
+      "source": "services/share-site/app.js",
+      "destination": "services/share-site/app.js",
+      "resolution": "integrated",
+      "sha256": "ffb0f3b5d10d4c0b8632e1aa990f9a29a2374eedca3fe8b94bf1dc77d70c5fdd"
+    },
+    {
+      "source": "services/share-site/index.html",
+      "destination": "services/share-site/index.html",
+      "resolution": "integrated",
+      "sha256": "a5ae390525533c46f4277354755b711820425a09c3fa8d17151b6c59fc2d7cfe"
+    },
+    {
+      "source": "services/share-site/styles.css",
+      "destination": "services/share-site/styles.css",
+      "resolution": "integrated",
+      "sha256": "ed03bcaaabe313fa7d1a1af31a9a324bf8ebe9a666a38e3221d07439a5cd847d"
+    },
+    {
+      "source": "tools/codex-wechat/README.md",
+      "destination": "tools/codex-wechat/README.md",
+      "resolution": "integrated",
+      "sha256": "dd58aeb276d7ce405a4e41aab433fc8c64004ee39d777ea51df3f49d863ca21f"
+    },
+    {
+      "source": "tools/codex-wechat/codex_wechat.py",
+      "destination": "tools/codex-wechat/codex_wechat.py",
+      "resolution": "integrated",
+      "sha256": "a77ef202d4681800af5fc202609911579162dde34d4ab45f526859fb2d684ff8"
+    },
+    {
+      "source": "tools/codex-wechat/config.example.json",
+      "destination": "tools/codex-wechat/config.example.json",
+      "resolution": "integrated",
+      "sha256": "1d0719393f80ee15b7d85986c6fb27bfd33650b83ad5b338b914437fbdb21df1"
+    },
+    {
+      "source": "tools/conversation-canvas/.gitignore",
+      "destination": "tools/conversation-canvas/.gitignore",
+      "resolution": "integrated",
+      "sha256": "cdfe3b75c6c1d100b7373256ea09a9304c5a8b933b1d2d30433f5d73bf3ea9fa"
+    },
+    {
+      "source": "tools/conversation-canvas/bridge-data.mjs",
+      "destination": "tools/conversation-canvas/bridge-data.mjs",
+      "resolution": "integrated",
+      "sha256": "833d06af0931ffc58e9bc21e5c74fc9247e937a1c1216a587510d3e8b8e73018"
+    },
+    {
+      "source": "tools/conversation-canvas/bridge-data.test.mjs",
+      "destination": "tools/conversation-canvas/bridge-data.test.mjs",
+      "resolution": "integrated",
+      "sha256": "43cbbc97b4d1e2ad373157991164d626600d14a050b7b7d089a503c9396c8546"
+    },
+    {
+      "source": "tools/conversation-canvas/build-userscript.mjs",
+      "destination": "tools/conversation-canvas/build-userscript.mjs",
+      "resolution": "integrated",
+      "sha256": "0a0d46dc1aa4851d2b20f62ff914cce18ea95761e4e0fc40ca80e1408785c85a"
+    },
+    {
+      "source": "tools/conversation-canvas/context-lookup.test.mjs",
+      "destination": "tools/conversation-canvas/context-lookup.test.mjs",
+      "resolution": "integrated",
+      "sha256": "b87fb943f28b17766f440ebf5d272182091527786525543740ad7ec4a207c76f"
+    },
+    {
+      "source": "tools/conversation-canvas/dev/embedding-harness.mjs",
+      "destination": "tools/conversation-canvas/dev/embedding-harness.mjs",
+      "resolution": "integrated",
+      "sha256": "bb9da1b180a36d8c6dc54cb77945f02ab6519ef39b4019ff97905978639d40c3"
+    },
+    {
+      "source": "tools/conversation-canvas/distribution.test.mjs",
+      "destination": "tools/conversation-canvas/distribution.test.mjs",
+      "resolution": "integrated",
+      "sha256": "9b07da651a17a323879726fa920356ed09aabc81830c479d3017545204227318"
+    },
+    {
+      "source": "tools/conversation-canvas/external-api.mjs",
+      "destination": "tools/conversation-canvas/external-api.mjs",
+      "resolution": "integrated",
+      "sha256": "405b4a9ccbcf70f07c2ff0e7cc6c20ed10a1db4a831a408146d86f719d0aa2c7"
+    },
+    {
+      "source": "tools/conversation-canvas/external-api.test.mjs",
+      "destination": "tools/conversation-canvas/external-api.test.mjs",
+      "resolution": "integrated",
+      "sha256": "5ede980415a6dc193f63f0b2a2e4041582f6164165c09d254f991767ac04a5ca"
+    },
+    {
+      "source": "tools/conversation-canvas/license",
+      "destination": "tools/conversation-canvas/license",
+      "resolution": "integrated",
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+    },
+    {
+      "source": "tools/conversation-canvas/long-organizer.mjs",
+      "destination": "tools/conversation-canvas/long-organizer.mjs",
+      "resolution": "integrated",
+      "sha256": "4fd79ea3cb4e5766e7653f77f184e90215348cc1ff2878fd6b4484e6d51e62d3"
+    },
+    {
+      "source": "tools/conversation-canvas/long-organizer.test.mjs",
+      "destination": "tools/conversation-canvas/long-organizer.test.mjs",
+      "resolution": "integrated",
+      "sha256": "9f554948911e0ba7afb8de635e7f31fd7f6a17e9fac7ac43819ff3ba5d80616c"
+    },
+    {
+      "source": "tools/conversation-canvas/model.mjs",
+      "destination": "tools/conversation-canvas/model.mjs",
+      "resolution": "integrated",
+      "sha256": "5f2a600e5cf219fb23ff09497bab9dfb10e941abcf9ebbfc0d25128f14e9a376"
+    },
+    {
+      "source": "tools/conversation-canvas/model.test.mjs",
+      "destination": "tools/conversation-canvas/model.test.mjs",
+      "resolution": "integrated",
+      "sha256": "b93f85e4ff3a60fad75c6e8da950f25cc2f129c7d759eda46d75437d684d9b19"
+    },
+    {
+      "source": "tools/conversation-canvas/native-history.mjs",
+      "destination": "tools/conversation-canvas/native-history.mjs",
+      "resolution": "integrated",
+      "sha256": "d8115286074624bc392af54abcd9854c0a2b666fcd14c91888dbd2f1ded9abbd"
+    },
+    {
+      "source": "tools/conversation-canvas/native-history.test.mjs",
+      "destination": "tools/conversation-canvas/native-history.test.mjs",
+      "resolution": "integrated",
+      "sha256": "47900df6690b53ae05813f524a572c206dd6f35014314b837e35863f81e71228"
+    },
+    {
+      "source": "tools/conversation-canvas/native-runtime.mjs",
+      "destination": "tools/conversation-canvas/native-runtime.mjs",
+      "resolution": "integrated",
+      "sha256": "c9670570498ed6ce7d516632362e463e10c81dfd1e71fb1d001146e759b00a4d"
+    },
+    {
+      "source": "tools/conversation-canvas/native-runtime.test.mjs",
+      "destination": "tools/conversation-canvas/native-runtime.test.mjs",
+      "resolution": "integrated",
+      "sha256": "ae48b9689a4791cfa5a66439ff2e668249918e8d1e6fd827be6cf08e4149bf2e"
+    },
+    {
+      "source": "tools/conversation-canvas/organize.mjs",
+      "destination": "tools/conversation-canvas/organize.mjs",
+      "resolution": "integrated",
+      "sha256": "ddcf529ae463ff4428888e76fb29d8abfcbc813a1901f32f2821031af32c2b58"
+    },
+    {
+      "source": "tools/conversation-canvas/organize.test.mjs",
+      "destination": "tools/conversation-canvas/organize.test.mjs",
+      "resolution": "integrated",
+      "sha256": "a88533029b1c650d0229c34c820b7a2f07fd65293d2f3981096c1374b61ff6ec"
+    },
+    {
+      "source": "tools/conversation-canvas/package.json",
+      "destination": "tools/conversation-canvas/package.json",
+      "resolution": "integrated",
+      "sha256": "7d306d1d5c8391154b1b817e0a54135ead3a567ad50d3ec3ea512200d490a3a1"
+    },
+    {
+      "source": "tools/conversation-canvas/public/canvas.user.js",
+      "destination": "tools/conversation-canvas/public/canvas.user.js",
+      "resolution": "integrated",
+      "sha256": "ff62eaf2339646db4cd45142c404c197c3b0cbe2e97f3cf7814f9c84f17ba188"
+    },
+    {
+      "source": "tools/conversation-canvas/readme.md",
+      "destination": "tools/conversation-canvas/readme.md",
+      "resolution": "integrated",
+      "sha256": "4205c0d4cc253b01e96f7a9cd7059bbd4924d3a386e1eb44369cbeece17cb9b7"
+    },
+    {
+      "source": "tools/conversation-canvas/src/canvas-panel.js",
+      "destination": "tools/conversation-canvas/src/canvas-panel.js",
+      "resolution": "integrated",
+      "sha256": "3e94626c24b986f8af664242e7196900c82715b93dc7a690e9d3a77a772c7018"
+    },
+    {
+      "source": "tools/conversation-canvas/src/canvas-store.js",
+      "destination": "tools/conversation-canvas/src/canvas-store.js",
+      "resolution": "integrated",
+      "sha256": "b184459ac2ac462390fc65b43ec27b23dee9b91deebe2ee9257f8abceba3a44e"
+    },
+    {
+      "source": "tools/conversation-canvas/src/native-api.js",
+      "destination": "tools/conversation-canvas/src/native-api.js",
+      "resolution": "integrated",
+      "sha256": "de939404f5b46c5283d551e3704a2cb8942192be79a9957d9a95c7c4d44712ed"
+    },
+    {
+      "source": "tools/conversation-canvas/src/native-sidechat.js",
+      "destination": "tools/conversation-canvas/src/native-sidechat.js",
+      "resolution": "integrated",
+      "sha256": "a79df02fcc0173c98829c2749c8b087b777426c0aa934df14ba8cc9a5fbf1f73"
+    },
+    {
+      "source": "tools/conversation-canvas/src/tree-canvas-view.js",
+      "destination": "tools/conversation-canvas/src/tree-canvas-view.js",
+      "resolution": "integrated",
+      "sha256": "140fe0359424f1ceec576e32cb5edaf616dc5ff66616c056f6effa0bf3ee4527"
+    },
+    {
+      "source": "tools/conversation-canvas/src/tree-canvas.css",
+      "destination": "tools/conversation-canvas/src/tree-canvas.css",
+      "resolution": "integrated",
+      "sha256": "877f8e6419d766f6f768ee166be8c6dc2b757365d01212fc9855f4b08851fe7c"
+    },
+    {
+      "source": "tools/conversation-canvas/tree-canvas.mjs",
+      "destination": "tools/conversation-canvas/tree-canvas.mjs",
+      "resolution": "integrated",
+      "sha256": "2af73a6a9b141d5feafbfb5608711dcdd1af33197ba1ed4fb08c1bf94e3a39bc"
+    },
+    {
+      "source": "tools/conversation-canvas/tree-canvas.test.mjs",
+      "destination": "tools/conversation-canvas/tree-canvas.test.mjs",
+      "resolution": "integrated",
+      "sha256": "90928bb578895929ceeeda34e13658bd85da934f9a598d5fe3315e17539d6df2"
+    },
+    {
+      "source": "tools/conversation-canvas/tree-markup.mjs",
+      "destination": "tools/conversation-canvas/tree-markup.mjs",
+      "resolution": "integrated",
+      "sha256": "b0ca9d8e75084e36e350f7c0fdc39ac2d431507f42cb9a03ca48645a2ed57fbd"
+    },
+    {
+      "source": "tools/conversation-canvas/tree.test.mjs",
+      "destination": "tools/conversation-canvas/tree.test.mjs",
+      "resolution": "integrated",
+      "sha256": "efd8b2e70157512650a0ca12df420ee8a86191f94f9db2107b0fc7f0da4006cd"
+    },
+    {
+      "source": "tools/conversation-canvas/view-pages.mjs",
+      "destination": "tools/conversation-canvas/view-pages.mjs",
+      "resolution": "integrated",
+      "sha256": "f0f83183a36375a24a507a76b0d80969384605159e7800d23b3f808a15e43e4a"
+    },
+    {
+      "source": "tools/i18n-codemod.mjs",
+      "destination": "tools/i18n-codemod.mjs",
+      "resolution": "integrated",
+      "sha256": "fc8dc0d7be4224f2449207e267fabd4feb5f534f7c85c8cb2126a7e170fdb42c"
+    },
+    {
+      "source": "tools/i18n-keys.json",
+      "destination": "tools/i18n-keys.json",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "6f446ca79c2a1a80f1cdf91205f2240578a6bfcae1abd32af8021b4cf2ef1ac7"
+    },
+    {
+      "source": "tools/i18n-verify.mjs",
+      "destination": "tools/i18n-verify.mjs",
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8195f0bcf1b976f28a3ec70a40f60de8a25982d1523996a06ec9b42d7ec4c5ea"
+    },
+    {
+      "source": "types/codex-plus-extensions.d.ts",
+      "destination": "types/alunixa-x-extensions.d.ts",
+      "resolution": "integrated",
+      "sha256": "9e00d9820a574a96677470b9ea3621f1e698ceef7ec374f1f3251e1f05b53ecb"
+    }
+  ],
+  "localValidation": {
+    "rust": {
+      "passed": 2190,
+      "failed": 0,
+      "ignored": 9
+    },
+    "frontend": {
+      "tests": 626,
+      "passed": 625,
+      "failed": 0,
+      "skipped": 1
+    },
+    "siteInstaller": 21,
+    "liveDesktop": false
+  }
+}

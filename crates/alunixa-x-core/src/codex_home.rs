@@ -185,6 +185,3 @@ fn lexically_normalize(path: &Path) -> PathBuf {
     }
     normalized
 }
-
-
-

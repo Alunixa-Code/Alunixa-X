@@ -257,11 +257,7 @@ mod migration_tests {
         let archive = temp.path().join("migration-backups");
         let legacy = root.join(LEGACY_MANAGER_BUNDLE_NAME);
         fs::create_dir_all(legacy.join("Contents/MacOS")).unwrap();
-        fs::write(
-            legacy.join("Contents/MacOS/AlunixaXManager"),
-            b"legacy",
-        )
-        .unwrap();
+        fs::write(legacy.join("Contents/MacOS/AlunixaXManager"), b"legacy").unwrap();
 
         let moved = migrate_legacy_manager_bundle_to(&root, &archive)
             .unwrap()

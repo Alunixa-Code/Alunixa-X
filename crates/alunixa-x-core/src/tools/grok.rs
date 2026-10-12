@@ -39,7 +39,9 @@ fn api_backend_for(profile: &RelayProfile) -> anyhow::Result<&'static str> {
     match profile.protocol {
         RelayProtocol::Responses => Ok("responses"),
         RelayProtocol::ChatCompletions => Ok("chat_completions"),
-        _ => bail!("Grok CLI requires Responses or Chat Completions; this provider protocol is not supported by its native config"),
+        _ => bail!(
+            "Grok CLI requires Responses or Chat Completions; this provider protocol is not supported by its native config"
+        ),
     }
 }
 

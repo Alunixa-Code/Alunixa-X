@@ -1355,8 +1355,11 @@ mod tests {
         assert!(!command.contains("--alunixa-x-shared-terminal"));
         assert!(!command.contains("/shared-terminal/submit"));
         let encoded = command.split_whitespace().last().unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
-        let utf16: Vec<_> = bytes.chunks_exact(2)
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let utf16: Vec<_> = bytes
+            .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output 'hello'");
@@ -1391,8 +1394,11 @@ mod tests {
         assert!(!command.contains("--alunixa-x-shared-terminal"));
         assert!(!command.contains("/shared-terminal/submit"));
         let encoded = command.split_whitespace().last().unwrap();
-        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
-        let utf16: Vec<_> = bytes.chunks_exact(2)
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let utf16: Vec<_> = bytes
+            .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output legacy");

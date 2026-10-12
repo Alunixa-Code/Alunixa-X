@@ -10,8 +10,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use toml_edit::{DocumentMut, Item};
 
-use crate::zed_remote::ZedOpenStrategy;
 use crate::tools::{ToolConfig, ToolId};
+use crate::zed_remote::ZedOpenStrategy;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -278,7 +278,8 @@ pub struct RelayProfile {
         rename = "cooldownErrorStatuses",
         default = "default_cooldown_error_statuses"
     )]
-    pub cooldown_error_statuses: Vec<u16>,}
+    pub cooldown_error_statuses: Vec<u16>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -827,7 +828,8 @@ pub struct BackendSettings {
     pub tools: BTreeMap<ToolId, ToolConfig>,
     /// UI 顶栏当前聚焦的工具。只影响管理器的展示，不影响 Codex 的启动配置。
     #[serde(rename = "activeTool", default)]
-    pub active_tool: ToolId,}
+    pub active_tool: ToolId,
+}
 
 impl Default for BackendSettings {
     fn default() -> Self {
@@ -1087,7 +1089,8 @@ impl BackendSettings {
             || (profile.relay_mode == RelayMode::Official && profile.official_mix_api_key)
             || profile.has_model_routes()
             || profile.has_model_protocols()
-            || profile.uses_no_auth() || profile.web_search_history_compat_enabled()
+            || profile.uses_no_auth()
+            || profile.web_search_history_compat_enabled()
     }
 }
 
@@ -1420,9 +1423,16 @@ impl RelayProfile {
     pub fn reasoning_effort_for_model(&self, model: &str) -> ReasoningEffort {
         self.model_reasoning_efforts
             .get(model.trim())
-            .or_else(|| self.model_reasoning_efforts.iter()
-                .find(|(name, _)| crate::model_suffix::parse_model_suffix(name).0.eq_ignore_ascii_case(model.trim()))
-                .map(|(_, effort)| effort))
+            .or_else(|| {
+                self.model_reasoning_efforts
+                    .iter()
+                    .find(|(name, _)| {
+                        crate::model_suffix::parse_model_suffix(name)
+                            .0
+                            .eq_ignore_ascii_case(model.trim())
+                    })
+                    .map(|(_, effort)| effort)
+            })
             .copied()
             .unwrap_or_default()
     }
@@ -1718,7 +1728,10 @@ impl SettingsStore {
     }
 
     fn load_unlocked(&self) -> anyhow::Result<BackendSettings> {
-        let contents = match self.read_contents()? { Some(value) => value, None => return Ok(BackendSettings::default()) };
+        let contents = match self.read_contents()? {
+            Some(value) => value,
+            None => return Ok(BackendSettings::default()),
+        };
 
         let mut value = serde_json::from_str::<Value>(&contents).with_context(|| {
             format!(
@@ -1787,9 +1800,18 @@ impl SettingsStore {
     fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         serialize_settings_bounded(settings)?;
         let previous = self.load_raw_object()?;
-        let count = previous.get("relayProfiles").and_then(Value::as_array).map_or(0, Vec::len);
-        anyhow::ensure!(!(settings.relay_profiles.is_empty() && count > 0), "Refusing to erase existing providers");
-        anyhow::ensure!(!(is_default_single_profile(&settings.relay_profiles) && count > 1), "Refusing to collapse saved providers to defaults");
+        let count = previous
+            .get("relayProfiles")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        anyhow::ensure!(
+            !(settings.relay_profiles.is_empty() && count > 0),
+            "Refusing to erase existing providers"
+        );
+        anyhow::ensure!(
+            !(is_default_single_profile(&settings.relay_profiles) && count > 1),
+            "Refusing to collapse saved providers to defaults"
+        );
         let mut settings = normalize_settings_config_sections(settings.clone())?;
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
         let mut raw = self.load_raw_object()?;
@@ -1899,7 +1921,10 @@ impl SettingsStore {
     }
 
     fn load_raw_object(&self) -> anyhow::Result<Map<String, Value>> {
-        let contents = match self.read_contents()? { Some(value) => value, None => return Ok(settings_to_object(&BackendSettings::default())) };
+        let contents = match self.read_contents()? {
+            Some(value) => value,
+            None => return Ok(settings_to_object(&BackendSettings::default())),
+        };
 
         match serde_json::from_str::<Value>(&contents)? {
             Value::Object(map) => Ok(map),
@@ -2382,8 +2407,10 @@ fn normalize_settings_config_sections(
     settings.dictation.normalize();
     settings.codex_app_typing_effect = normalize_typing_effect(&settings.codex_app_typing_effect);
     for profile in &mut settings.relay_profiles {
-        profile.channel_requests_per_minute = normalize_channel_requests_per_minute(profile.channel_requests_per_minute);
-        profile.cooldown_error_statuses = normalize_channel_cooldown_statuses(&profile.cooldown_error_statuses);
+        profile.channel_requests_per_minute =
+            normalize_channel_requests_per_minute(profile.channel_requests_per_minute);
+        profile.cooldown_error_statuses =
+            normalize_channel_cooldown_statuses(&profile.cooldown_error_statuses);
     }
     settings.sync_tool_shards();
     settings.relay_common_config_contents =
@@ -2471,30 +2498,21 @@ fn normalize_settings_config_sections(
         .to_string();
     settings.codex_app_memory_embedding_model =
         settings.codex_app_memory_embedding_model.trim().to_string();
+    settings.sync_tool_shards();
     Ok(settings)
 }
 
 fn split_context_config_sections(config: &str) -> (String, String) {
-    let mut common = Vec::new();
-    let mut context = Vec::new();
-    let mut in_context_table = false;
-
-    for line in config.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_context_table = is_context_table_header(trimmed);
-        }
-        if in_context_table {
-            context.push(line);
-        } else {
-            common.push(line);
+    let Ok(mut common) = config.parse::<DocumentMut>() else {
+        return (config.to_owned(), String::new());
+    };
+    let mut context = DocumentMut::new();
+    for key in ["mcp_servers", "skills", "plugins"] {
+        if let Some(item) = common.as_table_mut().remove(key) {
+            context.as_table_mut().insert(key, item);
         }
     }
-
-    (
-        normalize_text_config(common.join("\n")),
-        normalize_text_config(context.join("\n")),
-    )
+    (common.to_string(), context.to_string())
 }
 
 fn is_context_table_header(header: &str) -> bool {
@@ -2665,7 +2683,16 @@ mod tests {
                     let origin = after.get("upstreamBaseUrl").cloned();
                     if before.get("upstreamBaseUrl").and_then(Value::as_str) == Some("")
                         && origin.is_some()
-                        && before.get("baseUrl") == origin.as_ref()
+                        && (before.get("baseUrl") == origin.as_ref()
+                            || (before.get("relayMode").and_then(Value::as_str)
+                                == Some("aggregate")
+                                && origin.as_ref().and_then(Value::as_str)
+                                    == Some(
+                                        crate::protocol_proxy::local_responses_proxy_base_url(
+                                            crate::protocol_proxy::protocol_proxy_port(),
+                                        )
+                                        .as_str(),
+                                    )))
                     {
                         before.insert("upstreamBaseUrl".into(), origin.unwrap());
                     }
@@ -2683,8 +2710,18 @@ mod tests {
                 _ => {}
             }
         }
-        let canonical = normalize_settings_config_sections(settings.clone()).unwrap();
-        let mut before = serde_json::to_value(settings).unwrap();
+        let mut prepared = settings.clone();
+        let (common, extracted) =
+            split_context_config_sections(&prepared.relay_common_config_contents);
+        prepared.relay_common_config_contents = crate::relay_config::normalize_config_text(&common);
+        prepared.relay_context_config_contents =
+            crate::relay_config::normalize_config_text(&join_config_sections(&[
+                prepared.relay_context_config_contents.as_str(),
+                extracted.as_str(),
+            ]));
+        prepared.sync_tool_shards();
+        let canonical = normalize_settings_config_sections(prepared.clone()).unwrap();
+        let mut before = serde_json::to_value(&prepared).unwrap();
         let after = serde_json::to_value(&canonical).unwrap();
         allow_transport_origin_fill(&mut before, &after);
         assert_eq!(
@@ -4348,7 +4385,8 @@ impl BackendSettings {
         self.active_aggregate_relay_profile().is_some()
             || profile.protocol != RelayProtocol::Responses
             || profile.relay_mode == RelayMode::CustomModels
-            || profile.has_model_routes() || profile.has_model_protocols()
+            || profile.has_model_routes()
+            || profile.has_model_protocols()
             || profile.web_search_history_compat_enabled()
             || profile.uses_no_auth()
     }
@@ -4433,8 +4471,9 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
     merge_bool_setting(target, source, "codexAppServiceTierControls");
     merge_bool_setting(target, source, "codexAppPetRealMouseLook");
     merge_bool_setting(target, source, "codexAppWhaleWidgetEnabled");
-    if let Some(value @ ("auto" | "custom" | "off")) =
-        source.get("codexAppWhaleBalanceProtocol").and_then(Value::as_str)
+    if let Some(value @ ("auto" | "custom" | "off")) = source
+        .get("codexAppWhaleBalanceProtocol")
+        .and_then(Value::as_str)
     {
         target.insert(
             "codexAppWhaleBalanceProtocol".to_string(),

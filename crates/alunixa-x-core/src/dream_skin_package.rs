@@ -921,7 +921,12 @@ fn validate_manifest(manifest: &DreamSkinPackageManifest, platform: &str) -> any
     if !valid_semver(&manifest.version) || !valid_semver(&manifest.min_client_version) {
         bail!("manifest 版本号无效");
     }
-    if compare_semver(&manifest.min_client_version, DREAM_SKIN_PACKAGE_CLIENT_VERSION).is_gt() {
+    if compare_semver(
+        &manifest.min_client_version,
+        DREAM_SKIN_PACKAGE_CLIENT_VERSION,
+    )
+    .is_gt()
+    {
         bail!(
             "主题包要求 Dream Skin 兼容版本 {}，当前支持 {}（Alunixa X {}）。minClientVersion 应填写 Dream Skin 引擎版本，不是 Codex Desktop build；请使用兼容的主题包或联系发布者确认版本标注。",
             manifest.min_client_version,

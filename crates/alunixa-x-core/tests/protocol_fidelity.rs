@@ -741,10 +741,10 @@ fn failed_stream_retains_partial_tool_data_without_finalizing_execution() {
 
 #[test]
 fn explicit_claude_effort_cannot_reintroduce_nonadaptive_wire_fields() {
-    for effort in ["xhigh","ultra"] {
-        let request=json!({"model":"claude-opus-5-5","input":"hi","reasoning_effort":effort,"thinking":{"type":"enabled"}});
-        let body=responses_to_chat_completions(request).unwrap();
-        assert_eq!(body["thinking"]["type"],"adaptive");
+    for effort in ["xhigh", "ultra"] {
+        let request = json!({"model":"claude-opus-5-5","input":"hi","reasoning_effort":effort,"thinking":{"type":"enabled"}});
+        let body = responses_to_chat_completions(request).unwrap();
+        assert_eq!(body["thinking"]["type"], "adaptive");
         assert!(body.get("reasoning_effort").is_none());
     }
 }

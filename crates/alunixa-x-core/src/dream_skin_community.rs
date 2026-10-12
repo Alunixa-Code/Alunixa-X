@@ -419,10 +419,7 @@ fn append_warning(warning: &mut String, message: String) {
 
 fn community_http_client(timeout: Duration) -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
-        .user_agent(format!(
-            "AlunixaX/{} DreamSkin",
-            env!("CARGO_PKG_VERSION")
-        ))
+        .user_agent(format!("AlunixaX/{} DreamSkin", env!("CARGO_PKG_VERSION")))
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(8))
         .timeout(timeout)

@@ -16,8 +16,8 @@ use alunixa_x_core::status::{LaunchStatus, StatusStore};
 use alunixa_x_core::user_scripts::UserScriptManager;
 use serde::Serialize;
 use serde_json::{Value, json};
-use tauri::Manager;
 use tauri::Emitter;
+use tauri::Manager;
 
 use crate::install::{self, InstallActionResult, InstallOptions};
 
@@ -901,20 +901,18 @@ pub async fn launch_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
 }
 
 #[tauri::command]
-pub async fn launch_codex_multi_instance(
-    request: CodexMultiLaunchRequest,
-) -> CommandResult<Value> {
-    match tauri::async_runtime::spawn_blocking(move || launch_codex_multi_instance_blocking(request))
-        .await
+pub async fn launch_codex_multi_instance(request: CodexMultiLaunchRequest) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        launch_codex_multi_instance_blocking(request)
+    })
+    .await
     {
         Ok(result) => result,
         Err(error) => failed(&format!("启动 Codex 多开实例失败：{error}"), json!({})),
     }
 }
 
-fn launch_codex_multi_instance_blocking(
-    request: CodexMultiLaunchRequest,
-) -> CommandResult<Value> {
+fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> CommandResult<Value> {
     let stored_settings = match SettingsStore::default().load() {
         Ok(settings) => settings,
         Err(error) => return failed(&format!("读取供应商设置失败：{error}"), json!({})),
@@ -1014,12 +1012,14 @@ fn launch_codex_multi_instance_blocking(
     } else {
         ""
     };
-    if let Err(error) = alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
-        &codex_home,
-        &profile,
-        common_config,
-        helper_port,
-    ) {
+    if let Err(error) =
+        alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
+            &codex_home,
+            &profile,
+            common_config,
+            helper_port,
+        )
+    {
         return failed(
             &format!("应用供应商到多开实例失败：{error}"),
             json!({
@@ -1082,9 +1082,12 @@ fn launch_codex_multi_instance_blocking(
     // 保持 relay_profiles_enabled，让 `ensure_active_protocol_proxy_config_in_home`
     // 用多开进程的 ALUNIXA_X_PROTOCOL_PROXY_PORT 修正 config.toml 中的本地代理地址；
     // 否则父进程写入的默认 57321 会让多个实例互相抢同一个代理端口。
-    worker_settings.relay_profiles_enabled = worker_settings.active_relay_transport_uses_protocol_proxy()
-        || worker_settings.active_relay_session_provider() == alunixa_x_core::settings::RelaySessionProvider::Openai
-        || (profile.relay_mode == alunixa_x_core::settings::RelayMode::Official && profile.official_mix_api_key);
+    worker_settings.relay_profiles_enabled = worker_settings
+        .active_relay_transport_uses_protocol_proxy()
+        || worker_settings.active_relay_session_provider()
+            == alunixa_x_core::settings::RelaySessionProvider::Openai
+        || (profile.relay_mode == alunixa_x_core::settings::RelayMode::Official
+            && profile.official_mix_api_key);
     worker_settings.codex_extra_args = multi_instance_extra_args(&settings.codex_extra_args);
     worker_settings
         .codex_extra_args
@@ -1110,10 +1113,9 @@ fn launch_codex_multi_instance_blocking(
             );
         }
     };
-    if let Err(error) = alunixa_x_core::settings::atomic_write(
-        &worker_options_path,
-        &worker_options_bytes,
-    ) {
+    if let Err(error) =
+        alunixa_x_core::settings::atomic_write(&worker_options_path, &worker_options_bytes)
+    {
         return failed(
             &format!("保存多开 worker 参数失败：{error}"),
             json!({ "instanceId": instance_id }),
@@ -1123,8 +1125,8 @@ fn launch_codex_multi_instance_blocking(
         Ok(path) => path,
         Err(error) => {
             return failed(
-            &format!("定位多开 launcher 可执行文件失败：{error}"),
-            json!({ "instanceId": instance_id }),
+                &format!("定位多开 launcher 可执行文件失败：{error}"),
+                json!({ "instanceId": instance_id }),
             );
         }
     };
@@ -1142,7 +1144,10 @@ fn launch_codex_multi_instance_blocking(
         .env("ALUNIXA_X_STATE_HOME", &worker_state_dir)
         .env("ALUNIXA_X_INSTANCE_ID", &instance_id)
         .env("ALUNIXA_X_INSTANCE_LABEL", &profile.name)
-        .env("ALUNIXA_X_LAUNCHER_GUARD_PORT", launcher_guard_port.to_string())
+        .env(
+            "ALUNIXA_X_LAUNCHER_GUARD_PORT",
+            launcher_guard_port.to_string(),
+        )
         .env("ALUNIXA_X_PROTOCOL_PROXY_PORT", helper_port.to_string())
         .env("XDG_CONFIG_HOME", &shared_config_home)
         .stdin(std::process::Stdio::null())
@@ -1199,9 +1204,14 @@ fn launch_codex_multi_instance_blocking(
 /// existing default-home/settings/helper/bridge code without touching the main
 /// Alunixa X instance.
 pub fn run_codex_multi_worker(options_path: &Path) -> anyhow::Result<()> {
-    let expected_state = options_path.parent().context("multi worker options directory missing")?
+    let expected_state = options_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("multi worker options directory missing"))?
         .join("worker-home/.codex-session-delete");
-    anyhow::ensure!(alunixa_x_core::paths::default_app_state_dir() == expected_state, "multi_state_home_mismatch");
+    anyhow::ensure!(
+        alunixa_x_core::paths::default_app_state_dir() == expected_state,
+        "multi_state_home_mismatch"
+    );
     let options: CodexMultiWorkerOptions = serde_json::from_slice(&std::fs::read(options_path)?)?;
     let launch_options = alunixa_x_launcher::LaunchOptions {
         app_dir: Some(PathBuf::from(options.app_path)),
@@ -1240,7 +1250,12 @@ fn multi_instance_slug(value: &str) -> String {
 
 fn multi_instance_user_data_dir(slug: &str) -> PathBuf {
     directories::BaseDirs::new()
-        .map(|dirs| dirs.data_local_dir().join("AlunixaX").join("multi").join(slug))
+        .map(|dirs| {
+            dirs.data_local_dir()
+                .join("AlunixaX")
+                .join("multi")
+                .join(slug)
+        })
         .unwrap_or_else(|| {
             alunixa_x_core::paths::default_app_state_dir()
                 .join("user-data")
@@ -1356,10 +1371,7 @@ fn select_multi_instance_port(requested: u16, instance_id: &str) -> u16 {
     };
     (0..1000)
         .map(|offset| base.saturating_add(offset))
-        .find(|port| {
-            *port > 0
-                && std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok()
-        })
+        .find(|port| *port > 0 && std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok())
         .unwrap_or(base)
 }
 
@@ -2632,13 +2644,15 @@ pub async fn save_settings(
     match save_result {
         Ok(()) => {
             if let Ok(runtime) = weixin_runtime().lock()
-                && let Some(runtime) = runtime.as_ref() {
+                && let Some(runtime) = runtime.as_ref()
+            {
                 runtime.codex_path.set(&settings.weixin_connect_codex_path);
             }
             settings_payload(
-            "设置已保存；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用。",
-            "设置保存后重新读取失败",
-        ) },
+                "设置已保存；将在下次通过 Alunixa X 启动器启动 Codex 时完整应用。",
+                "设置保存后重新读取失败",
+            )
+        }
         Err(error) => failed(
             &format!("保存设置失败：{error}"),
             fallback_settings_payload(),
@@ -3128,8 +3142,7 @@ pub async fn activate_dream_skin_theme(
             {
                 Ok(runtime) => (runtime, false, "Dream Skin 主题已应用。".to_string()),
                 Err(error) => (
-                    alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port)
-                        .await,
+                    alunixa_x_core::dream_skin_runtime::dream_skin_status(request.debug_port).await,
                     true,
                     format!("主题已保存，下次启动生效；实时应用失败：{error}"),
                 ),
@@ -3579,6 +3592,11 @@ pub fn list_local_sessions(
     let mut session_ids = std::collections::HashSet::new();
     let mut errors = Vec::new();
     for db_path in &db_paths {
+        let known_reference_only =
+            alunixa_x_core::codex_sqlite::session_db_has_threads_table(db_path).ok() == Some(false);
+        if known_reference_only {
+            continue;
+        }
         let adapter = local_session_adapter(db_path);
         match adapter.list_local_session_ids() {
             Ok(ids) => session_ids.extend(ids),
@@ -3866,10 +3884,7 @@ fn relay_join_config_sections(sections: &[&str]) -> String {
     if sections.is_empty() {
         String::new()
     } else {
-        alunixa_x_core::relay_config::normalize_config_text(&format!(
-            "{}\n",
-            sections.join("\n\n")
-        ))
+        alunixa_x_core::relay_config::normalize_config_text(&format!("{}\n", sections.join("\n\n")))
     }
 }
 
@@ -4495,7 +4510,11 @@ pub async fn refresh_user_script_inventory() -> CommandResult<SettingsPayload> {
     ok(
         message,
         SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+            revision: alunixa_x_core::config_transaction::revision(
+                &alunixa_x_core::paths::default_settings_path(),
+                &alunixa_x_core::codex_home::default_codex_home_dir(),
+            )
+            .ok(),
             settings: SettingsStore::default().load().unwrap_or_default(),
             settings_path: alunixa_x_core::paths::default_settings_path()
                 .to_string_lossy()
@@ -4521,7 +4540,11 @@ pub async fn reload_user_scripts() -> CommandResult<SettingsPayload> {
                 .as_array()
                 .is_some_and(|scripts| scripts.iter().any(|script| script["status"] == "failed"));
             let payload = SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+                revision: alunixa_x_core::config_transaction::revision(
+                    &alunixa_x_core::paths::default_settings_path(),
+                    &alunixa_x_core::codex_home::default_codex_home_dir(),
+                )
+                .ok(),
                 settings: SettingsStore::default().load().unwrap_or_default(),
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -5183,7 +5206,11 @@ pub fn reset_settings() -> CommandResult<SettingsPayload> {
         Err(error) => failed(
             &format!("重置设置失败：{error}"),
             SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+                revision: alunixa_x_core::config_transaction::revision(
+                    &alunixa_x_core::paths::default_settings_path(),
+                    &alunixa_x_core::codex_home::default_codex_home_dir(),
+                )
+                .ok(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -5209,7 +5236,11 @@ pub fn reset_image_overlay_settings() -> CommandResult<SettingsPayload> {
         Err(error) => failed(
             &format!("重置图片覆盖层失败：{error}"),
             SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+                revision: alunixa_x_core::config_transaction::revision(
+                    &alunixa_x_core::paths::default_settings_path(),
+                    &alunixa_x_core::codex_home::default_codex_home_dir(),
+                )
+                .ok(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -6179,7 +6210,8 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
                 alunixa_x_core::settings::RelayProtocol::ChatCompletions => "Chat Completions",
                 alunixa_x_core::settings::RelayProtocol::Completions => "Completions",
                 alunixa_x_core::settings::RelayProtocol::AnthropicMessages => "Anthropic Messages",
-                alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent => "Gemini Generate Content",
+                alunixa_x_core::settings::RelayProtocol::GeminiGenerateContent =>
+                    "Gemini Generate Content",
             }
         ),
     });
@@ -6617,8 +6649,7 @@ pub fn clear_relay_injection() -> CommandResult<RelayPayload> {
         && !relay.official_mix_api_key
         && !relay.auth_contents.trim().is_empty())
     .then_some(relay.auth_contents.as_str());
-    match alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents)
-    {
+    match alunixa_x_core::relay_config::clear_relay_config_to_home_with_auth(&home, auth_contents) {
         Ok(result) => {
             finish_codex_app_state_after_provider_switch(
                 &home,
@@ -6880,7 +6911,11 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
         .to_string();
     match store.load() {
         Ok(settings) => Ok(SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+            revision: alunixa_x_core::config_transaction::revision(
+                &alunixa_x_core::paths::default_settings_path(),
+                &alunixa_x_core::codex_home::default_codex_home_dir(),
+            )
+            .ok(),
             settings,
             settings_path,
             user_scripts: user_script_inventory(),
@@ -6888,7 +6923,11 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
         Err(error) => Err((
             error,
             SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+                revision: alunixa_x_core::config_transaction::revision(
+                    &alunixa_x_core::paths::default_settings_path(),
+                    &alunixa_x_core::codex_home::default_codex_home_dir(),
+                )
+                .ok(),
                 settings: BackendSettings::default(),
                 settings_path,
                 user_scripts: user_script_inventory(),
@@ -6899,7 +6938,11 @@ fn settings_payload_value() -> Result<SettingsPayload, (anyhow::Error, SettingsP
 
 fn fallback_settings_payload() -> SettingsPayload {
     SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(&alunixa_x_core::paths::default_settings_path(), &alunixa_x_core::codex_home::default_codex_home_dir()).ok(),
+        revision: alunixa_x_core::config_transaction::revision(
+            &alunixa_x_core::paths::default_settings_path(),
+            &alunixa_x_core::codex_home::default_codex_home_dir(),
+        )
+        .ok(),
         settings: SettingsStore::default().load().unwrap_or_default(),
         settings_path: alunixa_x_core::paths::default_settings_path()
             .to_string_lossy()
@@ -8931,12 +8974,8 @@ enabled = true
             normalized.relay_profiles[0].relay_mode,
             alunixa_x_core::settings::RelayMode::PureApi
         );
-        assert!(
-            serde_json::to_value(&normalized)
-                .unwrap()
-                .get("launchMode")
-                .is_none()
-        );
+        assert_eq!(normalized.relay_profiles[0].id, "api");
+        assert_eq!(normalized.active_relay_id, "api");
     }
 
     #[test]
@@ -9368,7 +9407,10 @@ model_reasoning_effort = "high"
 
     #[test]
     fn multi_instance_slug_is_safe_and_bounded() {
-        assert_eq!(multi_instance_slug("Deep/Seek .. profile"), "Deep-Seek-profile");
+        assert_eq!(
+            multi_instance_slug("Deep/Seek .. profile"),
+            "Deep-Seek-profile"
+        );
         assert_eq!(multi_instance_slug("///"), "instance");
         assert!(multi_instance_slug(&"x".repeat(200)).len() <= 64);
     }

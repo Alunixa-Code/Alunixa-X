@@ -52,40 +52,17 @@ fn codex_auto_update_control_uses_the_official_codex_environment_gate() {
 }
 
 #[test]
-fn manager_exposes_a_persisted_codex_only_auto_update_switch() {
+fn retired_update_switch_does_not_return_as_an_available_gui_capability() {
     let source = include_str!("../../../apps/alunixa-x-manager/src/App.tsx");
-
-    assert!(source.contains("codexAppDisableAutoUpdate: boolean"));
-    assert!(source.contains("codexAppDisableAutoUpdate: false"));
-    assert!(source.contains("关闭 Codex 自动更新"));
-    assert!(source.contains("setPersistedEnhanceFlag(\"codexAppDisableAutoUpdate\", value)"));
-    assert!(source.contains("不影响 Alunixa X 自身的 GitHub Release 更新"));
+    assert!(!source.contains("setPersistedEnhanceFlag(\"codexAppDisableAutoUpdate\""));
+    assert!(source.contains("check_update"));
 }
 
 #[test]
-fn launcher_applies_the_codex_update_policy_before_starting_any_codex_variant() {
+fn retired_update_preference_is_not_replayed_by_the_new_launcher() {
     let source = include_str!("../src/launcher.rs");
-    let default_hooks_index = source
-        .find("impl LaunchHooks for DefaultLaunchHooks")
-        .expect("launcher should implement the default launch hooks");
-    let launch_codex_index = source[default_hooks_index..]
-        .find("async fn launch_codex(")
-        .map(|index| default_hooks_index + index)
-        .expect("default launch hooks should define launch_codex");
-    let launch_codex = &source[launch_codex_index..];
-
-    let policy_index = launch_codex
-        .find("apply_codex_auto_update_policy")
-        .expect("launcher should apply the Codex update policy");
-    let windows_activation_index = launch_codex
-        .find("if cfg!(windows) {")
-        .expect("launcher should contain Windows packaged activation");
-    assert!(policy_index < windows_activation_index);
-    assert_eq!(
-        source.matches("configure_codex_process_command").count(),
-        2,
-        "macOS open and portable/direct launches should both receive the updater environment"
-    );
+    assert!(!source.contains("apply_codex_auto_update_policy"));
+    assert!(source.contains("isolated_multi_instance"));
 }
 
 #[test]
@@ -102,13 +79,11 @@ fn disable_wss_setting_defaults_and_round_trips() {
 }
 
 #[test]
-fn manager_exposes_persisted_disable_wss_switch() {
+fn removed_wss_toggle_is_not_advertised_as_an_effective_native_control() {
     let source = include_str!("../../../apps/alunixa-x-manager/src/App.tsx");
-    assert!(source.contains("codexAppDisableWss: boolean"));
-    assert!(source.contains("禁用 WSS"));
-    assert!(source.contains("editNative(\"codexAppDisableWss\", value, true)"));
-    assert!(source.contains("checked={nativeChecked(\"codexAppDisableWss\")}"));
-    assert!(source.contains("capabilityWrites"));
+    assert!(!source.contains("editNative(\"codexAppDisableWss\""));
+    let manager = include_str!("../../../apps/alunixa-x-manager/src-tauri/src/commands.rs");
+    assert!(manager.contains("apply_wss_policy_to_home("));
 }
 
 #[test]

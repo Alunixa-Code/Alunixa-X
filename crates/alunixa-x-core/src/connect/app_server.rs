@@ -752,8 +752,7 @@ mod tests {
         assert!(store.contains("系统保护"), "{store}");
         assert!(store.contains("清空"), "{store}");
 
-        let plain =
-            spawn_failure_hint(r"C:\codex\codex.exe", std::io::ErrorKind::PermissionDenied);
+        let plain = spawn_failure_hint(r"C:\codex\codex.exe", std::io::ErrorKind::PermissionDenied);
         assert_eq!(plain, "：没有执行权限");
 
         let missing = spawn_failure_hint("codex", std::io::ErrorKind::NotFound);

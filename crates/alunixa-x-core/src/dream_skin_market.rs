@@ -14,7 +14,8 @@ pub const DEFAULT_MARKET_INDEX_URL: &str =
     "https://raw.githubusercontent.com/BigPizzaV3/CodexPlusPlus-Themes/main/index.json";
 pub const DEFAULT_MARKET_RAW_BASE_URL: &str =
     "https://raw.githubusercontent.com/BigPizzaV3/CodexPlusPlus-Themes/main/";
-pub const DEFAULT_MARKET_REPOSITORY_URL: &str = "https://github.com/BigPizzaV3/CodexPlusPlus-Themes";
+pub const DEFAULT_MARKET_REPOSITORY_URL: &str =
+    "https://github.com/BigPizzaV3/CodexPlusPlus-Themes";
 
 const MARKET_CACHE_FILE: &str = "dream-skin/market/index.json";
 const MARKET_INSTALLS_FILE: &str = "dream-skin/market/installed.json";

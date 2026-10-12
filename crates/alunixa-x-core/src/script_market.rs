@@ -191,9 +191,7 @@ pub fn market_scripts_payload(
 }
 
 /// 从用户脚本地盘清单里取出 `market_id -> version`，用于判断已安装与有更新。
-fn installed_market_versions(
-    inventory: &Value,
-) -> std::collections::BTreeMap<String, String> {
+fn installed_market_versions(inventory: &Value) -> std::collections::BTreeMap<String, String> {
     inventory
         .get("scripts")
         .and_then(Value::as_array)

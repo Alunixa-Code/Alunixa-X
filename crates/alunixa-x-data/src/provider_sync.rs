@@ -1,5 +1,5 @@
-use fs2::FileExt;
 use crate::storage::{has_table, json_to_sql_value, select_dicts};
+use fs2::FileExt;
 use rusqlite::{Connection, OptionalExtension, ToSql, params_from_iter, types::Value as SqlValue};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -578,18 +578,19 @@ pub struct ProviderSyncDryRunPreview {
     pub backup_root: PathBuf,
 }
 
-pub fn preview_provider_sync(codex_home: Option<&Path>) -> anyhow::Result<ProviderSyncDryRunPreview> {
+pub fn preview_provider_sync(
+    codex_home: Option<&Path>,
+) -> anyhow::Result<ProviderSyncDryRunPreview> {
     let home = codex_home
         .map(Path::to_path_buf)
         .unwrap_or_else(default_codex_home_dir);
     let config_path = home.join("config.toml");
-    let target_provider =
-        match resolve_provider_sync_target_snapshot(&config_path, None) {
-            Ok(snapshot) => snapshot.target_provider,
-            // 预览不该因为目标解析失败就报错——那会让用户在真正执行前拿不到审计信息。
-            // 退回默认 provider，只影响展示。
-            Err(_) => DEFAULT_PROVIDER.to_string(),
-        };
+    let target_provider = match resolve_provider_sync_target_snapshot(&config_path, None) {
+        Ok(snapshot) => snapshot.target_provider,
+        // 预览不该因为目标解析失败就报错——那会让用户在真正执行前拿不到审计信息。
+        // 退回默认 provider，只影响展示。
+        Err(_) => DEFAULT_PROVIDER.to_string(),
+    };
     let sqlite_paths = provider_sync_db_paths(&home);
     let audit = match audit_provider_sync_state(&home, &sqlite_paths) {
         Ok(audit) => audit,
@@ -1460,10 +1461,7 @@ fn canonical_thread_insert_columns(columns: &HashSet<String>) -> Vec<&'static st
     .collect()
 }
 
-fn canonical_thread_insert_values(
-    columns: &[&str],
-    thread: &CatalogRepairThread,
-) -> Vec<SqlValue> {
+fn canonical_thread_insert_values(columns: &[&str], thread: &CatalogRepairThread) -> Vec<SqlValue> {
     columns
         .iter()
         .map(|column| match *column {
@@ -1629,7 +1627,6 @@ fn audit_provider_sync_state(
         .count();
     Ok(audit)
 }
-
 
 fn backup_database_thread_ids(home: &Path) -> anyhow::Result<HashSet<String>> {
     let root = home.join("backups_state/provider-sync");
@@ -2465,9 +2462,12 @@ fn resolve_active_rollout_path(home: &Path, value: &str) -> Option<PathBuf> {
 fn rollout_path_candidates(home: &Path, raw: &str) -> Vec<PathBuf> {
     let raw = raw.trim();
     let mut candidates = Vec::new();
-    for view in [Some(raw.to_string()), crate::storage::wsl_path_alternative(raw)]
-        .into_iter()
-        .flatten()
+    for view in [
+        Some(raw.to_string()),
+        crate::storage::wsl_path_alternative(raw),
+    ]
+    .into_iter()
+    .flatten()
     {
         let path = PathBuf::from(&view);
         let path = if rollout_view_is_absolute(&view) {
@@ -2491,10 +2491,8 @@ fn rollout_path_candidates(home: &Path, raw: &str) -> Vec<PathBuf> {
 fn rollout_view_is_absolute(view: &str) -> bool {
     let normalized = view.replace('\\', "/");
     let bytes = normalized.as_bytes();
-    let drive_prefixed = bytes.len() >= 3
-        && bytes[0].is_ascii_alphabetic()
-        && bytes[1] == b':'
-        && bytes[2] == b'/';
+    let drive_prefixed =
+        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
     drive_prefixed || normalized.starts_with("/") || Path::new(view).is_absolute()
 }
 
@@ -3025,10 +3023,7 @@ pub fn session_index_lines_for_thread(
 ///
 /// Best-effort: returns `Ok(0)` without writing when the file is missing or
 /// changed since it was read, so a delete flow never clobbers fresh entries.
-pub fn remove_session_index_entry(
-    codex_home: &Path,
-    thread_id: &str,
-) -> anyhow::Result<usize> {
+pub fn remove_session_index_entry(codex_home: &Path, thread_id: &str) -> anyhow::Result<usize> {
     let path = codex_home.join("session_index.jsonl");
     if !path.exists() {
         return Ok(0);
@@ -3099,16 +3094,16 @@ pub fn restore_thread_sidebar_references(
     if !thread_id.is_empty() {
         clear_thread_tombstones(
             codex_home,
-            &HashSet::from([thread_id.strip_prefix("local:").unwrap_or(thread_id).to_string()]),
+            &HashSet::from([thread_id
+                .strip_prefix("local:")
+                .unwrap_or(thread_id)
+                .to_string()]),
         );
     }
     Ok(restored)
 }
 
-pub fn validate_thread_sidebar_snapshot(
-    codex_home: &Path,
-    snapshot: &Value,
-) -> anyhow::Result<()> {
+pub fn validate_thread_sidebar_snapshot(codex_home: &Path, snapshot: &Value) -> anyhow::Result<()> {
     let thread_id = snapshot
         .get("thread_id")
         .and_then(Value::as_str)
@@ -3160,10 +3155,7 @@ const SIDEBAR_CATALOG_TABLES: [&str; 3] = [
     "local_thread_catalog_scan_entries",
 ];
 
-fn snapshot_thread_from_global_state(
-    codex_home: &Path,
-    thread_id: &str,
-) -> anyhow::Result<Value> {
+fn snapshot_thread_from_global_state(codex_home: &Path, thread_id: &str) -> anyhow::Result<Value> {
     let path = codex_home.join(".codex-global-state.json");
     if !path.exists() {
         return Ok(json!({}));
@@ -3219,10 +3211,7 @@ fn snapshot_thread_from_global_state(
     Ok(Value::Object(snapshot))
 }
 
-fn snapshot_thread_from_catalog_dbs(
-    codex_home: &Path,
-    thread_id: &str,
-) -> anyhow::Result<Value> {
+fn snapshot_thread_from_catalog_dbs(codex_home: &Path, thread_id: &str) -> anyhow::Result<Value> {
     let mut entries = Vec::new();
     for path in alunixa_x_core::codex_sqlite::codex_thread_reference_db_paths_from_home(codex_home)
     {
@@ -3314,7 +3303,10 @@ fn restore_thread_to_global_state(
     if path.exists() && fs::read(&path)? != original_bytes {
         anyhow::bail!(".codex-global-state.json changed while restoring sidebar state");
     }
-    alunixa_x_core::settings::atomic_write(&path, serde_json::to_string_pretty(&state)?.as_bytes())?;
+    alunixa_x_core::settings::atomic_write(
+        &path,
+        serde_json::to_string_pretty(&state)?.as_bytes(),
+    )?;
     Ok(restored)
 }
 
@@ -3381,7 +3373,11 @@ fn restore_thread_to_catalog_dbs(
     Ok(restored_total)
 }
 
-fn insert_row_ignore(db: &Connection, table: &str, row: &Map<String, Value>) -> anyhow::Result<usize> {
+fn insert_row_ignore(
+    db: &Connection,
+    table: &str,
+    row: &Map<String, Value>,
+) -> anyhow::Result<usize> {
     let columns: Vec<&String> = row.keys().collect();
     if columns.is_empty() {
         return Ok(0);
@@ -3410,10 +3406,12 @@ fn insert_row_ignore(db: &Connection, table: &str, row: &Map<String, Value>) -> 
 }
 
 fn sidebar_catalog_db_paths(codex_home: &Path) -> anyhow::Result<HashSet<PathBuf>> {
-    Ok(alunixa_x_core::codex_sqlite::codex_thread_reference_db_paths_from_home(codex_home)
-        .into_iter()
-        .filter_map(|path| fs::canonicalize(path).ok())
-        .collect())
+    Ok(
+        alunixa_x_core::codex_sqlite::codex_thread_reference_db_paths_from_home(codex_home)
+            .into_iter()
+            .filter_map(|path| fs::canonicalize(path).ok())
+            .collect(),
+    )
 }
 
 fn thread_value_matches(value: &Value, thread_id: &str) -> bool {
@@ -3597,13 +3595,17 @@ fn remove_thread_from_global_state(codex_home: &Path, thread_id: &str) -> anyhow
     if fs::read(&path)? != original_bytes {
         anyhow::bail!(".codex-global-state.json changed while deleting thread {thread_id}");
     }
-    alunixa_x_core::settings::atomic_write(&path, serde_json::to_string_pretty(&state)?.as_bytes())?;
+    alunixa_x_core::settings::atomic_write(
+        &path,
+        serde_json::to_string_pretty(&state)?.as_bytes(),
+    )?;
     Ok(removed)
 }
 
 fn remove_thread_from_catalog_dbs(codex_home: &Path, thread_id: &str) -> anyhow::Result<usize> {
     let mut removed_total = 0usize;
-    for path in alunixa_x_core::codex_sqlite::codex_thread_reference_db_paths_from_home(codex_home) {
+    for path in alunixa_x_core::codex_sqlite::codex_thread_reference_db_paths_from_home(codex_home)
+    {
         if !path.exists() {
             continue;
         }
@@ -3644,10 +3646,7 @@ fn remove_thread_from_catalog_dbs(codex_home: &Path, thread_id: &str) -> anyhow:
 /// Lines whose `id` already exists are skipped. Returns the number of
 /// appended lines. Best-effort: returns `Ok(0)` without writing when the
 /// file changed since it was read.
-pub fn restore_session_index_entries(
-    codex_home: &Path,
-    lines: &[String],
-) -> anyhow::Result<usize> {
+pub fn restore_session_index_entries(codex_home: &Path, lines: &[String]) -> anyhow::Result<usize> {
     if lines.is_empty() {
         return Ok(0);
     }
@@ -4026,8 +4025,7 @@ fn apply_bulk_session_rewrite_plans(
                         total_rollout_files,
                         rewrite_plans.len(),
                         applied.changes.len(),
-                        scanned_skipped_rollout_files
-                            + applied.skipped_locked_rollout_files.len(),
+                        scanned_skipped_rollout_files + applied.skipped_locked_rollout_files.len(),
                     );
                 }
                 if let Err(restore_error) = restore_bulk_session_rewrites(&applied.changes) {
@@ -4490,9 +4488,7 @@ fn sqlite_provider_ids(path: &Path) -> anyhow::Result<Vec<String>> {
     Ok(sorted_provider_ids(ids))
 }
 
-fn sqlite_provider_sync_thread_kinds(
-    paths: &[PathBuf],
-) -> anyhow::Result<ProviderSyncThreadKinds> {
+fn sqlite_provider_sync_thread_kinds(paths: &[PathBuf]) -> anyhow::Result<ProviderSyncThreadKinds> {
     let mut kinds = ProviderSyncThreadKinds::default();
     for path in paths {
         if !path.exists() {
@@ -4723,14 +4719,9 @@ fn count_sqlite_updates(
     let catalog_columns = table_columns(&db, "local_thread_catalog")?;
     let mut total = 0;
     if columns.contains("id") && columns.contains("model_provider") {
-        total += provider_update_thread_ids(
-            &db,
-            "threads",
-            "id",
-            target_provider,
-            excluded_thread_ids,
-        )?
-        .len();
+        total +=
+            provider_update_thread_ids(&db, "threads", "id", target_provider, excluded_thread_ids)?
+                .len();
     }
     if catalog_columns.contains("thread_id") && catalog_columns.contains("model_provider") {
         total += provider_update_thread_ids(
@@ -4808,13 +4799,9 @@ fn apply_sqlite_update(
     let tx = db.transaction()?;
     let mut counts = SqliteUpdateCounts::default();
     if columns.contains("id") && columns.contains("model_provider") {
-        for thread_id in provider_update_thread_ids(
-            &tx,
-            "threads",
-            "id",
-            target_provider,
-            excluded_thread_ids,
-        )? {
+        for thread_id in
+            provider_update_thread_ids(&tx, "threads", "id", target_provider, excluded_thread_ids)?
+        {
             counts.provider_rows += tx.execute(
                 "UPDATE threads SET model_provider = ?1 WHERE id = ?2 AND COALESCE(model_provider, '') <> ?1",
                 (target_provider, thread_id),
@@ -5063,9 +5050,7 @@ fn repair_missing_local_thread_catalog_rows_filtered(
     update_full_sync_state: bool,
 ) -> anyhow::Result<CatalogRepairCounts> {
     let plan = collect_catalog_repair_plan(home, paths, target_provider, thread_ids)?;
-    if plan.threads.is_empty()
-        && (!update_full_sync_state || !plan.has_cleanup_candidates())
-    {
+    if plan.threads.is_empty() && (!update_full_sync_state || !plan.has_cleanup_candidates()) {
         return Ok(CatalogRepairCounts::default());
     }
     let mut total = CatalogRepairCounts::default();
@@ -5379,8 +5364,7 @@ fn collect_catalog_marked_non_root_thread_ids(
             if thread_source_is_user(thread_source.as_deref()) {
                 continue;
             }
-            if source_marks_non_root_agent(&source_kind) || spawned_child_ids.contains(&thread_id)
-            {
+            if source_marks_non_root_agent(&source_kind) || spawned_child_ids.contains(&thread_id) {
                 thread_ids_by_path
                     .entry(path.clone())
                     .or_default()
@@ -5404,8 +5388,7 @@ fn is_catalog_non_root_agent(
     if thread_source_is_user(thread.thread_source.as_deref()) {
         return false;
     }
-    source_marks_non_root_agent(&thread.source_kind)
-        || spawned_child_ids.contains(&thread.id)
+    source_marks_non_root_agent(&thread.source_kind) || spawned_child_ids.contains(&thread.id)
 }
 
 fn thread_source_is_user(thread_source: Option<&str>) -> bool {
@@ -5416,8 +5399,7 @@ fn thread_source_is_user(thread_source: Option<&str>) -> bool {
 
 fn thread_source_marks_non_root(thread_source: Option<&str>) -> bool {
     thread_source.map(str::trim).is_some_and(|value| {
-        value.eq_ignore_ascii_case("subagent")
-            || value.eq_ignore_ascii_case("memory_consolidation")
+        value.eq_ignore_ascii_case("subagent") || value.eq_ignore_ascii_case("memory_consolidation")
     })
 }
 
@@ -6061,8 +6043,14 @@ mod provider_sync_preview_tests {
         let preview = preview_provider_sync(Some(&home)).unwrap();
 
         assert_eq!(preview.target_provider, "relay-alpha");
-        assert_eq!(preview.backup_root, home.join("backups_state/provider-sync"));
-        assert!(!home.join("tmp/provider-sync.lock").exists(), "预览不该建锁");
+        assert_eq!(
+            preview.backup_root,
+            home.join("backups_state/provider-sync")
+        );
+        assert!(
+            !home.join("tmp/provider-sync.lock").exists(),
+            "预览不该建锁"
+        );
         assert!(!preview.backup_root.exists(), "预览不该建备份目录");
         assert_eq!(fs::read(home.join("config.toml")).unwrap(), config_before);
     }
@@ -6104,7 +6092,9 @@ mod non_root_agent_tests {
 
     #[test]
     fn structured_subagent_markers_still_identify_child_threads() {
-        assert!(marks_non_root(r#"{"subagent":{"thread_spawn":{"depth":1}}}"#));
+        assert!(marks_non_root(
+            r#"{"subagent":{"thread_spawn":{"depth":1}}}"#
+        ));
         assert!(marks_non_root(r#"{"sub_agent":{"other":"review"}}"#));
         assert!(marks_non_root(r#"{"internal":true}"#));
     }
@@ -6167,9 +6157,11 @@ mod rollback_tests {
 
         let error = restore_bulk_session_rewrite(&change).unwrap_err();
 
-        assert!(error
-            .chain()
-            .any(|cause| cause.to_string().contains("rollout rollback hash mismatch")));
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string().contains("rollout rollback hash mismatch"))
+        );
         assert_eq!(fs::read(&rollout).unwrap(), rewritten.into_bytes());
     }
 }
@@ -6195,7 +6187,10 @@ mod global_state_tests {
         assert_eq!(apply_global_state_update(&path).unwrap(), 1);
 
         let updated: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(updated["projectless-thread-ids"], original["projectless-thread-ids"]);
+        assert_eq!(
+            updated["projectless-thread-ids"],
+            original["projectless-thread-ids"]
+        );
         assert_eq!(
             updated["thread-workspace-root-hints"],
             original["thread-workspace-root-hints"]
@@ -6232,7 +6227,11 @@ mod global_state_tests {
 
         let error = write_global_state_if_unchanged(&path, &original_bytes, &state).unwrap_err();
 
-        assert!(error.to_string().contains(GLOBAL_STATE_SOURCE_CHANGED_ERROR));
+        assert!(
+            error
+                .to_string()
+                .contains(GLOBAL_STATE_SOURCE_CHANGED_ERROR)
+        );
         assert_eq!(fs::read(&path).unwrap(), newer_sidebar_bytes);
     }
 }
@@ -6649,8 +6648,11 @@ mod canonical_thread_rebuild_tests {
             [],
         )
         .unwrap();
-        db.execute("INSERT INTO local_thread_catalog_metadata VALUES (1, 0)", [])
-            .unwrap();
+        db.execute(
+            "INSERT INTO local_thread_catalog_metadata VALUES (1, 0)",
+            [],
+        )
+        .unwrap();
         for (index, (thread_id, provider)) in rows.iter().enumerate() {
             db.execute(
                 "INSERT INTO local_thread_catalog
@@ -6724,7 +6726,10 @@ mod canonical_thread_rebuild_tests {
             result.message
         );
         let after = thread_ids(&state_db);
-        assert!(after.contains(&thread_id.to_string()), "缺失的 canonical 行应被补建：{after:?}");
+        assert!(
+            after.contains(&thread_id.to_string()),
+            "缺失的 canonical 行应被补建：{after:?}"
+        );
         for id in before {
             assert!(after.contains(&id), "原有行不允许丢失：{id}");
         }
@@ -6859,11 +6864,7 @@ mod sync_diagnostics_tests {
 
         assert_eq!(result.repair_audit.scanned_rollout_files, 0);
         assert!(result.repair_audit.scanned_session_dirs.is_empty());
-        assert!(
-            result.message.contains("均不存在"),
-            "{}",
-            result.message
-        );
+        assert!(result.message.contains("均不存在"), "{}", result.message);
         assert!(
             result.message.contains("rollout 文件 0 个"),
             "{}",
@@ -6948,7 +6949,10 @@ mod sync_diagnostics_tests {
         fs::create_dir_all(&home).unwrap();
         write_config(&home, "relay-alpha");
         let global_state = home.join(".codex-global-state.json");
-        assert_eq!(global_state.file_name().unwrap(), ".codex-global-state.json");
+        assert_eq!(
+            global_state.file_name().unwrap(),
+            ".codex-global-state.json"
+        );
         // 空文件 / 被截断的文件：解析报 `expected value at line 1 column 1`。
         fs::write(&global_state, "{\"projectless-thread-ids\": [").unwrap();
 
@@ -6989,7 +6993,10 @@ mod sync_diagnostics_tests {
         let preview = preview_provider_sync(Some(&home)).unwrap();
 
         assert_eq!(preview.audit.scanned_rollout_files, 1);
-        assert_eq!(preview.audit.scanned_session_dirs, vec!["sessions".to_string()]);
+        assert_eq!(
+            preview.audit.scanned_session_dirs,
+            vec!["sessions".to_string()]
+        );
         assert!(!home.join("tmp/provider-sync.lock").exists());
         assert!(!preview.backup_root.exists());
     }

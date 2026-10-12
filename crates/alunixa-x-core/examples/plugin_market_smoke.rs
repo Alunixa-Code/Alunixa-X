@@ -1,8 +1,6 @@
 //! 向已启动的隔离 Codex 页面注入真实桥接；不启动/重启 App、不切换账号。
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result, ensure};
-use async_trait::async_trait;
 use alunixa_x_core::{
     bridge,
     launcher::{DefaultLaunchHooks, LaunchHooks},
@@ -11,6 +9,8 @@ use alunixa_x_core::{
     settings::BackendSettings,
     status::StatusStore,
 };
+use anyhow::{Context, Result, ensure};
+use async_trait::async_trait;
 use serde_json::Value;
 
 struct SmokeSettings(BackendSettings);

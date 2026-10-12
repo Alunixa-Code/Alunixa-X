@@ -6,8 +6,7 @@ use reqwest::header::{HeaderMap, RETRY_AFTER};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard};
 
 use crate::settings::{
-    RelayProfile, normalize_channel_cooldown_statuses,
-    normalize_channel_requests_per_minute,
+    RelayProfile, normalize_channel_cooldown_statuses, normalize_channel_requests_per_minute,
 };
 
 const DEFAULT_COOLDOWN: Duration = Duration::from_secs(30);
@@ -50,7 +49,11 @@ pub fn key_for_relay(relay: &RelayProfile) -> String {
     if !relay.id.trim().is_empty() {
         return relay.id.trim().to_string();
     }
-    relay.base_url.trim().trim_end_matches('/').to_ascii_lowercase()
+    relay
+        .base_url
+        .trim()
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
 }
 
 pub async fn acquire(key: &str, profile: &RelayProfile) -> ChannelPermit {

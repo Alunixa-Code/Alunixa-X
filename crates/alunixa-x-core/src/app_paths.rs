@@ -29,7 +29,6 @@ const LINUX_CODEX_EXECUTABLES: &[&str] = &[
     "codex.exe",
 ];
 
-
 #[cfg(windows)]
 const OPENAI_PACKAGE_FAMILY_NAMES: &[&str] = &[
     "OpenAI.Codex_2p2nqsd0c76g0",
@@ -118,8 +117,6 @@ pub fn find_latest_codex_app_dir_default() -> Option<PathBuf> {
     {
         None
     }
-
-
 }
 #[cfg(windows)]
 fn find_latest_codex_app_dir_from_appx_package() -> anyhow::Result<Option<PathBuf>> {
@@ -361,7 +358,6 @@ pub fn macos_default_search_roots() -> Vec<PathBuf> {
     roots
 }
 
-
 pub fn find_linux_codex_app(search_roots: &[PathBuf]) -> Option<PathBuf> {
     for root in search_roots {
         for candidate in linux_app_candidates(root) {
@@ -479,25 +475,41 @@ pub fn find_standalone_codex_app_dir() -> Option<PathBuf> {
 /// Finds the CLI shipped by the standalone Codex installer.
 pub fn find_standalone_codex_cli() -> Option<PathBuf> {
     let local_appdata = std::env::var_os("LOCALAPPDATA")?;
-    find_standalone_codex_cli_in(&PathBuf::from(local_appdata).join("OpenAI").join("Codex").join("bin"))
+    find_standalone_codex_cli_in(
+        &PathBuf::from(local_appdata)
+            .join("OpenAI")
+            .join("Codex")
+            .join("bin"),
+    )
 }
 
 fn find_standalone_codex_cli_in(bin_dir: &Path) -> Option<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(path) = standalone_cli_in_dir(bin_dir) { candidates.push(path); }
+    if let Some(path) = standalone_cli_in_dir(bin_dir) {
+        candidates.push(path);
+    }
     if let Ok(entries) = std::fs::read_dir(bin_dir) {
         for entry in entries.flatten() {
             if entry.path().is_dir() {
-                if let Some(path) = standalone_cli_in_dir(&entry.path()) { candidates.push(path); }
+                if let Some(path) = standalone_cli_in_dir(&entry.path()) {
+                    candidates.push(path);
+                }
             }
         }
     }
-    candidates.sort_by_key(|path| std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok());
+    candidates.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+    });
     candidates.pop()
 }
 
 fn standalone_cli_in_dir(dir: &Path) -> Option<PathBuf> {
-    ["codex.exe", "codex", "Codex.exe", "Codex"].iter().map(|name| dir.join(name)).find(|path| path.is_file())
+    ["codex.exe", "codex", "Codex.exe", "Codex"]
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|path| path.is_file())
 }
 
 /// `normalize_codex_app_path` 拒绝一个已存在路径时，说明具体卡在哪一条判据。
@@ -607,8 +619,18 @@ mod standalone_cli_tests {
         std::fs::create_dir_all(&new).unwrap();
         std::fs::write(old.join("codex.exe"), "old").unwrap();
         std::fs::write(new.join("codex.exe"), "new").unwrap();
-        std::fs::File::options().write(true).open(old.join("codex.exe")).unwrap().set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000))).unwrap();
-        assert_eq!(find_standalone_codex_cli_in(temp.path()), Some(new.join("codex.exe")));
+        std::fs::File::options()
+            .write(true)
+            .open(old.join("codex.exe"))
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(
+                std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+            ))
+            .unwrap();
+        assert_eq!(
+            find_standalone_codex_cli_in(temp.path()),
+            Some(new.join("codex.exe"))
+        );
     }
 
     #[test]
@@ -727,7 +749,12 @@ fn alunixa_x_plus_name_path(path: &Path) -> bool {
             .strip_suffix(".app")
             .unwrap_or(name)
             .to_ascii_lowercase();
-        if lower == "codex++"
+        if lower == "alunixa x"
+            || lower == "alunixa x (ax)"
+            || lower == "alunixax"
+            || lower == "alunixa-x"
+            || lower == "alunixa x launch"
+            || lower == "codex++"
             || lower == "codexplusplus"
             || lower == "alunixa-x-plus"
             || lower == "codex++ manager"
@@ -1276,9 +1303,13 @@ fn executable_in_dir(dir: &Path) -> Option<PathBuf> {
         spec.executable_names
     } else {
         #[cfg(target_os = "linux")]
-        { LINUX_CODEX_EXECUTABLES }
+        {
+            LINUX_CODEX_EXECUTABLES
+        }
         #[cfg(not(target_os = "linux"))]
-        { STANDALONE_CODEX_EXECUTABLES }
+        {
+            STANDALONE_CODEX_EXECUTABLES
+        }
     };
     for name in names {
         let candidate = dir.join(name);

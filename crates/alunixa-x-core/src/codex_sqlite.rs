@@ -82,7 +82,15 @@ fn legacy_state_db_path(home: &Path) -> PathBuf {
 }
 
 fn codex_sqlite_dir_session_dbs(home: &Path) -> Vec<PathBuf> {
-    codex_sqlite_dir_dbs_with_tables(home, &["threads", "local_thread_catalog", "automation_runs", "inbox_items"])
+    codex_sqlite_dir_dbs_with_tables(
+        home,
+        &[
+            "threads",
+            "local_thread_catalog",
+            "automation_runs",
+            "inbox_items",
+        ],
+    )
 }
 
 fn codex_sqlite_dir_thread_reference_dbs(home: &Path) -> Vec<PathBuf> {
@@ -106,7 +114,8 @@ fn codex_sqlite_dir_thread_reference_dbs(home: &Path) -> Vec<PathBuf> {
 
 fn codex_sqlite_dir_dbs_with_tables(home: &Path, tables: &[&str]) -> Vec<PathBuf> {
     let sqlite_dir = home.join("sqlite");
-    let entries = [sqlite_dir, home.to_path_buf()].into_iter()
+    let entries = [sqlite_dir, home.to_path_buf()]
+        .into_iter()
         .flat_map(|dir| fs::read_dir(dir).into_iter().flatten());
     let mut candidates = entries
         .filter_map(Result::ok)
@@ -184,10 +193,9 @@ pub fn latest_unarchived_goal_thread_model(home: &Path) -> Option<String> {
         if !db_path.exists() {
             continue;
         }
-        let Ok(db) = Connection::open_with_flags(
-            &db_path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        ) else {
+        let Ok(db) =
+            Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        else {
             continue;
         };
         if !connection_has_table(&db, "automation_runs") || !connection_has_table(&db, "threads") {
@@ -655,4 +663,13 @@ mod tests {
         let text = "no suffix here";
         assert_eq!(sanitize_model_suffixes_in_text(text), text);
     }
+}
+
+pub fn session_db_has_threads_table(path: &Path) -> anyhow::Result<bool> {
+    let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='threads')",
+        [],
+        |row| row.get(0),
+    )?)
 }

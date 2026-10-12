@@ -1569,7 +1569,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         std::fs::create_dir_all(manager.linked_dir().join("no-manifest")).unwrap();
-        let bundled = manager.linked_dir().join(BUNDLED_SKILLS_DIR).join("imagegen");
+        let bundled = manager
+            .linked_dir()
+            .join(BUNDLED_SKILLS_DIR)
+            .join("imagegen");
         std::fs::create_dir_all(&bundled).unwrap();
         std::fs::write(
             bundled.join(SKILL_MANIFEST_FILE),
@@ -1580,7 +1583,10 @@ mod tests {
         let entries = manager.merge_entries(&[]);
 
         assert!(entries.iter().all(|entry| entry.id != "no-manifest"));
-        let imagegen: Vec<_> = entries.iter().filter(|entry| entry.id == "imagegen").collect();
+        let imagegen: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.id == "imagegen")
+            .collect();
         assert_eq!(imagegen.len(), 1, "自带 skill 不应被本地扫描重复收录");
         assert!(imagegen[0].bundled);
     }
@@ -1590,18 +1596,33 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let custom = manager.linked_dir().join("custom-skill");
-        let bundled = manager.linked_dir().join(BUNDLED_SKILLS_DIR).join("builtin-skill");
+        let bundled = manager
+            .linked_dir()
+            .join(BUNDLED_SKILLS_DIR)
+            .join("builtin-skill");
         for path in [&custom, &bundled] {
             std::fs::create_dir_all(path).unwrap();
-            std::fs::write(path.join(SKILL_MANIFEST_FILE), "---\nname: test\ndescription: local\n---\n").unwrap();
+            std::fs::write(
+                path.join(SKILL_MANIFEST_FILE),
+                "---\nname: test\ndescription: local\n---\n",
+            )
+            .unwrap();
         }
         let config = manager.codex_home.join("config.toml");
         std::fs::write(&config, "[skills]\nbundled = true\n").unwrap();
         let before = std::fs::read(&config).unwrap();
         let entries = manager.local_inventory();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().any(|entry| entry.id == "custom-skill" && entry.enabled));
-        assert!(entries.iter().any(|entry| entry.id == "builtin-skill" && entry.bundled));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "custom-skill" && entry.enabled)
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "builtin-skill" && entry.bundled)
+        );
         assert_eq!(std::fs::read(config).unwrap(), before);
     }
 

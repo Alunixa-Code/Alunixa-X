@@ -8,8 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail, ensure};
-use base64::Engine;
 use alunixa_x_core::launcher::{DefaultLaunchHooks, LaunchHooks};
 use alunixa_x_core::models::{DeleteResult, ExportResult, SessionRef};
 use alunixa_x_core::routes::{
@@ -18,6 +16,8 @@ use alunixa_x_core::routes::{
 };
 use alunixa_x_core::settings::{BackendSettings, DictationSettings, SettingsStore};
 use alunixa_x_core::status::StatusStore;
+use anyhow::{Context, Result, bail, ensure};
+use base64::Engine;
 use serde_json::{Value, json};
 
 // 探针固定使用首次校验过的听写快照；并发修改管理器设置不能切换这次 ASR 请求。

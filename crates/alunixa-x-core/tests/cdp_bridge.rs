@@ -172,7 +172,22 @@ fn stepwise_script_uses_the_floating_panel_entrypoint() {
 fn stepwise_runtime_bumps_version_when_reinjection_contract_changes() {
     let script = assets::stepwise_script();
 
-    assert!(script.contains("const SCRIPT_VERSION = \"2.0.8\";"));
+    // The frozen upstream floating-panel fragments own the runtime version.
+    // Reuse requires a healthy, same-version instance; all other instances retire.
+    assert!(script.contains("const SCRIPT_VERSION = \"2.0.7\";"));
+    assert!(script.contains("previous?.version === SCRIPT_VERSION"));
+    assert!(script.contains("previous?.state?.destroyed !== true"));
+    assert!(script.contains("previousRuntimeHealthy"));
+    assert!(script.contains("previous?.state?.root?.isConnected === true"));
+    assert!(script.contains("previous?.state?.popover?.isConnected === true"));
+    assert!(
+        script.contains(
+            "if (previous && typeof previous.destroy === \"function\") previous.destroy()"
+        )
+    );
+    assert!(
+        script.contains("return !state.destroyed && window[API_KEY]?.instanceId === INSTANCE_ID")
+    );
 }
 
 #[test]
@@ -2536,7 +2551,21 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(script.contains("isCodexPluginBuildFlavorFilter"));
     assert!(script.contains("!filtered.includes(plugin) : !callback(plugin)"));
     assert!(script.contains("isCodexPluginMarketplaceHiddenFilter"));
-    assert!(script.contains("!filtered.includes(marketplace) : !callback(marketplace)"));
+    let hidden_filter = script
+        .split_once("function isCodexPluginMarketplaceHiddenFilter(")
+        .expect("hidden-marketplace recognizer should exist")
+        .1
+        .split("\n  function installPluginBuildFlavorFilterPatch(")
+        .next()
+        .expect("hidden-marketplace recognizer should have a body");
+    assert!(hidden_filter.contains("!Array.isArray(filtered)"));
+    assert!(hidden_filter.contains("!filtered.includes(marketplace)"));
+    assert!(
+        !hidden_filter.contains("callback(marketplace)"),
+        "recognition must use native filter results, not replay side-effecting callbacks"
+    );
+    assert!(script.contains("originalFilter.call(this, callback, thisArg)"));
+    assert!(script.contains("if (!codexPluginMarketplacePatchEnabled()) return filtered"));
     assert!(script.contains("plugin_marketplace_hidden_filter_bypassed"));
     assert!(script.contains("method === \"list-plugins\""));
     assert!(script.contains("method === \"vscode://codex/list-plugins\""));
@@ -3541,7 +3570,18 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("standard"));
     assert!(script.contains("fast"));
     assert!(script.contains("[\"setting-storage-\", \"app-initial-\"]"));
-    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
+    assert!(
+        script
+            .contains("[\"app-shared-\", \"setting-storage-\", \"vscode-api-\", \"app-initial-\"]")
+    );
+    assert!(script.contains("if (serviceTierDispatcherPatchPromise) return"));
+    assert!(
+        script
+            .contains("serviceTierDispatcherPatchMissCount >= serviceTierDispatcherPatchMaxMisses")
+    );
+    assert!(script.contains("codexServiceTierComposerFooterSelector"));
+    assert!(script.contains("[class*=\"_ComposerFooter_\"]"));
+    assert!(script.contains("[class*=\"_ComposerLayoutFooter_\"]"));
     assert!(script.contains("[\"vscode-api-\", \"app-initial-\"]"));
     assert!(script.contains("codexSettingStorageFromModule"));
     assert!(script.contains("codexStateApiFromModule"));

@@ -391,10 +391,9 @@ pub fn run_probe_request(path: &Path) -> anyhow::Result<()> {
                     &request.backup_dir,
                     probe_port,
                 )?,
-                "repair_at_startup" | "enforce_at_startup" => enforce_disabled_at_startup(
-                    &registry,
-                    &request.backup_dir,
-                )?,
+                "repair_at_startup" | "enforce_at_startup" => {
+                    enforce_disabled_at_startup(&registry, &request.backup_dir)?
+                }
                 "restore" => (
                     restore(
                         &registry,
@@ -623,7 +622,11 @@ mod tests {
         assert_eq!(after.enabled, Some(0));
         assert_eq!(after.server, "127.0.0.1:43210");
         assert!(backup.is_some());
-        assert!(dir.path().join(format!("{}.json", backup.unwrap())).is_file());
+        assert!(
+            dir.path()
+                .join(format!("{}.json", backup.unwrap()))
+                .is_file()
+        );
     }
 
     #[test]

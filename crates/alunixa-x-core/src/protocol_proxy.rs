@@ -114,8 +114,16 @@ impl CodexPatchProxyAction {
 }
 
 impl CodexToolContext {
- fn is_tool_search_proxy(&self, name: &str) -> bool { self.custom_tools.get(name).is_some_and(|spec| spec.openai_name == "tool_search") }
- fn is_builtin_web_search_proxy(&self, name: &str) -> bool { self.custom_tools.get(name).is_some_and(|spec| spec.kind == CodexCustomToolKind::BuiltIn && spec.openai_name == "web_search") }
+    fn is_tool_search_proxy(&self, name: &str) -> bool {
+        self.custom_tools
+            .get(name)
+            .is_some_and(|spec| spec.openai_name == "tool_search")
+    }
+    fn is_builtin_web_search_proxy(&self, name: &str) -> bool {
+        self.custom_tools.get(name).is_some_and(|spec| {
+            spec.kind == CodexCustomToolKind::BuiltIn && spec.openai_name == "web_search"
+        })
+    }
     fn is_custom_tool_proxy(&self, upstream_name: &str) -> bool {
         self.custom_tools.contains_key(upstream_name)
     }
@@ -148,11 +156,22 @@ pub fn responses_to_chat_completions(body: Value) -> anyhow::Result<Value> {
     responses_to_chat_completions_with_options(body, false)
 }
 
-fn responses_to_chat_completions_for_wire(mut body: Value, wire: &str, standard: bool) -> anyhow::Result<Value> {
-    let additional: Vec<Value> = body["input"].as_array().into_iter().flatten()
-        .filter(|i| i["type"] == "additional_tools").flat_map(|i| i["tools"].as_array().into_iter().flatten().cloned()).collect();
+fn responses_to_chat_completions_for_wire(
+    mut body: Value,
+    wire: &str,
+    standard: bool,
+) -> anyhow::Result<Value> {
+    let additional: Vec<Value> = body["input"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|i| i["type"] == "additional_tools")
+        .flat_map(|i| i["tools"].as_array().into_iter().flatten().cloned())
+        .collect();
     if !additional.is_empty() {
-        if !body["tools"].is_array() { body["tools"] = json!([]); }
+        if !body["tools"].is_array() {
+            body["tools"] = json!([]);
+        }
         body["tools"].as_array_mut().unwrap().extend(additional);
     }
     fidelity::validate_request(&body, wire)?;
@@ -227,8 +246,11 @@ fn responses_to_chat_completions_for_wire(mut body: Value, wire: &str, standard:
         add_namespace_tools_to_context(&mut tool_context, namespace);
     }
     let mut has_chat_tools = false;
-    let mut converted = body.get("tools").and_then(Value::as_array)
-        .map(|tools| responses_tools_to_chat_tools(tools, &tool_context)).unwrap_or_default();
+    let mut converted = body
+        .get("tools")
+        .and_then(Value::as_array)
+        .map(|tools| responses_tools_to_chat_tools(tools, &tool_context))
+        .unwrap_or_default();
     for namespace in &namespaces {
         converted.extend(namespace_tool_to_chat_tools(namespace, &tool_context));
     }
@@ -769,7 +791,13 @@ fn chat_completion_to_response_with_context(
         response["error"] = json!({"type":"invalid_upstream_tool_call","message":"Native server-side search was not executed by the Chat upstream; use a client search tool or native Responses provider"});
     }
     copy_response_request_fields(&mut response, original_request);
-    if message.get("reasoning_details").is_some() || message["tool_calls"].as_array().is_some_and(|calls| calls.iter().any(|call| tool_call_extra_content(call).is_some())) {
+    if message.get("reasoning_details").is_some()
+        || message["tool_calls"].as_array().is_some_and(|calls| {
+            calls
+                .iter()
+                .any(|call| tool_call_extra_content(call).is_some())
+        })
+    {
         fidelity::attach_replay(&mut response, "chat", message.clone());
     }
 
@@ -2245,11 +2273,24 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         relays.first().map(|item| item.id.as_str()),
         Some(relay.id.as_str())
     );
-    let request_model = request_json.get("model").and_then(Value::as_str).unwrap_or_default();
+    let request_model = request_json
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if relay.relay_mode == crate::settings::RelayMode::CustomModels {
-        return open_custom_models_proxy_request(&relay, &request_json, is_stream, original_user_agent, request_path).await;
+        return open_custom_models_proxy_request(
+            &relay,
+            &request_json,
+            is_stream,
+            original_user_agent,
+            request_path,
+        )
+        .await;
     }
-    let relays = relays.into_iter().map(|relay| relay_with_model_protocol(relay, request_model)).collect::<anyhow::Result<Vec<_>>>()?;
+    let relays = relays
+        .into_iter()
+        .map(|relay| relay_with_model_protocol(relay, request_model))
+        .collect::<anyhow::Result<Vec<_>>>()?;
     let relay_count = relays.len();
     let mut cooldown_retries = 0_usize;
     'request: loop {
@@ -2487,7 +2528,9 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                     });
                 }
                 if input_has_native_compaction(&request_json) {
-                    return native_compaction_unsupported_result(NativeCompactionUnsupported::history().into());
+                    return native_compaction_unsupported_result(
+                        NativeCompactionUnsupported::history().into(),
+                    );
                 }
 
                 let _ = crate::diagnostic_log::append_diagnostic_log(
@@ -2813,11 +2856,14 @@ pub async fn open_audio_transcriptions_proxy_request(
         }),
     );
     let upstream = match send_upstream_request(
-        with_relay_auth(crate::http_client::proxied_client(&effective_user_agent(
-            &relay.user_agent,
-            original_user_agent,
-        ))?
-        .post(&endpoint), &relay)
+        with_relay_auth(
+            crate::http_client::proxied_client(&effective_user_agent(
+                &relay.user_agent,
+                original_user_agent,
+            ))?
+            .post(&endpoint),
+            &relay,
+        )
         .header(reqwest::header::CONTENT_TYPE, content_type)
         .body(body.to_vec()),
     )
@@ -2950,8 +2996,11 @@ async fn upstream_request_parts(
     model_override: Option<&str>,
     preserve_native_request: bool,
 ) -> anyhow::Result<(String, Value, UpstreamWireApi, bool)> {
-    if let Some(model) = model_override { request_json["model"] = json!(model); }
-    let compact = request_has_compaction_trigger(&request_json) || is_responses_compact_proxy_path(request_path);
+    if let Some(model) = model_override {
+        request_json["model"] = json!(model);
+    }
+    let compact = request_has_compaction_trigger(&request_json)
+        || is_responses_compact_proxy_path(request_path);
     let synthetic_compaction = compact && !preserve_native_request;
     if synthetic_compaction {
         request_json = rewrite_request_for_compaction(strip_compaction_trigger(request_json));
@@ -2983,17 +3032,29 @@ async fn upstream_request_parts(
     match relay.protocol {
         RelayProtocol::Responses => {
             let mut body = request_json;
-            if relay.web_search_history_compat_enabled() && compact && !is_responses_compact_proxy_path(request_path) { ensure_web_search_tool_for_history(&mut body); }
+            if relay.web_search_history_compat_enabled()
+                && compact
+                && !is_responses_compact_proxy_path(request_path)
+            {
+                ensure_web_search_tool_for_history(&mut body);
+            }
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
-                if is_responses_compact_proxy_path(request_path) { responses_compact_url(&relay.base_url) } else { responses_url(&relay.base_url) },
+                if is_responses_compact_proxy_path(request_path) {
+                    responses_compact_url(&relay.base_url)
+                } else {
+                    responses_url(&relay.base_url)
+                },
                 body,
                 UpstreamWireApi::Responses,
                 synthetic_compaction,
             ))
         }
         RelayProtocol::ChatCompletions => {
-            let mut body = responses_to_chat_completions_with_options(request_json, relay.standard_openai_protocol)?;
+            let mut body = responses_to_chat_completions_with_options(
+                request_json,
+                relay.standard_openai_protocol,
+            )?;
             apply_relay_image_handling(relay, &mut body).await;
             Ok((
                 chat_completions_url(&relay.base_url),
@@ -3315,23 +3376,44 @@ fn upstream_request_builder(
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
     builder = match relay.protocol {
-        RelayProtocol::AnthropicMessages => with_native_key(builder, relay, "x-api-key").header("anthropic-version", "2023-06-01"),
+        RelayProtocol::AnthropicMessages => {
+            with_native_key(builder, relay, "x-api-key").header("anthropic-version", "2023-06-01")
+        }
         RelayProtocol::GeminiGenerateContent => with_native_key(builder, relay, "x-goog-api-key"),
-        _ => return finish_upstream_builder(with_relay_auth(builder, relay), is_stream, upstream_body),
+        _ => {
+            return finish_upstream_builder(
+                with_relay_auth(builder, relay),
+                is_stream,
+                upstream_body,
+            );
+        }
     };
     builder = crate::relay_headers::apply_headers(builder, &relay.custom_headers);
     finish_upstream_builder(builder, is_stream, upstream_body)
 }
 
-fn with_native_key(builder: reqwest::RequestBuilder, relay: &crate::settings::RelayProfile, header: &'static str) -> reqwest::RequestBuilder {
-    if relay.uses_no_auth() || relay.custom_headers.iter().any(|h| h.key.trim().eq_ignore_ascii_case(header) && !h.value.trim().is_empty()) {
+fn with_native_key(
+    builder: reqwest::RequestBuilder,
+    relay: &crate::settings::RelayProfile,
+    header: &'static str,
+) -> reqwest::RequestBuilder {
+    if relay.uses_no_auth()
+        || relay
+            .custom_headers
+            .iter()
+            .any(|h| h.key.trim().eq_ignore_ascii_case(header) && !h.value.trim().is_empty())
+    {
         builder
     } else {
         builder.header(header, relay.api_key.trim())
     }
 }
 
-fn finish_upstream_builder(mut builder: reqwest::RequestBuilder, is_stream: bool, upstream_body: &Value) -> reqwest::RequestBuilder {
+fn finish_upstream_builder(
+    mut builder: reqwest::RequestBuilder,
+    is_stream: bool,
+    upstream_body: &Value,
+) -> reqwest::RequestBuilder {
     if is_stream {
         builder = builder
             .header(reqwest::header::ACCEPT, "text/event-stream")
@@ -3767,7 +3849,9 @@ pub fn responses_url(base_url: &str) -> String {
 
 pub fn responses_compact_url(base_url: &str) -> String {
     let base = base_url.trim().trim_end_matches('#').trim_end_matches('/');
-    if base.to_ascii_lowercase().ends_with("/responses/compact") { return base.to_string(); }
+    if base.to_ascii_lowercase().ends_with("/responses/compact") {
+        return base.to_string();
+    }
     let responses = responses_url(base_url);
     if responses
         .to_ascii_lowercase()
@@ -4478,7 +4562,11 @@ impl ChatSseState {
         self.text.refusal = refusal;
         if !self.text.added {
             let output_index = self.next_output_index();
-            let item_id = format!("msg_{}_{}", response_id_body(&self.response_id), output_index);
+            let item_id = format!(
+                "msg_{}_{}",
+                response_id_body(&self.response_id),
+                output_index
+            );
             self.text.output_index = Some(output_index);
             self.text.item_id = item_id.clone();
             self.text.added = true;
@@ -5628,7 +5716,11 @@ fn append_responses_item(
             }));
         }
         Some("tool_search_call") => {
-            let call_id = item.get("call_id").or_else(|| item.get("id")).and_then(Value::as_str).unwrap_or("");
+            let call_id = item
+                .get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
             seen_tool_call_ids.insert(call_id.to_string());
             pending_tool_calls.push(json!({"id":call_id,"type":"function","function":{
                 "name":"tool_search","arguments":responses_arguments_to_chat(item.get("arguments").unwrap_or(&json!({})))
@@ -6017,10 +6109,15 @@ fn build_codex_tool_context(tools: Option<&Value>) -> CodexToolContext {
         }
         if response_tool_type(tool) == "tool_search" {
             let name = response_tool_name(tool).unwrap_or("tool_search");
-            context.custom_tools.insert(name.to_string(), CodexCustomToolSpec {
-                openai_name: "tool_search".into(), namespace: String::new(),
-                kind: CodexCustomToolKind::Raw, proxy_action: None,
-            });
+            context.custom_tools.insert(
+                name.to_string(),
+                CodexCustomToolSpec {
+                    openai_name: "tool_search".into(),
+                    namespace: String::new(),
+                    kind: CodexCustomToolKind::Raw,
+                    proxy_action: None,
+                },
+            );
             context.has_custom_tools = true;
         } else if response_tool_type(tool) == "namespace" {
             add_namespace_tools_to_context(&mut context, tool);
@@ -6097,8 +6194,13 @@ fn responses_tools_to_chat_tools(tools: &[Value], context: &CodexToolContext) ->
             continue;
         }
         if response_tool_type(tool) == "tool_search" {
-            converted.push(function_tool(response_tool_name(tool).unwrap_or("tool_search"),
-                response_tool_description(tool), normalize_chat_tool_parameters(&tool.get("parameters").cloned().unwrap_or_else(|| json!({})))));
+            converted.push(function_tool(
+                response_tool_name(tool).unwrap_or("tool_search"),
+                response_tool_description(tool),
+                normalize_chat_tool_parameters(
+                    &tool.get("parameters").cloned().unwrap_or_else(|| json!({})),
+                ),
+            ));
         } else if response_tool_type(tool) == "namespace" {
             converted.extend(namespace_tool_to_chat_tools(tool, context));
         } else if response_tool_is_structured_function(tool) {
@@ -6327,12 +6429,24 @@ fn namespace_tool_to_chat_tools(namespace_tool: &Value, context: &CodexToolConte
 }
 
 fn normalize_chat_tool_parameters(parameters: &Value) -> Value {
-    let mut normalized = if parameters.is_object() { parameters.clone() } else { json!({}) };
-    let bare_ref = normalized.as_object().is_some_and(|o| o.len() == 1 && o.contains_key("$ref"));
+    let mut normalized = if parameters.is_object() {
+        parameters.clone()
+    } else {
+        json!({})
+    };
+    let bare_ref = normalized
+        .as_object()
+        .is_some_and(|o| o.len() == 1 && o.contains_key("$ref"));
     if !bare_ref {
-        if normalized.get("type").is_none_or(Value::is_null) { normalized["type"] = json!("object"); }
-        if normalized.get("properties").is_none() { normalized["properties"] = json!({}); }
-        if normalized.get("required").is_none() { normalized["required"] = json!([]); }
+        if normalized.get("type").is_none_or(Value::is_null) {
+            normalized["type"] = json!("object");
+        }
+        if normalized.get("properties").is_none() {
+            normalized["properties"] = json!({});
+        }
+        if normalized.get("required").is_none() {
+            normalized["required"] = json!([]);
+        }
     }
     flatten_top_level_combinators(inline_ref_siblings(&normalized))
 }
@@ -6895,7 +7009,9 @@ fn push_tool_call_delta_sse(
     delta: &str,
     tool_context: &CodexToolContext,
 ) {
-    if tool_context.is_custom_tool_proxy(&state.name) && !tool_context.is_tool_search_proxy(&state.name) {
+    if tool_context.is_custom_tool_proxy(&state.name)
+        && !tool_context.is_tool_search_proxy(&state.name)
+    {
         let _ = delta;
     } else {
         push_sse(
@@ -6917,7 +7033,9 @@ fn push_tool_call_done_sse(
     output_index: u32,
     tool_context: &CodexToolContext,
 ) {
-    if tool_context.is_custom_tool_proxy(&state.name) && !tool_context.is_tool_search_proxy(&state.name) {
+    if tool_context.is_custom_tool_proxy(&state.name)
+        && !tool_context.is_tool_search_proxy(&state.name)
+    {
         let input = reconstruct_custom_tool_call_input_with_context(
             tool_context,
             &state.name,
@@ -7305,7 +7423,10 @@ fn response_output_text(value: &Value) -> String {
 }
 
 fn tool_output_content(value: &Value) -> Value {
-    if value.as_array().is_some_and(|parts| parts.iter().any(is_image_part)) {
+    if value
+        .as_array()
+        .is_some_and(|parts| parts.iter().any(is_image_part))
+    {
         responses_content_to_chat_content("tool", value)
     } else {
         json!(response_output_text(value))
@@ -7738,7 +7859,11 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str, s
     let Some(reasoning_enabled) = reasoning_requested(body) else {
         return;
     };
-    let style = if standard { ChatReasoningStyle::Default } else { infer_chat_reasoning_style(model) };
+    let style = if standard {
+        ChatReasoningStyle::Default
+    } else {
+        infer_chat_reasoning_style(model)
+    };
 
     match style {
         ChatReasoningStyle::Thinking => {
@@ -7781,15 +7906,17 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str, s
         ChatReasoningStyle::DeepSeek
         | ChatReasoningStyle::LowHigh
         | ChatReasoningStyle::Default
-            if supports_reasoning_effort(model) || (standard && model.to_ascii_lowercase().contains("gemini")) =>
+            if supports_reasoning_effort(model)
+                || (standard && model.to_ascii_lowercase().contains("gemini")) =>
         {
             result["reasoning_effort"] = json!(mapped);
         }
-        ChatReasoningStyle::Thinking if is_kimi_coding_model(model) => { result["reasoning_effort"] = json!(mapped); }
+        ChatReasoningStyle::Thinking if is_kimi_coding_model(model) => {
+            result["reasoning_effort"] = json!(mapped);
+        }
         _ => {}
     }
 }
-
 
 fn reasoning_requested(body: &Value) -> Option<bool> {
     if let Some(effort) = body.pointer("/reasoning/effort").and_then(Value::as_str) {
@@ -7813,7 +7940,8 @@ fn infer_chat_reasoning_style(model: &str) -> ChatReasoningStyle {
     if model.contains("qwen") || model.contains("dashscope") || model.contains("bailian") {
         return ChatReasoningStyle::EnableThinking;
     }
-    if is_kimi_coding_model(&model) || model.contains("kimi")
+    if is_kimi_coding_model(&model)
+        || model.contains("kimi")
         || model.contains("moonshot")
         || model.contains("glm")
         || model.contains("zhipu")
@@ -8025,7 +8153,9 @@ fn input_has_encrypted_agent_content(input: &Value) -> bool {
                 Value::Array(parts) => parts.iter().any(|part| {
                     part.get("type").and_then(Value::as_str) == Some("encrypted_content")
                 }),
-                Value::Object(_) => content.get("type").and_then(Value::as_str) == Some("encrypted_content"),
+                Value::Object(_) => {
+                    content.get("type").and_then(Value::as_str) == Some("encrypted_content")
+                }
                 _ => false,
             })
     }
@@ -8036,18 +8166,27 @@ fn input_has_encrypted_agent_content(input: &Value) -> bool {
     }
 }
 
-pub fn responses_to_chat_completions_with_options(mut body: Value, standard: bool) -> anyhow::Result<Value> {
+pub fn responses_to_chat_completions_with_options(
+    mut body: Value,
+    standard: bool,
+) -> anyhow::Result<Value> {
     remove_unsupported_native_search(&mut body)?;
     expand_local_compaction_history(&mut body);
     if input_has_native_compaction(&body) {
         return Err(NativeCompactionUnsupported::history().into());
     }
-    if body.get("input").is_some_and(input_has_encrypted_agent_content) {
+    if body
+        .get("input")
+        .is_some_and(input_has_encrypted_agent_content)
+    {
         return Err(UnsupportedEncryptedAgentContent.into());
     }
     let body = fidelity::prepare_history(body, "chat")?;
     let mut result = responses_to_chat_completions_for_wire(body.clone(), "chat", standard)?;
-    let model = body.get("model").and_then(Value::as_str).unwrap_or_default();
+    let model = body
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     if let Some(messages) = result["messages"].as_array_mut() {
         relocate_tool_output_images(messages);
         normalize_image_data_urls_for_model(messages, model);
@@ -9214,10 +9353,12 @@ fn flatten_top_level_combinators(schema: Value) -> Value {
     let Some(object) = schema.as_object() else {
         return schema;
     };
-    let Some((key, branches)) = SCHEMA_COMBINATOR_KEYS
-        .iter()
-        .find_map(|key| object.get(*key).and_then(Value::as_array).map(|a| (*key, a)))
-    else {
+    let Some((key, branches)) = SCHEMA_COMBINATOR_KEYS.iter().find_map(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_array)
+            .map(|a| (*key, a))
+    }) else {
         return schema;
     };
     if branches.is_empty() {
@@ -9283,10 +9424,7 @@ fn flatten_top_level_combinators(schema: Value) -> Value {
     if !flattenable || properties.is_empty() {
         // 降级：把分支原样塞进一个带说明的字段，schema 依然合法。
         let mut fallback = object.clone();
-        fallback.insert(
-            "type".to_string(),
-            json!("object"),
-        );
+        fallback.insert("type".to_string(), json!("object"));
         fallback.insert("properties".to_string(), json!({}));
         let mut description: Vec<String> = Vec::new();
         for branch in branches {
@@ -9318,10 +9456,7 @@ fn flatten_top_level_combinators(schema: Value) -> Value {
     flattened.insert("properties".to_string(), Value::Object(properties));
     flattened.insert(
         "required".to_string(),
-        json!(required
-            .unwrap_or_default()
-            .into_iter()
-            .collect::<Vec<_>>()),
+        json!(required.unwrap_or_default().into_iter().collect::<Vec<_>>()),
     );
     Value::Object(flattened)
 }
@@ -9343,7 +9478,12 @@ fn merge_schema_property(properties: &mut Map<String, Value>, name: &str, value:
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    for (child_name, child_value) in right.get("properties").and_then(Value::as_object).into_iter().flatten() {
+    for (child_name, child_value) in right
+        .get("properties")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+    {
         merge_schema_property(&mut merged_properties, child_name, child_value);
     }
     merged.insert("properties".to_string(), Value::Object(merged_properties));
@@ -9351,19 +9491,33 @@ fn merge_schema_property(properties: &mut Map<String, Value>, name: &str, value:
     let left_required: BTreeSet<String> = left
         .get("required")
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     let right_required: BTreeSet<String> = right
         .get("required")
         .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     merged.insert(
         "required".to_string(),
-        json!(left_required
-            .intersection(&right_required)
-            .cloned()
-            .collect::<Vec<_>>()),
+        json!(
+            left_required
+                .intersection(&right_required)
+                .cloned()
+                .collect::<Vec<_>>()
+        ),
     );
     *existing = Value::Object(merged);
 }
@@ -9565,11 +9719,9 @@ fn web_search_action_has_target(action: &Value) -> bool {
             .get("queries")
             .and_then(Value::as_array)
             .is_some_and(|queries| {
-                queries.iter().any(|query| {
-                    query
-                        .as_str()
-                        .is_some_and(|value| !value.trim().is_empty())
-                })
+                queries
+                    .iter()
+                    .any(|query| query.as_str().is_some_and(|value| !value.trim().is_empty()))
             })
         || action
             .get("url")
@@ -9781,7 +9933,12 @@ impl CompactionSseConverter {
     /// 喂入上游流式响应的一个网络 chunk。SSE 事件可能被 TCP 拆开，
     /// 内部按 `\n\n` 边界缓冲；残缺块留在缓冲区等下一个 chunk。
     pub fn push_upstream_bytes(&mut self, bytes: &[u8]) {
-        if let Err(error) = append_utf8_safe(&mut self.sse_buffer, &mut self.sse_utf8_remainder, bytes) { self.fail(error.to_string(), Some("invalid_utf8".into())); return; }
+        if let Err(error) =
+            append_utf8_safe(&mut self.sse_buffer, &mut self.sse_utf8_remainder, bytes)
+        {
+            self.fail(error.to_string(), Some("invalid_utf8".into()));
+            return;
+        }
         while let Some(block) = take_sse_block(&mut self.sse_buffer) {
             if block.trim().is_empty() {
                 continue;
@@ -10019,7 +10176,11 @@ impl ExtraContentCache {
         if call_id.is_empty() {
             return;
         }
-        if self.entries.insert(call_id.to_string(), extra_content).is_none() {
+        if self
+            .entries
+            .insert(call_id.to_string(), extra_content)
+            .is_none()
+        {
             self.order.push_back(call_id.to_string());
         }
         while self.order.len() > self.capacity {
@@ -10069,9 +10230,14 @@ impl NativeResponsesSseObserver {
 
     fn observe_event(&mut self) {
         let prefix = String::from_utf8_lossy(&self.event_prefix);
-        let event_name = prefix.lines().find_map(|line| strip_sse_field(line, "event"));
-        let data = prefix.lines().filter_map(|line| strip_sse_field(line, "data"))
-            .collect::<Vec<_>>().join("\n");
+        let event_name = prefix
+            .lines()
+            .find_map(|line| strip_sse_field(line, "event"));
+        let data = prefix
+            .lines()
+            .filter_map(|line| strip_sse_field(line, "data"))
+            .collect::<Vec<_>>()
+            .join("\n");
         // 只观察已完整解析的顶层 type；后续大 payload 超过前缀上限时，
         // 忽略其解析错误，保留此前读到的类型。它不是原生响应的有效性校验器。
         struct EventType<'a>(&'a mut Option<String>);
@@ -10080,7 +10246,10 @@ impl NativeResponsesSseObserver {
             fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("an SSE event object")
             }
-            fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
                 while let Some(key) = map.next_key::<String>()? {
                     if key == "type" {
                         *self.0 = Some(map.next_value::<String>()?);
@@ -10096,8 +10265,12 @@ impl NativeResponsesSseObserver {
         let _ = serde::Deserializer::deserialize_map(&mut deserializer, EventType(&mut event_type));
         match event_type.as_deref().or(event_name.map(str::trim)) {
             Some("response.completed") => self.completed = true,
-            Some("response.failed") => self.failure = Some("原生 Responses 上游返回 response.failed"),
-            Some("response.incomplete") => self.failure = Some("原生 Responses 上游返回 response.incomplete"),
+            Some("response.failed") => {
+                self.failure = Some("原生 Responses 上游返回 response.failed")
+            }
+            Some("response.incomplete") => {
+                self.failure = Some("原生 Responses 上游返回 response.incomplete")
+            }
             Some("error") => self.failure = Some("原生 Responses 上游返回 error 事件"),
             None if self.event_too_large => self.unclassified_large_event = true,
             _ => {}
@@ -10106,15 +10279,17 @@ impl NativeResponsesSseObserver {
 
     pub(crate) fn finish(self) -> Option<String> {
         // failed/incomplete 优先于 completed；[DONE] 或 HTTP EOF 都不能证明成功。
-        self.failure.or_else(|| {
-            if self.completed {
-                None
-            } else if self.unclassified_large_event {
-                Some("原生 Responses 流终止状态未知（诊断事件超限），未观察到完成事件")
-            } else {
-                Some("原生 Responses 上游在完成事件前结束了响应流")
-            }
-        }).map(str::to_string)
+        self.failure
+            .or_else(|| {
+                if self.completed {
+                    None
+                } else if self.unclassified_large_event {
+                    Some("原生 Responses 流终止状态未知（诊断事件超限），未观察到完成事件")
+                } else {
+                    Some("原生 Responses 上游在完成事件前结束了响应流")
+                }
+            })
+            .map(str::to_string)
     }
 }
 
@@ -10124,7 +10299,10 @@ pub(crate) struct UnsupportedEncryptedAgentContent;
 
 impl std::fmt::Display for UnsupportedEncryptedAgentContent {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "unsupported_encrypted_agent_content: Chat Completions 上游无法处理加密的 agent 消息内容，请使用支持该协议的 Responses 上游")
+        write!(
+            formatter,
+            "unsupported_encrypted_agent_content: Chat Completions 上游无法处理加密的 agent 消息内容，请使用支持该协议的 Responses 上游"
+        )
     }
 }
 
@@ -10236,14 +10414,33 @@ const SCHEMA_COMBINATOR_KEYS: [&str; 3] = ["oneOf", "anyOf", "allOf"];
 const IMAGE_DATA_URL_PREFIX: &str = "data:image/";
 
 impl ChatSseToResponsesConverter {
- pub fn has_failed(&self) -> bool { self.failed }
- pub fn has_terminal_event(&self) -> bool { self.failed || self.state.completed }
+    pub fn has_failed(&self) -> bool {
+        self.failed
+    }
+    pub fn has_terminal_event(&self) -> bool {
+        self.failed || self.state.completed
+    }
 }
 
-fn upstream_request_builder_for_wire(client: reqwest::Client, endpoint: &str, key: &str, stream: bool, body: &Value, wire: UpstreamWireApi) -> reqwest::RequestBuilder {
- let protocol=match wire { UpstreamWireApi::AnthropicMessages => RelayProtocol::AnthropicMessages, UpstreamWireApi::GeminiGenerateContent => RelayProtocol::GeminiGenerateContent, _ => RelayProtocol::ChatCompletions };
- let relay=crate::settings::RelayProfile { api_key:key.into(), protocol, ..Default::default() };
- upstream_request_builder(client, endpoint, &relay, stream, body)
+fn upstream_request_builder_for_wire(
+    client: reqwest::Client,
+    endpoint: &str,
+    key: &str,
+    stream: bool,
+    body: &Value,
+    wire: UpstreamWireApi,
+) -> reqwest::RequestBuilder {
+    let protocol = match wire {
+        UpstreamWireApi::AnthropicMessages => RelayProtocol::AnthropicMessages,
+        UpstreamWireApi::GeminiGenerateContent => RelayProtocol::GeminiGenerateContent,
+        _ => RelayProtocol::ChatCompletions,
+    };
+    let relay = crate::settings::RelayProfile {
+        api_key: key.into(),
+        protocol,
+        ..Default::default()
+    };
+    upstream_request_builder(client, endpoint, &relay, stream, body)
 }
 
 pub fn ensure_web_search_tool_for_history(request_json: &mut Value) -> bool {
@@ -10307,7 +10504,10 @@ pub(crate) struct UnsupportedNativeWebSearch;
 
 impl std::fmt::Display for UnsupportedNativeWebSearch {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "unsupported_native_web_search: Chat 路由不执行服务端原生搜索，请使用客户端搜索工具或支持原生搜索的 Responses 上游")
+        write!(
+            formatter,
+            "unsupported_native_web_search: Chat 路由不执行服务端原生搜索，请使用客户端搜索工具或支持原生搜索的 Responses 上游"
+        )
     }
 }
 
@@ -10324,20 +10524,26 @@ impl UnsupportedNativeWebSearch {
 
 fn remove_unsupported_native_search(body: &mut Value) -> anyhow::Result<()> {
     let choice = body.get("tool_choice");
-    if choice.and_then(|choice| choice.get("type")).and_then(Value::as_str)
-        .is_some_and(|kind| matches!(kind, "web_search" | "web_search_preview")) {
+    if choice
+        .and_then(|choice| choice.get("type"))
+        .and_then(Value::as_str)
+        .is_some_and(|kind| matches!(kind, "web_search" | "web_search_preview"))
+    {
         return Err(UnsupportedNativeWebSearch.into());
     }
     let required = choice.and_then(Value::as_str) == Some("required");
     if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
         let before = tools.len();
         // 同名 function/custom 和命名空间工具由客户端执行，必须保留。
-        tools.retain(|tool| !matches!(tool.get("type").and_then(Value::as_str),
-            Some("web_search" | "web_search_preview")));
+        tools.retain(|tool| {
+            !matches!(
+                tool.get("type").and_then(Value::as_str),
+                Some("web_search" | "web_search_preview")
+            )
+        });
         if before != tools.len() && required && tools.is_empty() {
             return Err(UnsupportedNativeWebSearch.into());
         }
     }
     Ok(())
 }
-

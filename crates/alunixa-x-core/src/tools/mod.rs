@@ -13,8 +13,8 @@ pub mod grok;
 use std::path::PathBuf;
 
 use crate::settings::{
-    default_active_relay_id, default_relay_test_model, AggregateRelayProfile, BackendSettings,
-    RelayProfile,
+    AggregateRelayProfile, BackendSettings, RelayProfile, default_active_relay_id,
+    default_relay_test_model,
 };
 
 /// 工具标识。`Unknown` 兜底任何本版本还不认识的值，保证前向兼容：

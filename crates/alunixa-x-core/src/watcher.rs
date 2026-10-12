@@ -65,10 +65,14 @@ pub fn disable_watcher() -> std::io::Result<()> {
 pub fn watcher_is_installed() -> bool {
     #[cfg(windows)]
     {
-        let registered = crate::windows_integration::read_current_user_string_values(WATCHER_RUN_KEY)
-            .unwrap_or_default()
-            .iter()
-            .any(|(name, value)| name == WATCHER_RUN_NAME && value.as_ref().is_some_and(|value| !value.is_empty()));
+        let registered =
+            crate::windows_integration::read_current_user_string_values(WATCHER_RUN_KEY)
+                .unwrap_or_default()
+                .iter()
+                .any(|(name, value)| {
+                    name == WATCHER_RUN_NAME
+                        && value.as_ref().is_some_and(|value| !value.is_empty())
+                });
         registered || startup_shortcut_path().is_some_and(|path| path.is_file())
     }
     #[cfg(not(windows))]
@@ -87,10 +91,7 @@ pub fn cdp_listening(port: u16) -> bool {
 }
 
 pub fn build_spawn_launcher_command(launcher_path: &str, _debug_port: u16) -> Vec<String> {
-    vec![
-        launcher_path.to_string(),
-        "--autostart".to_string(),
-    ]
+    vec![launcher_path.to_string(), "--autostart".to_string()]
 }
 
 pub fn build_watcher_install_plan(launcher_path: PathBuf, _debug_port: u16) -> WatcherInstallPlan {
@@ -700,7 +701,9 @@ impl LauncherExitSnapshot {
     pub fn capture() -> anyhow::Result<Self> {
         let processes = crate::windows_integration::enumerate_processes();
         let ids = filter_killable_launcher_processes(
-            processes.iter().map(|p| (p.process_id, p.parent_process_id, p.exe_file.as_str())),
+            processes
+                .iter()
+                .map(|p| (p.process_id, p.parent_process_id, p.exe_file.as_str())),
             std::process::id(),
         );
         let mut captured = Vec::new();
@@ -711,7 +714,9 @@ impl LauncherExitSnapshot {
                 anyhow::bail!("Cannot verify launcher process identity: {pid}");
             }
         }
-        Ok(Self { processes: captured })
+        Ok(Self {
+            processes: captured,
+        })
     }
 
     pub fn wait_for_exit_or_force(self, timeout: Duration) -> LauncherExitOutcome {
@@ -846,9 +851,10 @@ fn launcher_incarnations_still_running(
     captured: &[(u32, u64)],
     mut birth_id: impl FnMut(u32) -> Option<u64>,
 ) -> Vec<u32> {
-    captured.iter().filter_map(|(pid, birth)| {
-        (birth_id(*pid) == Some(*birth)).then_some(*pid)
-    }).collect()
+    captured
+        .iter()
+        .filter_map(|(pid, birth)| (birth_id(*pid) == Some(*birth)).then_some(*pid))
+        .collect()
 }
 
 #[cfg(test)]

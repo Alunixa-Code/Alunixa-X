@@ -139,6 +139,33 @@ pub async fn run_weixin_connect_with_codex_path(
     status: SharedWeixinConnectStatus,
     codex_path: WeixinCodexPath,
 ) -> anyhow::Result<()> {
+    let explicit_base = config.base_url.clone();
+    let normalized = config.normalized();
+    let base = if explicit_base.trim().is_empty() {
+        normalized.base_url.as_str()
+    } else {
+        explicit_base.trim()
+    };
+    let client = match WeixinClient::new(base, &normalized.token, &normalized.route_tag) {
+        Ok(client) => client,
+        Err(error) => {
+            update_status(&status, |current| {
+                current.state = "error".into();
+                current.message = "微信连接初始化失败：服务地址不受支持，请检查配置。".into();
+            });
+            return Err(error);
+        }
+    };
+    run_weixin_connect_with_client(normalized, stop, status, codex_path, client).await
+}
+
+async fn run_weixin_connect_with_client(
+    config: WeixinConnectConfig,
+    stop: Arc<AtomicBool>,
+    status: SharedWeixinConnectStatus,
+    codex_path: WeixinCodexPath,
+    client: WeixinClient,
+) -> anyhow::Result<()> {
     let config = config.normalized();
     if config.token.is_empty() {
         bail!("请先扫码登录微信");
@@ -159,7 +186,6 @@ pub async fn run_weixin_connect_with_codex_path(
         current.has_token = true;
     });
 
-    let client = WeixinClient::new(&config.base_url, &config.token, &config.route_tag)?;
     let store = ConnectSessionStore::default_for_account(&config.account_id);
     let mut state = store.load().unwrap_or_default();
     let mut app_config = AppServerConfig {
@@ -421,11 +447,12 @@ fn is_allowed_peer(allow_from: &str, peer: &str) -> bool {
 /// 由 Alunixa X 的单模型路由写入），该代理只随从 Alunixa X 启动的桌面版存在。
 /// 提前探测，避免 turn 失败后只剩一句模糊的「处理失败」。
 async fn local_model_endpoint_unreachable_reason() -> Option<String> {
-    let base_url = std::fs::read_to_string(
-        crate::relay_config::default_codex_home_dir().join("config.toml"),
-    )
-    .ok()
-    .and_then(|contents| crate::relay_config::root_key_string(&contents, "openai_base_url"))?;
+    let base_url =
+        std::fs::read_to_string(crate::relay_config::default_codex_home_dir().join("config.toml"))
+            .ok()
+            .and_then(|contents| {
+                crate::relay_config::root_key_string(&contents, "openai_base_url")
+            })?;
     let (host, port) = localhost_endpoint(&base_url)?;
     let connect = tokio::net::TcpStream::connect((host.as_str(), port));
     if tokio::time::timeout(std::time::Duration::from_millis(300), connect)
@@ -568,11 +595,12 @@ mod tests {
         };
         let status: SharedWeixinConnectStatus = Arc::new(Mutex::new(Default::default()));
         let stop = Arc::new(AtomicBool::new(false));
-        let task = tokio::spawn(run_weixin_connect_with_codex_path(
+        let task = tokio::spawn(run_weixin_connect_with_client(
             config,
             Arc::clone(&stop),
             Arc::clone(&status),
             WeixinCodexPath::new(""),
+            WeixinClient::new_unchecked_for_tests(&server.uri()),
         ));
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         // 循环正常退出时会写「微信连接已停止」，必须在停止前快照处理状态
@@ -590,7 +618,8 @@ mod tests {
         );
         // 清理循环写入真实 app state 目录的测试状态文件
         let _ = std::fs::remove_file(
-            crate::paths::default_app_state_dir().join("weixin-connect-state-unit-test-ignore.json"),
+            crate::paths::default_app_state_dir()
+                .join("weixin-connect-state-unit-test-ignore.json"),
         );
     }
 

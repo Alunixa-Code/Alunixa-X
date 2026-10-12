@@ -608,9 +608,7 @@ fn acquire_single_instance_guard() -> Option<alunixa_x_core::ports::LoopbackPort
                 }),
             );
             match std::net::TcpListener::bind(("127.0.0.1", 0)) {
-                Ok(listener) => Some(alunixa_x_core::ports::LoopbackPortGuard::listener(
-                    listener,
-                )),
+                Ok(listener) => Some(alunixa_x_core::ports::LoopbackPortGuard::listener(listener)),
                 Err(fallback_error) => {
                     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
                         "manager.guard_fallback_failed",

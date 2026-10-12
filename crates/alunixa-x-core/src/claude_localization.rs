@@ -6,9 +6,9 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 static OPERATION: Mutex<()> = Mutex::new(());
 const ASSETS: &[(&str, &[u8])] = &[
@@ -108,7 +108,9 @@ fn source_app() -> PathBuf {
     {
         let install = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let packaged = PathBuf::from(install).join(r"app\claude.exe");
-        if packaged.is_file() { return packaged; }
+        if packaged.is_file() {
+            return packaged;
+        }
     }
     let candidates = [
         local.join(r"Microsoft\WindowsApps\claude-desktop.exe"),
@@ -118,7 +120,10 @@ fn source_app() -> PathBuf {
         local.join(r"Claude\Claude.exe"),
         program.join(r"Claude\Claude.exe"),
     ];
-    candidates.into_iter().find(|path| path.is_file()).unwrap_or_else(|| local.join(r"Programs\Claude\Claude.exe"))
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| local.join(r"Programs\Claude\Claude.exe"))
 }
 
 #[cfg(target_os = "windows")]
@@ -128,7 +133,9 @@ fn windows_msix_source(path: &Path) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn windows_msix_source(_path: &Path) -> bool { false }
+fn windows_msix_source(_path: &Path) -> bool {
+    false
+}
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn source_app() -> PathBuf {
@@ -142,16 +149,24 @@ fn home_dir() -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn copy_app() -> PathBuf { runtime_dir().join("Claude CN.app") }
+fn copy_app() -> PathBuf {
+    runtime_dir().join("Claude CN.app")
+}
 
 #[cfg(target_os = "windows")]
 fn copy_app() -> PathBuf {
     let source = source_app();
-    if windows_msix_source(&source) { source } else { runtime_dir().join("Claude CN").join("Claude.exe") }
+    if windows_msix_source(&source) {
+        source
+    } else {
+        runtime_dir().join("Claude CN").join("Claude.exe")
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn copy_app() -> PathBuf { runtime_dir().join("Claude CN") }
+fn copy_app() -> PathBuf {
+    runtime_dir().join("Claude CN")
+}
 
 #[cfg(target_os = "windows")]
 fn staged_copy_path(label: &str) -> PathBuf {
@@ -186,18 +201,26 @@ fn config_path() -> PathBuf {
         .unwrap_or_else(|| home_dir().join("AppData/Roaming"));
     for name in ["Claude", "Claude-3p"] {
         let dir = support.join(name);
-        if dir.is_dir() { return dir.join("config.json"); }
+        if dir.is_dir() {
+            return dir.join("config.json");
+        }
     }
     support.join("Claude").join("config.json")
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn config_path() -> PathBuf { home_dir().join(".claude/config.json") }
+fn config_path() -> PathBuf {
+    home_dir().join(".claude/config.json")
+}
 
 fn find_runtime(name: &str) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     let names: Vec<String> = if name == "python3" {
-        vec!["python.exe".to_string(), "py.exe".to_string(), "python3.exe".to_string()]
+        vec![
+            "python.exe".to_string(),
+            "py.exe".to_string(),
+            "python3.exe".to_string(),
+        ]
     } else {
         vec![format!("{name}.exe"), name.to_string()]
     };
@@ -205,7 +228,12 @@ fn find_runtime(name: &str) -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = std::env::var_os("PATH")
         .into_iter()
         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-        .flat_map(|dir| names.iter().map(move |name| dir.join(name)).collect::<Vec<_>>())
+        .flat_map(|dir| {
+            names
+                .iter()
+                .map(move |name| dir.join(name))
+                .collect::<Vec<_>>()
+        })
         .collect();
     #[cfg(not(target_os = "windows"))]
     let mut candidates = vec![home_dir().join(".local/bin").join(name)];
@@ -249,13 +277,20 @@ fn app_version(app: &Path, _key: &str) -> String {
     let escaped = app.to_string_lossy().replace('\'', "''");
     Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(format!("(Get-Item -LiteralPath '{escaped}').VersionInfo.ProductVersion"))
-        .output().ok().filter(|out| out.status.success())
-        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string()).unwrap_or_default()
+        .arg(format!(
+            "(Get-Item -LiteralPath '{escaped}').VersionInfo.ProductVersion"
+        ))
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn app_version(_app: &Path, _key: &str) -> String { String::new() }
+fn app_version(_app: &Path, _key: &str) -> String {
+    String::new()
+}
 
 #[cfg(target_os = "macos")]
 fn claude_running() -> bool {
@@ -272,12 +307,16 @@ fn claude_running() -> bool {
 fn claude_running() -> bool {
     Command::new("tasklist.exe")
         .args(["/FI", "IMAGENAME eq Claude.exe", "/NH"])
-        .stdout(Stdio::null()).stderr(Stdio::null()).status()
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
         .is_ok_and(|status| status.success())
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn claude_running() -> bool { false }
+fn claude_running() -> bool {
+    false
+}
 
 pub fn status() -> ClaudeLocalizationStatus {
     let source = source_app();
@@ -410,7 +449,10 @@ fn set_locale_at(config: &Path, backup: &Path, locale: Option<&str>, restore: bo
 }
 
 pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
-    ensure!(cfg!(any(target_os = "macos", target_os = "windows")), "Claude 汉化目前支持 macOS 和 Windows");
+    ensure!(
+        cfg!(any(target_os = "macos", target_os = "windows")),
+        "Claude 汉化目前支持 macOS 和 Windows"
+    );
     ensure!(
         ["prepare", "check", "launch", "restore"].contains(&action),
         "未知汉化操作"
@@ -441,34 +483,43 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                 "需要带有内置 WebSocket 的 Node.js 22 或更新版本才能中文启动"
             );
             if cfg!(target_os = "windows") && windows_msix_source(&source) {
-                fs::write(root.join("prepared.json"), serde_json::to_vec(&json!({
-                    "sourceBuild": app_version(&source, "ProductVersion"),
-                    "msix": true
-                }))?)?;
+                fs::write(
+                    root.join("prepared.json"),
+                    serde_json::to_vec(&json!({
+                        "sourceBuild": app_version(&source, "ProductVersion"),
+                        "msix": true
+                    }))?,
+                )?;
                 "已检测到 Windows MSIX 版 Claude；保留官方包不变，使用启动注入。".to_string()
             } else {
-            let staged = staged_copy_path(&format!("Claude-staging-{}", uuid::Uuid::new_v4()));
-            let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
-            run_script(&script_runtime, script, &staged, &[])?;
-            // 校验通过后才替换；旧副本保留，构建失败时不会影响它。
-            let old = staged_copy_path(&format!("Claude-backup-{}", uuid::Uuid::new_v4()));
-            if copy.exists() {
-                if let Some(parent) = old.parent() { fs::create_dir_all(parent)?; }
-                fs::rename(&copy, &old)?;
-            }
-            if let Err(error) = fs::rename(&staged, &copy) {
-                if old.exists() {
-                    let _ = fs::rename(&old, &copy);
+                let staged = staged_copy_path(&format!("Claude-staging-{}", uuid::Uuid::new_v4()));
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
+                run_script(&script_runtime, script, &staged, &[])?;
+                // 校验通过后才替换；旧副本保留，构建失败时不会影响它。
+                let old = staged_copy_path(&format!("Claude-backup-{}", uuid::Uuid::new_v4()));
+                if copy.exists() {
+                    if let Some(parent) = old.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(&copy, &old)?;
                 }
-                return Err(error.into());
-            }
-            fs::write(
-                root.join("prepared.json"),
-                serde_json::to_vec(&json!({
-                    "sourceBuild": app_version(&source, "CFBundleVersion")
-                }))?,
-            )?;
-            "副本已准备并通过签名及 app.asar 一致性校验。".to_string()
+                if let Err(error) = fs::rename(&staged, &copy) {
+                    if old.exists() {
+                        let _ = fs::rename(&old, &copy);
+                    }
+                    return Err(error.into());
+                }
+                fs::write(
+                    root.join("prepared.json"),
+                    serde_json::to_vec(&json!({
+                        "sourceBuild": app_version(&source, "CFBundleVersion")
+                    }))?,
+                )?;
+                "副本已准备并通过签名及 app.asar 一致性校验。".to_string()
             }
         }
         "check" => {
@@ -476,7 +527,11 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                 ensure!(source.exists(), "未找到 Claude MSIX 安装入口");
                 "Windows MSIX 安装入口已检测到，采用原版包启动注入。".to_string()
             } else {
-                let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
                 run_script(&script_runtime, script, &copy, &["--check"])?;
                 "副本签名、中文词表、注入开关及 app.asar 一致性校验通过。".to_string()
             }
@@ -488,7 +543,11 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                 find_runtime("node").context("未找到带内置 WebSocket 的 Node.js 22 或更新版本")?
             };
             if !(cfg!(target_os = "windows") && windows_msix_source(&source)) {
-                let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
                 run_script(&script_runtime, script, &copy, &["--check"])?;
             }
             let config = config_path();
@@ -506,7 +565,11 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
             };
             set_locale_at(&config, &backup, original.as_deref(), action == "restore")?;
             let locale = original.as_deref().unwrap_or("en-US");
-            let script = if cfg!(target_os = "windows") { "inject-cn.ps1" } else { "inject-cn.js" };
+            let script = if cfg!(target_os = "windows") {
+                "inject-cn.ps1"
+            } else {
+                "inject-cn.js"
+            };
             if let Err(error) = run_script(&launcher, script, &copy, &["--locale", locale]) {
                 // 启动失败后只在应用未运行时还原本次外壳语言，避免与 Claude 写盘竞争。
                 if !claude_running() {

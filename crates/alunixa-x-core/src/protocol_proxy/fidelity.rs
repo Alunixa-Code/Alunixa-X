@@ -163,7 +163,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .or_else(|| call.get("id"))
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                let name = if kind == "tool_search_call" { "tool_search" } else {
+                let name = if kind == "tool_search_call" {
+                    "tool_search"
+                } else {
                     call.get("name").and_then(Value::as_str).unwrap_or("")
                 };
                 if id.is_empty() || name.is_empty() || !calls.insert(id.to_string()) {
@@ -192,7 +194,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     return reject("additional tools must be an array");
                 };
                 validate_tools(tools)?;
-                if let Some(content) = item.get("content") { validate_content(content, wire)?; }
+                if let Some(content) = item.get("content") {
+                    validate_content(content, wire)?;
+                }
             }
             "function_call_output" | "custom_tool_call_output" | "tool_result" => {
                 let id = item
@@ -242,7 +246,9 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
         }
     }
     if calls != outputs {
-        return reject("unanswered tool calls require their original results; history was not discarded");
+        return reject(
+            "unanswered tool calls require their original results; history was not discarded",
+        );
     }
     Ok(())
 }

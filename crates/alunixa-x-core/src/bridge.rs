@@ -53,7 +53,13 @@ pub async fn install_renderer_bridge(
             }
         })
     });
-    install_bridge(websocket_url, BRIDGE_BINDING_NAME, handler, new_document_scripts).await
+    install_bridge(
+        websocket_url,
+        BRIDGE_BINDING_NAME,
+        handler,
+        new_document_scripts,
+    )
+    .await
 }
 
 static NEXT_MESSAGE_ID: AtomicU64 = AtomicU64::new(100);
@@ -337,8 +343,7 @@ const APP_SERVER_CLIENT_CAPTURE_WATCH_CAP: Duration = Duration::from_secs(8 * 60
 const APP_SERVER_CLIENT_CAPTURE_ENABLE_TIMEOUT: Duration = Duration::from_secs(15);
 const APP_SERVER_CLIENT_CAPTURE_ENABLE_ATTEMPTS: usize = 3;
 const APP_SERVER_CLIENT_CAPTURE_ENABLE_RETRY_DELAY: Duration = Duration::from_secs(2);
-const APP_SERVER_CLIENT_CAPTURE_ON_CALL_FRAME: &str =
-    "(()=>{try{const ctor=this.constructor;if(typeof ctor!=='function'||ctor===Object||ctor===Function)return false;if(typeof ctor.prototype?.sendRequest!=='function'&&typeof this.sendRequest!=='function')return false;window.__alunixaXAppServerClientClass=ctor;return window.__alunixaXAppServerClientClass===ctor}catch{return false}})()";
+const APP_SERVER_CLIENT_CAPTURE_ON_CALL_FRAME: &str = "(()=>{try{const ctor=this.constructor;if(typeof ctor!=='function'||ctor===Object||ctor===Function)return false;if(typeof ctor.prototype?.sendRequest!=='function'&&typeof this.sendRequest!=='function')return false;window.__alunixaXAppServerClientClass=ctor;return window.__alunixaXAppServerClientClass===ctor}catch{return false}})()";
 const APP_SERVER_CLIENT_CAPTURE_COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const APP_SERVER_CLIENT_CAPTURE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -463,10 +468,15 @@ async fn run_app_server_client_capture(
         return Ok(());
     };
     capture_app_server_client_at_location(
-        &mut session, &generation, (url_regex, line_number, column_number),
-        APP_SERVER_CLIENT_CAPTURE_COMMAND_TIMEOUT, APP_SERVER_CLIENT_CAPTURE_WATCH_CAP,
+        &mut session,
+        &generation,
+        (url_regex, line_number, column_number),
+        APP_SERVER_CLIENT_CAPTURE_COMMAND_TIMEOUT,
+        APP_SERVER_CLIENT_CAPTURE_WATCH_CAP,
         APP_SERVER_CLIENT_CAPTURE_CLEANUP_TIMEOUT,
-    ).await.map(|_| ())
+    )
+    .await
+    .map(|_| ())
 }
 
 #[derive(Default)]

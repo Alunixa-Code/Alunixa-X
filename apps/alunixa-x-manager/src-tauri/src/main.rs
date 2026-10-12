@@ -2,10 +2,16 @@
 
 fn main() {
     let os_args: Vec<_> = std::env::args_os().collect();
-    if let Some(options_path) = os_args.windows(2)
+    if let Some(options_path) = os_args
+        .windows(2)
         .find(|window| window[0] == "--alunixa-x-multi-worker")
-        .and_then(|window| window.get(1)) {
-        if alunixa_x_manager_lib::commands::run_codex_multi_worker(std::path::Path::new(options_path)).is_err() {
+        .and_then(|window| window.get(1))
+    {
+        if alunixa_x_manager_lib::commands::run_codex_multi_worker(std::path::Path::new(
+            options_path,
+        ))
+        .is_err()
+        {
             // The worker status file records a redacted diagnostic; never echo config or credentials here.
             eprintln!("multi_worker_failed");
             std::process::exit(1);
@@ -14,11 +20,18 @@ fn main() {
     }
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--alunixa-x-proxy-probe") {
-        let result = args.get(1).ok_or_else(|| anyhow::anyhow!("proxy_probe_request_missing"))
-            .and_then(|path| alunixa_x_core::packaged_proxy::run_probe_request(std::path::Path::new(path)));
+        let result = args
+            .get(1)
+            .ok_or_else(|| anyhow::anyhow!("proxy_probe_request_missing"))
+            .and_then(|path| {
+                alunixa_x_core::packaged_proxy::run_probe_request(std::path::Path::new(path))
+            });
         std::process::exit(if result.is_ok() { 0 } else { 1 });
     }
-    if args.iter().any(|arg| arg == "--alunixa-x-hook" || arg == "--alunixa-x-shared-terminal") {
+    if args
+        .iter()
+        .any(|arg| arg == "--alunixa-x-hook" || arg == "--alunixa-x-shared-terminal")
+    {
         let result = tokio_runtime_blocking_cli(args);
         std::process::exit(if result.is_ok() { 0 } else { 1 });
     }
@@ -108,9 +121,11 @@ fn tokio_runtime_blocking_cli(args: Vec<String>) -> anyhow::Result<()> {
         let request = alunixa_x_core::shared_terminal::parse_proxy_request(args.iter())?;
         let result = alunixa_x_core::shared_terminal::run_proxy(request).await?;
         std::io::stdout().write_all(result.output.as_bytes())?;
-        if !result.error.is_empty() { std::io::stderr().write_all(result.error.as_bytes())?; }
+        if !result.error.is_empty() {
+            std::io::stderr().write_all(result.error.as_bytes())?;
+        }
         std::io::stdout().flush()?;
-        std::process::exit(result.exit_code.clamp(0,255));
+        std::process::exit(result.exit_code.clamp(0, 255));
     })
 }
 

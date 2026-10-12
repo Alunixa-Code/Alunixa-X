@@ -498,8 +498,8 @@ fn mask_bearer_tokens(text: &str) -> String {
         let at = i + rel;
         let after = at + WORD.len();
         // 前一字符是字母数字或 `_` 视为词内（如 token_bearer），不算独立词
-        let prev_in_word = at > 0
-            && ((bytes[at - 1] as char).is_ascii_alphanumeric() || bytes[at - 1] == b'_');
+        let prev_in_word =
+            at > 0 && ((bytes[at - 1] as char).is_ascii_alphanumeric() || bytes[at - 1] == b'_');
         let next_is_ws = after < bytes.len() && matches!(bytes[after], b' ' | b'\t');
         result.push_str(&text[i..after]);
         if prev_in_word || !next_is_ws {
@@ -2662,12 +2662,19 @@ mod tests {
         let cases = [
             ("Authorization: Bearer sk-abc", "Authorization: ***"),
             ("authorization: Basic dXNlcjpwYXNz", "authorization: ***"),
-            ("\"Authorization\": \"Bearer xyz\"", "\"Authorization\": \"***\""),
+            (
+                "\"Authorization\": \"Bearer xyz\"",
+                "\"Authorization\": \"***\"",
+            ),
             // 空值不掩成占位符
             ("\"Authorization\": \"\"", "\"Authorization\": \"\""),
         ];
         for (input, expected) in cases {
-            assert_eq!(redact_secrets(input, "unused-key"), expected, "input: {input}");
+            assert_eq!(
+                redact_secrets(input, "unused-key"),
+                expected,
+                "input: {input}"
+            );
         }
     }
 
@@ -2678,17 +2685,29 @@ mod tests {
             "header was bearer ***, then more"
         );
         // 非独立词 / 后面不是空白：不误伤
-        assert_eq!(redact_secrets("unbearer something", "unused"), "unbearer something");
+        assert_eq!(
+            redact_secrets("unbearer something", "unused"),
+            "unbearer something"
+        );
         assert_eq!(redact_secrets("bearerxyz", "unused"), "bearerxyz");
         // 下划线词内（token_bearer）不算独立词
-        assert_eq!(redact_secrets("token_bearer abc", "unused"), "token_bearer abc");
+        assert_eq!(
+            redact_secrets("token_bearer abc", "unused"),
+            "token_bearer abc"
+        );
     }
 
     #[test]
     fn redact_secrets_keeps_normal_text_intact() {
-        assert_eq!(redact_secrets("HTTP 401 未授权", "sk-test"), "HTTP 401 未授权");
+        assert_eq!(
+            redact_secrets("HTTP 401 未授权", "sk-test"),
+            "HTTP 401 未授权"
+        );
         // authorization 作为普通单词（无冒号）不触发
-        assert_eq!(redact_secrets("authorization failed", "sk-test"), "authorization failed");
+        assert_eq!(
+            redact_secrets("authorization failed", "sk-test"),
+            "authorization failed"
+        );
     }
 
     // ── validate_image_data_url（加固 spec §4.1 第二道门）────────────
@@ -2829,8 +2848,14 @@ mod tests {
         assert_eq!(outcome.status, "ok");
         // description 逐字可见：命中精确匹配的那串不被掩
         let desc = outcome.text.as_deref().unwrap();
-        assert!(desc.contains("sk-test"), "description must stay verbatim: {desc}");
-        assert!(!desc.contains("***"), "description must stay verbatim: {desc}");
+        assert!(
+            desc.contains("sk-test"),
+            "description must stay verbatim: {desc}"
+        );
+        assert!(
+            !desc.contains("***"),
+            "description must stay verbatim: {desc}"
+        );
         // raw_response 仍整段脱敏
         let raw_resp = outcome.raw_response.as_deref().unwrap();
         assert!(!raw_resp.contains("sk-test"));

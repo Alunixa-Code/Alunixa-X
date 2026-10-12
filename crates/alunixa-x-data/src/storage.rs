@@ -454,11 +454,7 @@ impl SQLiteStorageAdapter {
                 "候选路径：{}",
                 others
                     .iter()
-                    .map(|path| format!(
-                        "{} (exists: {})",
-                        path.to_string_lossy(),
-                        path.is_file()
-                    ))
+                    .map(|path| format!("{} (exists: {})", path.to_string_lossy(), path.is_file()))
                     .collect::<Vec<_>>()
                     .join("、")
             ));
@@ -894,7 +890,8 @@ impl SQLiteStorageAdapter {
             .then_some(path)
         };
         for db_path in &self.allowed_db_paths {
-            let Ok(db) = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
+            let Ok(db) = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            else {
                 continue;
             };
             let _ = db.busy_timeout(std::time::Duration::from_millis(50));
@@ -928,12 +925,12 @@ impl SQLiteStorageAdapter {
                 }
                 budget -= 1;
                 let Ok(entry) = entry else { continue };
-                let Ok(kind) = entry.file_type() else { continue };
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
                 if kind.is_dir() && depth < 3 {
                     pending.push((entry.path(), depth + 1));
-                } else if kind.is_file()
-                    && entry.file_name().to_string_lossy().ends_with(&suffix)
-                {
+                } else if kind.is_file() && entry.file_name().to_string_lossy().ends_with(&suffix) {
                     return fs::canonicalize(entry.path()).ok();
                 }
             }
@@ -1598,7 +1595,11 @@ fn table_columns(db: &Connection, table: &str) -> anyhow::Result<Vec<String>> {
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-pub(crate) fn select_dicts(db: &Connection, sql: &str, params: &[&dyn ToSql]) -> anyhow::Result<Vec<Value>> {
+pub(crate) fn select_dicts(
+    db: &Connection,
+    sql: &str,
+    params: &[&dyn ToSql],
+) -> anyhow::Result<Vec<Value>> {
     let mut stmt = db.prepare(sql)?;
     let columns: Vec<String> = stmt
         .column_names()
@@ -2055,7 +2056,11 @@ pub(crate) fn json_to_sql_value(value: &Value) -> SqlValue {
 mod database_not_found_tests {
     use super::*;
 
-    fn adapter(db_path: PathBuf, allowed: Vec<PathBuf>, home: Option<&Path>) -> SQLiteStorageAdapter {
+    fn adapter(
+        db_path: PathBuf,
+        allowed: Vec<PathBuf>,
+        home: Option<&Path>,
+    ) -> SQLiteStorageAdapter {
         let mut adapter = SQLiteStorageAdapter::new(db_path, BackupStore::new("/tmp/backups"))
             .with_allowed_db_paths(allowed);
         if let Some(home) = home {
@@ -2072,7 +2077,11 @@ mod database_not_found_tests {
         let primary = home.join("state_5.sqlite");
         let candidate = home.join("sqlite").join("state_5.sqlite");
 
-        let adapter = adapter(primary.clone(), vec![primary.clone(), candidate.clone()], Some(&home));
+        let adapter = adapter(
+            primary.clone(),
+            vec![primary.clone(), candidate.clone()],
+            Some(&home),
+        );
         let message = adapter.database_not_found_message();
 
         assert!(message.contains(&primary.to_string_lossy().to_string()));
@@ -2116,7 +2125,10 @@ mod database_not_found_tests {
         let adapter = adapter(primary, vec![], None);
         let message = adapter.database_not_found_message();
 
-        assert!(!message.contains("Codex home："), "不该出现空 home：{message}");
+        assert!(
+            !message.contains("Codex home："),
+            "不该出现空 home：{message}"
+        );
     }
 }
 

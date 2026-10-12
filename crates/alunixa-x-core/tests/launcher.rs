@@ -440,20 +440,21 @@ fn app_paths_saved_path_is_used_when_no_explicit_path_is_provided() {
 #[test]
 fn app_paths_rejects_alunixa_x_plus_install_dir_as_codex_app() {
     let temp = tempfile::tempdir().unwrap();
-    let manager = temp.path().join("Programs").join("Alunixa X");
-    std::fs::create_dir_all(&manager).unwrap();
-    // 真实安装根里是产品自己的文件：管理工具二进制 + 卸载器（见 install/windows.rs）。
-    std::fs::write(manager.join("alunixa-x-plus-manager.exe"), "").unwrap();
-    std::fs::write(manager.join("uninstall.exe"), "").unwrap();
+    for gui in ["alunixa-x-plus.exe", "alunixa-x-plus-manager.exe"] {
+        let manager = temp.path().join(gui).join("Programs").join("Alunixa X");
+        std::fs::create_dir_all(&manager).unwrap();
+        std::fs::write(manager.join(gui), "").unwrap();
+        std::fs::write(manager.join("uninstall.exe"), "").unwrap();
+        // A product marker must reject even an official-looking executable;
+        // merely omitting Codex.exe would not exercise self-launch protection.
+        std::fs::write(manager.join("Codex.exe"), "").unwrap();
 
-    assert_eq!(normalize_codex_app_path(&manager), None);
-    assert_eq!(
-        normalize_codex_app_path(&manager.join("alunixa-x-plus-manager.exe")),
-        None
-    );
+        assert_eq!(normalize_codex_app_path(&manager), None, "{gui}");
+        assert_eq!(normalize_codex_app_path(&manager.join(gui)), None, "{gui}");
 
-    let resolved = resolve_codex_app_dir_with_saved(None, Some(&manager.to_string_lossy()));
-    assert_ne!(resolved.as_deref(), Some(manager.as_path()));
+        let resolved = resolve_codex_app_dir_with_saved(None, Some(&manager.to_string_lossy()));
+        assert_ne!(resolved.as_deref(), Some(manager.as_path()), "{gui}");
+    }
 }
 
 #[test]
@@ -727,11 +728,7 @@ fn launcher_appends_extra_codex_arguments_after_debug_arguments() {
 
 #[test]
 fn launcher_preserves_fast_startup_compatibility_without_implicit_cli_arguments() {
-    for old_value in [
-        serde_json::json!(true),
-        serde_json::json!(false),
-        serde_json::json!("legacy"),
-    ] {
+    for old_value in [serde_json::json!(true), serde_json::json!(false)] {
         let settings: BackendSettings = serde_json::from_value(serde_json::json!({
             "codexAppFastStartup": old_value,
         }))
@@ -740,9 +737,23 @@ fn launcher_preserves_fast_startup_compatibility_without_implicit_cli_arguments(
         assert_eq!(args, build_codex_arguments(9229, &[]));
         assert_eq!(
             serde_json::to_value(&settings).unwrap()["codexAppFastStartup"],
-            old_value.as_bool().unwrap_or(false),
+            old_value.as_bool().unwrap(),
             "retain typed AX compatibility settings without inventing CLI flags"
         );
+    }
+
+    for invalid_value in [
+        serde_json::json!("legacy"),
+        serde_json::json!(1),
+        serde_json::json!(null),
+        serde_json::json!({}),
+        serde_json::json!([]),
+    ] {
+        let error = serde_json::from_value::<BackendSettings>(serde_json::json!({
+            "codexAppFastStartup": invalid_value,
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("expected a boolean"));
     }
 
     let manual_argument = "--host-resolver-rules=MAP example.test 127.0.0.1";

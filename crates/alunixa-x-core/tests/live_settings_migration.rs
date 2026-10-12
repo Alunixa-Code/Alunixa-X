@@ -24,7 +24,8 @@ fn migrating_a_real_settings_file_loses_nothing() {
     };
 
     let original_text = std::fs::read_to_string(&live).expect("读真实 settings.json");
-    let original: serde_json::Value = serde_json::from_str(&original_text).expect("解析真实 settings");
+    let original: serde_json::Value =
+        serde_json::from_str(&original_text).expect("解析真实 settings");
 
     // 只在临时目录里动手，原文件只读。
     let temp = tempfile::tempdir().unwrap();
@@ -44,10 +45,7 @@ fn migrating_a_real_settings_file_loses_nothing() {
     //   - 不认识的键会被 `normalize_settings_config_sections` 丢掉（任何一次保存都会）
     //   - `relay*ConfigContents` 是配置文本，保存时会做 TOML 归一化（删空行等）
     // 除这两类外，其余字段必须逐字节不变。
-    const TEXT_FIELDS: &[&str] = &[
-        "relayCommonConfigContents",
-        "relayContextConfigContents",
-    ];
+    const TEXT_FIELDS: &[&str] = &["relayCommonConfigContents", "relayContextConfigContents"];
     let original_obj = original.as_object().unwrap();
     let migrated_obj = migrated.as_object().unwrap();
     let mut unknown_keys = Vec::new();
@@ -101,8 +99,14 @@ fn migrating_a_real_settings_file_loses_nothing() {
         .expect("迁移后必须有 tools.codex");
     assert_eq!(codex.get("activeRelayId"), original.get("activeRelayId"));
     assert_eq!(
-        codex.get("relayProfiles").and_then(|value| value.as_array()).map(Vec::len),
-        original.get("relayProfiles").and_then(|value| value.as_array()).map(Vec::len),
+        codex
+            .get("relayProfiles")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
+        original
+            .get("relayProfiles")
+            .and_then(|value| value.as_array())
+            .map(Vec::len),
         "分片里的供应商数量必须与扁平字段一致"
     );
 

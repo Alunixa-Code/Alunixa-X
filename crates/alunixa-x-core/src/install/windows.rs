@@ -251,7 +251,10 @@ mod tests {
         // 安装记录来自另一个目录；空桌面不代表首次安装。
         let installed = has_existing_installation(|key| {
             Ok(if key == UNINSTALL_SUBKEY {
-                vec![("InstallLocation".into(), Some("C:/Programs/Alunixa X".into()))]
+                vec![(
+                    "InstallLocation".into(),
+                    Some("C:/Programs/Alunixa X".into()),
+                )]
             } else {
                 Vec::new()
             })
@@ -291,7 +294,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let installed = has_existing_installation(|key| {
             Ok(if key == LEGACY_UNINSTALL_SUBKEY {
-                vec![("InstallLocation".into(), Some("C:/Programs/Alunixa X".into()))]
+                vec![(
+                    "InstallLocation".into(),
+                    Some("C:/Programs/Alunixa X".into()),
+                )]
             } else {
                 Vec::new()
             })

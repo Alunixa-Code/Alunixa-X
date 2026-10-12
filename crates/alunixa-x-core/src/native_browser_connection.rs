@@ -251,7 +251,12 @@ mod tests {
         assert_eq!(browser_info(&json!({"type":"iab"})).unwrap(), None);
         assert_eq!(browser_info(&json!({"type":"cdp"})).unwrap(), None);
         // 已登记的 ID 必须标记为 recognized。
-        assert!(browser_info(&edge(json!(true))).unwrap().unwrap().recognized);
+        assert!(
+            browser_info(&edge(json!(true)))
+                .unwrap()
+                .unwrap()
+                .recognized
+        );
         // 既不是 edge/chrome 也不是 extension 的后端仍然拒绝。
         let mut info = edge(json!(true));
         info["family"] = json!("firefox");

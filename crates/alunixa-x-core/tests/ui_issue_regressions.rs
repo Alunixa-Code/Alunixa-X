@@ -57,8 +57,12 @@ fn session_delete_renderer_behaviors() {
         .current_dir(root.join("apps/alunixa-x-manager"))
         .output()
         .expect("node is required for session deletion UI tests");
-    assert!(output.status.success(), "{}\n{}",
-        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

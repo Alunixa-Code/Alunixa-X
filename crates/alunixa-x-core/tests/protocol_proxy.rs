@@ -108,8 +108,10 @@ fn chat_conversion_rejects_encrypted_agent_content_without_echoing_payload() {
     ] {
         for standard in [false, true] {
             let error = responses_to_chat_completions_with_options(
-                json!({"model":"custom-model","input":input}), standard,
-            ).expect_err("加密 agent 内容必须明确拒绝，不能静默丢弃或视为明文");
+                json!({"model":"custom-model","input":input}),
+                standard,
+            )
+            .expect_err("加密 agent 内容必须明确拒绝，不能静默丢弃或视为明文");
             let diagnostic = format!("{error:#}");
             assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
             assert!(!diagnostic.contains("private-agent-payload"));
@@ -122,15 +124,25 @@ fn chat_conversion_preserves_plaintext_and_local_compaction_but_rejects_foreign_
     let converted = responses_to_chat_completions(json!({"input":[
         {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}]},
         {"role":"user","content":"plaintext-task"}, local_compaction_item("local-summary")
-    ]})).unwrap();
-    let messages=converted["messages"].to_string();
-    for value in ["plaintext-task","visible-summary","local-summary"] { assert!(messages.contains(value)); }
-    assert!(responses_to_chat_completions(json!({"input":[{"type":"reasoning","encrypted_content":"opaque"}]})).is_err());
+    ]}))
+    .unwrap();
+    let messages = converted["messages"].to_string();
+    for value in ["plaintext-task", "visible-summary", "local-summary"] {
+        assert!(messages.contains(value));
+    }
+    assert!(
+        responses_to_chat_completions(
+            json!({"input":[{"type":"reasoning","encrypted_content":"opaque"}]})
+        )
+        .is_err()
+    );
 }
 
 #[tokio::test]
 async fn encrypted_agent_content_is_rejected_before_contacting_chat_upstream() {
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let address = listener.local_addr().unwrap();
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
     let upstream = tokio::spawn(async move {
@@ -139,12 +151,18 @@ async fn encrypted_agent_content_is_rejected_before_contacting_chat_upstream() {
             _ = stopped => None,
         }
     });
-    let settings = session_header_settings(RelayProtocol::ChatCompletions, format!("http://{address}/v1"));
+    let settings = session_header_settings(
+        RelayProtocol::ChatCompletions,
+        format!("http://{address}/v1"),
+    );
     let result = open_responses_proxy_request_with_settings(
         &json!({"model":"custom-model","stream":false,"input":[
             {"type":"encrypted_content","encrypted_content":"private-agent-payload"}
-        ]}).to_string(), settings,
-    ).await;
+        ]})
+        .to_string(),
+        settings,
+    )
+    .await;
     let _ = stop.send(());
     let request = upstream.await.unwrap();
     assert!(result.is_err(), "必须在发送上游请求前拒绝不支持的加密内容");
@@ -153,7 +171,9 @@ async fn encrypted_agent_content_is_rejected_before_contacting_chat_upstream() {
 
 #[tokio::test]
 async fn responses_upstream_preserves_encrypted_agent_content() {
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let address = listener.local_addr().unwrap();
     let upstream = tokio::spawn(capture_json_request_once(listener));
     let request = json!({"model":"custom-model","stream":false,"input":[
@@ -161,8 +181,11 @@ async fn responses_upstream_preserves_encrypted_agent_content() {
          "content":[{"type":"encrypted_content","encrypted_content":"opaque-agent-payload"}]},
         {"type":"encrypted_content","encrypted_content":"standalone-opaque-agent-payload"}
     ]});
-    let settings = session_header_settings(RelayProtocol::Responses, format!("http://{address}/v1"));
-    let result = open_responses_proxy_request_with_settings(&request.to_string(), settings).await.unwrap();
+    let settings =
+        session_header_settings(RelayProtocol::Responses, format!("http://{address}/v1"));
+    let result = open_responses_proxy_request_with_settings(&request.to_string(), settings)
+        .await
+        .unwrap();
     assert_eq!(result.status_code, 200);
     let (_, sent) = upstream.await.unwrap();
     assert_eq!(sent, request);
@@ -2115,7 +2138,10 @@ fn responses_request_normalizes_empty_assistant_messages_for_chat_upstream() {
 
 #[test]
 fn responses_request_rejects_unsupported_unnamed_tool_controls() {
-    let error = responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"unknown_builtin"}],"tool_choice":"required"})).unwrap_err();
+    let error = responses_to_chat_completions(
+        json!({"input":"hi","tools":[{"type":"unknown_builtin"}],"tool_choice":"required"}),
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("unsupported unnamed tool"));
 }
 
@@ -3390,7 +3416,10 @@ fn chat_completion_response_accepts_responses_style_usage_fields() {
     assert_eq!(converted["usage"]["input_tokens"], 12);
     assert_eq!(converted["usage"]["output_tokens"], 3);
     assert_eq!(converted["usage"]["total_tokens"], 15);
-    assert_eq!(converted["usage"]["input_tokens_details"]["cached_tokens"], 1);
+    assert_eq!(
+        converted["usage"]["input_tokens_details"]["cached_tokens"],
+        1
+    );
     assert_eq!(converted["usage"]["cache_read_input_tokens"], 1);
     assert_eq!(converted["usage"]["cache_creation_input_tokens"], 4);
 }
@@ -5811,7 +5840,10 @@ key = "value"
 /// 时走孤儿输出路径，不能 panic 也不能丢内容。
 #[test]
 fn responses_input_handles_orphan_tool_search_output() {
-    let error = responses_to_chat_completions(json!({"input":[{"type":"tool_search_output","call_id":"orphan","tools":[]}]})).expect_err("invalid history must not be discarded or relabeled");
+    let error = responses_to_chat_completions(
+        json!({"input":[{"type":"tool_search_output","call_id":"orphan","tools":[]}]}),
+    )
+    .expect_err("invalid history must not be discarded or relabeled");
     assert!(error.to_string().contains("orphan"), "{error}");
 }
 
@@ -5819,16 +5851,25 @@ fn responses_input_handles_orphan_tool_search_output() {
 /// 空对象而不是产出非法 item 或 panic。
 #[test]
 fn chat_response_tool_search_call_rejects_malformed_arguments_without_fabrication() {
-    assert!(chat_completion_to_response_with_request(json!({"choices":[{"message":{"role":"assistant","tool_calls":[
+    assert!(
+        chat_completion_to_response_with_request(
+            json!({"choices":[{"message":{"role":"assistant","tool_calls":[
         {"id":"x","type":"function","function":{"name":"tool_search","arguments":"{broken"}}
-    ]},"finish_reason":"tool_calls"}]}), &json!({"tools":[{"type":"tool_search","execution":"client"}]})).is_err());
+    ]},"finish_reason":"tool_calls"}]}),
+            &json!({"tools":[{"type":"tool_search","execution":"client"}]})
+        )
+        .is_err()
+    );
 }
 
 /// #2263：tool_search_call 缺 call_id 时回退用 id 字段；两者皆空则整个
 /// item 被丢弃（与 function_call 分支的防御行为一致）。
 #[test]
 fn responses_input_tool_search_call_falls_back_to_id_and_rejects_empty() {
-    let error = responses_to_chat_completions(json!({"input":[{"type":"tool_search_call","arguments":{}}]})).expect_err("invalid history must not be discarded or relabeled");
+    let error = responses_to_chat_completions(
+        json!({"input":[{"type":"tool_search_call","arguments":{}}]}),
+    )
+    .expect_err("invalid history must not be discarded or relabeled");
     assert!(error.to_string().contains("identity"), "{error}");
 }
 
@@ -5963,21 +6004,35 @@ async fn native_compaction_preserves_protocol_and_opaque_state() {
 
 #[test]
 fn gemini_reasoning_is_model_specific_or_explicit_standard_opt_in() {
-    let request=json!({"model":"gemini-3.8-flash","input":"hi","reasoning":{"effort":"high"}});
-    for standard in [false,true] {
-        assert_eq!(responses_to_chat_completions_with_options(request.clone(),standard).unwrap()["reasoning_effort"],"high");
+    let request = json!({"model":"gemini-3.8-flash","input":"hi","reasoning":{"effort":"high"}});
+    for standard in [false, true] {
+        assert_eq!(
+            responses_to_chat_completions_with_options(request.clone(), standard).unwrap()["reasoning_effort"],
+            "high"
+        );
     }
-    let request=json!({"model":"google/gemini-other","input":"hi","reasoning":{"effort":"high"}});
-    assert!(responses_to_chat_completions(request.clone()).unwrap().get("reasoning_effort").is_none());
-    assert_eq!(responses_to_chat_completions_with_options(request,true).unwrap()["reasoning_effort"],"high");
+    let request = json!({"model":"google/gemini-other","input":"hi","reasoning":{"effort":"high"}});
+    assert!(
+        responses_to_chat_completions(request.clone())
+            .unwrap()
+            .get("reasoning_effort")
+            .is_none()
+    );
+    assert_eq!(
+        responses_to_chat_completions_with_options(request, true).unwrap()["reasoning_effort"],
+        "high"
+    );
 }
 
 #[test]
 fn native_search_is_not_replaced_by_a_fake_client_executor() {
-    for choice in [json!({"type":"web_search"}),json!("required")] {
-        let error=responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"web_search"}],"tool_choice":choice})).unwrap_err();
+    for choice in [json!({"type":"web_search"}), json!("required")] {
+        let error = responses_to_chat_completions(
+            json!({"input":"hi","tools":[{"type":"web_search"}],"tool_choice":choice}),
+        )
+        .unwrap_err();
         assert!(error.to_string().contains("unsupported_native_web_search"));
     }
     let converted=responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]})).unwrap();
-    assert_eq!(converted["tools"][0]["function"]["name"],"web_search");
+    assert_eq!(converted["tools"][0]["function"]["name"], "web_search");
 }

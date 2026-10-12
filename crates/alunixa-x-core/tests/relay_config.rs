@@ -235,7 +235,7 @@ fn codex_session_db_path_prefers_new_sqlite_directory_threads_db() {
 }
 
 #[test]
-fn apply_relay_config_does_not_register_or_modify_retired_plugin_cache() {
+fn provider_write_retains_valid_native_marketplace_without_mutating_its_snapshot() {
     let temp = tempfile::tempdir().unwrap();
     let home = temp.path();
     write_remote_plugin_marketplace_snapshot(home);
@@ -252,8 +252,8 @@ model_provider = "chatgpt"
     .unwrap();
 
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
-    assert!(!config.contains("[marketplaces."));
-    assert!(!config.contains("plugins-remote"));
+    assert!(config.contains("[marketplaces."));
+    assert!(config.contains("plugins-remote"));
     assert_eq!(std::fs::read(&snapshot_path).unwrap(), snapshot_before);
     assert!(
         home.join(".tmp/plugins-remote/plugins/product-design/.codex-plugin/plugin.json")
@@ -801,7 +801,6 @@ fn apply_chat_protocol_relay_points_codex_to_local_responses_proxy() {
 #[test]
 /// 回归（issue #1604）：重启/注入路径写入聚合代理配置时，
 /// 必须保留 live auth.json 里已有的官方 OAuth token，不能整体覆盖。
-#[test]
 fn apply_relay_config_with_session_provider_keeps_live_oauth_tokens() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -862,6 +861,7 @@ fn apply_relay_config_with_session_provider_repairs_empty_auth_json() {
     );
 }
 
+#[test]
 fn openai_session_provider_rejects_chat_completions() {
     let temp = tempfile::tempdir().unwrap();
 
@@ -2091,7 +2091,6 @@ fn apply_relay_files_allows_empty_isolated_auth_json() {
 #[test]
 /// 回归（issue #1604）：低层 apply API 处理聚合 profile 时不能把 auth.json 写成空文件，
 /// 并且要保留 live 里已有的官方 OAuth token。
-#[test]
 fn apply_relay_profile_files_for_aggregate_keeps_live_oauth_tokens() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -2179,6 +2178,7 @@ model_provider = "openai"
     );
 }
 
+#[test]
 fn lists_codex_context_entries_from_common_config() {
     let entries = list_context_entries_from_common_config(
         r#"[mcp_servers.context7]
