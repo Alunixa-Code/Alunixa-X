@@ -103,6 +103,8 @@ Section "Install"
   ; No sherpa-onnx DLL is required by the statically-linked SDK.
   File "${APPDIR}\alunixa-x-plus.exe"
   File "${APPDIR}\alunixa-x-imagegen-mcp.exe"
+  File "${APPDIR}\LICENSE"
+  File "${APPDIR}\THIRD_PARTY_NOTICES.md"
 
   ; 只迁移确实存在的桌面入口，用户删掉的入口在升级时仍不补建（issue #2376）。
   StrCpy $HadDesktopEntry 0
@@ -182,6 +184,8 @@ Section "Uninstall"
 
   Delete "$INSTDIR\alunixa-x-plus.exe"
   Delete "$INSTDIR\alunixa-x-imagegen-mcp.exe"
+  Delete "$INSTDIR\LICENSE"
+  Delete "$INSTDIR\THIRD_PARTY_NOTICES.md"
 
   ; NSIS 的 Delete 遇到被占用文件会静默失败，用户会误以为卸载干净。
   ; 残留检测提示用户先从托盘退出，避免“卸载后重装”继续失败（issue #2362）。

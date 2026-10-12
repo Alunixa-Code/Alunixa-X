@@ -66,7 +66,7 @@
       "source": ".github/workflows/release-assets.yml",
       "destination": ".github/workflows/release-assets.yml",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "f3b162f65dcb98df83b4c43243d71d8152f9fd809c0a3c73628669c39f9354c4"
+      "sha256": "7affbf4a8de06725238457d215735324f8383f3ba75d0554966ef6dd4b8983ff"
     },
     {
       "source": ".github/workflows/sync-official-models.yml",
@@ -3549,13 +3549,13 @@
       "source": "scripts/installer/macos/package-dmg.sh",
       "destination": "scripts/installer/macos/package-dmg.sh",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "379f3e909716b2e52421a84161ef0d2dadcf8484430467dbe444487ecc1da5f6"
+      "sha256": "40497e4d525d7ba80c58e9c665a1d944d4e3187b8bed01766506581a3ea4221e"
     },
     {
       "source": "scripts/installer/windows/CodexPlusPlus.nsi",
       "destination": "scripts/installer/windows/AlunixaX.nsi",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "64b0a1af460ede38052183cb32ceb6dfe2ec64d7fbff03adece99ed42fbc2603"
+      "sha256": "64cad8d29746e8b5fdd945f8358ccd4ad68cd8904cc331d51570aed02a8e403b"
     },
     {
       "source": "scripts/probe-extension-api-cdp.mjs",
@@ -3897,6 +3897,14 @@
     "commit": "99277921d9363c78e656ada0ca3bf39e30938b23",
     "codexCli": "0.157.1",
     "loopbackCliScenarios": 3,
-    "liveDesktopModified": false
+    "liveDesktopModified": false,
+    "localValidation": {
+      "passed": 1106,
+      "failed": 0,
+      "ignored": 3,
+      "anthropicCases": 25,
+      "cliScenarios": 3,
+      "installerCases": 12
+    }
   }
 }

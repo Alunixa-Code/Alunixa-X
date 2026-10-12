@@ -194,6 +194,19 @@ test("all installer shell entry points parse with native Bash", { skip: !hasBash
 });
 
 const compiler = [process.env.NSIS_COMPILER, "C:/Program Files (x86)/NSIS/makensis.exe", "C:/Program Files/NSIS/makensis.exe"].find((path) => path && existsSync(path));
+test("distributed packages preserve project and third-party license notices", () => {
+  const windows = text("scripts/installer/windows/package.ps1");
+  const nsis = text("scripts/installer/windows/AlunixaX.nsi");
+  const macos = text("scripts/installer/macos/package-dmg.sh");
+  const release = text(".github/workflows/release-assets.yml");
+  for (const name of ["LICENSE", "THIRD_PARTY_NOTICES.md"]) {
+    assert(windows.includes(`'${name}'`));
+    assert(nsis.includes(`File "\${APPDIR}\\${name}"`));
+    assert(macos.includes(`"$app_dir/Contents/Resources/${name}"`));
+    assert(release.includes(`"$GITHUB_WORKSPACE/${name}"`));
+  }
+  assert(text("THIRD_PARTY_NOTICES.md").includes("Copyright (c) 2025 Jason Young"));
+});
 test("real NSIS packages fixture payloads without launching or installing them", { skip: process.platform !== "win32" || !compiler }, () => temporary((directory) => {
   const binaries = join(directory, "binaries");
   const output = join(directory, "packaged");

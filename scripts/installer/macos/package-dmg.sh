@@ -72,6 +72,8 @@ create_app() {
   mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
   cp "$binary_path" "$app_dir/Contents/MacOS/$executable_name"
   cp "$ICON_ICNS" "$app_dir/Contents/Resources/$ICON_NAME"
+  cp "$ROOT/LICENSE" "$app_dir/Contents/Resources/LICENSE"
+  cp "$ROOT/THIRD_PARTY_NOTICES.md" "$app_dir/Contents/Resources/THIRD_PARTY_NOTICES.md"
   chmod +x "$app_dir/Contents/MacOS/$executable_name"
   printf 'APPL????' > "$app_dir/Contents/PkgInfo"
   if [ "$executable_name" = "AlunixaX" ]; then

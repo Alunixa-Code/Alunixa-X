@@ -22,8 +22,13 @@ foreach ($name in $binaries) {
     if ($header.Length -lt 2 -or $header[0] -ne 0x4d -or $header[1] -ne 0x5a) { throw "Not a PE binary: $name" }
     Copy-Item -LiteralPath $path -Destination (Join-Path $app $name) -Force
 }
+$notices = @('LICENSE', 'THIRD_PARTY_NOTICES.md')
+foreach ($name in $notices) {
+    Copy-Item -LiteralPath (Join-Path $root $name) -Destination (Join-Path $app $name) -Force
+}
+$payloads = @($binaries) + @($notices)
 $actual = @(Get-ChildItem -LiteralPath $app -File | ForEach-Object Name | Sort-Object)
-if (Compare-Object ($binaries | Sort-Object) $actual) { throw 'Windows stage must contain only GUI and imagegen MCP; clean the build stage before retrying.' }
+if (Compare-Object ($payloads | Sort-Object) $actual) { throw 'Windows stage must contain only GUI, imagegen MCP, and license notices; clean the build stage before retrying.' }
 
 if (-not $Compiler) {
     $Compiler = @(
@@ -40,4 +45,4 @@ $setup = Join-Path $output "Alunixa-X-$Version-windows-x64-setup.exe"
 & $Compiler '/INPUTCHARSET' 'UTF8' "/DVERSION=$Version" "/DROOT=$root" "/DAPPDIR=$app" "/DOUTPUT_FILE=$setup" (Join-Path $PSScriptRoot 'AlunixaX.nsi')
 if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed with exit code $LASTEXITCODE" }
 if (-not (Test-Path -LiteralPath $setup -PathType Leaf) -or (Get-Item -LiteralPath $setup).Length -eq 0) { throw 'Installer output missing or empty.' }
-Compress-Archive -LiteralPath ($binaries | ForEach-Object { Join-Path $app $_ }) -DestinationPath (Join-Path $output "Alunixa-X-$Version-windows-x64.zip") -Force
+Compress-Archive -LiteralPath ($payloads | ForEach-Object { Join-Path $app $_ }) -DestinationPath (Join-Path $output "Alunixa-X-$Version-windows-x64.zip") -Force

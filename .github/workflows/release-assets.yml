@@ -376,11 +376,14 @@ jobs:
             file "$WINDOWS_BIN_DIR/$binary" | grep -F 'PE32+' >/dev/null
             cp "$WINDOWS_BIN_DIR/$binary" "dist/windows/app/$binary"
           done
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/windows/app/
           (
             cd "$WINDOWS_BIN_DIR"
             zip -9 -j "$GITHUB_WORKSPACE/dist/release/Alunixa-X-${VERSION}-windows-x64.zip" \
               alunixa-x-plus.exe \
-              alunixa-x-imagegen-mcp.exe
+              alunixa-x-imagegen-mcp.exe \
+              "$GITHUB_WORKSPACE/LICENSE" \
+              "$GITHUB_WORKSPACE/THIRD_PARTY_NOTICES.md"
           )
 
           REQUIRED_PACKAGES=()
