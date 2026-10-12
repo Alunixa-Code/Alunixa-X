@@ -61,8 +61,8 @@ test("regular preview preserves inherited window and compaction when neither is 
 test("custom startup selection is explicit and distinct from editing another model", () => {
   const editor = fs.readFileSync(new URL("./components/CustomModelsEditor.tsx", import.meta.url), "utf8");
   assert.match(app, /defaultId=\{profile\.defaultCustomModelId/);
-  assert.match(app, /updateDraft\(\{customModels,defaultCustomModelId\}\)/);
-  assert.match(editor, /type="radio" checked=\{defaultId === model\.id\} onChange=\{\(\) => onChange\(models,model\.id\)\}/);
+  assert.match(app, /updateDraft\(\{customModels,defaultCustomModelId,model:selected\?\.model/);
+  assert.match(editor, /type="radio"[\s\S]*?checked=\{defaultId === model\.id\}[\s\S]*?onChange=\{\(\) => onChange\(models,model\.id\)\}/);
   assert.match(editor, /onChange\(models\.map[\s\S]*?, defaultId\)/);
 });
 

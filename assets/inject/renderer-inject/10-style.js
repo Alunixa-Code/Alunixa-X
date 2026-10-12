@@ -1873,10 +1873,16 @@
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false, answerOutline: false, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
+    return { pluginAutoExpand:true, projectMove:true, performanceProtection:true, zedRemoteOpen:true, upstreamWorktreeCreate:true, nativeMenuLocalization:true, pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false, answerOutline: false, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
   }
 
   const alunixaXBackendSettingMap = {
+    pluginAutoExpand:"codexAppPluginAutoExpand",
+    projectMove:"codexAppProjectMove",
+    performanceProtection:"codexAppPerformanceProtection",
+    zedRemoteOpen:"codexAppZedRemoteOpen",
+    upstreamWorktreeCreate:"codexAppUpstreamWorktreeCreate",
+    nativeMenuLocalization:"codexAppNativeMenuLocalization",
     pluginMarketplaceUnlock: "codexAppPluginMarketplaceUnlock",
     modelWhitelistUnlock: "codexAppModelWhitelistUnlock",
     sessionDelete: "codexAppSessionDelete",
@@ -1914,6 +1920,8 @@
   function alunixaXSettings() {
     if (alunixaXBackendSettings.enhancementsEnabled === false) {
       return {
+        pluginAutoExpand:false, projectMove:false, performanceProtection:false,
+        zedRemoteOpen:false, upstreamWorktreeCreate:false, nativeMenuLocalization:false,
         pluginMarketplaceUnlock: false,
         modelWhitelistUnlock: false,
         sessionDelete: false,

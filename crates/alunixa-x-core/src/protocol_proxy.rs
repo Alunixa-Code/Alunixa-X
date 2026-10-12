@@ -1988,6 +1988,53 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 .unwrap_or("")
                 .to_string();
 
+            if settings.enhancements_enabled
+                && settings.codex_app_responses_id_negotiation
+                && wire_api == UpstreamWireApi::Responses
+                && matches!(status_code, 400 | 422)
+                && !probe_native_compaction
+            {
+                let error_body = read_limited_upstream_body(&mut upstream, 64 * 1024)
+                    .await?
+                    .to_vec();
+                let repair = std::str::from_utf8(&error_body).ok().and_then(|error| {
+                    repair_responses_item_ids_for_upstream_error(&upstream_body.to_string(), error)
+                });
+                if let Some(repair) = repair {
+                    let repaired = serde_json::from_str::<Value>(&repair.body)?;
+                    upstream = send_responses_upstream_request(
+                        &relay,
+                        &endpoint,
+                        &repaired,
+                        wire_api,
+                        is_stream,
+                        original_user_agent,
+                        beta_features,
+                        session_headers,
+                    )
+                    .await?;
+                    status_code = upstream.status().as_u16();
+                    content_type = upstream
+                        .headers()
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("")
+                        .to_string();
+                } else {
+                    return Ok(UpstreamProxyResponse {
+                        status_code,
+                        is_stream: false,
+                        content_type,
+                        wire_api,
+                        compaction: false,
+                        native_compaction_passthrough: false,
+                        buffered_body: Some(error_body),
+                        response: None,
+                        _channel_permit: Some(channel_permit),
+                    });
+                }
+            }
+
             if probe_native_compaction {
                 let success = (200..300).contains(&status_code);
                 let retry_after =

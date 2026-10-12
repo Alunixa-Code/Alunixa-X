@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod install;
+mod restored_operations;
 mod runtime_health;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -124,6 +125,7 @@ pub fn run() {
             commands::list_tools,
             commands::test_vlm,
             commands::load_grok_config,
+            restored_operations::restored_agent_operation,
             commands::save_grok_config,
             commands::load_grok_providers,
             commands::apply_grok_relay_profile,

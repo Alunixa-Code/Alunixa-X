@@ -38,8 +38,13 @@ function harness(options: { marker?: string | null; current?: unknown; response?
     pause: (fn: () => Promise<void>) => { pause = fn; } };
 }
 
-test("forced locale installation is retired and migration never synthesizes permission consent", () => {
-  assert.doesNotMatch(renderer, /function installAlunixaXForceChineseLocale\(/);
+test("explicit forced locale and conservative disable migration never synthesize permission consent", () => {
+  assert.match(renderer, /function installAlunixaXForceChineseLocale\(/);
+  const startup = readFileSync(new URL("../../../assets/inject/renderer-inject/99-startup.js", import.meta.url), "utf8");
+  assert.match(startup, /__ALUNIXA_X_FORCE_CHINESE_LOCALE__\?\.enabled === true/);
+  const runtime = readFileSync(new URL("../../../assets/inject/renderer-inject/96-restored-features.js", import.meta.url), "utf8");
+  const locale = runtime.slice(runtime.indexOf("function installAlunixaXForceChineseLocale"), runtime.indexOf("const codexPerformanceImageFailures"));
+  assert.doesNotMatch(locale, /approval_policy|full-access|permissionDecision|dispatchEvent/);
   assert.doesNotMatch(source, /navigator|__STATSIG__|\.reload\(|\.click\(|dispatchEvent|full-access|approval_policy/);
   assert.doesNotMatch(source, /setInterval|setTimeout/);
   assert.match(renderer, /restoreCodexPlusManagedLocale\(\)/);

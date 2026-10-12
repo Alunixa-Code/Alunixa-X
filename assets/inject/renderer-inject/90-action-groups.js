@@ -185,7 +185,8 @@
     const missingDelete = settings.sessionDelete && !existingDeleteButton;
     const missingMore = needsMoreMenu && !existingMoreButton;
     const deleteReady = !settings.sessionDelete || existingDeleteButton?.dataset.codexDeleteVersion === codexDeleteVersion;
-    const groupReady = existingGroup?.dataset.codexActionGroupVersion === codexActionGroupVersion;
+    const groupReady = existingGroup?.dataset.codexActionGroupVersion === codexActionGroupVersion
+      && existingGroup?.dataset.codexProjectMoveEnabled === String(!!settings.projectMove);
     if (groupReady && deleteReady && !hasUnexpectedDelete && !hasUnexpectedMore && !hasUnexpectedExport && !missingDelete && !missingMore) {
       return;
     }
@@ -197,6 +198,7 @@
     const group = document.createElement("div");
     group.className = actionGroupClass;
     group.dataset.codexActionGroupVersion = codexActionGroupVersion;
+    group.dataset.codexProjectMoveEnabled = String(!!settings.projectMove);
     if (needsMoreMenu) {
       const moreButton = document.createElement("button");
       moreButton.type = "button";
@@ -225,6 +227,19 @@
         sessionAutoRenameItem.dataset.codexSessionAutoRenameMenu = "true";
         sessionAutoRenameItem.__codexSessionAutoRenameRow = row;
         moreMenu.appendChild(sessionAutoRenameItem);
+      }
+      if (settings.projectMove) {
+        moreMenu.appendChild(createSessionMoreMenuItem("移动到项目", "↗", (event) => {
+          closeSessionMoreMenus();
+          void openProjectMoveMenuForRow(row,moreButton,ref,event);
+        }));
+      }
+      if (settings.upstreamWorktreeCreate) {
+        moreMenu.appendChild(createSessionMoreMenuItem("Upstream worktree", "⑂", (event) => {
+          stopActionButtonEvent(row,moreButton,event);
+          closeSessionMoreMenus();
+          void openUpstreamWorktreeDialog(row,ref);
+        }));
       }
       // 拓展注册的会话行操作追加在内置项之后。菜单每次重建（版本号变化）都会
       // 重新走一遍这里，所以拓展项不会因为重建而丢失。

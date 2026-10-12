@@ -71,32 +71,23 @@ function eventHandlerNodes(component: ts.Node, element: ts.JsxOpeningElement | t
   return result;
 }
 
-test("retired enhancements have no settings, navigation or command references in the manager UI", () => {
-  const retired = new Set([
-    "codexAppZedRemoteOpen", "zedRemoteOpenStrategy", "zedRemoteProjectRegistryEnabled", "zedRemoteSyncToZedSettings",
-    "codexAppUpstreamWorktreeCreate", "codexAppForceChineseLocale", "codexAppNativeMenuLocalization",
-    "codexAppFastStartup", "快速启动",
-    "ZedRemoteScreen", "ZedRemoteProjectSection", "zedRemote", "list_zed_remote_projects", "open_zed_remote", "forget_zed_remote_project",
-    "launchMode", "LaunchMode", "ModeSelector", "saveLaunchMode", "setLaunchMode", "patchMode",
-    "repairPluginMarketplace", "refreshRemotePluginMarketplace", "repairRemotePluginMarketplace",
-    "PluginMarketplaceRepairResult", "PluginMarketplaceStatusResult", "RemotePluginMarketplaceResult",
-    "pluginMarketplaceProgress", "remotePluginMarketplace", "remotePluginMarketplaceProgress",
-    "setPluginMarketplaceProgress", "setRemotePluginMarketplace", "setRemotePluginMarketplaceProgress",
-    "repair_plugin_marketplace", "plugin_marketplace_status", "remote_plugin_marketplace_status", "repair_remote_plugin_marketplace",
-    "修复插件市场", "官方远端插件缓存", "插件市场修复进度", "官方远端插件缓存进度", "释放并注册内置缓存",
-  ]);
-  const references = descendants(app)
-    .filter((node) => ts.isIdentifier(node) || ts.isStringLiteral(node))
-    .map((node) => (node as ts.Identifier | ts.StringLiteral).text)
-    .filter((name) => retired.has(name));
-  assert.deepEqual([...new Set(references)], []);
+test("retained legacy controls coexist with modern voice and Stepwise settings", () => {
+  const enhanced = component("EnhanceScreen").getText(app);
+  for (const field of ["codexAppZedRemoteOpen","zedRemoteOpenStrategy","codexAppUpstreamWorktreeCreate",
+    "codexAppForceChineseLocale","codexAppNativeMenuLocalization","codexAppFastStartup","launchMode"]) {
+    assert.ok(enhanced.includes(field), field);
+  }
+  assert.ok(enhanced.includes("AgentHealthPanel"));
 });
 
 test("unified enhancements use the master switch and Chinese suggestion labels", () => {
   const enhance = component("EnhanceScreen");
   const toggles = elements(enhance).filter((element) => element.tagName.getText(app) === "FeatureToggle");
   assert.ok(toggles.length > 0);
-  for (const toggle of toggles) assert.equal(attribute(toggle, "disabled"), "!masterEnabled");
+  for (const toggle of toggles) {
+    const gate=attribute(toggle,"disabled") || "";
+    assert.ok(gate.includes("!masterEnabled") || gate === "true", "every feature respects master or unsupported state");
+  }
   assert.equal(attribute(fieldControl(enhance, "form.codexAppPluginMarketplaceUnlock"), "disabled"), "!masterEnabled");
   const petGroup = elements(enhance).find((element) => element.tagName.getText(app) === "FeatureGroup"
     && attribute(element, "title") === 't("挂件与桌宠")');
@@ -128,7 +119,7 @@ test("complete voice and Stepwise panels share the enhancement form and save act
     assert.equal(attribute(panel, "onFormChange"), "onFormChange");
   }
   const calls = descendants(enhance).filter(ts.isCallExpression);
-  assert.ok(calls.some((node) => node.expression.getText(app) === "actions.saveSettings"), "enhancements must retain their save action");
+  assert.ok(calls.some((node) => node.expression.getText(app) === "actions.saveSettingsValue"), "enhancements must retain their save action");
 
   const settings = component("SettingsScreen");
   assert.ok(!elements(settings).some((element) => ["DictationSettingsPanel", "StepwiseSettingsPanel"].includes(element.tagName.getText(app))));
@@ -221,7 +212,7 @@ test("all enhancement panes stay mounted while tab selection only changes visibi
 
 test("enhancement saving is an explicit permanent top action", () => {
   const enhance = component("EnhanceScreen");
-  const saves = elements(enhance).filter((element) => attribute(element, "onClick")?.includes("actions.saveSettings("));
+  const saves = elements(enhance).filter((element) => attribute(element, "onClick")?.includes("actions.saveSettingsValue("));
   assert.equal(saves.length, 1);
   assert.equal(attribute(saves[0], "disabled"), "!dirty");
   assert.equal(isConditional(saves[0], enhance), false);

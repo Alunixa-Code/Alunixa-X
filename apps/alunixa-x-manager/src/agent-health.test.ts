@@ -21,7 +21,7 @@ function declaration(name: string) {
   return text;
 }
 
-test("unified enhancement controls bind persisted settings, not retired native switches", () => {
+test("restored enhancement controls bind persisted settings and gate explicit native writes", () => {
   const screen = declaration("EnhanceScreen");
   const settings = readFileSync(new URL("../../../crates/alunixa-x-core/src/settings.rs", import.meta.url), "utf8");
   const keys = [...screen.matchAll(/set(?:Persisted)?EnhanceFlag\("([^"]+)"/g)].map(m => m[1]);
@@ -30,7 +30,11 @@ test("unified enhancement controls bind persisted settings, not retired native s
   for (const key of ["computerUseGuardEnabled", "enhancementsEnabled", "codexAppPackagedProxyRepair"]) {
     assert.ok(core.includes(`"${key}"`));
   }
-  assert.doesNotMatch(screen, /nativeChecked|editNative|codexAppForceChineseLocale/);
+  assert.match(screen, /nativeChecked/);
+  assert.match(screen, /nativeCapabilityEditable/);
+  assert.match(screen, /actions\.markNativeCapabilityWrite\(key\)/);
+  assert.match(screen, /nativeDiskValues\[key\]/);
+  assert.match(screen, /codexAppForceChineseLocale/);
 });
 
 function saveHarness(results: Array<"ok" | "failed" | "null" | "throw">) {
@@ -48,12 +52,14 @@ function saveHarness(results: Array<"ok" | "failed" | "null" | "throw">) {
     committedSettingsRef: { current: { codexAppPackagedProxyRepair: true } },
     settingsSaveRequestRef: { current: 0 },
     settingsSaveQueueRef: { current: Promise.resolve() },
+    nativeCapabilityWritesRef: { current: new Map() },
+    nativeSettingsDraftRef: { current: {} },
     normalizeSettings: (s: unknown) => s,
     whaleBalanceSettingsIssue: () => null,
     whaleBalanceValidationMessage: () => "",
     dictationSettingsIssue: () => null,
     dictationSettingsValidationMessage: () => "",
-    setSettingsForm: (s: unknown) => { form = s; },
+    setSettingsForm: (s: unknown) => { form = structuredClone(s); },
     setSettings: () => {},
     isSuccessStatus: (s: string) => s === "ok",
     showNotice: (...args: unknown[]) => { notices.push(args); },
@@ -141,7 +147,7 @@ test("immediate enhancement edits keep the entire pending form before entering t
   const screen = declaration("EnhanceScreen");
   assert.match(screen, /const next = \{ \.\.\.form, \[key\]: value \}/);
   assert.match(screen, /onFormChange\(next\)/);
-  assert.match(screen, /actions\.saveSettingsValue\(next, true\)/);
+  assert.match(screen, /actions\.saveSettingsValue\(next, true, nativeEdits\)/);
 });
 
 test("a rejected transport leaves the CAS queue usable and never advances an unconfirmed revision", async () => {

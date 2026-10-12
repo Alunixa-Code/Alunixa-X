@@ -105,7 +105,7 @@ test("dispatcher discovery through the actual installer supports split and legac
   }
 });
 
-test("retired shared terminal stops the previous runtime once without invoking exports or touching sessions", () => {
+test("disabled shared terminal stops the previous runtime once without invoking exports or touching sessions", () => {
   const timers = new Set(["poll", "heartbeat", "retention"]);
   const listeners = new Set(["snapshot", "activity"]);
   const records = [{ threadId: "fixture-thread", sessionId: "fixture-session" }];
@@ -124,8 +124,9 @@ test("retired shared terminal stops the previous runtime once without invoking e
   assert.equal(timers.size + listeners.size, 0);
   assert.deepEqual(records, [{ threadId: "fixture-thread", sessionId: "fixture-session" }]);
   assert.match(source("scanDeferred"), /retireCodexSharedTerminalRuntime\(\)/);
-  assert.doesNotMatch(renderer, /function (?:loadCodexTerminalManager|installCodexSharedTerminalRuntime)\(/);
-  assert.doesNotMatch(renderer, /postJson\("\/shared-terminal\//);
+  assert.match(renderer, /function installCodexSharedTerminalRuntime\(/);
+  assert.match(source("scanDeferred"), /codexAppSharedTerminal === true/);
+  assert.match(renderer, /postJson\("\/shared-terminal\/next/);
 });
 
 test("shared terminal retirement disables legacy runtimes and bounds cleanup failures", () => {
@@ -301,7 +302,39 @@ test("retired fast startup flags leave native initialization and fetch ownership
   assert.equal(calls[1][0], aborted);
   assert.equal((calls[1][0] as Request).signal.aborted, true);
   assert.deepEqual(unexpected, [], "retired startup cannot create new polling or timeout work");
-  assert.doesNotMatch(renderer, /function install(?:AlunixaX|CodexPlus)FastStartup\(|__alunixaXFastStartup|statsigTimeoutMs/);
+  assert.match(renderer, /function installAlunixaXFastStartup\(/);
+  assert.doesNotMatch(source("installAlunixaXFastStartup"), /initializeAsync\s*=|loadingStatus\s*=|\$emt\(/);
+});
+
+test("explicit fast startup bounds only selected telemetry fetches and restores owned patches", async () => {
+  const calls: unknown[][]=[];
+  const initializeAsync=()=>Promise.reject(new Error("native initialization"));
+  const originalFetch=async (...args: unknown[])=>{calls.push(args);return "native";};
+  const window: Record<string,any> = {
+    location:{href:"app://-/index.html"}, fetch:originalFetch, setTimeout, clearTimeout,
+    __ALUNIXA_X_FAST_STARTUP__:{enabled:true,statsigTimeoutMs:100},
+    __STATSIG__:{firstInstance:{initializeAsync,loadingStatus:"Loading"}},
+  };
+  const install=compile("installAlunixaXFastStartup",{window,URL,AbortController,Promise,Set});
+  install();
+  const patched=window.fetch;
+  assert.notEqual(patched,originalFetch);
+  await patched("http://127.0.0.1:57321/v1/responses");
+  assert.equal(calls[0][1],undefined,"model traffic must not acquire a synthetic signal");
+  const controller=new AbortController();controller.abort();
+  await patched(new Request("https://ab.chatgpt.com/config",{signal:controller.signal}));
+  assert.equal((calls[1][1] as any).signal.aborted,true);
+  assert.equal(window.__STATSIG__.firstInstance.initializeAsync,initializeAsync);
+  assert.equal(window.__STATSIG__.firstInstance.loadingStatus,"Loading");
+  window.__ALUNIXA_X_FAST_STARTUP__.enabled=false;
+  install();
+  assert.equal(window.fetch,originalFetch);
+  window.__ALUNIXA_X_FAST_STARTUP__.enabled=true;
+  install();
+  const independent=()=>Promise.resolve("external");
+  window.fetch=independent;
+  window.__alunixaXFastStartupRuntime.dispose();
+  assert.equal(window.fetch,independent,"disposing cannot overwrite a subsequent native patch");
 });
 
 test("retired startup never turns a native timeout into synthetic initialization success", async () => {

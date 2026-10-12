@@ -529,7 +529,7 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
         } else {
             ""
         };
-    format!(
+    let script = format!(
         "{}window.__CODEX_SESSION_DELETE_HELPER__ = {};\nwindow.__ALUNIXA_X_VERSION__ = {};\nwindow.__ALUNIXA_X_BUILD__ = {};\nwindow.__ALUNIXA_X_IMAGE_OVERLAY__ = {};\nwindow.__ALUNIXA_X_EXTERNAL_DREAM_SKIN_RUNTIME__ = true;\nwindow.__ALUNIXA_X_DREAM_SKIN_PLATFORM__ = {};\nwindow.__ALUNIXA_X_DREAM_SKIN_REVISION__ = {};\nwindow.__ALUNIXA_X_DREAM_SKIN_ART__ = {};\nwindow.__ALUNIXA_X_DREAM_SKIN_ART_SIGNATURE__ = {};\nwindow.__ALUNIXA_X_DREAM_SKIN_THEME__ = {};\nwindow.__ALUNIXA_X_PASTE_FIX__ = {};\nwindow.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = {};\n{}\n{}\n{}",
         instance_identity,
         serde_json::to_string(&helper_url).expect("helper URL should serialize"),
@@ -556,6 +556,14 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
         ),
         stepwise_runtime,
         dream_skin_target_runtime,
+    );
+    format!(
+        "window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {};\nwindow.__ALUNIXA_X_FAST_STARTUP__ = {};\nwindow.__ALUNIXA_X_PERFORMANCE_PROTECTION__ = {};\nwindow.__ALUNIXA_X_DISABLE_AUTO_UPDATE__ = {};\n{}",
+        force_chinese_locale_config(settings),
+        fast_startup_config(settings),
+        performance_protection_config(settings),
+        json!({"enabled":settings.codex_app_disable_auto_update}),
+        script
     )
 }
 
@@ -614,6 +622,16 @@ pub fn image_overlay_config(helper_port: u16, settings: &BackendSettings) -> Val
 
 pub fn paste_fix_enabled_config(settings: &BackendSettings) -> Value {
     json!({ "enabled": settings.codex_app_paste_fix })
+}
+
+pub fn force_chinese_locale_config(settings: &BackendSettings) -> Value {
+    json!({"enabled":settings.enhancements_enabled && settings.codex_app_force_chinese_locale,"locale":"zh-CN"})
+}
+pub fn fast_startup_config(settings: &BackendSettings) -> Value {
+    json!({"enabled":settings.enhancements_enabled && settings.codex_app_fast_startup,"statsigTimeoutMs":800})
+}
+pub fn performance_protection_config(settings: &BackendSettings) -> Value {
+    json!({"enabled":settings.enhancements_enabled && settings.codex_app_performance_protection})
 }
 
 fn image_data_uri(mime_type: &str, bytes: &[u8]) -> String {

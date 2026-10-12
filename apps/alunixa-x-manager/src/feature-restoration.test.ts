@@ -68,7 +68,7 @@ test("native locale, startup, performance and update controls have actual inject
 });
 
 test("shared terminal is wired at both the native producer and the local service", () => {
-  assert.match(hook, /settings\.codex_app_shared_terminal/);
+  assert.match(hook, /settings\s*\.\s*codex_app_shared_terminal/);
   assert.match(launcher, /"\/shared-terminal\/submit"/);
   assert.match(launcher, /"\/shared-terminal\/next"/);
 });

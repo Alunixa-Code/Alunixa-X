@@ -59,7 +59,14 @@
     }
   }
 
-  void restoreCodexPlusManagedLocale();
+  if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
+    runScanStep(installAlunixaXForceChineseLocale);
+  } else {
+    void restoreCodexPlusManagedLocale();
+  }
+  runScanStep(installRestoredFeatureStyles);
+  runScanStep(installAlunixaXFastStartup);
+  runScanStep(installCodexPerformanceProtection);
   installCodexPlusInstanceIdentity();
   runScanStep(installCodexPlusTypingEffects);
   runScanStep(syncCodexPlusWhaleWidget);

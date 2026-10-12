@@ -1315,6 +1315,39 @@ impl BridgeDataService for LauncherDataService {
             .map_err(|error| anyhow::anyhow!("archived lookup task failed: {error}"))
     }
 
+    async fn move_thread_workspace(
+        &self,
+        session: SessionRef,
+        target_cwd: String,
+    ) -> anyhow::Result<Value> {
+        let db_paths = self.candidate_db_paths();
+        let backup_store = alunixa_x_data::BackupStore::new(self.backup_dir.clone());
+        tokio::task::spawn_blocking(move || {
+            alunixa_x_data::move_codex_thread_workspace_from_paths(
+                db_paths,
+                backup_store,
+                &session,
+                &target_cwd,
+            )
+        })
+        .await
+        .map_err(|error| anyhow::anyhow!("move thread workspace task failed: {error}"))
+    }
+
+    async fn thread_sort_key(&self, session: SessionRef) -> anyhow::Result<Value> {
+        let adapter = self.storage_adapter();
+        tokio::task::spawn_blocking(move || adapter.codex_thread_sort_key(&session))
+            .await
+            .map_err(|error| anyhow::anyhow!("thread sort key task failed: {error}"))
+    }
+
+    async fn thread_sort_keys(&self, sessions: Vec<SessionRef>) -> anyhow::Result<Value> {
+        let adapter = self.storage_adapter();
+        tokio::task::spawn_blocking(move || adapter.codex_thread_sort_keys(&sessions))
+            .await
+            .map_err(|error| anyhow::anyhow!("thread sort keys task failed: {error}"))
+    }
+
     async fn recover_remote_control_session(&self, thread_id: String) -> anyhow::Result<Value> {
         let settings = alunixa_x_core::settings::SettingsStore::default()
             .load()

@@ -298,7 +298,7 @@ pub trait LaunchHooks: Send + Sync {
     }
     async fn ensure_active_protocol_proxy_config(
         &self,
-        _settings: &BackendSettings,
+        settings: &BackendSettings,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -374,6 +374,7 @@ pub trait LaunchHooks: Send + Sync {
 pub struct DefaultLaunchHooks {
     child: Mutex<Option<Child>>,
     helper: Mutex<Option<HelperRuntime>>,
+    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
     bridge_watchdog: Mutex<Option<BridgeWatchdogRuntime>>,
     bridge_reinjector: Mutex<Option<BridgeReinjector>>,
     #[cfg(windows)]
@@ -607,6 +608,19 @@ where
                 &home, settings.codex_app_instructions_enabled, &settings.codex_app_instructions,
             )?;
             if settings.enhancements_enabled {
+                crate::codex_hooks::apply_alunixa_x_hooks(
+                    &settings,&crate::install::companion_binary_path(crate::install::APP_BINARY),
+                )?;
+                #[cfg(windows)]
+                if settings.computer_use_guard_enabled {
+                    let artifacts=crate::computer_use_guard::resolve_computer_use_guard_artifacts(&home)?;
+                    crate::computer_use_guard::ensure_computer_use_config_with_artifacts(&home,&artifacts)?;
+                }
+                if settings.codex_app_performance_protection {
+                    if let Err(error)=crate::workspace_performance::prune_broad_saved_workspace_roots() {
+                        let _=crate::diagnostic_log::append_diagnostic_log("launcher.performance_cleanup_failed",serde_json::json!({"error":error.to_string()}));
+                    }
+                }
                 let imagegen = crate::install::companion_binary_path("alunixa-x-imagegen-mcp");
                 if imagegen.is_file() {
                     crate::relay_config::set_codex_imagegen_mcp_in_home(&home, &imagegen, helper_port, true)?;
@@ -1049,19 +1063,22 @@ impl LaunchHooks for DefaultLaunchHooks {
             }),
         );
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+        let shared_terminal = self.shared_terminal.clone();
         let task = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = &mut shutdown_rx => break,
                     accepted = listener.accept() => {
                         if let Ok((stream, addr)) = accepted {
+                            let shared_terminal = shared_terminal.clone();
                             tokio::spawn(async move {
-                                let _ = handle_helper_connection(stream, Some(addr)).await;
+                                let _ = handle_helper_connection_with_broker(stream, Some(addr), shared_terminal).await;
                             });
                         }
                     }
                 }
             }
+            shared_terminal.cancel_all().await;
         });
         *self.helper.lock().await = Some(HelperRuntime {
             shutdown: shutdown_tx,
@@ -1074,10 +1091,23 @@ impl LaunchHooks for DefaultLaunchHooks {
         &self,
         app_dir: &Path,
         debug_port: u16,
-        _settings: &BackendSettings,
+        settings: &BackendSettings,
         extra_args: &[String],
     ) -> anyhow::Result<CodexLaunch> {
-        let launch_extra_args = normalize_codex_extra_args(extra_args);
+        crate::codex_auto_update::apply_codex_auto_update_policy(
+            settings.codex_app_disable_auto_update,
+        )?;
+        let native_menu_inspector_port = (settings.enhancements_enabled
+            && settings.codex_app_native_menu_localization)
+            .then(|| select_native_menu_inspector_port(debug_port));
+
+        let mut launch_extra_args = codex_extra_args_for_launch(settings, extra_args);
+        if let Some(port) = native_menu_inspector_port {
+            launch_extra_args.push(format!("--inspect=127.0.0.1:{port}"));
+            tokio::spawn(async move {
+                let _ = crate::native_menu::install_native_menu_localizer(port).await;
+            });
+        }
         let isolated_multi_instance =
             std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").is_some_and(|value| value == "1");
         if cfg!(windows) && !isolated_multi_instance {
@@ -1488,8 +1518,21 @@ impl LaunchHooks for DefaultLaunchHooks {
 }
 
 async fn handle_helper_connection(
+    stream: tokio::net::TcpStream,
+    remote_addr: Option<SocketAddr>,
+) -> anyhow::Result<()> {
+    handle_helper_connection_with_broker(
+        stream,
+        remote_addr,
+        crate::shared_terminal::SharedTerminalBroker::shared(),
+    )
+    .await
+}
+
+async fn handle_helper_connection_with_broker(
     mut stream: tokio::net::TcpStream,
     remote_addr: Option<SocketAddr>,
+    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
 ) -> anyhow::Result<()> {
     let request = match read_http_request(&mut stream).await {
         Ok(request) => request,
@@ -1515,6 +1558,78 @@ async fn handle_helper_connection(
     let method = parts.next().unwrap_or_default();
     let raw_path = parts.next().unwrap_or_default();
     let path = raw_path.split('?').next().unwrap_or(raw_path);
+    if path.starts_with("/shared-terminal/") {
+        let local = remote_addr
+            .or_else(|| stream.peer_addr().ok())
+            .is_some_and(|peer| peer.ip().is_loopback());
+        let enabled = SettingsStore::default().load().is_ok_and(|settings| {
+            settings.enhancements_enabled && settings.codex_app_shared_terminal
+        });
+        if !local || !enabled {
+            let body = serde_json::to_vec(
+                &serde_json::json!({"status":"failed","message":"共享终端未启用或请求不是本机连接"}),
+            )?;
+            write_http_response(
+                &mut stream,
+                "403 Forbidden",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            return Ok(());
+        }
+        let payload = serde_json::from_slice::<Value>(&request.body).unwrap_or(Value::Null);
+        let response: anyhow::Result<Value> = async {
+            anyhow::ensure!(method == "POST", "共享终端请求方法无效");
+            let request_id = || payload["requestId"].as_str().context("缺少共享终端请求 ID");
+            match path {
+                "/shared-terminal/submit" => Ok(serde_json::to_value(
+                    shared_terminal
+                        .submit(serde_json::from_value(payload)?)
+                        .await?,
+                )?),
+                "/shared-terminal/next" => Ok(serde_json::to_value(shared_terminal.next().await)?),
+                "/shared-terminal/started" => {
+                    shared_terminal
+                        .started(
+                            request_id()?,
+                            payload["terminalSessionId"]
+                                .as_str()
+                                .context("缺少终端 session ID")?,
+                        )
+                        .await?;
+                    Ok(serde_json::json!({"status":"ok"}))
+                }
+                "/shared-terminal/heartbeat" => {
+                    shared_terminal.heartbeat(request_id()?).await?;
+                    Ok(serde_json::json!({"status":"ok"}))
+                }
+                "/shared-terminal/complete" => {
+                    shared_terminal
+                        .complete(serde_json::from_value(payload)?)
+                        .await?;
+                    Ok(serde_json::json!({"status":"ok"}))
+                }
+                _ => anyhow::bail!("未知共享终端路由"),
+            }
+        }
+        .await;
+        let (status, body) = match response {
+            Ok(response) => ("200 OK", response),
+            Err(error) => (
+                "400 Bad Request",
+                serde_json::json!({"status":"failed","message":error.to_string()}),
+            ),
+        };
+        write_http_response(
+            &mut stream,
+            status,
+            "application/json; charset=utf-8",
+            &serde_json::to_vec(&body)?,
+        )
+        .await?;
+        return Ok(());
+    }
     let request_user_agent = header_value_from_headers(&request_headers, "user-agent");
     let request_beta_features =
         header_value_from_headers(&request_headers, "x-codex-beta-features");
@@ -3304,7 +3419,10 @@ pub fn build_codex_arguments_for_settings(
     debug_port: u16,
     settings: &BackendSettings,
 ) -> Vec<String> {
-    build_codex_arguments(debug_port, &settings.codex_extra_args)
+    build_codex_arguments(
+        debug_port,
+        &codex_extra_args_for_launch(settings, &settings.codex_extra_args),
+    )
 }
 
 pub fn build_codex_command(app_dir: &Path, debug_port: u16, extra_args: &[String]) -> Vec<String> {
@@ -5364,6 +5482,98 @@ mod proxy_stream_tests {
     use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    #[tokio::test]
+    async fn restored_shared_terminal_round_trips_over_the_production_loopback_routes() {
+        let _guard = crate::paths::settings_path_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        struct Restore(Option<std::path::PathBuf>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                crate::paths::set_settings_path_for_tests(self.0.take());
+            }
+        }
+        let path = temp.path().join("settings.json");
+        std::fs::write(
+            &path,
+            br#"{"enhancementsEnabled":true,"codexAppSharedTerminal":true}"#,
+        )
+        .unwrap();
+        let _restore = Restore(crate::paths::set_settings_path_for_tests(Some(path)));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let broker = crate::shared_terminal::SharedTerminalBroker::shared();
+        let service = tokio::spawn(async move {
+            for _ in 0..8 {
+                let (socket, peer) = listener.accept().await.unwrap();
+                let broker = broker.clone();
+                tokio::spawn(async move {
+                    super::handle_helper_connection_with_broker(socket, Some(peer), broker)
+                        .await
+                        .unwrap();
+                });
+            }
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let submission=client.post(format!("http://{address}/shared-terminal/submit"))
+            .json(&json!({"requestId":"fixture-command","threadId":"fixture-thread","cwd":"fixture","command":"echo fixture"}));
+        let submitted = tokio::spawn(async move {
+            submission
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        });
+        let mut work = Value::Null;
+        for _ in 0..2 {
+            work = client
+                .post(format!("http://{address}/shared-terminal/next"))
+                .json(&json!({}))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap();
+            if !work.is_null() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(work["requestId"], "fixture-command");
+        assert_eq!(work["command"], "echo fixture");
+        for (route, payload) in [
+            (
+                "started",
+                json!({"requestId":"fixture-command","terminalSessionId":"fixture-terminal"}),
+            ),
+            ("heartbeat", json!({"requestId":"fixture-command"})),
+            (
+                "complete",
+                json!({"requestId":"fixture-command","exitCode":0,"output":"fixture result","error":""}),
+            ),
+        ] {
+            let response = client
+                .post(format!("http://{address}/shared-terminal/{route}"))
+                .json(&payload)
+                .send()
+                .await
+                .unwrap();
+            assert!(response.status().is_success());
+        }
+        let response = submitted.await.unwrap();
+        assert_eq!(response["exitCode"], 0);
+        assert_eq!(response["output"], "fixture result");
+        let denied = client
+            .get(format!("http://{address}/shared-terminal/next"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(denied.status().as_u16(), 400);
+        service.abort();
+    }
+
     async fn forward_fixture(
         body: &str,
         truncated: bool,
@@ -5684,4 +5894,65 @@ mod proxy_stream_tests {
             upstream_task.await.unwrap();
         }
     }
+}
+
+pub fn build_codex_arguments_with_native_menu_inspector(
+    debug_port: u16,
+    inspector_port: u16,
+    extra_args: &[String],
+) -> Vec<String> {
+    let mut args = build_codex_arguments(debug_port, &[]);
+    if inspector_port != 0 {
+        args.push(format!("--inspect=127.0.0.1:{inspector_port}"));
+    }
+    args.extend(normalize_codex_extra_args(extra_args));
+    args
+}
+
+pub fn build_packaged_activation_with_native_menu_inspector(
+    app_dir: &Path,
+    debug_port: u16,
+    inspector_port: u16,
+    extra_args: &[String],
+) -> Option<CodexLaunch> {
+    Some(CodexLaunch::PackagedActivation {
+        app_user_model_id: crate::app_paths::packaged_app_user_model_id(app_dir)?,
+        arguments: command_line_arguments(&build_codex_arguments_with_native_menu_inspector(
+            debug_port,
+            inspector_port,
+            extra_args,
+        )),
+        process_id: None,
+    })
+}
+
+fn select_native_menu_inspector_port(debug_port: u16) -> u16 {
+    let requested = debug_port.saturating_add(100);
+    crate::ports::select_platform_loopback_port(requested)
+}
+
+fn codex_extra_args_for_launch(settings: &BackendSettings, extra_args: &[String]) -> Vec<String> {
+    let mut args = Vec::new();
+    if settings.codex_app_fast_startup && !has_host_resolver_rules(extra_args) {
+        args.push(statsig_fast_fail_host_resolver_rule());
+    }
+    args.extend(normalize_codex_extra_args(extra_args));
+    args
+}
+
+fn has_host_resolver_rules(args: &[String]) -> bool {
+    args.iter()
+        .any(|arg| arg.trim().starts_with("--host-resolver-rules"))
+}
+
+fn statsig_fast_fail_host_resolver_rule() -> String {
+    [
+        "--host-resolver-rules=MAP ab.chatgpt.com 127.0.0.1",
+        "MAP featureassets.org 127.0.0.1",
+        "MAP prodregistryv2.org 127.0.0.1",
+        "MAP api.statsigcdn.com 127.0.0.1",
+        "MAP statsigapi.net 127.0.0.1",
+        "MAP cloudflare-dns.com 127.0.0.1",
+    ]
+    .join(",")
 }

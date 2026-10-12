@@ -110,7 +110,12 @@ pub fn apply_alunixa_x_hooks_in_home(
 
         #[cfg(windows)]
         {
-            for matcher in ["Bash", "shell_command"] {
+            for matcher in [
+                "Bash",
+                "shell_command",
+                "exec_command",
+                "functions.exec_command",
+            ] {
                 append_hook(
                     hooks,
                     "PreToolUse",
@@ -262,25 +267,46 @@ fn ai_shell_hook_output(settings: &BackendSettings, input: &Value, launcher_path
     {
         if !matches!(
             input.get("tool_name").and_then(Value::as_str),
-            Some("Bash" | "shell_command")
+            Some("Bash" | "shell_command" | "exec_command" | "functions.exec_command")
         ) {
             return json!({});
         }
         let Some(tool_input) = input.get("tool_input").and_then(Value::as_object) else {
             return json!({});
         };
-        let Some(command) = tool_input.get("command") else {
+        let command_key = if tool_input.contains_key("command") {
+            "command"
+        } else {
+            "cmd"
+        };
+        let Some(command) = tool_input.get(command_key) else {
             return json!({});
         };
-        // The legacy shared-terminal submit endpoint was retired upstream.
-        // Preserve the selected native AI shell instead of emitting a dead proxy command.
         let selected_shell = available_ai_shell(settings.codex_app_ai_shell);
-        let wrapped = wrap_command_value(command, selected_shell);
+        let proxy = settings
+            .codex_app_shared_terminal
+            .then(|| shared_terminal_command_value(input, command, launcher_path))
+            .flatten();
+        let wrapped = if let Some(proxy) = proxy {
+            let proxy = match proxy {
+                Value::String(command) => Value::String(format!("& {command}")),
+                Value::Array(commands) => Value::Array(
+                    commands
+                        .into_iter()
+                        .map(|command| json!(format!("& {}", command.as_str().unwrap_or(""))))
+                        .collect(),
+                ),
+                _ => Value::Null,
+            };
+            wrap_command_value(&proxy, selected_shell)
+        } else {
+            wrap_command_value(command, selected_shell)
+        };
         let Some(wrapped) = wrapped else {
             return json!({});
         };
         let mut updated_input = Value::Object(tool_input.clone());
-        updated_input["command"] = wrapped;
+        updated_input[command_key] = wrapped;
         json!({
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -1214,10 +1240,10 @@ mod tests {
         assert!(text.contains("user-memory-tool"));
         #[cfg(windows)]
         {
-            assert_eq!(written["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+            assert_eq!(written["hooks"]["PreToolUse"].as_array().unwrap().len(), 4);
             assert!(text.contains("shell_command"));
             assert!(text.contains("Bash"));
-            assert_eq!(result.installed, 3);
+            assert_eq!(result.installed, 5);
         }
         #[cfg(not(windows))]
         {
@@ -1326,7 +1352,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn retired_shared_terminal_flag_keeps_native_ai_shell_command_and_workdir() {
+    fn enabled_shared_terminal_uses_encoded_proxy_and_preserves_workdir() {
         let settings = BackendSettings {
             codex_app_shared_terminal: true,
             codex_app_ai_shell: CodexAiShell::PowerShell,
@@ -1362,7 +1388,10 @@ mod tests {
             .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
-        assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output 'hello'");
+        let decoded = String::from_utf16(&utf16).unwrap();
+        assert!(decoded.starts_with(r"& 'C:\Program Files\Alunixa X\alunixa-x.exe' "));
+        assert!(decoded.contains("--alunixa-x-shared-terminal"));
+        assert!(!decoded.contains("Write-Output"));
         assert_eq!(
             output["hookSpecificOutput"]["updatedInput"]["workdir"],
             input["tool_input"]["workdir"]
@@ -1371,7 +1400,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn retired_shared_terminal_flag_keeps_legacy_bash_command_without_dead_proxy() {
+    fn enabled_shared_terminal_routes_legacy_bash_through_the_same_broker() {
         let settings = BackendSettings {
             codex_app_shared_terminal: true,
             codex_app_ai_shell: CodexAiShell::PowerShell,
@@ -1401,7 +1430,9 @@ mod tests {
             .chunks_exact(2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
-        assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output legacy");
+        let decoded = String::from_utf16(&utf16).unwrap();
+        assert!(decoded.starts_with("& 'launcher.exe' "));
+        assert!(decoded.contains("--alunixa-x-shared-terminal"));
         assert_eq!(input["cwd"], r"D:\legacy");
     }
 

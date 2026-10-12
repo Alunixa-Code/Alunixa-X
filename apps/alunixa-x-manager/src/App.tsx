@@ -89,6 +89,7 @@ import { NativeBrowserStatusView, nativeBrowserConsent } from "./native-browser-
 import { ImageModelsScreen } from "@/components/ImageModelsScreen";
 import { WallpaperSettings } from "@/components/WallpaperSettings";
 import { AgentHealthPanel } from "@/components/AgentHealthPanel";
+import { RestoredOperationsScreen } from "@/components/RestoredOperationsScreen";
 import { CustomModelsEditor, createEmptyCustomModel, type CustomModel } from "@/components/CustomModelsEditor";
 const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 import { AgentCachePanel } from "./agent-cache";
@@ -991,7 +992,7 @@ const TOOL_ICONS: Record<string, string> = {
   claude: new URL("./assets/agents/claude.svg", import.meta.url).href,
 };
 
-type Route = "imageModels" | "overview" | "relay" | "multiLaunch" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
+type Route = "officialRemote" | "remoteProjects" | "usageAnalytics" | "imageModels" | "overview" | "relay" | "multiLaunch" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
@@ -1017,6 +1018,9 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   { id: "context", label: "MCP", icon: Network, tool: "codex" },
   { id: "skills", label: "Skills", icon: BookOpen, tool: "codex" },
   { id: "weixin", label: t("微信连接"), icon: ScanLine, tool: "codex" },
+  { id:"officialRemote",label:t("官方手机远控"),icon:Cable,tool:"codex" },
+  { id:"remoteProjects",label:t("远程项目"),icon:GitBranch,tool:"codex" },
+  { id:"usageAnalytics",label:t("Token 与模型使用统计"),icon:LayoutDashboard,tool:"codex" },
   { id: "enhance", label: t("Codex增强"), icon: Hammer, tool: "codex" },
   { id: "dreamSkin", label: t("皮肤管理"), icon: Palette, tool: "codex" },
   { id: "userScripts", label: t("拓展"), icon: FileCode2, tool: "codex" },
@@ -1036,11 +1040,11 @@ const navigationSections: Array<{ label: string; routes: Route[]; placement?: "b
   },
   {
     label: t("全局管理"),
-    routes: ["context", "skills", "sessions"],
+    routes: ["context", "skills", "sessions", "remoteProjects", "usageAnalytics"],
   },
   {
     label: t("扩展"),
-    routes: ["weixin", "enhance", "dreamSkin", "userScripts", "pluginMarket"],
+    routes: ["weixin", "officialRemote", "enhance", "dreamSkin", "userScripts", "pluginMarket"],
   },
   {
     label: t("系统"),
@@ -3706,6 +3710,9 @@ export function App() {
           {route === "pluginMarket" ? <PluginMarketScreen /> : null}
           
           {route === "agentCache" ? <AgentCachePanel /> : null}
+          {route === "officialRemote" ? <RestoredOperationsScreen key="remote" section="remote" onSettingsChanged={()=>actions.refreshSettings(true)} /> : null}
+          {route === "remoteProjects" ? <RestoredOperationsScreen key="projects" section="projects" /> : null}
+          {route === "usageAnalytics" ? <RestoredOperationsScreen key="usage" section="usage" /> : null}
           {route === "maintenance" ? (
             <MaintenanceScreen
               overview={overview}
@@ -3749,8 +3756,7 @@ export function App() {
           }} onChange={patch => setSettingsForm(current => ({...current,...patch}))}
             onSave={() => actions.saveSettingsValue(settingsForm, false)}
             onReset={() => actions.saveSettingsValue({...settingsForm,codexAppImageOverlayEnabled:false,codexAppImageOverlayPath:""},false)} /> : null}
-          {route === "enhance" ? <AgentHealthPanel autoRepair={(settingsForm as any).codexAppPackagedProxyRepair ?? true}
-            onAutoRepairChange={value => setSettingsForm(current => ({...current,codexAppPackagedProxyRepair:value}))} /> : null}
+
         </section>
       </main>
       {signalArchiveOpen ? <Suspense fallback={null}><SignalArchive onClose={() => setSignalArchiveOpen(false)} /></Suspense> : null}
@@ -4676,7 +4682,8 @@ function RelayScreen({
           setDetailProfileId(null);
         }}
         onFormChange={saveRelaySettings}
-        onSaved={() => {
+        onSaved={(savedProfile) => {
+          setProviderView(relayProviderView(savedProfile));
           setNewProfileDraft(null);
           setDetailProfileId(null);
         }}
@@ -5381,9 +5388,22 @@ function EnhanceScreen({
   const [nativeCapabilityStates, setNativeCapabilityStates] = useState<Record<string, string>>({});
   const [nativeDiskValues, setNativeDiskValues] = useState<Record<string, unknown>>({});
   const [nativeEdits, setNativeEdits] = useState<string[]>([]);
+  const [pluginRepairBusy, setPluginRepairBusy] = useState(false);
+  const repairPluginCache = async (action: string) => {
+    if(pluginRepairBusy) return;
+    setPluginRepairBusy(true);
+    try {
+      if(dirty && !await actions.saveSettingsValue(form,true,nativeEdits)) return;
+      const result=await invoke<{status?:string;message?:string}>("restored_agent_operation",{action,payload:{}});
+      await actions.refreshSettings(true);
+      await actions.showMessage(t("插件市场"),result.message || t("已完成"),result.status==="failed"?"failed":"ok");
+    } catch(error) { await actions.showMessage(t("插件市场"),String(error),"failed"); }
+    finally { setPluginRepairBusy(false); }
+  };
   useEffect(() => { setNativeEdits([]); }, [savedRevision]);
   type NativeBooleanKey = "codexAppFastMode" | "codexAppDisableWss" | "codexGoalsEnabled";
-  const nativeCapabilityEditable = (key: string) => ["saved_pending_restart","different"].includes(nativeCapabilityStates[key] || "");
+  const nativeCapabilityEditable = (key: string) => ["saved_pending_restart","different"].includes(nativeCapabilityStates[key] || "")
+    || (key === "codexAppSubAgentMaxThreads" && nativeCapabilityStates[key] === "unknown");
   const nativeChecked = (key: NativeBooleanKey) => nativeEdits.includes(key) || actions.nativeCapabilityPending(key)
     || typeof nativeDiskValues[key] !== "boolean" ? form[key] : nativeDiskValues[key] as boolean;
   const editNative = (key: NativeBooleanKey, value: boolean) => {
@@ -5535,6 +5555,10 @@ function EnhanceScreen({
                   disabled={!masterEnabled || !isWindowsPlatform} onChange={value => setEnhanceFlag("computerUseGuardEnabled",value)} />
                 <FeatureToggle title={t("插件列表全量展示")} checked={form.codexAppPluginAutoExpand}
                   disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppPluginAutoExpand",value)} />
+                <div className="feature-action-row">
+                  <Button disabled={pluginRepairBusy || !masterEnabled} onClick={()=>void repairPluginCache("plugins/repair")}>{t("修复插件市场")}</Button>
+                  <Button disabled={pluginRepairBusy || !masterEnabled} variant="outline" onClick={()=>void repairPluginCache("plugins/remote")}>{t("释放并注册内置缓存")}</Button>
+                </div>
                 <FeatureToggle title={t("会话项目移动")} checked={form.codexAppProjectMove}
                   disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppProjectMove",value)} />
                 <FeatureToggle title={t("Instructions 提示词")} checked={form.codexAppInstructionsEnabled}
@@ -5687,7 +5711,7 @@ function EnhanceScreen({
 
               <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
-              <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Alunixa X 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
+              <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Alunixa X 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
               <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={nativeChecked("codexAppDisableWss")} unknown={typeof nativeDiskValues.codexAppDisableWss !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppDisableWss")} onChange={(value) => void editNative("codexAppDisableWss", value)} />
               <FeatureToggle title={t("性能保护")} detail={t("减少后台 CDP、日志和页面扫描，在大对话切换时降低渲染压力，并清理会触发全盘 Git 探测的过宽历史工作区。")} checked={form.codexAppPerformanceProtection} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPerformanceProtection", value)} />
               <FeatureToggle title={t("原生菜单栏位置")} detail={t("把 Alunixa X 菜单插入 Codex 顶部原生菜单栏。")} checked={form.codexAppNativeMenuPlacement} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuPlacement", value)} />
@@ -7936,7 +7960,7 @@ function RelayProfileDetail({
   isNew?: boolean;
   onBack: () => void;
   onFormChange: (value: BackendSettings) => Promise<BackendSettings | null>;
-  onSaved?: () => void;
+  onSaved?: (savedProfile: RelayProfile) => void;
   actions: Actions;
 }) {
   const [draft, setDraft] = useState<RelayProfile>(profile);
@@ -8034,7 +8058,7 @@ function RelayProfileDetail({
       if (requiresRestart) {
         const restarted = await actions.restart(true);
         if (!restarted) return;
-        onSaved?.();
+        onSaved?.(savedSettings.relayProfiles.find(candidate => candidate.id === normalizedDraft.id) ?? normalizedDraft);
         return;
       }
       const savedProfile = savedSettings.relayProfiles.find((candidate) => candidate.id === normalizedDraft.id)
@@ -8042,7 +8066,7 @@ function RelayProfileDetail({
       if (isActive && savedSettings.relayProfilesEnabled && relayProfileUsesLiveFiles(savedProfile)) {
         await actions.switchRelayProfile(savedSettings, savedSettings.activeRelayId);
       }
-      onSaved?.();
+      onSaved?.(savedProfile);
     } finally {
       setSavingDraft(false);
     }
@@ -8760,6 +8784,8 @@ function RelayProfileEditor({
       </Field>
       <CustomModelsEditor models={profile.customModels || []}
         defaultId={profile.defaultCustomModelId || profile.customModels?.[0]?.id || ""}
+        efforts={profile.modelReasoningEfforts}
+        onEffortChange={(model,effort)=>updateDraft({modelReasoningEfforts:{...profile.modelReasoningEfforts,[modelProtocolKey(model.model)]:effort}})}
         onChange={(customModels, defaultCustomModelId) => {
           const selected = customModels.find(model => model.id === defaultCustomModelId);
           updateDraft({customModels,defaultCustomModelId,model:selected?.model || "",lastUsedModel:selected?.model || ""});
@@ -11755,6 +11781,9 @@ function routeTitle(route: Route) {
 
 function routeSubtitle(route: Route) {
   const subtitles: Record<Route, string> = {
+    officialRemote: t("ChatGPT 账号连接与官方手机远控"),
+    remoteProjects: t("管理 Zed 远程项目记录"),
+    usageAnalytics: t("查看本机 Token 与模型使用统计"),
     imageModels: t("配置独立 API、Key 和默认生图模型"),
     overview: t("检查问题、启动与快速修复"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),

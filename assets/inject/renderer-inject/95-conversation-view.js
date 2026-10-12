@@ -875,7 +875,15 @@
   }
 
   function scanDeferred() {
-    retireCodexSharedTerminalRuntime();
+    if (alunixaXBackendSettings.enhancementsEnabled !== false && alunixaXBackendSettings.codexAppSharedTerminal === true) {
+      runScanStep(installCodexSharedTerminalRuntime);
+    } else {
+      retireCodexSharedTerminalRuntime();
+    }
+    runScanStep(runPluginAutoExpand);
+    runScanStep(scheduleProjectMoveProjection);
+    runScanStep(refreshZedRemoteOpenControls);
+    runScanStep(installUpstreamWorktreeNativeAdapter);
     installCodexQueuedFollowUpEditPatch();
     if (codexPluginMarketplacePatchEnabled()) {
       const pluginUnlockStrategy = codexPluginUnlockStrategy();

@@ -163,6 +163,19 @@ pub trait BridgeRuntimeService: Send + Sync {
 
 #[async_trait]
 pub trait BridgeDataService: Send + Sync {
+    async fn move_thread_workspace(
+        &self,
+        _session: SessionRef,
+        _target_cwd: String,
+    ) -> anyhow::Result<Value> {
+        anyhow::bail!("当前后端无法移动会话项目")
+    }
+    async fn thread_sort_key(&self, _session: SessionRef) -> anyhow::Result<Value> {
+        anyhow::bail!("当前后端无法读取会话排序时间")
+    }
+    async fn thread_sort_keys(&self, _sessions: Vec<SessionRef>) -> anyhow::Result<Value> {
+        anyhow::bail!("当前后端无法读取会话排序时间")
+    }
     async fn whale_history(&self, _payload: Value) -> anyhow::Result<Value> {
         Ok(json!({"status":"unavailable","message":"本机用量统计暂不可用"}))
     }
@@ -187,6 +200,65 @@ pub async fn handle_bridge_request(
     path: &str,
     payload: Value,
 ) -> serde_json::Value {
+    let restored: Option<anyhow::Result<Value>> = match path {
+        "/move-thread-workspace" => Some(
+            ctx.data
+                .move_thread_workspace(
+                    session_from_payload(&payload),
+                    payload["target_cwd"].as_str().unwrap_or("").to_string(),
+                )
+                .await,
+        ),
+        "/thread-sort-key" => Some(
+            ctx.data
+                .thread_sort_key(session_from_payload(&payload))
+                .await,
+        ),
+        "/thread-sort-keys" => Some(
+            ctx.data
+                .thread_sort_keys(
+                    payload["sessions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(session_from_payload)
+                        .collect(),
+                )
+                .await,
+        ),
+        "/upstream-worktree/status" => Some(Ok(crate::upstream_worktree::status_response())),
+        "/upstream-worktree/defaults" => {
+            Some(Ok(crate::upstream_worktree::defaults_response(&payload)))
+        }
+        "/upstream-worktree/prepare" => {
+            Some(Ok(crate::upstream_worktree::prepare_response(&payload)))
+        }
+        "/upstream-worktree/create" => {
+            Some(Ok(crate::upstream_worktree::create_response(&payload)))
+        }
+        "/zed-remote/status" => Some(Ok(crate::zed_remote::zed_remote_status())),
+        "/zed-remote/resolve-host" => {
+            Some(Ok(crate::zed_remote::resolve_ssh_target_response(&payload)))
+        }
+        "/zed-remote/fallback" | "/zed-remote/fallback-request" => Some(Ok(
+            crate::zed_remote::fallback_open_request_response(&payload),
+        )),
+        "/zed-remote/open" => Some(Ok(crate::zed_remote::open_zed_remote(&payload))),
+        "/zed-remote/projects" => Some(Ok(crate::zed_remote::list_zed_remote_projects_response(
+            &payload,
+        ))),
+        "/zed-remote/remember-project" => Some(Ok(
+            crate::zed_remote::remember_zed_remote_project_response(&payload),
+        )),
+        "/zed-remote/forget-project" => Some(Ok(
+            crate::zed_remote::forget_zed_remote_project_response(&payload),
+        )),
+        _ => None,
+    };
+    if let Some(result) = restored {
+        return result
+            .unwrap_or_else(|error| json!({"status":"failed","message":error.to_string()}));
+    }
     let started = Instant::now();
     let _ = crate::diagnostic_log::append_diagnostic_log(
         "bridge.request",

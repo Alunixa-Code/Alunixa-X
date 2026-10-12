@@ -1,4 +1,10 @@
-import { ArrowDown, ArrowUp, Plus, TestTube, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, GripVertical, Plus, TestTube, Trash2 } from "lucide-react";
+import { DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import type { ReactNode } from "react";
+import { modelProtocolKey } from "../model-protocols";
+import { supportsClaudeAdaptive } from "../claude-thinking";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { t } from "../i18n";
@@ -20,11 +26,24 @@ const protocols = [
   ["geminiGenerateContent", "Gemini Generate Content"],
 ] as const;
 
-export function CustomModelsEditor({ models, defaultId, onChange, onTest }: {
+function SortableModel({ id, children }: { id: string; children: ReactNode }) {
+  const { setNodeRef, transform, transition, attributes, listeners } = useSortable({ id });
+  return <article ref={setNodeRef} className="custom-model-block" data-custom-model-id={id}
+    style={{transform:CSS.Transform.toString(transform),transition}}>
+    <button type="button" className="custom-model-drag" aria-label={t("拖动模型排序")} {...attributes} {...listeners}><GripVertical size={16}/></button>
+    {children}
+  </article>;
+}
+
+export function CustomModelsEditor({ models, defaultId, onChange, onTest, efforts = {}, onEffortChange }: {
   models: CustomModel[]; defaultId: string;
   onChange: (models: CustomModel[], defaultId: string) => void;
   onTest?: (model: CustomModel) => void;
+  efforts?: Record<string, string>;
+  onEffortChange?: (model: CustomModel, effort: string) => void;
 }) {
+  const sensors=useSensors(useSensor(PointerSensor,{activationConstraint:{delay:240,tolerance:6}}),
+    useSensor(KeyboardSensor,{coordinateGetter:sortableKeyboardCoordinates}));
   const update = (index: number, patch: Partial<CustomModel>) =>
     onChange(models.map((model, i) => i === index ? {...model,...patch} : model), defaultId);
   const move = (index: number, direction: -1 | 1) => {
@@ -42,8 +61,14 @@ export function CustomModelsEditor({ models, defaultId, onChange, onTest }: {
       }}><Plus size={16}/>{t("添加模型")}</Button>
     </div>
     <p className="field-hint">{t("多模型模式不再写根级窗口覆盖；Codex 会从模型目录读取每个模型自己的上下文窗口与压缩阈值，切换模型后立即使用对应值。")}</p>
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({active,over}) => {
+      if (!over || active.id===over.id) return;
+      const from=models.findIndex(model=>model.id===active.id),to=models.findIndex(model=>model.id===over.id);
+      if(from>=0 && to>=0)onChange(arrayMove(models,from,to),defaultId);
+    }}>
+    <SortableContext items={models.map(model=>model.id)} strategy={verticalListSortingStrategy}>
     <div className="custom-model-blocks">
-      {models.map((model,index) => <article className="custom-model-block" key={model.id} data-custom-model-id={model.id}>
+      {models.map((model,index) => <SortableModel id={model.id} key={model.id}>
         <header className="custom-model-block-head">
           <label className="inline-toggle">
             <input type="radio" name="default-custom-model" checked={defaultId === model.id}
@@ -83,6 +108,15 @@ export function CustomModelsEditor({ models, defaultId, onChange, onTest }: {
             <Input aria-label={t("上下文窗口")} placeholder="200000 / 1M" value={model.contextWindow}
               onChange={event => update(index,{contextWindow:event.currentTarget.value})}/>
           </label>
+          {onEffortChange ? <label className="field"><span>{t("模型最高思考等级")}</span>
+            <select className="field-select" aria-label={t("模型最高思考等级")} value={efforts[modelProtocolKey(model.model)] || "xhigh"}
+              onChange={event=>onEffortChange(model,event.currentTarget.value)}>
+              {["low","medium","high","xhigh","max","ultra","adaptive"].map(effort=>
+                <option key={effort} value={effort} disabled={effort==="adaptive" && !supportsClaudeAdaptive(model.model,model.protocol,"pureApi")}>
+                  {effort==="adaptive"?t("自适应思维"):effort}
+                </option>)}
+            </select>
+          </label> : null}
           <label className="field"><span>{t("自动压缩 Token 阈值")}</span>
             <Input aria-label={t("自动压缩 Token 阈值")} disabled={!model.autoCompactEnabled} value={model.autoCompactLimit}
               onChange={event => update(index,{autoCompactLimit:event.currentTarget.value})}/>
@@ -90,7 +124,9 @@ export function CustomModelsEditor({ models, defaultId, onChange, onTest }: {
           <label className="inline-toggle"><input type="checkbox" aria-label={t("自动压缩")} checked={model.autoCompactEnabled}
             onChange={event => update(index,{autoCompactEnabled:event.currentTarget.checked})}/><span>{t("自动压缩")}</span></label>
         </div>
-      </article>)}
+      </SortableModel>)}
     </div>
+    </SortableContext>
+    </DndContext>
   </section>;
 }

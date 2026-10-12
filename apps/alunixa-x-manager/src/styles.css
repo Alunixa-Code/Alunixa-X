@@ -9868,6 +9868,7 @@ select {
 .relay-model-cell-protocol select { width: 100%; min-width: 0; height: 32px; color: inherit; background: var(--input-background, transparent); border: 1px solid var(--border); border-radius: 6px; font-size: 11px; }
 
 .custom-model-blocks { display: grid; gap: 14px; }
+.custom-model-drag { float: left; margin: 0 8px 6px 0; padding: 5px; cursor: grab; touch-action: none; color: hsl(var(--muted-foreground)); }
 .custom-model-block { min-width: 0; padding: 16px; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(var(--card)); }
 .custom-model-block-head, .custom-model-block-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .custom-model-block-head { justify-content: space-between; padding-bottom: 14px; margin-bottom: 14px; border-bottom: 1px solid hsl(var(--border)); }

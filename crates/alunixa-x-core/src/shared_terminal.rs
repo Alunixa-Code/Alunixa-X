@@ -162,6 +162,19 @@ impl SharedTerminalBroker {
         Ok(())
     }
 
+    pub async fn cancel_all(&self) {
+        let mut state = self.state.lock().await;
+        state.queue.clear();
+        for (request_id, entry) in state.entries.drain() {
+            let _ = entry.response.send(SharedTerminalResult {
+                request_id,
+                exit_code: 1,
+                output: String::new(),
+                error: "共享终端后端已停止；命令未报告完成，不自动重放".into(),
+            });
+        }
+    }
+
     #[cfg(test)]
     async fn pending_count(&self) -> usize {
         self.state.lock().await.entries.len()
@@ -235,7 +248,7 @@ pub fn proxy_command(
     let encode =
         |value: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(value.as_bytes());
     #[cfg(windows)]
-    let executable = format!("\"{}\"", launcher_path.to_string_lossy().replace('"', ""));
+    let executable = format!("'{}'", launcher_path.to_string_lossy().replace('\'', "''"));
     #[cfg(not(windows))]
     let executable = format!(
         "'{}'",
@@ -298,6 +311,7 @@ pub async fn run_proxy(request: SharedTerminalRequest) -> anyhow::Result<SharedT
     }
     let helper_port = status.helper_port.context("Alunixa X Helper 端口不可用")?;
     let client = reqwest::Client::builder()
+        .no_proxy()
         .connect_timeout(Duration::from_secs(3))
         .build()?;
     let response = client
@@ -327,6 +341,20 @@ pub async fn run_proxy(request: SharedTerminalRequest) -> anyhow::Result<SharedT
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn stopping_the_broker_resolves_pending_commands_without_replaying_them() {
+        let broker = SharedTerminalBroker::shared();
+        let submitted = broker.clone();
+        let task =
+            tokio::spawn(async move { submitted.submit(request("stopping")).await.unwrap() });
+        tokio::task::yield_now().await;
+        broker.cancel_all().await;
+        let result = task.await.unwrap();
+        assert_eq!(result.exit_code, 1);
+        assert!(result.error.contains("不自动重放"));
+        assert!(broker.next().await.is_none());
+    }
 
     fn request(id: &str) -> SharedTerminalRequest {
         SharedTerminalRequest {
