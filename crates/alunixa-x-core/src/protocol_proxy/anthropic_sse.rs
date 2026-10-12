@@ -1,12 +1,8 @@
 //! Adapted from cc-switch 99277921 (MIT, see THIRD_PARTY_NOTICES.md).
 //! Shared builders for the OpenAI Responses SSE envelope.
 //!
-//! The two Codex streaming converters — `streaming_codex_chat` (Chat Completions SSE →
-//! Responses SSE) and `streaming_codex_anthropic` (Anthropic Messages SSE → Responses
-//! SSE) — have completely different *input* state machines but must emit the identical
-//! Responses event stream the Codex client understands. This module owns that output
-//! envelope so the two converters cannot drift when an event's shape changes: a wire fix
-//! lands here once instead of being mirrored in both files.
+//! Native Anthropic blocks emit the Responses envelope without an intermediate
+//! Chat Completions state machine.
 //!
 //! Each function is pure — it takes primitives or a caller-built `item` `Value` and
 //! returns the exact bytes the converters previously constructed inline. Item shapes that
@@ -47,15 +43,6 @@ pub(super) fn response_completed(response: &Value) -> String {
     sse_event(
         "response.completed",
         json!({ "type": "response.completed", "response": response }),
-    )
-}
-
-/// `response.incomplete`. Codex treats it as a retryable stream error; the converters
-/// only use it for compaction turns, where a truncated summary must not be installed.
-pub(super) fn response_incomplete(response: &Value) -> String {
-    sse_event(
-        "response.incomplete",
-        json!({ "type": "response.incomplete", "response": response }),
     )
 }
 
@@ -239,18 +226,6 @@ pub(super) fn reasoning_item(item_id: &str, text: &str) -> Value {
         "type": "reasoning",
         "summary": [{ "type": "summary_text", "text": text }]
     })
-}
-
-/// Close a reasoning item: emits `reasoning_summary_text.done` →
-/// `reasoning_summary_part.done` → `output_item.done`, and returns the completed item.
-pub(super) fn reasoning_close(
-    output_index: u32,
-    item_id: &str,
-    text: &str,
-) -> (Vec<String>, Value) {
-    let item = reasoning_item(item_id, text);
-    let events = reasoning_close_with_item(output_index, item_id, text, &item, true);
-    (events, item)
 }
 
 /// Close a reasoning item whose completed shape is supplied by the converter.

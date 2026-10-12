@@ -480,37 +480,7 @@ pub(super) fn native_reasoning_options(body: &Value, wire: &str) -> anyhow::Resu
         .pointer("/reasoning/effort")
         .or_else(|| body.get("reasoning_effort"))
         .and_then(Value::as_str);
-    if wire == "anthropic" {
-        if let Some(thinking) = body.get("thinking") {
-            options["thinking"] = thinking.clone();
-        }
-        if let Some(effort) = effort {
-            match effort {
-                "none" | "disabled" => options["thinking"] = json!({"type":"disabled"}),
-                "adaptive" | "xhigh" | "ultra"
-                    if super::is_claude_model(body["model"].as_str().unwrap_or("")) =>
-                {
-                    options["thinking"] = json!({"type":"adaptive"});
-                }
-                "low" | "medium" | "high" | "max" | "xhigh" | "ultra" => {
-                    if options.get("thinking").is_none() {
-                        options["thinking"] = json!({"type":"adaptive"});
-                    }
-                    // Current Opus 5/5.5 support xhigh; older 4.6 models do not.
-                    // Ultra is an AX level, never an Anthropic wire value.
-                    let model = body["model"].as_str().unwrap_or("").to_ascii_lowercase();
-                    let mapped = match effort {
-                        "xhigh" if model.contains("claude-opus-4-6") => "max",
-                        "xhigh" if model.contains("claude-sonnet-4-6") => "high",
-                        "ultra" => "max",
-                        _ => effort,
-                    };
-                    options["output_config"] = json!({"effort":mapped});
-                }
-                _ => return reject("unsupported Anthropic reasoning effort"),
-            }
-        }
-    } else if wire == "gemini" {
+    if wire == "gemini" {
         if body.get("thinking").is_some() {
             return reject("Anthropic-style thinking options cannot be sent to Gemini");
         }

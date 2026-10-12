@@ -10,6 +10,7 @@ const MAX_THINKING_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
 pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<Value> {
+    remove_unsupported_native_search(&mut body)?;
     expand_local_compaction_history(&mut body);
     if input_has_native_compaction(&body) {
         return Err(NativeCompactionUnsupported::history().into());
@@ -236,6 +237,34 @@ pub(super) fn tool_context_from_request(body: &Value) -> (CodexToolContext, Vec<
         converted.extend(namespace_tool_to_chat_tools(namespace, &context));
     }
     dedup_chat_tools_by_name(&mut converted);
+    // cc-switch's bounded namespace names remain stable across declarations/history/replies.
+    for tool in &mut converted {
+        let name = tool["function"]["name"].as_str().unwrap_or("").to_string();
+        if name.len() <= 64 {
+            continue;
+        }
+        use sha2::{Digest, Sha256};
+        let hash: String = Sha256::digest(name.as_bytes())
+            .iter()
+            .take(8)
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let mut end = 46.min(name.len());
+        while !name.is_char_boundary(end) {
+            end -= 1;
+        }
+        let alias = format!("{}__{hash}", &name[..end]);
+        context
+            .native_tool_aliases
+            .insert(name.clone(), alias.clone());
+        if let Some(spec) = context.function_tools.remove(&name) {
+            context.function_tools.insert(alias.clone(), spec);
+        }
+        if let Some(spec) = context.custom_tools.remove(&name) {
+            context.custom_tools.insert(alias.clone(), spec);
+        }
+        tool["function"]["name"] = json!(alias);
+    }
     (context, converted)
 }
 
@@ -268,7 +297,8 @@ fn map_tool_choice_to_anthropic(choice: &Value, context: &CodexToolContext) -> V
         Some(Value::String(choice)) if choice == "required" => json!({"type":"any"}),
         Some(Value::String(choice)) if choice == "none" => json!({"type":"none"}),
         Some(choice) if choice.pointer("/function/name").is_some() => {
-            json!({"type":"tool","name":choice["function"]["name"]})
+            let name = choice["function"]["name"].as_str().unwrap_or("");
+            json!({"type":"tool","name":context.native_tool_aliases.get(name).map_or(name, String::as_str)})
         }
         _ if choice["type"] == "tool_search" => json!({"type":"tool","name":"tool_search"}),
         _ => json!({"type":"auto"}),
@@ -278,9 +308,10 @@ fn map_tool_choice_to_anthropic(choice: &Value, context: &CodexToolContext) -> V
 fn function_name(item: &Value, context: &CodexToolContext) -> String {
     let name = responses_history_function_name(item);
     context
-        .function_tools
+        .native_tool_aliases
         .get(&name)
-        .map_or(name.clone(), |_| name)
+        .cloned()
+        .unwrap_or(name)
 }
 
 fn convert_input_to_messages(
@@ -316,6 +347,11 @@ fn convert_input_to_messages(
                         &responses_history_function_name(item),
                         item.get("input").unwrap_or(&Value::Null),
                     );
+                    let name = context
+                        .native_tool_aliases
+                        .get(&name)
+                        .cloned()
+                        .unwrap_or(name);
                     (name, serde_json::from_str(&args)?)
                 } else {
                     let name = if kind == "tool_search_call" {

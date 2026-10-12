@@ -64,6 +64,7 @@ enum ChatReasoningStyle {
 struct CodexToolContext {
     custom_tools: BTreeMap<String, CodexCustomToolSpec>,
     function_tools: BTreeMap<String, CodexFunctionToolSpec>,
+    native_tool_aliases: BTreeMap<String, String>,
     has_custom_tools: bool,
     has_namespace_tools: bool,
 }
@@ -3643,6 +3644,13 @@ pub fn response_to_sse_for_wire(
             "response.output_item.added",
             json!({"type":"response.output_item.added","output_index":index,"item":added}),
         );
+        if matches!(
+            kind,
+            "function_call" | "custom_tool_call" | "tool_search_call"
+        ) && item["status"] == "incomplete"
+        {
+            continue;
+        }
         if kind == "message" {
             for (part_index, part) in item["content"].as_array().into_iter().flatten().enumerate() {
                 let refusal = part["type"] == "refusal";
@@ -7726,6 +7734,16 @@ pub fn wrap_non_stream_response_as_compaction(
 ) -> anyhow::Result<Vec<u8>> {
     let upstream_json: Value = serde_json::from_slice(upstream_body)?;
     let mut converter = CompactionSseConverter::new(model);
+    if matches!(
+        upstream_json["status"].as_str(),
+        Some("incomplete" | "failed")
+    ) {
+        converter.fail(
+            "上游返回了不完整摘要，无法完成压缩".into(),
+            Some("compaction_incomplete".into()),
+        );
+        return Ok(converter.finish());
+    }
     if let Some(error) = upstream_json.get("error").filter(|value| !value.is_null()) {
         converter.fail(
             error
@@ -9495,6 +9513,10 @@ impl CompactionSseConverter {
             event_type,
             "response.failed" | "response.incomplete" | "error"
         ) || chunk.get("error").is_some_and(|error| !error.is_null())
+            || (event_type == "response.completed"
+                && chunk
+                    .pointer("/response/status")
+                    .is_some_and(|status| status == "incomplete" || status == "failed"))
         {
             let error = chunk
                 .pointer("/response/error")

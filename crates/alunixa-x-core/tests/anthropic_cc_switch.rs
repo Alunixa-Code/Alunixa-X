@@ -1,6 +1,7 @@
 use alunixa_x_core::protocol_proxy::{
-    NativeSseToResponsesConverter, UpstreamWireApi, anthropic_message_to_response_with_request,
-    responses_to_anthropic_messages,
+    CompactionSseConverter, NativeSseToResponsesConverter, UpstreamWireApi,
+    anthropic_message_to_response_with_request, response_to_sse_for_wire,
+    responses_to_anthropic_messages, wrap_non_stream_response_as_compaction,
 };
 use serde_json::{Value, json};
 
@@ -183,6 +184,25 @@ fn tool_definitions_omit_null_description_and_preserve_strict() {
     .unwrap();
     assert!(request["tools"][0].get("description").is_none());
     assert_eq!(request["tools"][0]["strict"], true);
+}
+
+#[test]
+fn native_search_advertisement_is_not_sent_as_an_anthropic_tool_or_fake_executor() {
+    let request = responses_to_anthropic_messages(json!({
+        "input":"hello","tools":[
+            {"type":"web_search"},
+            {"type":"function","name":"web_search","parameters":{"type":"object"}}
+        ]
+    }))
+    .unwrap();
+    assert_eq!(request["tools"].as_array().unwrap().len(), 1);
+    assert_eq!(request["tools"][0]["name"], "web_search");
+    assert!(
+        responses_to_anthropic_messages(json!({
+            "input":"hello","tools":[{"type":"web_search"}],"tool_choice":{"type":"web_search"}
+        }))
+        .is_err()
+    );
 }
 
 #[test]
@@ -403,4 +423,182 @@ fn stream_failures_and_duplicate_terminal_events_never_become_success() {
             .count(),
         1
     );
+}
+
+#[test]
+fn limited_json_tool_response_does_not_emit_executable_done_events() {
+    let response = anthropic_message_to_response_with_request(
+        json!({
+            "content":[{"type":"tool_use","id":"x","name":"exec","input":{"cmd":"partial"}}],
+            "stop_reason":"max_tokens"
+        }),
+        &json!({}),
+    )
+    .unwrap();
+    let result =
+        events(&response_to_sse_for_wire(&response, UpstreamWireApi::AnthropicMessages).unwrap());
+    assert_eq!(terminal(&result)["type"], "response.completed");
+    assert_eq!(
+        terminal(&result)["response"]["output"][0]["status"],
+        "incomplete"
+    );
+    assert!(
+        !result
+            .iter()
+            .any(|event| event["type"] == "response.function_call_arguments.done")
+    );
+    assert!(
+        !result
+            .iter()
+            .any(|event| event["type"] == "response.output_item.done")
+    );
+}
+
+#[test]
+fn incomplete_compaction_is_not_published_as_a_valid_checkpoint() {
+    let response = anthropic_message_to_response_with_request(
+        json!({
+            "content":[{"type":"text","text":"partial summary"}],"stop_reason":"max_tokens"
+        }),
+        &json!({}),
+    )
+    .unwrap();
+    let mut converter = CompactionSseConverter::new("claude-opus-4-6");
+    converter.push_upstream_bytes(
+        &response_to_sse_for_wire(&response, UpstreamWireApi::AnthropicMessages).unwrap(),
+    );
+    assert_eq!(
+        terminal(&events(&converter.finish()))["type"],
+        "response.failed"
+    );
+    let result = wrap_non_stream_response_as_compaction(
+        &serde_json::to_vec(&response).unwrap(),
+        "claude-opus-4-6",
+    )
+    .unwrap();
+    assert_eq!(terminal(&events(&result))["type"], "response.failed");
+}
+
+#[test]
+fn resumed_incomplete_calls_and_orphan_results_are_removed_as_native_turns() {
+    let request = responses_to_anthropic_messages(json!({"input":[
+        {"type":"function_call","status":"incomplete","call_id":"x","name":"exec","arguments":"{\"cmd\":"},
+        {"type":"function_call_output","call_id":"x","output":"old result"},
+        {"role":"user","content":"new question"}
+    ]})).unwrap();
+    assert_eq!(
+        request["messages"],
+        json!([{"role":"user","content":[{"type":"text","text":"new question"}]}])
+    );
+}
+
+#[test]
+fn document_input_and_tool_results_keep_their_native_content_type() {
+    let request = responses_to_anthropic_messages(json!({"input":[
+        {"role":"user","content":[{"type":"input_file","filename":"fixture.pdf","file_data":"data:application/pdf;base64,cGRm"}]},
+        {"type":"function_call","call_id":"x","name":"read_file","arguments":"{}"},
+        {"type":"function_call_output","call_id":"x","output":[{"type":"input_file","file_url":"https://fixture.invalid/report.pdf"}]}
+    ]})).unwrap();
+    assert_eq!(request["messages"][0]["content"][0]["type"], "document");
+    assert_eq!(request["messages"][0]["content"][0]["title"], "fixture.pdf");
+    assert_eq!(
+        request["messages"][2]["content"][0]["content"][0]["source"]["type"],
+        "url"
+    );
+}
+
+#[test]
+fn required_thinking_models_keep_adaptive_and_reject_forced_tools() {
+    let request = responses_to_anthropic_messages(json!({
+        "model":"claude-fable-5","input":"hello","reasoning":{"effort":"none"}
+    }))
+    .unwrap();
+    assert_eq!(request["thinking"]["type"], "adaptive");
+    assert_eq!(request["output_config"]["effort"], "low");
+    assert!(responses_to_anthropic_messages(json!({
+        "model":"claude-fable-5","input":"hello","reasoning":{"effort":"high"},
+        "tools":[{"type":"function","name":"exec","parameters":{"type":"object"}}],"tool_choice":"required"
+    })).is_err());
+}
+
+#[test]
+fn tool_start_input_is_used_only_when_no_streamed_arguments_exist() {
+    let mut values = vec![
+        start(),
+        json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"x","name":"Read","input":{"path":"fixture","pages":""}}}),
+        json!({"type":"content_block_stop","index":0}),
+    ];
+    values.extend(end("tool_use"));
+    let result = stream(values, json!({}));
+    let args = terminal(&result)["response"]["output"][0]["arguments"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(args).unwrap(),
+        json!({"path":"fixture"})
+    );
+}
+
+#[test]
+fn empty_messages_and_invalid_json_never_become_valid_native_requests() {
+    for request in [
+        json!({"input":"   "}),
+        json!({"input":[{"role":"user","content":[{"type":"input_text","text":" "}]}]}),
+        json!({"input":[{"type":"function_call","call_id":"x","name":"exec","arguments":"invalid"}]}),
+    ] {
+        assert!(responses_to_anthropic_messages(request).is_err());
+    }
+}
+
+#[test]
+fn eof_after_a_stop_reason_is_still_a_failed_stream_without_message_stop() {
+    let result = stream(
+        vec![
+            start(),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":"partial"}}),
+            json!({"type":"message_delta","delta":{"stop_reason":"end_turn"}}),
+        ],
+        json!({}),
+    );
+    assert_eq!(terminal(&result)["type"], "response.failed");
+    assert!(
+        !result
+            .iter()
+            .any(|event| event["type"] == "response.completed")
+    );
+}
+
+#[test]
+fn long_namespace_names_are_bounded_stable_and_round_trip_with_original_identity() {
+    let namespace = "mcp__".to_string() + &"long_server_".repeat(6);
+    let body = json!({
+        "model":"claude-opus-4-6","input":"hello",
+        "tools":[{"type":"namespace","name":namespace,"tools":[{"type":"function","name":"read","parameters":{"type":"object"}}]}],
+        "tool_choice":{"type":"function","name":"read","namespace":namespace}
+    });
+    let request = responses_to_anthropic_messages(body.clone()).unwrap();
+    let name = request["tools"][0]["name"].as_str().unwrap();
+    assert_eq!(name.len(), 64);
+    assert_eq!(request["tool_choice"]["name"], name);
+    assert_eq!(
+        responses_to_anthropic_messages(body.clone()).unwrap()["tools"][0]["name"],
+        name
+    );
+    let response = anthropic_message_to_response_with_request(
+        json!({
+            "content":[{"type":"tool_use","id":"x","name":name,"input":{}}],
+            "stop_reason":"tool_use"
+        }),
+        &body,
+    )
+    .unwrap();
+    assert_eq!(response["output"][0]["name"], "read");
+    assert_eq!(response["output"][0]["namespace"], namespace);
+    let mut input = vec![json!({"role":"user","content":"hello"})];
+    input.extend(response["output"].as_array().unwrap().clone());
+    input.push(json!({"type":"function_call_output","call_id":"x","output":"done"}));
+    let mut next = body;
+    next["input"] = json!(input);
+    let next = responses_to_anthropic_messages(next).unwrap();
+    assert_eq!(next["messages"][1]["content"][0]["name"], name);
 }

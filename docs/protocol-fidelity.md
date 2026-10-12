@@ -1,5 +1,21 @@
 # 本地协议转换保真规则
 
+## 2026-10-12：Anthropic 原生适配
+
+- Anthropic 使用独立请求/原生内容块状态机，改编自 CC Switch `99277921d9363c78e656ada0ca3bf39e30938b23`，不再通过 Chat Completions 中间格式；正式 Helper HTTP 入口按上游协议分派喵~
+- 普通 Anthropic 限额对话用 `response.completed` 事件携带 `status: incomplete`，兼容实际 Codex 客户端；工具截断不发执行 done，压缩则仍拒绝不完整摘要喵~
+- 新 signed/redacted 思考项使用 `ccswitch-anthropic-thinking-v1:` 原生块回放；旧 `alunixa-x-replay-v1:` 整轮回放继续核验覆盖历史，防止编辑后静默替换，二者都是编码标记而非额外加密喵~
+- 恢复历史采用 CC Switch 的原生回合整理：合并同角色内容、工具结果前置、补开头 user、过滤空文本；中断的工具调用和无法配对的原生工具回合会移除，不把孤立工具结果伪装成 user 正文；以下通用严格拒绝规则主要适用于其他协议喵~
+- 缓存、传输元字段、思考预算、采样、强制工具约束、64 字节工具别名及原生文件内容有独立映射；不把原生搜索广告转换为假执行器喵~
+- 本机 Codex CLI 0.157.1 经真实 Helper 与隔离 loopback 网关完成 SSE、JSON/token 限制回退、签名工具续轮，实际 CLI 用量包含缓存读与写；不触碰运行中的桌面实例喵~
+
+```powershell
+cargo test -p alunixa-x-core --test anthropic_cc_switch --test protocol_fidelity --test protocol_proxy --locked -- --test-threads=1
+cargo test -p alunixa-x-core --lib launcher::proxy_stream_tests --locked -- --test-threads=1
+cargo build -p alunixa-x-core --example anthropic_protocol_fixture --locked
+python tools/verify-anthropic-codex.py --codex <installed-cli> --helper <built-fixture> --output <verification-json>
+```
+
 ## 范围
 
 - 转换由本机 Helper 的 `protocol_proxy` 执行，之后访问用户配置的上游；原生 Responses 与透明 HTTP/WebSocket 不强制绕经 Chat Completions 喵~

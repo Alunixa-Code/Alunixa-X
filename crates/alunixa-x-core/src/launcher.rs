@@ -2013,7 +2013,8 @@ async fn handle_protocol_proxy_connection(
                     error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
                 let search =
                     error.downcast_ref::<crate::protocol_proxy::UnsupportedNativeWebSearch>();
-                let status = if unsupported.is_some() || search.is_some() {
+                let conversion = crate::protocol_proxy::is_protocol_conversion_error(&error);
+                let status = if unsupported.is_some() || search.is_some() || conversion {
                     "400 Bad Request"
                 } else {
                     "502 Bad Gateway"
@@ -2023,7 +2024,15 @@ async fn handle_protocol_proxy_connection(
                         .map(|error| error.response_body())
                         .or_else(|| search.map(|error| error.response_body()))
                         .unwrap_or_else(
-                            || serde_json::json!({"status":"failed","message":error.to_string()}),
+                            || serde_json::json!({
+                                "status":"failed",
+                                "message":error.to_string(),
+                                "error":{
+                                    "type":if conversion { "invalid_request_error" } else { "upstream_error" },
+                                    "code":if conversion { "unsupported_protocol_conversion" } else { "upstream_connection_error" },
+                                    "message":error.to_string()
+                                }
+                            }),
                         ),
                 )?;
                 write_http_response(stream, status, "application/json; charset=utf-8", &body)
@@ -2082,6 +2091,48 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
+    if upstream.is_stream
+        && !upstream.compaction
+        && upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages
+        && request_json
+            .as_ref()
+            .is_some_and(|request| request["stream"] == false)
+    {
+        let bytes = upstream.read_body().await?;
+        let request = request_json.as_ref().unwrap();
+        let mut converter = crate::protocol_proxy::NativeSseToResponsesConverter::with_request(
+            upstream.wire_api,
+            request,
+        );
+        let mut converted = converter.push_bytes(&bytes);
+        converted.extend(converter.finish());
+        let response = std::str::from_utf8(&converted)?
+            .lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str::<Value>(data).ok())
+            .find(|event| {
+                matches!(
+                    event["type"].as_str(),
+                    Some("response.completed" | "response.failed")
+                )
+            })
+            .context("Anthropic stream has no terminal response")?["response"]
+            .clone();
+        let status = if response["status"] == "failed" {
+            "502 Bad Gateway"
+        } else {
+            "200 OK"
+        };
+        write_http_response(
+            stream,
+            status,
+            "application/json; charset=utf-8",
+            &serde_json::to_vec(&response)?,
+        )
+        .await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
     if upstream.is_stream {
         write_http_stream_headers(stream, "200 OK", "text/event-stream; charset=utf-8").await?;
         if upstream.compaction {
@@ -2095,18 +2146,30 @@ async fn handle_protocol_proxy_connection(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(""),
             );
-            if upstream.wire_api != crate::protocol_proxy::UpstreamWireApi::Responses {
-                converter = converter.with_chat_upstream();
-            }
+            let request = request_json.as_ref().cloned().unwrap_or_default();
+            let mut wire_converter =
+                crate::protocol_proxy::UpstreamSseToResponsesConverter::with_request(
+                    upstream.wire_api,
+                    &request,
+                );
             let mut bytes_stream = upstream.take_response()?.bytes_stream();
             while let Some(chunk) = bytes_stream.next().await {
                 match chunk {
-                    Ok(bytes) => converter.push_upstream_bytes(&bytes),
+                    Ok(bytes) => {
+                        if let Some(wire_converter) = &mut wire_converter {
+                            converter.push_upstream_bytes(&wire_converter.push_bytes(&bytes));
+                        } else {
+                            converter.push_upstream_bytes(&bytes);
+                        }
+                    }
                     Err(error) => {
                         converter.fail(format!("Stream error: {error}"), None);
                         break;
                     }
                 }
+            }
+            if let Some(wire_converter) = &mut wire_converter {
+                converter.push_upstream_bytes(&wire_converter.finish());
             }
             let payload = converter.finish();
             stream.write_all(&payload).await?;
@@ -2153,8 +2216,14 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let upstream_body = upstream.read_body().await?;
+    let mut upstream_body = upstream.read_body().await?;
     if upstream.compaction {
+        if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages {
+            let request = request_json.as_ref().cloned().unwrap_or_default();
+            let converted =
+                convert_protocol_proxy_json(&upstream_body, upstream.wire_api, &request)?;
+            upstream_body = serde_json::to_vec(&converted)?;
+        }
         // v2 远程压缩非流式路径：同样重组为单个 compaction 输出项。
         let body = crate::protocol_proxy::wrap_non_stream_response_as_compaction(
             &upstream_body,
@@ -2197,11 +2266,27 @@ async fn handle_protocol_proxy_connection(
         stream.shutdown().await?;
         return Ok(());
     }
-    let chat_json: serde_json::Value = serde_json::from_slice(&upstream_body)?;
-    let response_json = if let Some(request_json) = request_json.as_ref() {
-        crate::protocol_proxy::chat_completion_to_response_with_request(chat_json, request_json)?
-    } else {
-        crate::protocol_proxy::chat_completion_to_response(chat_json)?
+    let request = request_json.as_ref().cloned().unwrap_or_default();
+    let response_json = match convert_protocol_proxy_json(
+        &upstream_body,
+        upstream.wire_api,
+        &request,
+    ) {
+        Ok(response) => response,
+        Err(_) => {
+            let body = serde_json::to_vec(&serde_json::json!({
+                "error":{"type":"upstream_error","code":"invalid_upstream_response","message":"上游响应不符合所选协议"}
+            }))?;
+            write_http_response(
+                stream,
+                "502 Bad Gateway",
+                "application/json; charset=utf-8",
+                &body,
+            )
+            .await?;
+            stream.shutdown().await?;
+            return Ok(());
+        }
     };
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
@@ -2214,6 +2299,31 @@ async fn handle_protocol_proxy_connection(
     );
     stream.shutdown().await?;
     Ok(())
+}
+
+fn convert_protocol_proxy_json(
+    bytes: &[u8],
+    wire: crate::protocol_proxy::UpstreamWireApi,
+    request: &Value,
+) -> anyhow::Result<Value> {
+    use crate::protocol_proxy::{self, UpstreamWireApi};
+    let body = serde_json::from_slice(bytes)?;
+    match wire {
+        UpstreamWireApi::AnthropicMessages => {
+            protocol_proxy::anthropic_message_to_response_with_request(body, request)
+        }
+        UpstreamWireApi::GeminiGenerateContent => {
+            protocol_proxy::gemini_generate_content_to_response_with_request(body, request)
+        }
+        UpstreamWireApi::Completions => {
+            protocol_proxy::completion_to_response_with_request(body, request)
+        }
+        UpstreamWireApi::ChatCompletions => {
+            protocol_proxy::chat_completion_to_response_with_request(body, request)
+        }
+        UpstreamWireApi::Responses => Ok(body),
+        _ => anyhow::bail!("unsupported response conversion protocol"),
+    }
 }
 async fn handle_dictation_connection(
     stream: &mut tokio::net::TcpStream,
@@ -2669,16 +2779,42 @@ async fn forward_protocol_proxy_stream(
         }
         return Ok(observer.finish());
     }
-    let mut converter = request
-        .map(crate::protocol_proxy::ChatSseToResponsesConverter::with_request)
-        .unwrap_or_default();
-    while let Some(chunk) = chunks.next().await {
+    let request = request.cloned().unwrap_or_default();
+    let mut converter =
+        crate::protocol_proxy::UpstreamSseToResponsesConverter::with_request(wire_api, &request)
+            .context("unsupported streaming conversion protocol")?;
+    let mut terminal_deadline = None;
+    loop {
+        let idle_deadline =
+            tokio::time::Instant::now() + crate::protocol_proxy::upstream_stream_idle_timeout();
+        let deadline = terminal_deadline.map_or(idle_deadline, |deadline: tokio::time::Instant| {
+            deadline.min(idle_deadline)
+        });
+        let chunk = match tokio::time::timeout_at(deadline, chunks.next()).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                stream
+                    .write_all(
+                        &converter.fail("上游响应流等待超时".into(), Some("stream_timeout".into())),
+                    )
+                    .await?;
+                return Ok(Some("上游响应流等待超时".into()));
+            }
+        };
         match chunk {
             Ok(bytes) => {
                 let converted = converter.push_bytes(&bytes);
                 stream.write_all(&converted).await?;
                 if converter.has_failed() {
                     return Ok(Some("上游返回了流式错误事件".to_string()));
+                }
+                if converter.is_completed() {
+                    return Ok(None);
+                }
+                if terminal_deadline.is_none() && converter.is_waiting_for_terminal_event() {
+                    terminal_deadline =
+                        Some(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
                 }
             }
             Err(error) => {
@@ -2691,16 +2827,10 @@ async fn forward_protocol_proxy_stream(
             }
         }
     }
-    // EOF 不是 Chat 协议的完成事件；已发出的文本和工具增量不能自动重放。
-    if !converter.has_terminal_event() {
-        let failed = converter.fail(
-            "上游在完成事件前结束了响应流".to_string(),
-            Some("stream_incomplete".to_string()),
-        );
-        stream.write_all(&failed).await?;
+    stream.write_all(&converter.finish()).await?;
+    if converter.has_failed() {
         return Ok(Some("上游缺少完成事件".to_string()));
     }
-    stream.write_all(&converter.finish()).await?;
     Ok(None)
 }
 
@@ -5398,30 +5528,50 @@ mod proxy_stream_tests {
     async fn anthropic_production_forwarder_uses_the_native_content_block_converter() {
         for reason in ["end_turn", "max_tokens"] {
             let (failure, output) = forward_fixture(
-                &anthropic_fixture(reason), false, UpstreamWireApi::AnthropicMessages,
-            ).await;
+                &anthropic_fixture(reason),
+                false,
+                UpstreamWireApi::AnthropicMessages,
+            )
+            .await;
             assert!(failure.is_none(), "{failure:?}");
             let events = parsed_events(&output);
-            let completed = events.iter().find(|event| event["type"] == "response.completed")
+            let completed = events
+                .iter()
+                .find(|event| event["type"] == "response.completed")
                 .expect("Codex's completed envelope");
-            assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "fixture answer");
+            assert_eq!(
+                completed["response"]["output"][0]["content"][0]["text"],
+                "fixture answer"
+            );
             assert_eq!(completed["response"]["usage"]["input_tokens"], 19);
             assert_eq!(completed["response"]["usage"]["output_tokens"], 5);
-            assert_eq!(completed["response"]["status"], if reason == "max_tokens" { "incomplete" } else { "completed" });
+            assert_eq!(
+                completed["response"]["status"],
+                if reason == "max_tokens" {
+                    "incomplete"
+                } else {
+                    "completed"
+                }
+            );
         }
     }
 
     #[tokio::test]
     async fn anthropic_production_forwarder_accepts_json_fallback_without_losing_stream_framing() {
         let json = json!({"id":"msg_json","content":[{"type":"text","text":"JSON fallback"}],"stop_reason":"max_tokens"});
-        let (failure, output) = forward_fixture(
-            &json.to_string(), false, UpstreamWireApi::AnthropicMessages,
-        ).await;
+        let (failure, output) =
+            forward_fixture(&json.to_string(), false, UpstreamWireApi::AnthropicMessages).await;
         assert!(failure.is_none(), "{failure:?}");
         let events = parsed_events(&output);
-        let completed = events.iter().find(|event| event["type"] == "response.completed").unwrap();
+        let completed = events
+            .iter()
+            .find(|event| event["type"] == "response.completed")
+            .unwrap();
         assert_eq!(completed["response"]["status"], "incomplete");
-        assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "JSON fallback");
+        assert_eq!(
+            completed["response"]["output"][0]["content"][0]["text"],
+            "JSON fallback"
+        );
     }
 
     #[tokio::test]
@@ -5430,11 +5580,17 @@ mod proxy_stream_tests {
         let temp = tempfile::tempdir().unwrap();
         struct RestoreSettingsPath(Option<std::path::PathBuf>);
         impl Drop for RestoreSettingsPath {
-            fn drop(&mut self) { crate::paths::set_settings_path_for_tests(self.0.take()); }
+            fn drop(&mut self) {
+                crate::paths::set_settings_path_for_tests(self.0.take());
+            }
         }
         let settings_path = temp.path().join("settings.json");
-        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(settings_path.clone())));
-        for (request_stream, upstream_sse) in [(true, true), (true, false), (false, false)] {
+        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(
+            settings_path.clone(),
+        )));
+        for (request_stream, upstream_sse) in
+            [(true, true), (true, false), (false, false), (false, true)]
+        {
             let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = upstream.local_addr().unwrap();
             std::fs::write(&settings_path, serde_json::to_vec(&json!({
@@ -5450,10 +5606,17 @@ mod proxy_stream_tests {
                 let request = super::read_http_request(&mut socket).await.unwrap();
                 let headers = String::from_utf8(request.headers).unwrap();
                 assert!(headers.starts_with("POST /v1/messages HTTP/1.1"));
-                assert!(headers.to_ascii_lowercase().contains("x-api-key: fixture-key"));
+                assert!(
+                    headers
+                        .to_ascii_lowercase()
+                        .contains("x-api-key: fixture-key")
+                );
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
                 assert_eq!(body["messages"][0]["role"], "user");
-                assert_eq!(body["messages"][0]["content"][0]["text"], "fixture question");
+                assert_eq!(
+                    body["messages"][0]["content"][0]["text"],
+                    "fixture question"
+                );
                 assert_eq!(body["thinking"]["type"], "adaptive");
                 assert!(body.get("temperature").is_none());
                 assert!(body.get("prompt_cache_key").is_none());
@@ -5462,7 +5625,11 @@ mod proxy_stream_tests {
                 } else {
                     json!({"id":"msg_json","content":[{"type":"text","text":"fixture answer"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"cache_read_input_tokens":3,"cache_creation_input_tokens":4,"output_tokens":5}}).to_string()
                 };
-                let mime = if upstream_sse { "text/event-stream" } else { "application/json" };
+                let mime = if upstream_sse {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                };
                 socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).as_bytes()).await.unwrap();
                 socket.shutdown().await.unwrap();
             });
@@ -5470,29 +5637,48 @@ mod proxy_stream_tests {
             let helper_addr = helper.local_addr().unwrap();
             let helper_task = tokio::spawn(async move {
                 let (socket, remote) = helper.accept().await.unwrap();
-                super::handle_helper_connection(socket, Some(remote)).await.unwrap();
+                super::handle_helper_connection(socket, Some(remote))
+                    .await
+                    .unwrap();
             });
-            let response = reqwest::Client::builder().no_proxy().build().unwrap()
+            let response = reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap()
                 .post(format!("http://{helper_addr}/v1/responses"))
                 .json(&json!({
                     "model":"claude-opus-4-6","input":"fixture question","stream":request_stream,
                     "reasoning":{"effort":"high"},"temperature":0.3,"prompt_cache_key":"fixture"
                 }))
-                .send().await.unwrap();
+                .send()
+                .await
+                .unwrap();
             assert!(response.status().is_success());
-            let mime = response.headers()[reqwest::header::CONTENT_TYPE].to_str().unwrap().to_string();
+            let mime = response.headers()[reqwest::header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .to_string();
             let response = response.text().await.unwrap();
             if request_stream {
                 assert!(mime.contains("text/event-stream"));
                 let events = parsed_events(&response);
-                let completed = events.iter().find(|event| event["type"] == "response.completed").expect("completed helper response");
-                assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "fixture answer");
+                let completed = events
+                    .iter()
+                    .find(|event| event["type"] == "response.completed")
+                    .expect("completed helper response");
+                assert_eq!(
+                    completed["response"]["output"][0]["content"][0]["text"],
+                    "fixture answer"
+                );
                 assert_eq!(completed["response"]["usage"]["input_tokens"], 19);
             } else {
                 assert!(mime.contains("application/json"));
                 let response: Value = serde_json::from_str(&response).unwrap();
                 assert_eq!(response["status"], "completed");
-                assert_eq!(response["output"][0]["content"][0]["text"], "fixture answer");
+                assert_eq!(
+                    response["output"][0]["content"][0]["text"],
+                    "fixture answer"
+                );
             }
             helper_task.await.unwrap();
             upstream_task.await.unwrap();
