@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.38: Codex / Anthropic protocol repair
+
+The local Responses ↔ Anthropic bridge now uses an independent CC Switch adapter, with the production HTTP dispatch fixed. This covers stream completion, JSON fallback, signed tool continuations, resumed histories, thinking controls, and cache-write usage. Three isolated flows passed with installed Codex CLI 0.157.1; see the [multilingual release notes](docs/releases/v1.0.38.md).
+
 ## v1.0.37: complete non-advertising upstream integration
 
 This version also fixes cross-platform read-only atomic-write protection and corrects AX bundle identity and target-architecture macOS update fixtures. v1.0.36 was not published after macOS checks failed; v1.0.37 is rebuilt from a new tag without relaxing verification.

@@ -41,7 +41,7 @@ python tools/verify-anthropic-codex.py --codex <installed-cli> --helper <built-f
 
 - Anthropic 原始内容块及 Gemini 原始 parts 通过 Responses reasoning 项的 opaque `encrypted_content` 字段携带，包含签名、redacted 内容、顺序及原始函数身份喵~
 - `alunixa-x-replay-v1:` 是版本化 Base64 JSON 传输标记，**不是额外加密**；该字段不作为正文渲染，也不写入诊断日志喵~
-- 回放项包含其覆盖的输出项，续轮先核对相邻历史再恢复原生内容；历史缺失、被编辑或协议不一致时不拼接、不重放、不借用其他会话缓存喵~
+- 旧 AX 整轮/Gemini 回放项包含其覆盖的输出项，续轮先核对相邻历史再恢复原生内容；历史缺失、被编辑或协议不一致时不拼接、不重放、不借用其他会话缓存。新 Anthropic 思考项仅携带自己的原生签名块喵~
 - Gemini call_id 和缺失的 response_id 使用请求间唯一标识，不再使用 `call_gemini_0` 等共享键，也不在缓存满时清空所有签名喵~
 - 原生思考在不具备签名/原始回放依据时不会降为普通 assistant 文本；Chat 的非流式 reasoning_details 可保持原样回放，尚不能可靠重建的 opaque reasoning_details 流明确失败喵~
 - API 请求中的模型、供应商和签名能力仍由上游校验，不能把另一协议的签名转成有效的本供应商签名喵~
@@ -55,7 +55,7 @@ python tools/verify-anthropic-codex.py --codex <installed-cli> --helper <built-f
 - 思考、正文、refusal 分别使用匹配的类型/事件，交错输出使用独立的 item_id 和 output_index 喵~
 - `<think>` 仅在正文开头识别，思考增量立即输出，只暂存可能跨分片的结束标签；不使用泛化“删除调试文本”正则破坏用户正文喵~
 - 工具名/ID 未完整前不发布工具身份；参数保持原字符串，完整 JSON、稳定身份和唯一 call_id 校验通过后才发可执行的 done 事件喵~
-- 达到 token 限制时发 response.incomplete，不把截断工具调用标为 completed 喵~
+- 达到 token 限制时保留 incomplete 状态，不把截断工具调用标为 completed；Anthropic 普通对话采用上述 Codex 兼容 completed 事件封装，其他协议及压缩保留原有 incomplete/失败规则喵~
 - 上游对 stream 请求返回 JSON 时，由完整响应生成相同下游 SSE 契约，包括文本/思考/工具及原生回放项喵~
 
 ## 错误与重试

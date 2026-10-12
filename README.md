@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.38：Codex / Anthropic 协议修复
+
+本地 Responses ↔ Anthropic 桥改用 CC Switch 的独立原生实现，并修复正式 HTTP 服务误接 Chat 转换器的问题；覆盖流收尾、JSON 回退、签名工具续轮、恢复历史、思考参数及缓存写入用量。已用实际 Codex CLI 0.157.1 完成三种隔离链路验证，详见 [v1.0.38 中英俄说明](docs/releases/v1.0.38.md)。
+
 ## v1.0.37：完整非广告上游整合
 
 本版另修复跨平台只读原子写保护，补齐 AX 原生应用身份与按架构编译的 macOS 更新测试夹具；v1.0.36 因 macOS 门禁失败未公开发行，v1.0.37 使用新标签完整重建，不降低验证要求。

@@ -89,7 +89,7 @@
       "source": "CHANGELOG.md",
       "destination": "CHANGELOG.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "6b5a7efaad7a1e95cfcc0efe9fe57a99f3a2aedddd35b79d05767e470522fb74"
+      "sha256": "8983e1de48872b299d35a6300d21b97c6a15347d63503e9a7f855131c6de4e25"
     },
     {
       "source": "CONTRIBUTING.md",
@@ -101,13 +101,13 @@
       "source": "Cargo.lock",
       "destination": "Cargo.lock",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "a73514c8c6dbda48c2ca9d6c201e8b834ea22ace0bc0697ff003283062620def"
+      "sha256": "305ec801932ee6c76a5e02ea5c649f8132a90cb24204f6570251ecdbc7c18810"
     },
     {
       "source": "Cargo.toml",
       "destination": "Cargo.toml",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "8f61c7d8ff6a2e24e06a479d22cdb42d0fe15096749c6cbe343c517cf2bef333"
+      "sha256": "94c33016091ae5149f1832836c22d15966d602359426de63834e89d2bb6a0d01"
     },
     {
       "source": "EXTENSIONS.md",
@@ -131,19 +131,19 @@
       "source": "README.md",
       "destination": "README.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "e08c86e6c5dc6d1bde335128d05584cede36930b62d4e4dadb40ea0ec79f74da"
+      "sha256": "bd42ee02ce53a1f6c29edc50243d26c6a0f650ede59c3acdecfc0d19667de5f7"
     },
     {
       "source": "README_EN.md",
       "destination": "README_EN.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "14fe77e32a37a007278d398beae91c56e5b64a833c35a176f2cb352ca8c39036"
+      "sha256": "99798de39edfcb4d33c00c44210677177eb65b2239f470ad37cc0dfac9d42855"
     },
     {
       "source": "THIRD_PARTY_NOTICES.md",
       "destination": "THIRD_PARTY_NOTICES.md",
-      "resolution": "integrated",
-      "sha256": "2c97df4264c9dfad2a1a50987502a8030124e4289a34946ce70e6c16dc213604"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "ca56e68ada7368c9ae8e521df1d4ffd0edeeb6cec6226f47b1380e4d3686ee6a"
     },
     {
       "source": "apps/codex-plus-launcher/Cargo.toml",
@@ -179,13 +179,13 @@
       "source": "apps/codex-plus-manager/package-lock.json",
       "destination": "apps/alunixa-x-manager/package-lock.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "ed32813629e892dfc2984c604fc5a4844dd9588b75857267599e0e1985ae8c25"
+      "sha256": "e8e416f66f55f7c6f3a161a2909b457ff27bee9ab0305126371f23aad66c8d91"
     },
     {
       "source": "apps/codex-plus-manager/package.json",
       "destination": "apps/alunixa-x-manager/package.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "4a5c291da31fb05d909636ad0d1792db1502601c410af9a5fbc796a5910f425e"
+      "sha256": "7fa3c97cd9c2673c24e0b49733a2be8ad489eead249af0e0866df5c1c3035e52"
     },
     {
       "source": "apps/codex-plus-manager/src-tauri/Cargo.toml",
@@ -263,7 +263,7 @@
       "source": "apps/codex-plus-manager/src-tauri/tauri.conf.json",
       "destination": "apps/alunixa-x-manager/src-tauri/tauri.conf.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "cf71cccdb44741534db652c31e442944d495008560768ec888e19060e9fad233"
+      "sha256": "ac76ba7efe330abc08d59ca18f59a786f88c164660daf5a5e648186fb0a40eb5"
     },
     {
       "source": "apps/codex-plus-manager/src-tauri/tests/windows_subsystem.rs",
@@ -2046,7 +2046,7 @@
       "source": "crates/codex-plus-core/src/launcher.rs",
       "destination": "crates/alunixa-x-core/src/launcher.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "7c8cafc61bb2b804b62b027796b83284de4f71d4b1f80859f2c7e2a0f732fa74"
+      "sha256": "d09da1d781a80e32621263e1a50ec8a92df9cb45573be4cf52c76ad9d16d6a43"
     },
     {
       "source": "crates/codex-plus-core/src/lib.rs",
@@ -2136,7 +2136,7 @@
       "source": "crates/codex-plus-core/src/protocol_proxy.rs",
       "destination": "crates/alunixa-x-core/src/protocol_proxy.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "92d1b50a054125ca8a5f6d9e04ea96250186125a567dcb2c6b373c96888b3510"
+      "sha256": "f88680bd93c8f101c8b0165c7c58f0c1dc6b7cee590f30df18d552786af9f8ee"
     },
     {
       "source": "crates/codex-plus-core/src/provider_import.rs",
@@ -3890,5 +3890,13 @@
       },
       "macosVerification": "required in tagged GitHub Actions on x64 and arm64; not claimed from Windows local tests"
     }
+  },
+  "anthropicCompatibility": {
+    "version": "1.0.38",
+    "upstream": "farion1231/cc-switch",
+    "commit": "99277921d9363c78e656ada0ca3bf39e30938b23",
+    "codexCli": "0.157.1",
+    "loopbackCliScenarios": 3,
+    "liveDesktopModified": false
   }
 }

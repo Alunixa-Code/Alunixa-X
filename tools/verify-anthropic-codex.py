@@ -165,12 +165,17 @@ stream_idle_timeout_ms = 15000
             assert not any(event["type"] in ("error", "turn.failed") for event in events), events
             assert any(event.get("item", {}).get("text") == "fixture-ok" for event in events), events
             assert len(requests) == (2 if mode == "tools" else 1), len(requests)
+            usage = next(event.get("usage") for event in events if event["type"] == "turn.completed")
+            assert usage["input_tokens"] == 19 * len(requests), usage
+            assert usage["cached_input_tokens"] == 3 * len(requests), usage
+            assert usage["cache_write_input_tokens"] == 4 * len(requests), usage
+            assert usage["output_tokens"] == 5 * len(requests), usage
             return {
                 "scenario": mode, "result": "PASS", "requests": len(requests),
                 "upstream": f"127.0.0.1:{gateway.server_port}",
                 "downstream": f"127.0.0.1:{port}",
                 "request_fields": sorted(requests[0]),
-                "usage": next(event.get("usage") for event in events if event["type"] == "turn.completed"),
+                "usage": usage,
             }
         finally:
             if process.poll() is None:
