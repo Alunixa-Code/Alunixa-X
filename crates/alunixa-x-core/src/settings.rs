@@ -4484,8 +4484,8 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
         }
         target.insert("dictation".to_string(), Value::Object(dictation));
     }
-    target.remove("codexAppPluginAutoExpand");
-    target.remove("computerUseGuardEnabled");
+    merge_bool_setting(target, source, "codexAppPluginAutoExpand");
+    merge_bool_setting(target, source, "computerUseGuardEnabled");
     if let Some(value) = source.get("codexAppPath").and_then(Value::as_str) {
         target.insert("codexAppPath".to_string(), Value::String(value.to_string()));
     }

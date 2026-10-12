@@ -89,7 +89,7 @@ import { NativeBrowserStatusView, nativeBrowserConsent } from "./native-browser-
 import { ImageModelsScreen } from "@/components/ImageModelsScreen";
 import { WallpaperSettings } from "@/components/WallpaperSettings";
 import { AgentHealthPanel } from "@/components/AgentHealthPanel";
-import { CustomModelsEditor, type CustomModel } from "@/components/CustomModelsEditor";
+import { CustomModelsEditor, createEmptyCustomModel, type CustomModel } from "@/components/CustomModelsEditor";
 const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 import { AgentCachePanel } from "./agent-cache";
 import { PluginMarketScreen } from "./PluginMarketScreen";
@@ -347,6 +347,37 @@ type BackendSettings = WhaleBalanceSettings & {
   tools?: Record<string, ToolShard>;
   /** 侧栏当前聚焦的工具。只影响管理器的展示，不影响 Codex 的启动配置。 */
   activeTool?: string;
+  computerUseGuardEnabled: boolean;
+  codexAppPackagedProxyRepair: boolean;
+  codexAppPluginAutoExpand: boolean;
+  codexAppForceChineseLocale: boolean;
+  codexAppFastStartup: boolean;
+  codexAppDisableAutoUpdate: boolean;
+  codexAppDisableWss: boolean;
+  codexAppResponsesIdNegotiation: boolean;
+  codexAppSharedTerminal: boolean;
+  codexAppSharedTerminalRetentionMinutes: number;
+  codexAppAiShell: CodexAiShell;
+  codexAppPerformanceProtection: boolean;
+  codexAppProjectMove: boolean;
+  codexAppZedRemoteOpen: boolean;
+  zedRemoteOpenStrategy: ZedOpenStrategy;
+  zedRemoteProjectRegistryEnabled: boolean;
+  zedRemoteSyncToZedSettings: boolean;
+  codexAppUpstreamWorktreeCreate: boolean;
+  codexAppNativeMenuLocalization: boolean;
+  codexAppFastMode: boolean;
+  codexAppMemoryEmbeddingEnabled: boolean;
+  codexAppMemoryEmbeddingBaseUrl: string;
+  codexAppMemoryEmbeddingApiKey: string;
+  codexAppMemoryEmbeddingModel: string;
+  codexAppInstructionsEnabled: boolean;
+  codexAppInstructions: string;
+  codexAppWallpaperMuted: boolean;
+  codexAppWallpaperPaused: boolean;
+  codexAppWallpaperEnginePath: string;
+  launchMode: LaunchMode;
+  codexAppSubAgentMaxThreads: number;
 };
 
 /** settings.json 里单个工具的配置分片。Codex 分片由后端从扁平字段镜像生成。 */
@@ -378,6 +409,10 @@ type ToolsResult = {
 };
 
 type ImageOverlayFitMode = "fill" | "fit" | "stretch" | "tile" | "center";
+type LaunchMode = "patch" | "relay";
+type CodexAiShell = "powershell" | "pwsh";
+type ZedOpenStrategy = "addToFocusedWorkspace" | "reuseWindow" | "newWindow" | "default";
+
 type TypingEffect = "off" | "rainbow" | "fireworks" | "stars";
 
 export type RelayProfile = {
@@ -405,6 +440,7 @@ export type RelayProfile = {
   modelProtocols?: string;
   modelReasoningEfforts?: Record<string, string>;
   customModels?: CustomModel[];
+  lastUsedModel?: string;
   defaultCustomModelId?: string;
   modelAutoCompact: string;
   modelMetadata: string;
@@ -1018,6 +1054,37 @@ const globalNavigationRoutes: Route[] = ["imageModels", "agentCache", "about", "
 
 const defaultSettings: BackendSettings = {
   ...defaultWhaleBalanceSettings(),
+  computerUseGuardEnabled: false,
+  codexAppPackagedProxyRepair: true,
+  codexAppPluginAutoExpand: true,
+  codexAppForceChineseLocale: true,
+  codexAppFastStartup: false,
+  codexAppDisableAutoUpdate: false,
+  codexAppDisableWss: false,
+  codexAppResponsesIdNegotiation: false,
+  codexAppSharedTerminal: false,
+  codexAppSharedTerminalRetentionMinutes: 2,
+  codexAppAiShell: "powershell",
+  codexAppPerformanceProtection: true,
+  codexAppProjectMove: true,
+  codexAppZedRemoteOpen: true,
+  zedRemoteOpenStrategy: "addToFocusedWorkspace",
+  zedRemoteProjectRegistryEnabled: true,
+  zedRemoteSyncToZedSettings: false,
+  codexAppUpstreamWorktreeCreate: true,
+  codexAppNativeMenuLocalization: true,
+  codexAppFastMode: false,
+  codexAppMemoryEmbeddingEnabled: false,
+  codexAppMemoryEmbeddingBaseUrl: "",
+  codexAppMemoryEmbeddingApiKey: "",
+  codexAppMemoryEmbeddingModel: "",
+  codexAppInstructionsEnabled: false,
+  codexAppInstructions: "",
+  codexAppWallpaperMuted: true,
+  codexAppWallpaperPaused: false,
+  codexAppWallpaperEnginePath: "",
+  launchMode: "patch",
+  codexAppSubAgentMaxThreads: 6,
   codexAppPath: "",
   codexExtraArgs: [],
   dictation: defaultDictationSettings(),
@@ -1129,6 +1196,9 @@ const defaultSettings: BackendSettings = {
 
 export function App() {
   const settingsRevisionRef = useRef<string | null>(null);
+  const nativeCapabilityWritesRef = useRef(new Map<string, number>());
+  const nativeCapabilitySequenceRef = useRef(0);
+  const nativeSettingsDraftRef = useRef<BackendSettings>(defaultSettings);
   const committedSettingsRef = useRef<BackendSettings | null>(null);
   const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const settingsSaveRequestRef = useRef(0);
@@ -1207,6 +1277,7 @@ export function App() {
   const [multiLaunchPending, setMultiLaunchPending] = useState<string | null>(null);
   const multiLaunchPendingRef = useRef<string | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackendSettings>({ ...defaultSettings });
+  nativeSettingsDraftRef.current = settingsForm;
   // 左侧 Agent 切换栏的数据源。后端是唯一事实来源，不落 localStorage —— 多窗口
   // 同时开着时才不会各说各话。
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([]);
@@ -1232,7 +1303,7 @@ export function App() {
       && isDreamSkinDraftDirty(savedDreamSkinThemeDraft, dreamSkinThemeDraft),
   );
   const settingsDirty = useMemo(
-    () => Boolean(settings && !backendSettingsEqual(settingsForm, settings.settings)),
+    () => nativeCapabilityWritesRef.current.size > 0 || Boolean(settings && !backendSettingsEqual(settingsForm, settings.settings)),
     [settings, settingsForm],
   );
 
@@ -2369,7 +2440,9 @@ export function App() {
 
   const saveSettings = async () => { await saveSettingsValue(settingsForm, false); };
 
-  const saveSettingsValue = async (next: BackendSettings, silent = true): Promise<BackendSettings | null> => {
+  const saveSettingsValue = async (next: BackendSettings, silent = true, capabilityWrites: string[] = []): Promise<BackendSettings | null> => {
+    const writes = [...new Set([...nativeCapabilityWritesRef.current.keys(), ...capabilityWrites])];
+    const generations = new Map(writes.map(key => [key, nativeCapabilityWritesRef.current.get(key)]));
     const normalized = normalizeSettings(next);
     const issue = whaleBalanceValidationMessage(whaleBalanceSettingsIssue(normalized))
       || dictationSettingsValidationMessage(dictationSettingsIssue(normalized.dictation));
@@ -2377,13 +2450,23 @@ export function App() {
     const requestId = ++settingsSaveRequestRef.current;
     const persist = async () => {
       const result = await run(() => call<SettingsResult>("save_settings", {
-        settings: normalized, expectedRevision: settingsRevisionRef.current,
+        settings: normalized, expectedRevision: settingsRevisionRef.current, capabilityWrites: writes,
       }));
       if (result && isSuccessStatus(result.status)) {
         settingsRevisionRef.current = result.revision ?? null;
         const saved = normalizeSettings(result.settings);
         committedSettingsRef.current = saved;
-        if (requestId === settingsSaveRequestRef.current) { setSettings(result); setSettingsForm(saved); }
+        for (const key of writes) {
+          if (nativeCapabilityWritesRef.current.get(key) === generations.get(key)) nativeCapabilityWritesRef.current.delete(key);
+        }
+        if (requestId === settingsSaveRequestRef.current) {
+          setSettings(result);
+          const draft = { ...saved };
+          for (const key of nativeCapabilityWritesRef.current.keys()) {
+            (draft as unknown as Record<string, unknown>)[key] = (nativeSettingsDraftRef.current as unknown as Record<string, unknown>)[key];
+          }
+          setSettingsForm(draft);
+        }
         if (!silent) showNotice(t("设置保存"), result.message, result.status);
         return saved;
       }
@@ -3245,6 +3328,8 @@ export function App() {
       performUpdate,
       saveSettings,
       saveSettingsValue,
+      markNativeCapabilityWrite: (key: string) => { nativeCapabilityWritesRef.current.set(key, ++nativeCapabilitySequenceRef.current); },
+      nativeCapabilityPending: (key: string) => nativeCapabilityWritesRef.current.has(key),
       refreshSettings,
       resetSettings,
       resetImageOverlaySettings,
@@ -3591,6 +3676,7 @@ export function App() {
           {route === "enhance" ? (
             <EnhanceScreen
               dirty={settingsDirty}
+              savedRevision={settings?.revision}
               activeTab={enhancementTab}
               onTabChange={setEnhancementTab}
               form={settingsForm}
@@ -3754,7 +3840,9 @@ type Actions = {
   checkUpdate: () => Promise<void>;
   performUpdate: () => Promise<void>;
   saveSettings: () => Promise<void>;
-  saveSettingsValue: (settings: BackendSettings, silent?: boolean) => Promise<BackendSettings | null>;
+  saveSettingsValue: (settings: BackendSettings, silent?: boolean, capabilityWrites?: string[]) => Promise<BackendSettings | null>;
+  markNativeCapabilityWrite: (key: string) => void;
+  nativeCapabilityPending: (key: string) => boolean;
   refreshSettings: (silent?: boolean) => Promise<BackendSettings | null>;
   resetSettings: () => Promise<void>;
   resetImageOverlaySettings: () => Promise<void>;
@@ -4616,10 +4704,19 @@ function RelayScreen({
         icon={<KeyRound className="h-5 w-5" />}
         title={t("供应商列表")}
         actions={(
+          <>
           <Button onClick={() => { setNewProfileDraft(null); setDetailProfileId(null); setProviderCatalogOpen(true); }}>
             <Plus className="h-4 w-4" />
             {t("添加供应商")}
           </Button>
+          <Button variant="secondary" onClick={() => {
+            setNewProfileDraft(createCustomModelsRelayProfile(normalized));
+            setDetailProfileId(null);
+          }}>
+            <Plus className="h-4 w-4" />
+            {t("添加供应商(可自定义)")}
+          </Button>
+          </>
         )}
       />
       <div className="mg-content">
@@ -4841,6 +4938,11 @@ function ProviderCatalogScreen({
           />
         </div>
         <div className="provider-add-results">
+          <button className="provider-add-result provider-add-custom-result" type="button"
+            onClick={() => onSelect(createCustomModelsRelayProfile(form))}>
+            <span className="provider-add-icon">⚙</span>
+            <span><strong>{t("添加供应商(可自定义)")}</strong><small>{t("按模型独立配置 Base URL、Key 与协议")}</small></span>
+          </button>
           <button className="provider-add-result provider-add-custom-result" onClick={() => selectPreset()} type="button">
             <span className="provider-add-icon">✦</span>
             <span><strong>{t("自定义配置")}</strong><small>{t("手动填写请求地址和 API Key")}</small></span>
@@ -5261,6 +5363,7 @@ function StepwiseSettingsPanel({ form, onFormChange, actions }: {
 
 function EnhanceScreen({
   dirty,
+  savedRevision,
   activeTab,
   onTabChange,
   form,
@@ -5268,17 +5371,36 @@ function EnhanceScreen({
   actions,
 }: {
   dirty: boolean;
+  savedRevision?: string | null;
   activeTab: EnhancementTab;
   onTabChange: (tab: EnhancementTab) => void;
   form: BackendSettings;
   onFormChange: (value: BackendSettings) => void;
   actions: Actions;
 }) {
+  const [nativeCapabilityStates, setNativeCapabilityStates] = useState<Record<string, string>>({});
+  const [nativeDiskValues, setNativeDiskValues] = useState<Record<string, unknown>>({});
+  const [nativeEdits, setNativeEdits] = useState<string[]>([]);
+  useEffect(() => { setNativeEdits([]); }, [savedRevision]);
+  type NativeBooleanKey = "codexAppFastMode" | "codexAppDisableWss" | "codexGoalsEnabled";
+  const nativeCapabilityEditable = (key: string) => ["saved_pending_restart","different"].includes(nativeCapabilityStates[key] || "");
+  const nativeChecked = (key: NativeBooleanKey) => nativeEdits.includes(key) || actions.nativeCapabilityPending(key)
+    || typeof nativeDiskValues[key] !== "boolean" ? form[key] : nativeDiskValues[key] as boolean;
+  const editNative = (key: NativeBooleanKey, value: boolean) => {
+    actions.markNativeCapabilityWrite(key);
+    setNativeEdits(keys => [...new Set([...keys,key])]);
+    onFormChange({...form,[key]:value});
+  };
   const setEnhanceFlag = (key: keyof BackendSettings, value: boolean) => onFormChange({ ...form, [key]: value });
   const setPersistedEnhanceFlag = (key: keyof BackendSettings, value: boolean) => {
     const next = { ...form, [key]: value };
     onFormChange(next);
-    void actions.saveSettingsValue(next, true);
+    void actions.saveSettingsValue(next, true, nativeEdits);
+  };
+  const setPersistedSharedTerminalRetention = (value: number) => {
+    const next = {...form,codexAppSharedTerminalRetentionMinutes:Math.max(0,Math.min(5,Math.round(value)))};
+    onFormChange(next);
+    void actions.saveSettingsValue(next,true,nativeEdits);
   };
   const masterEnabled = form.enhancementsEnabled;
   const tabs: Array<{ value: EnhancementTab; label: string }> = [
@@ -5308,7 +5430,7 @@ function EnhanceScreen({
           </label>
           <div className="enhance-save-actions">
             <span className={dirty ? "is-dirty" : ""} role="status">{dirty ? t("有未保存修改") : t("已保存")}</span>
-            <Button disabled={!dirty} onClick={() => void actions.saveSettings()}>
+            <Button disabled={!dirty} onClick={() => void actions.saveSettingsValue(form,false,nativeEdits)}>
               <Save className="h-4 w-4" />
               {t("保存增强设置")}
             </Button>
@@ -5341,6 +5463,13 @@ function EnhanceScreen({
           ))}
         </div>
       </div>
+      <AgentHealthPanel autoRepair={form.codexAppPackagedProxyRepair} savedRevision={savedRevision}
+        onReload={() => actions.refreshSettings(false)}
+        onAudit={entries => {
+          setNativeCapabilityStates(Object.fromEntries((entries ?? []).map(entry => [entry.key,entry.state])));
+          setNativeDiskValues(Object.fromEntries((entries ?? []).map(entry => [entry.key,entry.disk])));
+        }}
+        onAutoRepairChange={value => setPersistedEnhanceFlag("codexAppPackagedProxyRepair",value)} />
       <div className="enhance-tab-panel" id="enhance-pane-general" role="tabpanel" aria-labelledby="enhance-tab-general" hidden={activeTab !== "general"}>
         <Panel className="enhance-panel">
           <CardContent className="enhance-content">
@@ -5400,6 +5529,186 @@ function EnhanceScreen({
                 <WhaleBalanceSettingsFields form={form} onFormChange={onFormChange} />
                 {isWindowsPlatform ? <FeatureToggle title={t("桌宠跟随真实鼠标")} detail={t("仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。")} checked={form.codexAppPetRealMouseLook} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppPetRealMouseLook", value)} /> : null}
               </FeatureGroup>
+
+              <FeatureGroup title={t("原生能力与运行保护")} detail={t("显示实际安装版本的能力，只有明确编辑的原生配置项才会写入。")}>
+                <FeatureToggle title={t("启用 Windows Computer Use Guard")} checked={form.computerUseGuardEnabled}
+                  disabled={!masterEnabled || !isWindowsPlatform} onChange={value => setEnhanceFlag("computerUseGuardEnabled",value)} />
+                <FeatureToggle title={t("插件列表全量展示")} checked={form.codexAppPluginAutoExpand}
+                  disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppPluginAutoExpand",value)} />
+                <FeatureToggle title={t("会话项目移动")} checked={form.codexAppProjectMove}
+                  disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppProjectMove",value)} />
+                <FeatureToggle title={t("Instructions 提示词")} checked={form.codexAppInstructionsEnabled}
+                  disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppInstructionsEnabled",value)} />
+                {form.codexAppInstructionsEnabled ? <Field label={t("提示词正文")}>
+                  <Textarea rows={8} value={form.codexAppInstructions} disabled={!masterEnabled}
+                    onChange={event => onFormChange({...form,codexAppInstructions:event.currentTarget.value})} />
+                </Field> : null}
+                <FeatureToggle title={t("Fast 模式")} checked={nativeChecked("codexAppFastMode")}
+                  unknown={typeof nativeDiskValues.codexAppFastMode !== "boolean"}
+                  disabled={!masterEnabled || !nativeCapabilityEditable("codexAppFastMode")}
+                  onChange={value => editNative("codexAppFastMode",value)} />
+                <FeatureToggle title="Goals" checked={nativeChecked("codexGoalsEnabled")}
+                  unknown={typeof nativeDiskValues.codexGoalsEnabled !== "boolean"}
+                  disabled={!masterEnabled || !nativeCapabilityEditable("codexGoalsEnabled")}
+                  onChange={value => editNative("codexGoalsEnabled",value)} />
+                <Field label={t("子代理最大并发数")}>
+                  <Input type="number" min={1} max={50} aria-label={t("子代理最大并发数")}
+                    disabled={!masterEnabled || !nativeCapabilityEditable("codexAppSubAgentMaxThreads")}
+                    value={actions.nativeCapabilityPending("codexAppSubAgentMaxThreads") ? form.codexAppSubAgentMaxThreads
+                      : typeof nativeDiskValues.codexAppSubAgentMaxThreads === "number" ? nativeDiskValues.codexAppSubAgentMaxThreads : form.codexAppSubAgentMaxThreads}
+                    onChange={event => {
+                      const value=Math.max(1,Math.min(50,Number(event.currentTarget.value) || 1));
+                      actions.markNativeCapabilityWrite("codexAppSubAgentMaxThreads");
+                      onFormChange({...form,codexAppSubAgentMaxThreads:value});
+                    }} />
+                </Field>
+                <Field label={t("接入模式")}>
+                  <AppSelect ariaLabel={t("接入模式")} value={form.launchMode}
+                    onChange={launchMode => onFormChange({...form,launchMode})}
+                    options={[{value:"patch",label:t("完整增强")},{value:"relay",label:t("兼容增强")}]} />
+                </Field>
+              </FeatureGroup>
+            <FeatureGroup title={t("上游协议协商")} detail={t("仅在供应商明确拒绝 Responses 工具 ID 时按其错误提示协商兼容格式。")}>
+              <FeatureToggle
+                title={t("Responses ID 自动协商")}
+                detail={t("默认关闭。开启后仍先原样发送；只有上游返回 invalid_id_prefix 并明确给出期望前缀时，才只改写相关 ID 并自动重试一次。未出现错误时请求完全不变，保存后立即用于后续请求。")}
+                checked={form.codexAppResponsesIdNegotiation}
+                disabled={!masterEnabled}
+                onChange={(value) => setPersistedEnhanceFlag("codexAppResponsesIdNegotiation", value)}
+              />
+            </FeatureGroup>
+            <FeatureGroup title={t("记忆检索")} detail={t("从本地 Codex 记忆中检索与当前提示相关的片段。")}>
+              <FeatureToggle
+                title={t("记忆嵌入模型")}
+                detail={t("开启后使用 OpenAI 兼容嵌入接口；关闭或接口异常时使用本地 BM25 关键词匹配。")}
+                checked={form.codexAppMemoryEmbeddingEnabled}
+                disabled={!masterEnabled}
+                onChange={(value) => setEnhanceFlag("codexAppMemoryEmbeddingEnabled", value)}
+              />
+              {form.codexAppMemoryEmbeddingEnabled ? (
+                <div className="memory-embedding-fields">
+                  <Field label="Base URL">
+                    <Input
+                      disabled={!masterEnabled}
+                      onChange={(event) => onFormChange({ ...form, codexAppMemoryEmbeddingBaseUrl: event.currentTarget.value })}
+                      placeholder="https://api.example.com/v1"
+                      spellCheck={false}
+                      value={form.codexAppMemoryEmbeddingBaseUrl}
+                    />
+                  </Field>
+                  <Field label="Key">
+                    <Input
+                      autoComplete="off"
+                      disabled={!masterEnabled}
+                      onChange={(event) => onFormChange({ ...form, codexAppMemoryEmbeddingApiKey: event.currentTarget.value })}
+                      placeholder="sk-..."
+                      spellCheck={false}
+                      type="password"
+                      value={form.codexAppMemoryEmbeddingApiKey}
+                    />
+                  </Field>
+                  <Field label="Model">
+                    <Input
+                      disabled={!masterEnabled}
+                      onChange={(event) => onFormChange({ ...form, codexAppMemoryEmbeddingModel: event.currentTarget.value })}
+                      placeholder="text-embedding-3-small"
+                      spellCheck={false}
+                      value={form.codexAppMemoryEmbeddingModel}
+                    />
+                  </Field>
+                </div>
+              ) : null}
+            </FeatureGroup>
+            <FeatureGroup title={t("界面与启动")} detail={t("控制语言、启动速度和 Codex 原生界面调整。")}>
+              {isWindowsPlatform ? (
+                <div className={`feature-choice-row ${!masterEnabled ? "disabled" : ""}`}>
+                  <div>
+                    <strong>{t("AI 调用终端")}</strong>
+                    <small>{t("选择 Codex AI 执行命令时使用的 PowerShell；所选终端不可用时自动回退。")}</small>
+                  </div>
+                  <div aria-label={t("AI 调用终端")} className="segmented ai-shell-segmented" role="radiogroup">
+                    <button
+                      aria-checked={form.codexAppAiShell === "powershell"}
+                      className={form.codexAppAiShell === "powershell" ? "active" : ""}
+                      disabled={!masterEnabled}
+                      onClick={() => onFormChange({ ...form, codexAppAiShell: "powershell" })}
+                      role="radio"
+                      type="button"
+                    >
+                      <span>Windows PowerShell</span>
+                      <small>powershell.exe</small>
+                    </button>
+                    <button
+                      aria-checked={form.codexAppAiShell === "pwsh"}
+                      className={form.codexAppAiShell === "pwsh" ? "active" : ""}
+                      disabled={!masterEnabled}
+                      onClick={() => onFormChange({ ...form, codexAppAiShell: "pwsh" })}
+                      role="radio"
+                      type="button"
+                    >
+                      <span>PowerShell 7</span>
+                      <small>pwsh.exe</small>
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {isWindowsPlatform ? <FeatureToggle title={t("AI 共享终端")} detail={t("让 AI 命令在右上角可打开的同一终端中运行，可实时查看输出并手动输入密码或 yes/no。需重启 Codex 才生效。")} checked={form.codexAppSharedTerminal} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppSharedTerminal", value)} /> : null}
+              {isWindowsPlatform ? (
+                <div className={`feature-choice-row shared-terminal-retention-row ${!masterEnabled || !form.codexAppSharedTerminal ? "disabled" : ""}`}>
+                  <div>
+                    <strong>{t("AI 终端释放时间")}</strong>
+                    <small>{t("命令结果返回后立即释放，或在最后一次输入/输出后保留 1 到 5 分钟。")}</small>
+                  </div>
+                  <div className="shared-terminal-retention-control">
+                    <div className="shared-terminal-retention-head">
+                      <span>{t("释放时间")}</span>
+                      <strong>
+                        {form.codexAppSharedTerminalRetentionMinutes === 0
+                          ? t("立即释放")
+                          : tf("{0} 分钟", [form.codexAppSharedTerminalRetentionMinutes])}
+                      </strong>
+                    </div>
+                    <input
+                      aria-label={t("AI 终端释放时间")}
+                      disabled={!masterEnabled || !form.codexAppSharedTerminal}
+                      max={5}
+                      min={0}
+                      onChange={(event) => setPersistedSharedTerminalRetention(Number(event.currentTarget.value))}
+                      step={1}
+                      type="range"
+                      value={form.codexAppSharedTerminalRetentionMinutes}
+                    />
+                    <div aria-hidden="true" className="shared-terminal-retention-ticks">
+                      {[0, 1, 2, 3, 4, 5].map((value) => <span key={value}>{value}</span>)}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
+              <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
+              <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Alunixa X 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
+              <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={nativeChecked("codexAppDisableWss")} unknown={typeof nativeDiskValues.codexAppDisableWss !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppDisableWss")} onChange={(value) => void editNative("codexAppDisableWss", value)} />
+              <FeatureToggle title={t("性能保护")} detail={t("减少后台 CDP、日志和页面扫描，在大对话切换时降低渲染压力，并清理会触发全盘 Git 探测的过宽历史工作区。")} checked={form.codexAppPerformanceProtection} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPerformanceProtection", value)} />
+              <FeatureToggle title={t("原生菜单栏位置")} detail={t("把 Alunixa X 菜单插入 Codex 顶部原生菜单栏。")} checked={form.codexAppNativeMenuPlacement} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuPlacement", value)} />
+              <FeatureToggle title={t("原生菜单汉化")} detail={t("启动时通过本地主进程调试端口汉化 Codex 原生菜单；不修改安装包。需重启 Codex 才生效。")} checked={form.codexAppNativeMenuLocalization} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeMenuLocalization", value)} />
+            </FeatureGroup>
+            <FeatureGroup title={t("远程项目")} detail={t("连接 Zed Remote 和 upstream worktree 辅助能力。")}>
+              <FeatureToggle title="Zed Remote open" detail={t("远程 SSH 文件引用可直接用 Zed Remote Development 打开。")} checked={form.codexAppZedRemoteOpen} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppZedRemoteOpen", value)} />
+              <FeatureToggle title={t("Zed 项目记录")} detail={t("维护 Alunixa X 自己的远程项目最近列表。")} checked={form.zedRemoteProjectRegistryEnabled} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("zedRemoteProjectRegistryEnabled", value)} />
+              <FeatureToggle title={t("同步 Zed settings")} detail={t("高级选项，默认关闭；当前实现不主动改写 Zed settings。")} checked={false} disabled={true} onChange={() => {}} />
+              <FeatureToggle title="Upstream worktree" detail={t("从最新 upstream 分支创建 Git worktree。")} checked={form.codexAppUpstreamWorktreeCreate} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppUpstreamWorktreeCreate", value)} />
+              <Field label={t("Zed 默认打开策略")}>
+                <AppSelect ariaLabel={t("Zed 默认打开策略")} value={form.zedRemoteOpenStrategy}
+                  disabled={!masterEnabled} onChange={zedRemoteOpenStrategy => onFormChange({...form,zedRemoteOpenStrategy})}
+                  options={[
+                    {value:"addToFocusedWorkspace",label:t("加入当前工作区")},
+                    {value:"reuseWindow",label:t("复用窗口")},
+                    {value:"newWindow",label:t("新窗口")},
+                    {value:"default",label:t("Zed 默认行为")},
+                  ]} />
+              </Field>
+            </FeatureGroup>
             </div>
             <div className="hint-line enhance-footer-hint">
               <Info className="h-4 w-4" />
@@ -8444,11 +8753,25 @@ function RelayProfileEditor({
         : t("已导入自定义元数据，生成时以该配置为准"),
     };
   };
+  if (profile.relayMode === "customModels") {
+    return <div className="relay-profile-editor custom-models-editor">
+      <Field className="relay-field-name" label={t("名称")}>
+        <Input value={profile.name} onChange={(event) => updateDraft({ name: event.currentTarget.value })} />
+      </Field>
+      <CustomModelsEditor models={profile.customModels || []}
+        defaultId={profile.defaultCustomModelId || profile.customModels?.[0]?.id || ""}
+        onChange={(customModels, defaultCustomModelId) => {
+          const selected = customModels.find(model => model.id === defaultCustomModelId);
+          updateDraft({customModels,defaultCustomModelId,model:selected?.model || "",lastUsedModel:selected?.model || ""});
+        }}
+        onTest={(model) => void actions.testRelayProfile({
+          ...profile, relayMode:"pureApi", model:model.model, testModel:model.model,
+          baseUrl:model.baseUrl, upstreamBaseUrl:model.baseUrl, apiKey:model.apiKey, protocol:model.protocol as RelayProtocol,
+        })} />
+    </div>;
+  }
   return (
     <div className="relay-profile-editor">
-      {profile.relayMode === "customModels" ? <CustomModelsEditor models={profile.customModels || []}
-        defaultId={profile.defaultCustomModelId || profile.customModels?.[0]?.id || ""}
-        onChange={(customModels, defaultCustomModelId) => updateDraft({customModels,defaultCustomModelId})} /> : null}
       <div className="relay-fields">
         <section className="relay-config-section relay-basic-section">
           <div className="relay-config-section-head">
@@ -10335,12 +10658,14 @@ function FeatureGroup({ title, detail, children }: { title: string; detail: stri
 function FeatureToggle({
   title,
   detail,
+  unknown = false,
   checked,
   disabled = false,
   onChange,
 }: {
   title: string;
-  detail: string;
+  detail?: string;
+  unknown?: boolean;
   checked: boolean;
   disabled?: boolean;
   onChange: (value: boolean) => void;
@@ -10348,6 +10673,8 @@ function FeatureToggle({
   return (
     <label className={`feature-toggle ${disabled ? "disabled" : ""}`}>
       <input
+        aria-label={title}
+        ref={element => { if (element) element.indeterminate = unknown; }}
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.checked)}
@@ -13338,6 +13665,14 @@ function createRelayProfile(settings: BackendSettings): RelayProfile {
     cooldownErrorStatuses: [429, 500],
   };
   return withGeneratedRelayFiles(next);
+}
+
+function createCustomModelsRelayProfile(settings: BackendSettings): RelayProfile {
+  const model = createEmptyCustomModel();
+  return { ...createRelayProfile(settings), name:t("自定义多模型"), relayMode:"customModels",
+    model:"", baseUrl:"", upstreamBaseUrl:"", apiKey:"",
+    customModels:[model], defaultCustomModelId:model.id, lastUsedModel:"",
+    contextWindow:"", autoCompactLimit:"", modelList:"",modelWindows:"{}",modelProtocols:"{}" };
 }
 
 function createAggregateRelayProfile(settings: BackendSettings): RelayProfile {
