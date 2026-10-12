@@ -486,6 +486,39 @@ pub struct LaunchRequest {
     pub sync_active_relay: bool,
 }
 
+/// 启动一个与管理器当前实例完全隔离的 Codex Desktop 实例。
+///
+/// 这个入口故意不复用 `launch_alunixa_x`：后者只管理默认 CODEX_HOME，且
+/// launcher/helper 的生命周期是单例。多开实例通过隐藏 worker 进程复用完整的
+/// Alunixa X launcher/injection 链，并给每个供应商分配独立的 CODEX_HOME、SQLite、
+/// Electron user-data-dir 和 CDP/helper 端口。
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiLaunchRequest {
+    /// 前端当前设置快照。省略时读取磁盘上的设置；API key 等不可序列化字段
+    /// 会从磁盘中同 id 的 profile 补回。
+    #[serde(default)]
+    pub settings: Option<BackendSettings>,
+    #[serde(default)]
+    pub profile_id: String,
+    /// 同一身份再次点击会复用这个目录，默认使用 profile id。
+    #[serde(default)]
+    pub instance_id: String,
+    #[serde(default)]
+    pub app_path: String,
+    /// 为 0 时按 instance id 选择一个可用端口。
+    #[serde(default)]
+    pub debug_port: u16,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiWorkerOptions {
+    pub app_path: String,
+    pub debug_port: u16,
+    pub helper_port: u16,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogRequest {
@@ -865,6 +898,468 @@ pub async fn launch_alunixa_x(request: LaunchRequest) -> CommandResult<Value> {
         Ok(result) => result,
         Err(error) => failed(&format!("启动后台任务失败：{error}"), json!({})),
     }
+}
+
+#[tauri::command]
+pub async fn launch_codex_multi_instance(
+    request: CodexMultiLaunchRequest,
+) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || launch_codex_multi_instance_blocking(request))
+        .await
+    {
+        Ok(result) => result,
+        Err(error) => failed(&format!("启动 Codex 多开实例失败：{error}"), json!({})),
+    }
+}
+
+fn launch_codex_multi_instance_blocking(
+    request: CodexMultiLaunchRequest,
+) -> CommandResult<Value> {
+    let stored_settings = match SettingsStore::default().load() {
+        Ok(settings) => settings,
+        Err(error) => return failed(&format!("读取供应商设置失败：{error}"), json!({})),
+    };
+    let mut settings = request
+        .settings
+        .clone()
+        .unwrap_or_else(|| stored_settings.clone());
+    let profile_id = if request.profile_id.trim().is_empty() {
+        settings.active_relay_id.clone()
+    } else {
+        request.profile_id.trim().to_string()
+    };
+    let Some(profile_index) = settings
+        .relay_profiles
+        .iter()
+        .position(|profile| profile.id == profile_id)
+    else {
+        return failed(
+            &format!("供应商身份不存在：{profile_id}"),
+            json!({ "profileId": profile_id }),
+        );
+    };
+    // 前端序列化 BackendSettings 时会省略 api_key；使用磁盘中的同一 profile
+    // 补回密钥，避免把未持久化的空 key 写入多开实例。
+    if let Some(saved_profile) = stored_settings
+        .relay_profiles
+        .iter()
+        .find(|profile| profile.id == profile_id)
+    {
+        let profile = &mut settings.relay_profiles[profile_index];
+        if profile.api_key.trim().is_empty() {
+            profile.api_key = saved_profile.api_key.clone();
+        }
+        if profile.auth_contents.trim().is_empty() {
+            profile.auth_contents = saved_profile.auth_contents.clone();
+        }
+    }
+    let profile = settings.relay_profiles[profile_index].clone();
+    if profile.relay_mode == alunixa_x_core::settings::RelayMode::Aggregate {
+        return failed(
+            "Codex 多开暂不支持需要共享本地聚合代理的供应商，请选择纯 API 或官方身份。",
+            json!({ "profileId": profile_id }),
+        );
+    }
+    if profile.has_model_routes() {
+        return failed(
+            "Codex 多开暂不支持模型路由，请选择单一上游供应商。",
+            json!({ "profileId": profile_id }),
+        );
+    }
+
+    let instance_id = if request.instance_id.trim().is_empty() {
+        profile_id.clone()
+    } else {
+        request.instance_id.trim().to_string()
+    };
+    let slug = multi_instance_slug(&instance_id);
+    let root = alunixa_x_core::paths::default_app_state_dir()
+        .join("codex-multi")
+        .join(&slug);
+    // 先分配端口，再生成 config.toml。Chat Completions 通过实例专属协议代理
+    // 转换，配置里的本地 base_url 必须与这个 helper 端口一致。
+    let debug_port = select_multi_instance_port(request.debug_port, &instance_id);
+    let helper_port = select_multi_instance_port(
+        debug_port.saturating_add(1),
+        &format!("{instance_id}-helper"),
+    );
+    let codex_home = root.join("codex-home");
+    let sqlite_home = root.join("sqlite-home");
+    let user_data_dir = multi_instance_user_data_dir(&slug);
+    if let Err(error) = std::fs::create_dir_all(&codex_home)
+        .and_then(|_| std::fs::create_dir_all(&sqlite_home))
+        .and_then(|_| std::fs::create_dir_all(&user_data_dir))
+    {
+        return failed(
+            &format!("创建 Codex 多开隔离目录失败：{error}"),
+            json!({ "instanceId": instance_id }),
+        );
+    }
+
+    // 官方 profile 通常没有 authContents；复制一次当前默认 CODEX_HOME 的登录态，
+    // 用户也可以在新窗口中重新登录。纯 API 实例不复制官方 auth，避免两个身份
+    // 重新混在一起。永远不覆盖实例已有 auth.json。
+    let default_home = alunixa_x_core::relay_config::default_codex_home_dir();
+    let instance_auth = codex_home.join("auth.json");
+    if profile.relay_mode == alunixa_x_core::settings::RelayMode::Official
+        && !instance_auth.exists()
+    {
+        let default_auth = default_home.join("auth.json");
+        if let Ok(contents) = std::fs::read(&default_auth) {
+            let _ = alunixa_x_core::settings::atomic_write(&instance_auth, &contents);
+        }
+    }
+    let common_config = if settings.relay_profiles_enabled {
+        settings.relay_common_config_contents.as_str()
+    } else {
+        ""
+    };
+    if let Err(error) = alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
+        &codex_home,
+        &profile,
+        common_config,
+        helper_port,
+    ) {
+        return failed(
+            &format!("应用供应商到多开实例失败：{error}"),
+            json!({
+                "profileId": profile_id,
+                "codexHome": codex_home.to_string_lossy()
+            }),
+        );
+    }
+    if let Err(error) = absolutize_multi_instance_model_catalog(&codex_home) {
+        return failed(
+            &format!("修正多开实例 model_catalog_json 路径失败：{error}"),
+            json!({ "profileId": profile_id, "codexHome": codex_home.to_string_lossy() }),
+        );
+    }
+    if let Err(error) = remove_invalid_multi_instance_mcp_servers(&codex_home) {
+        return failed(
+            &format!("清理多开实例无效 MCP 配置失败：{error}"),
+            json!({ "profileId": profile_id, "codexHome": codex_home.to_string_lossy() }),
+        );
+    }
+    if let Err(error) = seed_multi_instance_onboarding_state(&codex_home) {
+        return failed(
+            &format!("写入多开实例首次启动状态失败：{error}"),
+            json!({ "profileId": profile_id, "codexHome": codex_home.to_string_lossy() }),
+        );
+    }
+
+    let app_dir = alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+        (!request.app_path.trim().is_empty()).then(|| Path::new(request.app_path.trim())),
+        Some(settings.codex_app_path.as_str()),
+    );
+    let Some(app_dir) = app_dir else {
+        return failed("未找到 Codex Desktop，请先设置应用路径。", json!({}));
+    };
+    let executable = alunixa_x_core::app_paths::build_codex_executable(&app_dir);
+    if !executable.is_file() {
+        return failed(
+            &format!("Codex 可执行文件不存在：{}", executable.display()),
+            json!({ "appPath": app_dir.to_string_lossy() }),
+        );
+    }
+    let launcher_guard_port = select_multi_instance_port(0, &format!("{instance_id}-guard"));
+    let worker_home = root.join("worker-home");
+    let worker_state_dir = worker_home.join(".codex-session-delete");
+    if let Err(error) = std::fs::create_dir_all(&worker_state_dir) {
+        return failed(
+            &format!("创建多开 launcher 状态目录失败：{error}"),
+            json!({ "instanceId": instance_id }),
+        );
+    }
+    let worker_settings_path = worker_state_dir.join("settings.json");
+    let mut worker_settings = settings.clone();
+    worker_settings.codex_app_path = app_dir.to_string_lossy().to_string();
+    worker_settings.active_relay_id = profile.id.clone();
+    worker_settings.relay_profiles = vec![profile.clone()];
+    worker_settings.aggregate_relay_profiles.clear();
+    worker_settings.active_aggregate_relay_id.clear();
+    worker_settings.provider_sync_enabled = false;
+    // Chat Completions（例如 Zhipu GLM）需要 launcher 启动实例自己的协议代理。
+    // 保持 relay_profiles_enabled，让 `ensure_active_protocol_proxy_config_in_home`
+    // 用多开进程的 ALUNIXA_X_PROTOCOL_PROXY_PORT 修正 config.toml 中的本地代理地址；
+    // 否则父进程写入的默认 57321 会让多个实例互相抢同一个代理端口。
+    worker_settings.relay_profiles_enabled =
+        profile.protocol == alunixa_x_core::settings::RelayProtocol::ChatCompletions;
+    worker_settings.codex_extra_args = multi_instance_extra_args(&settings.codex_extra_args);
+    worker_settings
+        .codex_extra_args
+        .push(format!("--user-data-dir={}", user_data_dir.display()));
+    if let Err(error) = SettingsStore::new(worker_settings_path).save(&worker_settings) {
+        return failed(
+            &format!("保存多开 launcher 设置失败：{error}"),
+            json!({ "instanceId": instance_id }),
+        );
+    }
+    let worker_options_path = root.join("worker-options.json");
+    let worker_options = CodexMultiWorkerOptions {
+        app_path: app_dir.to_string_lossy().to_string(),
+        debug_port,
+        helper_port,
+    };
+    let worker_options_bytes = match serde_json::to_vec_pretty(&worker_options) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return failed(
+                &format!("序列化多开 worker 参数失败：{error}"),
+                json!({ "instanceId": instance_id }),
+            );
+        }
+    };
+    if let Err(error) = alunixa_x_core::settings::atomic_write(
+        &worker_options_path,
+        &worker_options_bytes,
+    ) {
+        return failed(
+            &format!("保存多开 worker 参数失败：{error}"),
+            json!({ "instanceId": instance_id }),
+        );
+    }
+    let manager_executable = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            return failed(
+            &format!("定位多开 launcher 可执行文件失败：{error}"),
+            json!({ "instanceId": instance_id }),
+            );
+        }
+    };
+    let shared_config_home = directories::BaseDirs::new()
+        .map(|dirs| dirs.home_dir().join(".config"))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    let mut command = std::process::Command::new(manager_executable);
+    command
+        .arg("--alunixa-x-multi-worker")
+        .arg(&worker_options_path)
+        .env("HOME", &worker_home)
+        .env("CODEX_HOME", &codex_home)
+        .env("CODEX_SQLITE_HOME", &sqlite_home)
+        .env("ALUNIXA_X_MULTI_INSTANCE", "1")
+        .env("ALUNIXA_X_STATE_HOME", &worker_state_dir)
+        .env("ALUNIXA_X_INSTANCE_ID", &instance_id)
+        .env("ALUNIXA_X_INSTANCE_LABEL", &profile.name)
+        .env("ALUNIXA_X_LAUNCHER_GUARD_PORT", launcher_guard_port.to_string())
+        .env("ALUNIXA_X_PROTOCOL_PROXY_PORT", helper_port.to_string())
+        .env("XDG_CONFIG_HOME", &shared_config_home)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(alunixa_x_core::windows_create_no_window());
+    }
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            return failed(
+                &format!("启动 Codex 多开实例失败：{error}"),
+                json!({ "executable": executable.to_string_lossy() }),
+            );
+        }
+    };
+    let pid = child.id();
+    // Child drop 不会终止 Unix 子进程；Codex Desktop 自己持有生命周期。
+    drop(child);
+    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+        "manager.multi_instance_started",
+        json!({
+            "instance_id": instance_id,
+            "profile_id": profile_id,
+            "debug_port": debug_port,
+            "helper_port": helper_port,
+            "codex_home": codex_home,
+            "sqlite_home": sqlite_home,
+            "user_data_dir": user_data_dir,
+            "pid": pid
+        }),
+    );
+    ok(
+        "Codex 多开实例已启动。",
+        json!({
+            "instanceId": instance_id,
+            "profileId": profile_id,
+            "pid": pid,
+            "debugPort": debug_port,
+            "homeDir": codex_home.to_string_lossy(),
+            "codexHome": codex_home.to_string_lossy(),
+            "sqliteHome": sqlite_home.to_string_lossy(),
+            "userDataDir": user_data_dir.to_string_lossy(),
+            "appPath": app_dir.to_string_lossy()
+        }),
+    )
+}
+
+/// Hidden child process used by Codex multi-launch. Its environment is isolated
+/// before this function is called, so the normal launcher can safely use its
+/// existing default-home/settings/helper/bridge code without touching the main
+/// Alunixa X instance.
+pub fn run_codex_multi_worker(options_path: &Path) -> anyhow::Result<()> {
+    let expected_state = options_path.parent().context("multi worker options directory missing")?
+        .join("worker-home/.codex-session-delete");
+    anyhow::ensure!(alunixa_x_core::paths::default_app_state_dir() == expected_state, "multi_state_home_mismatch");
+    let options: CodexMultiWorkerOptions = serde_json::from_slice(&std::fs::read(options_path)?)?;
+    let launch_options = alunixa_x_launcher::LaunchOptions {
+        app_dir: Some(PathBuf::from(options.app_path)),
+        debug_port: options.debug_port,
+        helper_port: options.helper_port,
+        status_store: StatusStore::default(),
+    };
+    alunixa_x_launcher::start(launch_options)?;
+    while alunixa_x_core::cdp::endpoint_available(options.debug_port) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    alunixa_x_launcher::shutdown()
+}
+
+fn multi_instance_slug(value: &str) -> String {
+    let mut slug = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    while slug.contains("--") {
+        slug = slug.replace("--", "-");
+    }
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "instance".to_string()
+    } else {
+        slug.chars().take(64).collect()
+    }
+}
+
+fn multi_instance_user_data_dir(slug: &str) -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|dirs| dirs.data_local_dir().join("AlunixaX").join("multi").join(slug))
+        .unwrap_or_else(|| {
+            alunixa_x_core::paths::default_app_state_dir()
+                .join("user-data")
+                .join(slug)
+        })
+}
+
+fn multi_instance_extra_args(args: &[String]) -> Vec<String> {
+    alunixa_x_core::settings::normalize_codex_extra_args(args)
+        .into_iter()
+        .filter(|arg| {
+            !arg.starts_with("--remote-debugging-port")
+                && !arg.starts_with("--remote-allow-origins")
+                && !arg.starts_with("--user-data-dir")
+        })
+        .collect()
+}
+
+fn absolutize_multi_instance_model_catalog(home: &Path) -> anyhow::Result<()> {
+    let config_path = home.join("config.toml");
+    let contents = std::fs::read_to_string(&config_path)?;
+    let mut doc = contents.parse::<toml_edit::DocumentMut>()?;
+    let Some(raw_path) = doc
+        .get("model_catalog_json")
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(());
+    };
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        return Ok(());
+    }
+    let absolute = home.join(path);
+    doc["model_catalog_json"] = toml_edit::value(absolute.to_string_lossy().to_string());
+    alunixa_x_core::settings::atomic_write(&config_path, doc.to_string().as_bytes())?;
+    Ok(())
+}
+
+fn seed_multi_instance_onboarding_state(home: &Path) -> anyhow::Result<()> {
+    let path = home.join(".codex-global-state.json");
+    let mut state = match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).unwrap_or_else(|_| json!({})),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => json!({}),
+        Err(error) => return Err(error.into()),
+    };
+    let root = state
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!(".codex-global-state.json 不是 JSON 对象"))?;
+    let atoms = root
+        .entry("electron-persisted-atom-state")
+        .or_insert_with(|| json!({}));
+    let atoms = atoms
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("electron-persisted-atom-state 不是 JSON 对象"))?;
+    atoms.insert(
+        "electron:onboarding-projectless-completed".to_string(),
+        Value::Bool(true),
+    );
+    atoms
+        .entry("last_completed_onboarding".to_string())
+        .or_insert_with(|| Value::from(current_timestamp_ms() / 1000));
+    let bytes = serde_json::to_vec_pretty(&state)?;
+    alunixa_x_core::settings::atomic_write(&path, &bytes)?;
+    Ok(())
+}
+
+fn remove_invalid_multi_instance_mcp_servers(home: &Path) -> anyhow::Result<()> {
+    let config_path = home.join("config.toml");
+    let contents = std::fs::read_to_string(&config_path)?;
+    let mut doc = contents.parse::<toml_edit::DocumentMut>()?;
+    let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(toml_edit::Item::as_table_like_mut)
+    else {
+        return Ok(());
+    };
+    let invalid = servers
+        .iter()
+        .filter_map(|(id, item)| {
+            let table = item.as_table_like()?;
+            let valid = ["command", "url"].iter().any(|key| {
+                table
+                    .get(*key)
+                    .and_then(toml_edit::Item::as_str)
+                    .is_some_and(|value| !value.trim().is_empty())
+            });
+            (!valid).then_some(id.to_string())
+        })
+        .collect::<Vec<_>>();
+    if invalid.is_empty() {
+        return Ok(());
+    }
+    for id in invalid {
+        servers.remove(&id);
+    }
+    if servers.is_empty() {
+        doc.as_table_mut().remove("mcp_servers");
+    }
+    alunixa_x_core::settings::atomic_write(&config_path, doc.to_string().as_bytes())?;
+    Ok(())
+}
+
+fn select_multi_instance_port(requested: u16, instance_id: &str) -> u16 {
+    let base = if requested > 0 {
+        requested
+    } else {
+        let sum = instance_id
+            .bytes()
+            .fold(0u16, |sum, byte| sum.wrapping_add(byte as u16));
+        9300u16.saturating_add(sum % 500)
+    };
+    (0..1000)
+        .map(|offset| base.saturating_add(offset))
+        .find(|port| {
+            *port > 0
+                && std::net::TcpListener::bind(("127.0.0.1", *port)).is_ok()
+        })
+        .unwrap_or(base)
 }
 
 #[tauri::command]
@@ -8868,6 +9363,84 @@ model_reasoning_effort = "high"
 
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("只允许打开 http 或 https 链接"));
+    }
+
+    #[test]
+    fn multi_instance_slug_is_safe_and_bounded() {
+        assert_eq!(multi_instance_slug("Deep/Seek .. profile"), "Deep-Seek-profile");
+        assert_eq!(multi_instance_slug("///"), "instance");
+        assert!(multi_instance_slug(&"x".repeat(200)).len() <= 64);
+    }
+
+    #[test]
+    fn multi_instance_port_selection_finds_distinct_loopback_ports() {
+        let first = select_multi_instance_port(0, "official");
+        let second = select_multi_instance_port(first.saturating_add(1), "deepseek");
+        assert!(first > 0);
+        assert!(second > 0);
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn multi_instance_catalog_pointer_is_absolute() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("model-catalogs")).unwrap();
+        std::fs::write(
+            temp.path().join("model-catalogs/catalog.json"),
+            "{\"models\":[]}",
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model_catalog_json = \"model-catalogs/catalog.json\"\n",
+        )
+        .unwrap();
+
+        absolutize_multi_instance_model_catalog(temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        let doc = config.parse::<toml_edit::DocumentMut>().unwrap();
+        let pointer = doc["model_catalog_json"].as_str().unwrap();
+        assert!(Path::new(pointer).is_absolute(), "{pointer}");
+        assert!(Path::new(pointer).is_file(), "{pointer}");
+    }
+
+    #[test]
+    fn multi_instance_onboarding_state_is_seeded_without_account_data() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join(".codex-global-state.json"),
+            r#"{"electron-persisted-atom-state":{"keep":true}}"#,
+        )
+        .unwrap();
+
+        seed_multi_instance_onboarding_state(temp.path()).unwrap();
+
+        let state: Value = serde_json::from_slice(
+            &std::fs::read(temp.path().join(".codex-global-state.json")).unwrap(),
+        )
+        .unwrap();
+        let atoms = &state["electron-persisted-atom-state"];
+        assert_eq!(atoms["keep"], true);
+        assert_eq!(atoms["electron:onboarding-projectless-completed"], true);
+        assert!(atoms["last_completed_onboarding"].is_number());
+        assert!(state.get("auth").is_none());
+    }
+
+    #[test]
+    fn multi_instance_removes_mcp_entries_without_transport() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "[mcp_servers.stitch.http_headers]\nkey = \"redacted\"\n\n[mcp_servers.node_repl]\ncommand = \"node\"\n",
+        )
+        .unwrap();
+
+        remove_invalid_multi_instance_mcp_servers(temp.path()).unwrap();
+
+        let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+        assert!(!config.contains("stitch"));
+        assert!(config.contains("[mcp_servers.node_repl]"));
     }
 }
 

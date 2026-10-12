@@ -9,12 +9,7 @@
 
 export type PresetCategory = "official" | "aggregator" | "third_party" | "cn_official";
 
-export type RelayProtocol =
-  | "responses"
-  | "chatCompletions"
-  | "completions"
-  | "anthropicMessages"
-  | "geminiGenerateContent";
+export type RelayProtocol = "responses" | "chatCompletions" | "completions" | "anthropicMessages" | "geminiGenerateContent";
 
 export interface ProviderPreset {
   id: string;
@@ -55,8 +50,8 @@ export const PRESETS: ProviderPreset[] = [
     websiteUrl: "https://platform.deepseek.com",
     apiKeyUrl: "https://platform.deepseek.com/api_keys",
     category: "cn_official",
-    baseUrl: "https://api.deepseek.com",
-    protocol: "chatCompletions",
+    baseUrl: "https://api.deepseek.com/",
+    protocol: "responses",
     model: "deepseek-v4-flash",
     modelList: ["deepseek-v4-flash", "deepseek-v4-pro"],
   },
@@ -106,14 +101,25 @@ export const PRESETS: ProviderPreset[] = [
   },
   {
     id: "minimax",
-    name: "MiniMax",
+    name: "MiniMax (China)",
     websiteUrl: "https://platform.minimaxi.com",
     apiKeyUrl: "https://platform.minimaxi.com/subscribe/coding-plan",
     category: "cn_official",
     baseUrl: "https://api.minimaxi.com/v1",
     protocol: "chatCompletions",
-    model: "MiniMax-M2.7",
-    modelList: ["MiniMax-M2.7"],
+    model: "MiniMax-M3",
+    modelList: ["MiniMax-M3", "MiniMax-M2.7"],
+  },
+  {
+    id: "minimax-global",
+    name: "MiniMax (Global)",
+    websiteUrl: "https://platform.minimax.io",
+    apiKeyUrl: "https://platform.minimax.io/subscribe/coding-plan",
+    category: "official",
+    baseUrl: "https://api.minimax.io/v1",
+    protocol: "chatCompletions",
+    model: "MiniMax-M3",
+    modelList: ["MiniMax-M3", "MiniMax-M2.7"],
   },
   {
     id: "volcano-ark",
@@ -190,10 +196,20 @@ export const PRESETS: ProviderPreset[] = [
   {
     id: "runapi",
     name: "RunAPI",
-    websiteUrl: "https://runapi.co",
-    apiKeyUrl: "https://runapi.co",
+    websiteUrl: "https://runapi.host",
+    apiKeyUrl: "https://runapi.host",
     category: "aggregator",
-    baseUrl: "https://runapi.co/v1",
+    baseUrl: "https://runapi.host/v1",
+    protocol: "responses",
+    model: "gpt-5.5",
+  },
+  {
+    id: "grooroute",
+    name: "GrooRoute",
+    websiteUrl: "https://grooroute.com/",
+    apiKeyUrl: "https://grooroute.com/register",
+    category: "aggregator",
+    baseUrl: "https://grooroute.com",
     protocol: "responses",
     model: "gpt-5.5",
   },

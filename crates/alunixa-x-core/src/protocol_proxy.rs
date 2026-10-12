@@ -207,7 +207,6 @@ fn responses_to_chat_completions_for_wire(mut body: Value, wire: &str, standard:
         result["stream_options"] = stream_options;
     }
 
-    apply_chat_reasoning_options(&mut result, &body, model, standard);
     fidelity::map_text_format(&mut result, &body)?;
     for key in [
         "thinking",
@@ -219,6 +218,8 @@ fn responses_to_chat_completions_for_wire(mut body: Value, wire: &str, standard:
             result[key] = value.clone();
         }
     }
+
+    apply_chat_reasoning_options(&mut result, &body, model, standard);
 
     let mut tool_context = build_codex_tool_context(body.get("tools"));
     let namespaces = collect_tool_search_output_namespaces(&body);
@@ -3314,12 +3315,20 @@ fn upstream_request_builder(
         .post(endpoint)
         .header(reqwest::header::CONTENT_TYPE, "application/json");
     builder = match relay.protocol {
-        RelayProtocol::AnthropicMessages => builder.header("x-api-key", relay.api_key.trim()).header("anthropic-version", "2023-06-01"),
-        RelayProtocol::GeminiGenerateContent => builder.header("x-goog-api-key", relay.api_key.trim()),
+        RelayProtocol::AnthropicMessages => with_native_key(builder, relay, "x-api-key").header("anthropic-version", "2023-06-01"),
+        RelayProtocol::GeminiGenerateContent => with_native_key(builder, relay, "x-goog-api-key"),
         _ => return finish_upstream_builder(with_relay_auth(builder, relay), is_stream, upstream_body),
     };
     builder = crate::relay_headers::apply_headers(builder, &relay.custom_headers);
     finish_upstream_builder(builder, is_stream, upstream_body)
+}
+
+fn with_native_key(builder: reqwest::RequestBuilder, relay: &crate::settings::RelayProfile, header: &'static str) -> reqwest::RequestBuilder {
+    if relay.uses_no_auth() || relay.custom_headers.iter().any(|h| h.key.trim().eq_ignore_ascii_case(header) && !h.value.trim().is_empty()) {
+        builder
+    } else {
+        builder.header(header, relay.api_key.trim())
+    }
 }
 
 fn finish_upstream_builder(mut builder: reqwest::RequestBuilder, is_stream: bool, upstream_body: &Value) -> reqwest::RequestBuilder {
@@ -7772,7 +7781,7 @@ fn apply_chat_reasoning_options(result: &mut Value, body: &Value, model: &str, s
         ChatReasoningStyle::DeepSeek
         | ChatReasoningStyle::LowHigh
         | ChatReasoningStyle::Default
-            if supports_reasoning_effort(model) =>
+            if supports_reasoning_effort(model) || (standard && model.to_ascii_lowercase().contains("gemini")) =>
         {
             result["reasoning_effort"] = json!(mapped);
         }
@@ -7877,6 +7886,7 @@ fn supports_reasoning_effort(model: &str) -> bool {
             .is_some_and(|ch| ch.is_ascii_digit() && ch >= '5')
         || infer_chat_reasoning_style(model) == ChatReasoningStyle::DeepSeek
         || infer_chat_reasoning_style(model) == ChatReasoningStyle::LowHigh
+        || model.eq_ignore_ascii_case("gemini-3.8-flash")
 }
 
 fn is_claude_model(model: &str) -> bool {

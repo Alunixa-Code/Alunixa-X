@@ -2657,6 +2657,54 @@ mod tests {
     }
 
     use super::*;
+
+    fn canonical_roundtrip_expected(settings: &BackendSettings) -> BackendSettings {
+        fn allow_transport_origin_fill(before: &mut Value, after: &Value) {
+            match (before, after) {
+                (Value::Object(before), Value::Object(after)) => {
+                    let origin = after.get("upstreamBaseUrl").cloned();
+                    if before.get("upstreamBaseUrl").and_then(Value::as_str) == Some("")
+                        && origin.is_some()
+                        && before.get("baseUrl") == origin.as_ref()
+                    {
+                        before.insert("upstreamBaseUrl".into(), origin.unwrap());
+                    }
+                    for (key, value) in before {
+                        if let Some(normalized) = after.get(key) {
+                            allow_transport_origin_fill(value, normalized);
+                        }
+                    }
+                }
+                (Value::Array(before), Value::Array(after)) => {
+                    for (value, normalized) in before.iter_mut().zip(after) {
+                        allow_transport_origin_fill(value, normalized);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let canonical = normalize_settings_config_sections(settings.clone()).unwrap();
+        let mut before = serde_json::to_value(settings).unwrap();
+        let after = serde_json::to_value(&canonical).unwrap();
+        allow_transport_origin_fill(&mut before, &after);
+        assert_eq!(
+            before, after,
+            "canonical roundtrip must preserve every field except filling an empty transport origin from its baseUrl"
+        );
+        assert_eq!(
+            normalize_settings_config_sections(canonical.clone()).unwrap(),
+            canonical,
+            "canonical normalization must be idempotent"
+        );
+        canonical
+    }
+
+    fn assert_stable_settings_roundtrip(store: &SettingsStore, expected: &BackendSettings) {
+        let loaded = store.load().unwrap();
+        assert_eq!(&loaded, expected);
+        store.save(&loaded).unwrap();
+        assert_eq!(&store.load().unwrap(), expected);
+    }
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -3243,7 +3291,8 @@ experimental_bearer_token = "sk-existing""#
 
         store.save(&settings).unwrap();
 
-        assert_eq!(store.load().unwrap(), settings);
+        let expected = canonical_roundtrip_expected(&settings);
+        assert_stable_settings_roundtrip(&store, &expected);
     }
 
     #[test]
@@ -3369,9 +3418,10 @@ experimental_bearer_token = "sk-existing""#
         store.save(&settings).unwrap();
 
         let loaded = store.load().unwrap();
-        let expected = normalize_settings_config_sections(settings).unwrap();
+        let expected = canonical_roundtrip_expected(&settings);
         let active_aggregate = loaded.active_aggregate_relay_profile().unwrap();
         assert_eq!(loaded, expected);
+        assert_stable_settings_roundtrip(&store, &expected);
         assert_eq!(
             active_aggregate.strategy,
             AggregateRelayStrategy::WeightedRoundRobin
@@ -3724,7 +3774,8 @@ experimental_bearer_token = "sk-existing""#
             updated.relay_context_config_contents,
             "[mcp_servers.context7]\ncommand = \"npx\"\n"
         );
-        assert_eq!(store.load().unwrap(), updated);
+        let expected = canonical_roundtrip_expected(&updated);
+        assert_stable_settings_roundtrip(&store, &expected);
     }
 
     #[test]
@@ -3752,7 +3803,8 @@ experimental_bearer_token = "sk-existing""#
                 .relay_context_config_contents
                 .contains("[plugins.\"superpowers@openai-curated\"]")
         );
-        assert_eq!(store.load().unwrap(), updated);
+        let expected = canonical_roundtrip_expected(&updated);
+        assert_stable_settings_roundtrip(&store, &expected);
     }
 
     #[test]
@@ -4298,6 +4350,7 @@ impl BackendSettings {
             || profile.relay_mode == RelayMode::CustomModels
             || profile.has_model_routes() || profile.has_model_protocols()
             || profile.web_search_history_compat_enabled()
+            || profile.uses_no_auth()
     }
 }
 

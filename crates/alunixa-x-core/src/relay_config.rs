@@ -486,10 +486,12 @@ pub fn apply_relay_files_to_home(
     if config_contents.trim().is_empty() {
         anyhow::bail!("config.toml 内容不能为空");
     }
+    let config_contents = preserve_live_app_settings(home, config_contents)?;
+    let config_contents = preserve_live_native_capabilities(home, &config_contents)?;
     std::fs::create_dir_all(home)?;
 
     let backup_path =
-        write_codex_live_atomic(home, Some(config_contents), Some(auth_contents.as_bytes()), false)?;
+        write_codex_live_atomic(home, Some(&config_contents), Some(auth_contents.as_bytes()), false)?;
 
     let status = relay_config_status_from_home(home);
     Ok(RelayApplyResult {
@@ -550,6 +552,8 @@ pub fn apply_relay_profile_files_to_home_with_context(
             apply_model_catalog_to_config(home, profile, &config_with_limits)?;
         let compatible_config =
             apply_deepseek_responses_compatibility(profile, &config_with_catalog)?;
+        let compatible_config = preserve_live_app_settings(home, &compatible_config)?;
+        let compatible_config = preserve_live_native_capabilities(home, &compatible_config)?;
         // 聚合 profile 的快照里没有凭据，必须现生成一份含代理 token 的合法 JSON，
         // 否则会把 auth.json 写成空文件（issue #1604）。
         let auth_contents = if profile.relay_mode == crate::settings::RelayMode::Aggregate {
@@ -690,6 +694,15 @@ pub fn apply_relay_profile_to_home_with_switch_rules(
     profile: &RelayProfile,
     common_config_contents: &str,
 ) -> anyhow::Result<RelayApplyResult> {
+    apply_relay_profile_to_home_with_switch_rules_and_proxy_port(home, profile, common_config_contents, crate::protocol_proxy::protocol_proxy_port())
+}
+
+pub fn apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
+    home: &Path,
+    profile: &RelayProfile,
+    common_config_contents: &str,
+    proxy_port: u16,
+) -> anyhow::Result<RelayApplyResult> {
     if profile.relay_mode == RelayMode::Official && !profile.official_mix_api_key {
         return apply_official_profile_to_home(home, profile, common_config_contents);
     }
@@ -700,7 +713,7 @@ pub fn apply_relay_profile_to_home_with_switch_rules(
     } else {
         String::new()
     };
-    let profile_config = complete_relay_profile_config(profile)?;
+    let profile_config = complete_relay_profile_config_with_proxy_port(profile, proxy_port)?;
     let config_with_common = merge_common_config_into_config(&profile_config, &selected_common)?;
     let config_with_common =
         preserve_unmanaged_live_context_entries(home, &config_with_common, common_config_contents)?;
@@ -714,6 +727,8 @@ pub fn apply_relay_profile_to_home_with_switch_rules(
             apply_model_catalog_to_config(home, profile, &config_with_limits)?;
         let compatible_config =
             apply_deepseek_responses_compatibility(profile, &config_with_catalog)?;
+        let compatible_config = preserve_live_app_settings(home, &compatible_config)?;
+        let compatible_config = preserve_live_native_capabilities(home, &compatible_config)?;
 
         if profile.relay_mode == crate::settings::RelayMode::PureApi {
             // 与 Aggregate / Official 分支对称：先读 live auth.json 再合并，
@@ -763,6 +778,7 @@ pub fn apply_relay_profile_config_to_home_with_context(
             apply_model_catalog_to_config(home, profile, &config_with_limits)?;
         let compatible_config =
             apply_deepseek_responses_compatibility(profile, &config_with_catalog)?;
+        let compatible_config = preserve_live_app_settings(home, &compatible_config)?;
         let compatible_config = preserve_live_native_capabilities(home, &compatible_config)?;
         apply_relay_config_file_to_home(home, &compatible_config)
     })
@@ -1955,6 +1971,9 @@ fn write_codex_live_atomic(
     #[cfg(windows)]
     let guarded_config_text = match config_text {
         Some(config_text) if preserve_computer_use_guard => {
+            let config_text = preserve_live_app_settings(home, config_text)?;
+            let config_text = preserve_live_native_capabilities(home, &config_text)?;
+            let config_text = config_text.as_str();
             let notify_exe = crate::computer_use_guard::find_computer_use_notify_exe(home);
             let marketplace_path =
                 crate::computer_use_guard::ensure_openai_bundled_marketplace(home)?;
@@ -4437,8 +4456,12 @@ pub fn relay_profile_api_key(profile: &RelayProfile) -> String {
 }
 
 fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<String> {
+    complete_relay_profile_config_with_proxy_port(profile, crate::protocol_proxy::protocol_proxy_port())
+}
+
+fn complete_relay_profile_config_with_proxy_port(profile: &RelayProfile, proxy_port: u16) -> anyhow::Result<String> {
     if profile.relay_mode == crate::settings::RelayMode::CustomModels {
-        return complete_ax_custom_profile_config(profile);
+        return complete_ax_custom_profile_config(profile, proxy_port);
     }
 
     let mut doc = parse_toml_document(&profile.config_contents)?;
@@ -4547,13 +4570,13 @@ fn complete_relay_profile_config(profile: &RelayProfile) -> anyhow::Result<Strin
         || profile.web_search_history_compat_enabled()
     {
         crate::protocol_proxy::local_responses_proxy_base_url(
-            crate::protocol_proxy::protocol_proxy_port(),
+            proxy_port,
         )
     } else {
         codex_base_url_for_protocol(
             base_url.trim(),
             profile.protocol,
-            crate::protocol_proxy::protocol_proxy_port(),
+            proxy_port,
         )
     };
     if !provider_base_url.trim().is_empty() {
@@ -7059,7 +7082,7 @@ fn normalize_ax_custom_profile(profile: &mut RelayProfile) -> anyhow::Result<()>
     Ok(())
 }
 
-fn complete_ax_custom_profile_config(profile: &RelayProfile) -> anyhow::Result<String> {
+fn complete_ax_custom_profile_config(profile: &RelayProfile, proxy_port: u16) -> anyhow::Result<String> {
     profile.model_protocol_map()?;
     let mut doc = parse_toml_document(&profile.config_contents)?;
     let provider_id = active_or_default_provider_id(&doc);
@@ -7116,14 +7139,14 @@ fn complete_ax_custom_profile_config(profile: &RelayProfile) -> anyhow::Result<S
     let provider_base_url = codex_base_url_for_protocol(
         base_url.trim(),
         profile.protocol,
-        crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+        proxy_port,
     );
     let uses_protocol_proxy = profile.relay_mode == crate::settings::RelayMode::CustomModels
         || profile.has_model_routes()
         || profile.has_model_protocols();
     let provider_base_url = if uses_protocol_proxy {
         crate::protocol_proxy::local_responses_proxy_base_url(
-            crate::protocol_proxy::DEFAULT_PROTOCOL_PROXY_PORT,
+            proxy_port,
         )
     } else {
         provider_base_url

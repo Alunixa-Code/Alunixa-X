@@ -1,3 +1,4 @@
+import { setContextRootEnabled } from "./context-enabled";
 /** 页面结构、尺寸参考 cc-switch v7 (MIT), Jason Young / farion1231。
  * https://github.com/farion1231/cc-switch — Codex 写入使用本仓库的原有后端。
  */
@@ -119,8 +120,7 @@ export function McpPage({ entries, onSave, onDelete, onRefresh, onImport, notify
   </div>;
 }
 function enabledBody(body: string, enabled: boolean) {
-  // enabled 是根字段，必须放在第一个子表之前，不能落进 env / headers。
-  return `enabled = ${enabled}\n${body.replace(/^enabled\s*=\s*(?:true|false)\s*\n?/m, "")}`;
+  return setContextRootEnabled(body, enabled);
 }
 function mcpSummary(body: string) {
   return body.split("\n").filter((line) => /^(command|args|url)\s*=/.test(line)).join(" · ") || t("自定义配置");

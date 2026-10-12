@@ -50,13 +50,13 @@
 
 先退出旧 AX，再运行新安装包；保留现有 `.codex`、供应商和会话目录，不做全量重置。Windows ZIP 需同时保留 `alunixa-x-plus.exe` 与 `alunixa-x-imagegen-mcp.exe`。macOS 的旧双应用安装检测后采用手动迁移入口，不冒险通过旧自更新脚本覆盖两个旧包。
 
-应用隔离代理只在实际 Codex 包上下文中诊断与修改，并备份/回读；关闭的代理不会因地址残留被误判，正常代理不以“修复”为名无条件删除。初始化失败会显示阶段与恢复入口；目前真实 Windows 首次白屏、真实语音硬件、Claude MSIX、多开及第三方网关全量参数仍需要对应环境验证，不能把静态测试成功理解为所有现场错误已消失。
+应用隔离代理只在实际 Codex 包上下文中诊断与修改，并备份/回读；关闭的代理不会因地址残留被误判。诊断修复仅针对失效本机代理；另一个“启动前覆盖”策略遵循既有设置，开启后每次将 Codex 包视图的 `ProxyEnable` 写为 0，即使该包代理原本可用；需要合法包代理时应关闭该自动覆盖开关。普通 HKCU、WinHTTP 和机器级代理不修改。初始化失败会显示阶段与恢复入口；目前真实 Windows 首次白屏、真实语音硬件、Claude MSIX、多开及第三方网关全量参数仍需要对应环境验证，不能把静态测试成功理解为所有现场错误已消失。
 
 协议转换保留缓存创建/读取/TTL、工具身份与原生签名；本地工具搜索转成标准 function，并恢复客户端 search item。无执行器的服务端搜索、外国协议不透明状态、损坏或不完整工具历史会明确返回兼容错误，不静默丢数据或制造成功结果。
 
 ## Alunixa X 是什么
 
-Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点连接 OpenAI Codex / ChatGPT Desktop，在不替换官方应用原始渲染器和 `app.asar` 的前提下，通过外部启动器、CDP、本地 helper 与协议代理提供统一管理能力。
+Alunixa X 是面向桌面 AI Agent 的跨平台控制系统。当前版本重点连接 OpenAI Codex / ChatGPT Desktop，主要通过外部启动器、CDP、本地 helper 与协议代理提供统一管理能力；可选原生浏览器兼容补丁采用受管备份与失败回滚，不以损坏原应用为代价宣称成功。
 
 <p align="center">
   <img src="docs/images/alunixa-x-dashboard.png" alt="Alunixa X Agent Rail 控制台" width="1000">

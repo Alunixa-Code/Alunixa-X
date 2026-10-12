@@ -14,6 +14,12 @@ const PENDING_PROVIDER_IMPORT_FILE: &str = "pending-provider-import.json";
 const PENDING_REMOTE_CONTROL_RECOVERY_FILE: &str = "pending-remote-control-recovery.json";
 
 pub fn default_app_state_dir() -> PathBuf {
+    // Windows Known Folder APIs ignore HOME. A multi-worker must never borrow
+    // the main manager's provider, launch status or diagnostic files.
+    if let Some(path) = multi_state_dir_from_env(
+        std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").as_deref(),
+        std::env::var_os("ALUNIXA_X_STATE_HOME").as_deref(),
+    ) { return path; }
     if let Some(home_dir) = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()) {
         return home_dir.join(APP_STATE_DIR);
     }
@@ -132,4 +138,26 @@ pub fn default_skill_backups_dir() -> PathBuf {
 
 pub fn default_pending_manager_navigation_path() -> PathBuf {
     default_app_state_dir().join(PENDING_MANAGER_NAVIGATION_FILE)
+}
+
+fn multi_state_dir_from_env(instance: Option<&std::ffi::OsStr>, state: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    if instance != Some(std::ffi::OsStr::new("1")) { return None; }
+    let path = PathBuf::from(state?);
+    (path.is_absolute() && path.parent().is_some()).then_some(path)
+}
+
+#[cfg(test)]
+mod multi_state_tests {
+    use super::*;
+    use std::ffi::OsStr;
+    #[test]
+    fn override_is_worker_scoped_and_rejects_relative_or_root_paths() {
+        let temp=tempfile::tempdir().unwrap();
+        let path=temp.path().join("worker-home/.codex-session-delete");
+        assert_eq!(multi_state_dir_from_env(Some(OsStr::new("1")), Some(path.as_os_str())), Some(path.clone()));
+        assert_eq!(multi_state_dir_from_env(None, Some(path.as_os_str())), None);
+        assert_eq!(multi_state_dir_from_env(Some(OsStr::new("1")), Some(OsStr::new("relative"))), None);
+        let root=path.ancestors().last().unwrap();
+        assert_eq!(multi_state_dir_from_env(Some(OsStr::new("1")), Some(root.as_os_str())), None);
+    }
 }

@@ -5488,7 +5488,6 @@ fn responses_item_id_normalization_repairs_legacy_prefixes() {
             { "type": "function_call", "id": "item_c270d5511c7129adc7475632", "call_id": "call_a", "name": "wait", "arguments": "{}" },
             { "type": "function_call_output", "id": "fc_call_a", "call_id": "call_a", "output": "ok" },
             { "type": "custom_tool_call", "id": "fc_call_b", "call_id": "call_b", "name": "exec", "input": "{}" },
-            {"type":"custom_tool_call_output","id":"ctco_call_b","call_id":"call_b","output":"ok"},
             { "type": "custom_tool_call_output", "id": "ctc_call_b", "call_id": "call_b", "output": "ok" },
             { "type": "agent_message", "id": "whatever_external", "content": "x" }
         ]
@@ -5960,4 +5959,25 @@ async fn native_compaction_preserves_protocol_and_opaque_state() {
             }
         }
     }
+}
+
+#[test]
+fn gemini_reasoning_is_model_specific_or_explicit_standard_opt_in() {
+    let request=json!({"model":"gemini-3.8-flash","input":"hi","reasoning":{"effort":"high"}});
+    for standard in [false,true] {
+        assert_eq!(responses_to_chat_completions_with_options(request.clone(),standard).unwrap()["reasoning_effort"],"high");
+    }
+    let request=json!({"model":"google/gemini-other","input":"hi","reasoning":{"effort":"high"}});
+    assert!(responses_to_chat_completions(request.clone()).unwrap().get("reasoning_effort").is_none());
+    assert_eq!(responses_to_chat_completions_with_options(request,true).unwrap()["reasoning_effort"],"high");
+}
+
+#[test]
+fn native_search_is_not_replaced_by_a_fake_client_executor() {
+    for choice in [json!({"type":"web_search"}),json!("required")] {
+        let error=responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"web_search"}],"tool_choice":choice})).unwrap_err();
+        assert!(error.to_string().contains("unsupported_native_web_search"));
+    }
+    let converted=responses_to_chat_completions(json!({"input":"hi","tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]})).unwrap();
+    assert_eq!(converted["tools"][0]["function"]["name"],"web_search");
 }

@@ -114,7 +114,7 @@ export function modelRouteSaveRequiresRestart(
   const active = proposed.relayProfiles.find((profile) => profile.id === proposed.activeRelayId)
     ?? proposed.relayProfiles[0];
   const activeHasRoutes = active
-    ? hasModelProtocols(active.modelProtocols) || normalizeRelayModelRoutes(active.modelRoutes).some(
+    ? hasModelProtocols(active.modelProtocols) || webSearchHistoryCompatEnabled(active) || normalizeRelayModelRoutes(active.modelRoutes).some(
       (route) => Boolean(route.model.trim() && route.targetRelayId.trim()),
     )
     : false;
@@ -122,7 +122,7 @@ export function modelRouteSaveRequiresRestart(
   const currentActive = current.relayProfiles.find((profile) => profile.id === current.activeRelayId)
     ?? current.relayProfiles[0];
   const currentActiveHasRoutes = currentActive
-    ? hasModelProtocols(currentActive.modelProtocols) || normalizeRelayModelRoutes(currentActive.modelRoutes).some(
+    ? hasModelProtocols(currentActive.modelProtocols) || webSearchHistoryCompatEnabled(currentActive) || normalizeRelayModelRoutes(currentActive.modelRoutes).some(
       (route) => Boolean(route.model.trim() && route.targetRelayId.trim()),
     )
     : false;

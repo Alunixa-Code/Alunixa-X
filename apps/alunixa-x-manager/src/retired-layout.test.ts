@@ -1,3 +1,4 @@
+import { contextRootEnabled, setContextRootEnabled } from "./context-enabled.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -77,11 +78,8 @@ test("unified MCP navigation is global to Codex providers and uses the preservin
 
 function mcpEnabledBody(body: string, enabled: boolean) {
   const page = readFileSync(new URL("./ManagementPages.tsx", import.meta.url), "utf8");
-  const tree = ts.createSourceFile("ManagementPages.tsx", page, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const node = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "enabledBody");
-  assert.ok(node, "the global MCP editor must keep a preserving enable/disable writer");
-  const compiled = ts.transpileModule(node.getText(tree), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  return new Function(`${compiled}; return enabledBody;`)()(body, enabled);
+  assert.match(page, /function enabledBody[\s\S]*?return setContextRootEnabled\(body, enabled\)/);
+  return setContextRootEnabled(body, enabled);
 }
 
 test("global MCP toggles preserve unrelated fields and nested configuration when a root flag exists", () => {
@@ -93,4 +91,14 @@ test("global MCP toggles preserve unrelated fields and nested configuration when
 test("global MCP toggles add only a root flag and never consume a nested enabled value", () => {
   const input = 'command = "fixture"\n[env]\nKEEP = "fixture-value"\n[settings]\nenabled = false\n';
   assert.equal(mcpEnabledBody(input, true), `enabled = true\n${input}`);
+});
+
+test("global flags ignore multiline content, arrays and nested legacy flags", () => {
+  const body = `description = """\n[not.a.table]\nenabled = false\n"""\nargs = [\n ["nested"]\n]\ndisabled = true\n[env]\ndisabled = true\n`;
+  assert.equal(contextRootEnabled(body), false);
+  const saved = mcpEnabledBody(body, true);
+  assert.equal(contextRootEnabled(saved), true);
+  assert.ok(saved.includes('[not.a.table]\nenabled = false'));
+  assert.ok(saved.endsWith('[env]\ndisabled = true\n'));
+  assert.equal((saved.match(/^disabled = true$/gm) || []).length, 1);
 });

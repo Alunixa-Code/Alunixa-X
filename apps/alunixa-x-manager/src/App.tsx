@@ -1,3 +1,4 @@
+import { contextRootEnabled, setContextRootEnabled } from "./context-enabled";
 import {
   closestCenter,
   DndContext,
@@ -262,6 +263,18 @@ type OverviewResult = CommandResult<{
 type LaunchCommandResult = CommandResult<{
   launchStartedAtMs?: number;
   nativeBrowserRestoreFailed?: boolean;
+}>;
+
+type MultiLaunchResult = CommandResult<{
+  instanceId?: string;
+  profileId?: string;
+  pid?: number;
+  debugPort?: number;
+  helperPort?: number;
+  codexHome?: string;
+  sqliteHome?: string;
+  userDataDir?: string;
+  appPath?: string;
 }>;
 
 type BackendSettings = WhaleBalanceSettings & {
@@ -942,7 +955,7 @@ const TOOL_ICONS: Record<string, string> = {
   claude: new URL("./assets/agents/claude.svg", import.meta.url).href,
 };
 
-type Route = "imageModels" | "overview" | "relay" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
+type Route = "imageModels" | "overview" | "relay" | "multiLaunch" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
@@ -961,6 +974,7 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
   // 概览在两个工具下都可见：它承载共用的置顶推荐位，以及各自的状态。
   { id: "overview", label: t("概览"), icon: LayoutDashboard },
   { id: "relay", label: t("供应商配置"), icon: KeyRound, tool: "codex" },
+  { id: "multiLaunch", label: t("Codex多开"), icon: Layers3, badge: "NEW", tool: "codex" },
   { id: "grok", label: t("Grok 配置"), icon: Blocks, tool: "grok" },
   { id: "claude", label: t("Claude 汉化"), icon: Languages, tool: "claude" },
   { id: "sessions", label: t("会话管理"), icon: MessageCircle, tool: "codex" },
@@ -982,7 +996,7 @@ const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string
 const navigationSections: Array<{ label: string; routes: Route[]; placement?: "bottom" }> = [
   {
     label: t("工作区"),
-    routes: ["overview", "relay", "grok", "claude"],
+    routes: ["overview", "relay", "multiLaunch", "grok", "claude"],
   },
   {
     label: t("全局管理"),
@@ -1190,6 +1204,8 @@ export function App() {
   const overviewRequestSequence = useRef(0);
   const launchPendingRef = useRef(false);
   const [launchPending, setLaunchPending] = useState(false);
+  const [multiLaunchPending, setMultiLaunchPending] = useState<string | null>(null);
+  const multiLaunchPendingRef = useRef<string | null>(null);
   const [settingsForm, setSettingsForm] = useState<BackendSettings>({ ...defaultSettings });
   // 左侧 Agent 切换栏的数据源。后端是唯一事实来源，不落 localStorage —— 多窗口
   // 同时开着时才不会各说各话。
@@ -2062,7 +2078,7 @@ export function App() {
     }
     setRoute(next);
     if (next === "overview") await refreshOverview(true);
-    if (next === "relay") {
+    if (next === "relay" || next === "multiLaunch") {
       await refreshSettings(true);
       await refreshWeixinStatus(true);
       await refreshRelay(true);
@@ -2132,6 +2148,24 @@ export function App() {
       logDiagnostic("manager.navigation_failed", { error: stringifyError(error) });
     }
     return false;
+  };
+
+  const launchMultiInstance = async (profile: RelayProfile) => {
+    if (!multiLaunchSupported(profile) || multiLaunchPendingRef.current !== null) return;
+    const profileId = profile.id;
+    multiLaunchPendingRef.current = profileId;
+    setMultiLaunchPending(profileId);
+    try {
+      // Launch only the saved identity; do not replay a stale full settings/auth snapshot.
+      await settingsSaveQueueRef.current;
+      const result = await run(() => call<MultiLaunchResult>("launch_codex_multi_instance", {
+        request: { profileId },
+      }));
+      if (result) showNotice(t("Codex多开"), result.message, result.status);
+    } finally {
+      multiLaunchPendingRef.current = null;
+      setMultiLaunchPending(null);
+    }
   };
 
   const launch = async () => {
@@ -3037,8 +3071,8 @@ export function App() {
   useEffect(() => {
     if (getLanguage() === "en") {
       void invoke("update_tray_labels", {
-        showLabel: "Show window",
-        quitLabel: "Quit",
+        showLabel: t("显示窗口"),
+        quitLabel: t("退出"),
         windowTitle: "Alunixa X",
       });
     }
@@ -3201,6 +3235,8 @@ export function App() {
     () => ({
       refreshCurrent: () => navigate(route),
       launch,
+      launchMultiInstance,
+      multiLaunchPending,
       restart,
       installEntrypoints,
       uninstallEntrypoints,
@@ -3394,7 +3430,7 @@ export function App() {
       disableWatcher: () => watcherAction("disable_watcher"),
       toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
     }),
-    [route, launchForm, settingsForm, settings, overview, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, dreamSkinLibrary, dreamSkinMarket, dreamSkinCommunity, selectedDreamSkinTheme, savedDreamSkinThemeDraft, dreamSkinThemeDraft, dreamSkinDraftDirty, pendingDreamSkinRestart],
+    [route, launchForm, settingsForm, settings, overview, removeOwnedData, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, multiLaunchPending, dreamSkinLibrary, dreamSkinMarket, dreamSkinCommunity, selectedDreamSkinTheme, savedDreamSkinThemeDraft, dreamSkinThemeDraft, dreamSkinDraftDirty, pendingDreamSkinRestart],
   );
   const isGlobalPage = globalNavigationRoutes.includes(route);
   const codexAppRunning = overview?.runtime_health?.codex_app?.status === "running";
@@ -3503,6 +3539,9 @@ export function App() {
               form={settingsForm}
               actions={actions}
             />
+          ) : null}
+          {route === "multiLaunch" ? (
+            <CodexMultiLaunchScreen form={settingsForm} actions={actions} />
           ) : null}
           {route === "relayEnvironment" ? (
             <RelayEnvironmentScreen result={relayEnvironment} actions={actions} />
@@ -3706,6 +3745,8 @@ export function App() {
 type Actions = {
   refreshCurrent: () => Promise<void>;
   launch: () => Promise<void>;
+  launchMultiInstance: (profile: RelayProfile) => Promise<void>;
+  multiLaunchPending: string | null;
   restart: (syncActiveRelay?: boolean) => Promise<boolean>;
   installEntrypoints: () => Promise<void>;
   uninstallEntrypoints: () => Promise<void>;
@@ -4669,6 +4710,85 @@ function RelayScreen({
             disabled={!normalized.relayProfilesEnabled || actions.relaySwitching}
             actions={actions}
           />
+          </CardContent>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+function multiLaunchSupported(profile: RelayProfile): boolean {
+  if (!profile.id.trim() || isAggregateRelayProfile(profile) || profile.relayMode === "customModels"
+    || (profile.protocol !== "responses" && profile.protocol !== "chatCompletions")
+    || normalizeRelayModelRoutes(profile.modelRoutes).some(route =>
+      route.model.trim() || route.targetRelayId.trim() || route.targetModel.trim())) return false;
+  try {
+    // Isolated workers currently support one transport, not AX per-model proxy routing.
+    return !hasModelProtocols(profile.modelProtocols);
+  } catch {
+    return false;
+  }
+}
+
+function CodexMultiLaunchScreen({
+  form,
+  actions,
+}: {
+  form: BackendSettings;
+  actions: Actions;
+}) {
+  const normalized = normalizeSettings(form);
+  return (
+    <div className="mg-page relay-management-page">
+      <PageHeader
+        icon={<Layers3 className="h-5 w-5" />}
+        title={t("Codex多开")}
+        actions={(
+          <Button onClick={() => void actions.refreshSettings(true)} variant="secondary">
+            <RefreshCw className="h-4 w-4" />
+            {t("刷新供应商")}
+          </Button>
+        )}
+      />
+      <div className="mg-content">
+        <Panel className="relay-management-panel">
+          <CardHeader>
+            <CardTitle>{t("选择供应商身份启动 Codex")}</CardTitle>
+            <CardDescription>{t("每个身份使用独立的配置、会话和用户数据目录，可与其他单一 Responses 或 Chat Completions 供应商同时运行。")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="relay-profile-list">
+              {normalized.relayProfiles.map((profile) => {
+                const aggregate = isAggregateRelayProfile(profile);
+                const unsupported = !multiLaunchSupported(profile);
+                const pending = actions.multiLaunchPending === profile.id;
+                return (
+                  <div className="relay-profile-card multi-launch-card" data-relay-profile-id={profile.id} key={profile.id}>
+                    <span className="relay-index" title={profile.name || t("未命名供应商")}>{providerInitial(profile.name)}</span>
+                    <span className="relay-summary">
+                      <strong>{profile.name || t("未命名供应商")}</strong>
+                      <small>{relayModeLabel(profile.relayMode)} · {relayProtocolLabel(profile.protocol)} · {relayProfileConfigBrief(profile)}</small>
+                    </span>
+                    <span className="relay-card-actions">
+                      <Button
+                        disabled={unsupported || actions.multiLaunchPending !== null}
+                        onClick={() => void actions.launchMultiInstance(profile)}
+                        title={aggregate
+                          ? t("聚合供应商暂不支持独立多开")
+                          : unsupported
+                            ? t("独立多开仅支持单一 Responses 或 Chat Completions 供应商；不支持自定义多模型、逐模型协议转换或模型路由。")
+                            : t("启动此供应商的独立 Codex 实例")}
+                        size="sm"
+                      >
+                        <Rocket className="h-4 w-4" />
+                        {pending ? t("启动中") : t("启动")}
+                      </Button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {!normalized.relayProfiles.length ? <div className="empty">{t("暂无供应商，请先添加供应商配置。")}</div> : null}
           </CardContent>
         </Panel>
       </div>
@@ -7351,6 +7471,23 @@ function SortableRelayProfileCard({
           {active ? t("使用中") : t("使用")}
         </Button>
         <span className="relay-card-extra">
+          <Button
+            disabled={!multiLaunchSupported(profile) || actions.multiLaunchPending !== null}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!multiLaunchSupported(profile)) return;
+              void actions.launchMultiInstance(profile);
+            }}
+            size="icon"
+            title={isAggregateRelayProfile(profile)
+              ? t("聚合供应商暂不支持独立多开")
+              : multiLaunchSupported(profile)
+                ? t("启动独立 Codex 实例")
+                : t("独立多开仅支持单一 Responses 或 Chat Completions 供应商；不支持自定义多模型、逐模型协议转换或模型路由。")}
+            variant="ghost"
+          >
+            <Rocket className="h-4 w-4" />
+          </Button>
           <Button
             disabled={isAggregateRelayProfile(profile)}
             onClick={(event) => {
@@ -10583,7 +10720,7 @@ function ClaudeLocalizationScreen() {
             <Metric label={t("官方词条")} value={s ? `${s.catalogEntries.toLocaleString()} ${t("条")}` : t("读取中")} />
           </div>
           <div className="hint-line" role="note">
-            {t("首次准备会创建独立副本并重新签名；官方应用、登录态和 app.asar 不会被改写。启动副本时可能需要在钥匙串弹窗中选择“始终允许”。")}
+            {t("首次准备会创建独立副本并执行完整性校验；官方应用、登录态和 app.asar 不会被改写。macOS 可能需要钥匙串授权，Windows 会使用独立副本启动。")}
           </div>
           {error ? <div className="inline-error">{error}</div> : null}
           <Toolbar>
@@ -10606,7 +10743,7 @@ function ClaudeLocalizationScreen() {
         <CardHead title={t("实现方式")} detail={t("安全边界") } />
         <CardContent>
           <ul className="claude-localization-list">
-            <li>{t("从官方应用克隆受管副本，只翻转副本的 Electron inspector 开关并做 ad-hoc 重签名。")}</li>
+            <li>{t("从官方应用克隆受管副本，只调整副本的 Electron inspector 开关；macOS 使用受管重签名，Windows 使用独立副本。")}</li>
             <li>{t("把官方 zh-Hans 词表装入副本的 ion-dist；启动器短暂连接本地 inspector，注入页面脚本后关闭端口。")}</li>
             <li>{t("更新失败会保留当前可用副本；构建完成且校验 app.asar 一致后才替换旧副本。")}</li>
           </ul>
@@ -11294,6 +11431,7 @@ function routeSubtitle(route: Route) {
     imageModels: t("配置独立 API、Key 和默认生图模型"),
     overview: t("检查问题、启动与快速修复"),
     relay: t("管理 API 供应商、协议、Key 与配置文件"),
+    multiLaunch: t("为不同供应商启动相互隔离的 Codex 实例"),
     grok: t("管理 Grok CLI 的模型与 API 端点"),
     claude: t("保留官方 Claude.app 原样，通过受管副本动态应用中文界面"),
     relayEnvironment: t("排查可能干扰中转站配置的本机环境"),
@@ -11495,22 +11633,11 @@ function contextEntrySummary(tomlBody: string) {
 }
 
 function contextEntryEnabled(tomlBody: string) {
-  return !tomlBody.split(/\r?\n/).some((line) => /^\s*enabled\s*=\s*false\s*(#.*)?$/i.test(line));
+  return contextRootEnabled(tomlBody);
 }
 
 function setContextEntryEnabled(tomlBody: string, enabled: boolean) {
-  const lines = tomlBody.trimEnd().split(/\r?\n/);
-  const nextValue = `enabled = ${enabled ? "true" : "false"}`;
-  let replaced = false;
-  const next = lines.map((line) => {
-    if (/^\s*enabled\s*=/.test(line)) {
-      replaced = true;
-      return nextValue;
-    }
-    return line;
-  });
-  if (!replaced) next.unshift(nextValue);
-  return ensureTrailingNewline(next.join("\n").trimEnd());
+  return setContextRootEnabled(tomlBody, enabled);
 }
 
 function ensureTrailingNewline(value: string) {
@@ -11738,31 +11865,22 @@ function contextHeaderFromLine(line: string): { kind: ContextKind; id: string } 
 }
 
 function applyContextLimitPreview(configContents: string, profile: RelayProfile): string {
+  if (profile.relayMode === "customModels") {
+    return removeRootTomlKey(removeRootTomlKey(configContents, "model_context_window"),
+      "model_auto_compact_token_limit");
+  }
   const replacements: Array<[string, string]> = [
     ["model_context_window", profile.contextWindow],
     ["model_auto_compact_token_limit", profile.autoCompactLimit],
   ];
-  let lines = configContents.split(/\r?\n/);
-
+  let updated = configContents;
   for (const [key, value] of replacements) {
     const trimmed = value.trim();
     if (!trimmed) continue;
-    let replaced = false;
-    lines = lines.map((line) => {
-      if (!replaced && new RegExp(`^\\s*${key}\\s*=`).test(line)) {
-        replaced = true;
-        return `${key} = ${trimmed}`;
-      }
-      return line;
-    });
-    if (!replaced) {
-      const firstTable = lines.findIndex((line) => /^\s*\[[^\]]+\]\s*$/.test(line));
-      const insertAt = firstTable >= 0 ? firstTable : lines.length;
-      lines.splice(insertAt, 0, `${key} = ${trimmed}`);
-    }
+    const tokens = normalizeTokenCountInput(trimmed);
+    if (/^[1-9]\d*$/.test(tokens)) updated = setRootTomlIntKey(updated, key, tokens);
   }
-
-  return ensureTrailingNewline(lines.join("\n").trimEnd());
+  return ensureTrailingNewline(updated.trimEnd());
 }
 
 function removeRootTomlKey(contents: string, key: string): string {
@@ -13493,7 +13611,7 @@ function splitLogLines(text: string) {
 
 function formatTime(value: number) {
   if (!value) return "-";
-  return new Date(value).toLocaleString("zh-CN");
+  return new Date(value).toLocaleString(getLocale());
 }
 
 function formatDuration(startedAtMs: number): string {

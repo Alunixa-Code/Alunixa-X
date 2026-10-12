@@ -1,6 +1,17 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
+    let os_args: Vec<_> = std::env::args_os().collect();
+    if let Some(options_path) = os_args.windows(2)
+        .find(|window| window[0] == "--alunixa-x-multi-worker")
+        .and_then(|window| window.get(1)) {
+        if alunixa_x_manager_lib::commands::run_codex_multi_worker(std::path::Path::new(options_path)).is_err() {
+            // The worker status file records a redacted diagnostic; never echo config or credentials here.
+            eprintln!("multi_worker_failed");
+            std::process::exit(1);
+        }
+        return;
+    }
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("--alunixa-x-proxy-probe") {
         let result = args.get(1).ok_or_else(|| anyhow::anyhow!("proxy_probe_request_missing"))

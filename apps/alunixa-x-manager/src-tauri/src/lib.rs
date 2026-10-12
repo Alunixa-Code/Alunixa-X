@@ -105,6 +105,7 @@ pub fn run() {
             commands::consume_pending_manager_navigation,
             commands::load_overview,
             commands::launch_alunixa_x,
+            commands::launch_codex_multi_instance,
             commands::restart_alunixa_x,
             commands::load_settings,
             commands::load_image_models,
