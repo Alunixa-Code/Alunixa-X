@@ -202,11 +202,10 @@ base_url = "https://edited-a.example/v1"
     assert_eq!(previous.context_window, "1000000");
     assert_eq!(previous.auto_compact_limit, "900000");
     assert_eq!(stored.active_relay_id, "b");
-    assert!(
-        serde_json::to_value(&stored)
-            .unwrap()
-            .get("launchMode")
-            .is_none()
+    assert_eq!(
+        serde_json::to_value(&stored).unwrap()["launchMode"],
+        serde_json::to_value(stored.launch_mode).unwrap(),
+        "restored AX compatibility mode must serialize consistently"
     );
     let live: toml::Value = std::fs::read_to_string(home.join("config.toml"))
         .unwrap()

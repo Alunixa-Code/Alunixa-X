@@ -31,9 +31,24 @@ pub fn switch_relay_profile_in_home(
         .load()
         .context("读取原供应商设置失败，已停止切换以避免覆盖配置")?;
     let target = selected_settings.active_relay_profile();
-    if !target.auth_contents.trim().is_empty() {
-        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&target.auth_contents)
-            .map_err(|_| anyhow::anyhow!("auth.json 不是有效 JSON 对象，未切换"))?;
+    let snapshot_invalid = !target.auth_contents.trim().is_empty()
+        && serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&target.auth_contents).is_err();
+    if snapshot_invalid {
+        let live = std::fs::read_to_string(home.join("auth.json")).unwrap_or_default();
+        let live_valid = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&live).is_ok();
+        if target.relay_mode == RelayMode::Aggregate && live_valid {
+            // A stale aggregate snapshot never outranks validated current login state.
+            if let Some(profile) = selected_settings.relay_profiles.iter_mut().find(|p| p.id == target.id) {
+                profile.auth_contents = "{}".into();
+            }
+        } else {
+            anyhow::bail!("auth.json 不是有效 JSON 对象，未切换");
+        }
+    }
+    if target.relay_mode == RelayMode::Aggregate {
+        let live = std::fs::read_to_string(home.join("auth.json")).unwrap_or_default();
+        anyhow::ensure!(live.trim().is_empty() || serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&live).is_ok(),
+            "auth.json 不是有效 JSON 对象，未切换，原登录凭据保持不变");
     }
     if !previous_active_relay_id.trim().is_empty()
         && previous_active_relay_id != selected_settings.active_relay_id

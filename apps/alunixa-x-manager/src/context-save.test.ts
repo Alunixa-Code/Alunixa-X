@@ -2,17 +2,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import ts from "typescript";
+import { normalizeTokenCountInput } from "./model-metadata.ts";
 
 const app = fs.readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const source = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-const names = ["applyContextLimitPreview", "parseContextWindowTokens", "setRootTomlIntKey", "setRootTomlLine",
-  "removeRootTomlKey", "ensureTrailingNewline", "tomlTablePathFromLine", "parseTomlDottedPath"];
-const extracted = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text ?? ""))
-  .map((node) => node.getText(source)).join("\n");
+const functions = new Map(source.statements.filter(ts.isFunctionDeclaration)
+  .filter(node => node.name).map(node => [node.name!.text, node]));
+const names = new Set<string>();
+function include(name: string) {
+  if (names.has(name)) return;
+  const node = functions.get(name);
+  assert.ok(node, `missing production helper: ${name}`);
+  names.add(name);
+  function visit(child: ts.Node) {
+    if (ts.isIdentifier(child) && functions.has(child.text)) include(child.text);
+    ts.forEachChild(child, visit);
+  }
+  visit(node);
+}
+include("applyContextLimitPreview");
+const extracted = [...names].map(name => functions.get(name)!.getText(source)).join("\n");
 const compiled = ts.transpileModule(extracted, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-const preview = new Function("isCustomModelsRelayProfile", `${compiled};return applyContextLimitPreview;`)(
-  (profile: any) => profile.relayMode === "customModels",
-);
+const preview = new Function("normalizeTokenCountInput", `${compiled};return applyContextLimitPreview;`)(normalizeTokenCountInput);
 function profile(patch = {}) {
   return { relayMode: "customModels", contextWindow: "272000", autoCompactEnabled: true, autoCompactLimit: "271000",
     defaultCustomModelId: "large", customModels: [

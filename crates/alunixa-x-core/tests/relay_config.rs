@@ -3,20 +3,35 @@ use alunixa_x_core::relay_config::{
     apply_pure_api_config_to_home, apply_relay_config_file_to_home, apply_relay_config_to_home,
     apply_relay_files_to_home, apply_relay_files_to_home_with_common,
     apply_relay_profile_files_to_home_with_context, apply_relay_profile_to_home_with_switch_rules,
-    backfill_relay_profile_from_home, backfill_relay_profile_from_home_with_common,
-    chatgpt_auth_status_from_home, cleanup_unsupported_approval_policies_in_home,
-    clear_relay_config_to_home, clear_relay_config_to_home_with_auth,
-    delete_context_entry_from_common_config, ensure_active_protocol_proxy_config_in_home,
-    extract_common_config_from_config, list_context_entries_from_common_config,
-    merge_common_config_into_config, normalize_relay_profile_for_storage,
-    prepare_common_config_for_apply, relay_config_status_from_home, relay_profile_api_key,
-    sanitize_common_config_contents, set_codex_goals_feature_in_home,
-    strip_common_config_from_config, sync_live_config_context_entries,
-    upsert_context_entry_in_common_config,
+    apply_relay_profile_to_home_with_switch_rules_and_proxy_port, backfill_relay_profile_from_home,
+    backfill_relay_profile_from_home_with_common, chatgpt_auth_status_from_home,
+    cleanup_unsupported_approval_policies_in_home, clear_relay_config_to_home,
+    clear_relay_config_to_home_with_auth, delete_context_entry_from_common_config,
+    ensure_active_protocol_proxy_config_in_home, extract_common_config_from_config,
+    list_context_entries_from_common_config, merge_common_config_into_config,
+    normalize_relay_profile_for_storage, prepare_common_config_for_apply,
+    relay_config_status_from_home, relay_profile_api_key, sanitize_common_config_contents,
+    set_codex_goals_feature_in_home, strip_common_config_from_config,
+    sync_live_config_context_entries, upsert_context_entry_in_common_config,
 };
 use alunixa_x_core::settings::{
     BackendSettings, RelayMode, RelayModelRoute, RelayProfile, RelayProtocol,
 };
+
+#[path = "support/pinned_model_metadata.rs"]
+mod pinned_model_metadata;
+
+fn assert_context_entry_explicitly_disabled(config: &str, section: &str, id: &str) {
+    let parsed: toml::Value = config
+        .parse()
+        .expect("context config must remain valid TOML");
+    let entry = &parsed[section][id];
+    assert_eq!(entry["enabled"].as_bool(), Some(false), "{section}.{id}");
+    assert!(
+        entry.get("disabled").is_none(),
+        "legacy disabled=true must be canonicalized rather than reactivating {section}.{id}"
+    );
+}
 
 /// 把路径安全地写进 config.toml 的种子文本里。
 ///
@@ -1012,7 +1027,11 @@ base_url = "https://relay.example.test/v1"
     };
     normalize_relay_profile_for_storage(&mut profile).unwrap();
 
-    assert!(profile.config_contents.contains(r#"model = "deepseek-v4-flash""#));
+    assert!(
+        profile
+            .config_contents
+            .contains(r#"model = "deepseek-v4-flash""#)
+    );
     assert!(!profile.config_contents.contains(r"\nmodel_provider"));
     // modelList 不被污染值侵入
     assert!(!profile.model_list.contains('\\'));
@@ -1268,17 +1287,33 @@ fn web_search_history_opt_in_routes_through_proxy_and_disable_restores_upstream(
         ..RelayProfile::default()
     };
     alunixa_x_core::relay_config::normalize_relay_profile_for_storage(&mut profile).unwrap();
-    assert!(profile.config_contents.contains("https://responses.example.test/v1"));
+    assert!(
+        profile
+            .config_contents
+            .contains("https://responses.example.test/v1")
+    );
     profile.web_search_history_compat = true;
     alunixa_x_core::relay_config::normalize_relay_profile_for_storage(&mut profile).unwrap();
-    assert!(profile.config_contents.contains("http://127.0.0.1:57321/v1"));
-    assert_eq!(profile.upstream_base_url, "https://responses.example.test/v1");
+    assert!(
+        profile
+            .config_contents
+            .contains("http://127.0.0.1:57321/v1")
+    );
+    assert_eq!(
+        profile.upstream_base_url,
+        "https://responses.example.test/v1"
+    );
 
     let temp = tempfile::tempdir().unwrap();
     let config_path = temp.path().join("config.toml");
-    std::fs::write(&config_path, profile.config_contents.replace(
-        "http://127.0.0.1:57321/v1", "https://responses.example.test/v1",
-    )).unwrap();
+    std::fs::write(
+        &config_path,
+        profile.config_contents.replace(
+            "http://127.0.0.1:57321/v1",
+            "https://responses.example.test/v1",
+        ),
+    )
+    .unwrap();
     let settings = BackendSettings {
         active_relay_id: profile.id.clone(),
         relay_profiles: vec![profile.clone()],
@@ -1289,8 +1324,16 @@ fn web_search_history_opt_in_routes_through_proxy_and_disable_restores_upstream(
 
     profile.web_search_history_compat = false;
     alunixa_x_core::relay_config::normalize_relay_profile_for_storage(&mut profile).unwrap();
-    assert!(profile.config_contents.contains("https://responses.example.test/v1"));
-    assert!(!profile.config_contents.contains("http://127.0.0.1:57321/v1"));
+    assert!(
+        profile
+            .config_contents
+            .contains("https://responses.example.test/v1")
+    );
+    assert!(
+        !profile
+            .config_contents
+            .contains("http://127.0.0.1:57321/v1")
+    );
     assert_eq!(profile.base_url, "https://responses.example.test/v1");
 }
 
@@ -1513,6 +1556,38 @@ base_url = "http://127.0.0.1:57321/v1"
     let live = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(!live.contains("alunixa_x_chat_base_url"));
     assert!(live.contains(r#"base_url = "http://127.0.0.1:57321/v1""#));
+}
+
+#[test]
+fn chat_protocol_profile_uses_supplied_multi_instance_proxy_port() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = RelayProfile {
+        id: "relay-chat-multi".to_string(),
+        model: "glm-4.5".to_string(),
+        base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+        upstream_base_url: "https://open.bigmodel.cn/api/paas/v4".to_string(),
+        api_key: "sk-test-redacted".to_string(),
+        protocol: RelayProtocol::ChatCompletions,
+        relay_mode: RelayMode::PureApi,
+        config_contents: r#"model = "glm-4.5"
+model_provider = "custom"
+
+[model_providers.custom]
+name = "custom"
+wire_api = "responses"
+requires_openai_auth = true
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+"#
+        .to_string(),
+        auth_contents: r#"{"OPENAI_API_KEY":"sk-test-redacted"}"#.to_string(),
+        ..RelayProfile::default()
+    };
+
+    apply_relay_profile_to_home_with_switch_rules_and_proxy_port(temp.path(), &profile, "", 61234)
+        .unwrap();
+    let live = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
+    assert!(live.contains(r#"base_url = "http://127.0.0.1:61234/v1""#));
+    assert!(!live.contains("open.bigmodel.cn"));
 }
 
 #[test]
@@ -1815,7 +1890,10 @@ fn apply_relay_files_preserves_live_windows_sandbox_across_profile_switches() {
         .parse()
         .unwrap();
     assert_eq!(parsed["windows"]["sandbox"].as_str(), Some("unelevated"));
-    assert_eq!(parsed["windows"]["sandbox_private_desktop"].as_bool(), Some(false));
+    assert_eq!(
+        parsed["windows"]["sandbox_private_desktop"].as_bool(),
+        Some(false)
+    );
 }
 
 #[test]
@@ -2213,7 +2291,7 @@ enabled = true
     let updated = sync_live_config_context_entries(live, disabled).unwrap();
 
     assert!(updated.contains(r#"model = "gpt-5""#));
-    assert!(!updated.contains("[mcp_servers.ida-pro-mcp]"));
+    assert_context_entry_explicitly_disabled(&updated, "mcp_servers", "ida-pro-mcp");
     assert!(updated.contains("[plugins.\"browser@openai-bundled\"]"));
 
     let enabled = r#"[mcp_servers.ida-pro-mcp]
@@ -2281,7 +2359,7 @@ enabled = true
 }
 
 #[test]
-fn global_common_config_drops_only_disabled_context_entries() {
+fn global_common_config_preserves_explicitly_disabled_context_entries() {
     let filtered = prepare_common_config_for_apply(
         r#"disable_response_storage = true
 
@@ -2307,7 +2385,7 @@ path = "plugin.js"
     assert!(filtered.contains("disable_response_storage = true"));
     assert!(filtered.contains("[features]"));
     assert!(filtered.contains("goals = true"));
-    assert!(!filtered.contains("[mcp_servers.context7]"));
+    assert_context_entry_explicitly_disabled(&filtered, "mcp_servers", "context7");
     assert!(filtered.contains("[mcp_servers.memory]"));
     // 遗留的 [skills.<id>] 是死数据，codex 不读，顺手清掉
     assert!(!filtered.contains("[skills.writer]"));
@@ -2550,7 +2628,7 @@ path = "plugin.js"
 }
 
 #[test]
-fn apply_relay_files_with_context_skips_disabled_global_context() {
+fn apply_relay_files_with_context_persists_disabled_global_context() {
     let temp = tempfile::tempdir().unwrap();
 
     alunixa_x_core::relay_config::apply_relay_files_to_home_with_context(
@@ -2584,7 +2662,7 @@ enabled = true
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert!(config.contains("[mcp_servers.enabled_one]"));
     assert!(config.contains("[plugins.enabled_two]"));
-    assert!(!config.contains("[plugins.disabled_one]"));
+    assert_context_entry_explicitly_disabled(&config, "plugins", "disabled_one");
     assert!(!config.contains("[skills.disabled_skill]"));
 }
 
@@ -3014,7 +3092,7 @@ other = true
 }
 
 #[test]
-fn set_codex_goals_feature_tolerates_invalid_existing_toml() {
+fn set_codex_goals_feature_rejects_invalid_toml_without_rewriting_user_content() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
         temp.path().join("config.toml"),
@@ -3029,11 +3107,14 @@ last_updated = "2026-05-25T11:52:46Z"
     )
     .unwrap();
 
-    set_codex_goals_feature_in_home(temp.path(), true).unwrap();
-
-    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(config.contains("[features]"));
-    assert!(config.contains("goals = true"));
+    let before = std::fs::read(temp.path().join("config.toml")).unwrap();
+    let error = set_codex_goals_feature_in_home(temp.path(), true).unwrap_err();
+    assert!(format!("{error:#}").contains("config.toml"));
+    assert_eq!(
+        std::fs::read(temp.path().join("config.toml")).unwrap(),
+        before,
+        "malformed user configuration must remain byte-for-byte unchanged"
+    );
 }
 
 #[test]
@@ -4006,9 +4087,12 @@ requires_openai_auth = true
     let mut common = String::new();
 
     alunixa_x_core::relay_config::backfill_relay_profile_from_home_with_common_and_policy(
-        temp.path(), &mut current, &mut common,
+        temp.path(),
+        &mut current,
+        &mut common,
         alunixa_x_core::relay_config::RelayBackfillPolicy::AdoptLiveIdentity,
-    ).unwrap();
+    )
+    .unwrap();
 
     assert!(
         current
@@ -4539,8 +4623,8 @@ enabled = false
     assert!(config.contains("[mcp_servers.managed]"));
     assert!(config.contains("managed-command"));
     assert!(!config.contains("old-managed"));
-    // 只有显式关掉的条目才不写入
-    assert!(!config.contains("[mcp_servers.turned_off]"));
+    // Preserve an explicit disable instead of resurrecting the native default.
+    assert_context_entry_explicitly_disabled(&config, "mcp_servers", "turned_off");
 }
 
 #[test]
@@ -4567,11 +4651,11 @@ command = "disabled"
     assert!(updated.contains(r#"command = "manual""#));
     assert!(updated.contains("[mcp_servers.managed]"));
     assert!(updated.contains(r#"command = "new""#));
-    assert!(!updated.contains("[mcp_servers.disabled]"));
+    assert_context_entry_explicitly_disabled(&updated, "mcp_servers", "disabled");
 }
 
 #[test]
-fn sync_live_config_context_entries_removes_disabled_managed_entries_from_live() {
+fn sync_live_config_context_entries_keeps_managed_entries_explicitly_disabled() {
     let live = r#"model = "gpt-5"
 
 [mcp_servers.manual]
@@ -4588,7 +4672,7 @@ command = "old"
     let updated = sync_live_config_context_entries(live, context).unwrap();
 
     assert!(updated.contains("[mcp_servers.manual]"));
-    assert!(!updated.contains("[mcp_servers.managed]"));
+    assert_context_entry_explicitly_disabled(&updated, "mcp_servers", "managed");
 }
 
 #[test]
@@ -4973,10 +5057,9 @@ experimental_bearer_token = "sk-new"
         config.contains(r#"model_catalog_json = "model-catalogs/relay-routes.json""#),
         "custom Responses provider with model routes must write a catalog: {config}"
     );
-    let catalog = std::fs::read_to_string(
-        temp.path().join("model-catalogs").join("relay-routes.json"),
-    )
-    .unwrap();
+    let catalog =
+        std::fs::read_to_string(temp.path().join("model-catalogs").join("relay-routes.json"))
+            .unwrap();
     assert!(catalog.contains(r#""slug": "gpt-5.6-sol""#), "{catalog}");
 }
 
@@ -5089,9 +5172,7 @@ experimental_bearer_token = "sk-new"
         .iter()
         .find(|model| model["slug"] == "gpt-5.6-sol")
         .unwrap();
-    assert_eq!(sol["context_window"], 272_000);
-    // 未显式配置窗口时保留官方模板上限（issue #2191）。
-    assert_eq!(sol["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&sol);
     assert_eq!(sol["default_reasoning_level"], "low");
     assert_eq!(sol["service_tiers"][0]["id"], "priority");
     assert_eq!(sol["supports_search_tool"], true);
@@ -5153,9 +5234,7 @@ base_url = "https://relay.example/v1"
     .unwrap();
     let astra = &catalog["models"][0];
     assert_eq!(astra["slug"], "gpt-6-astra");
-    assert_eq!(astra["context_window"], 272_000);
-    // 未显式配置窗口时保留官方模板上限（issue #2191）。
-    assert_eq!(astra["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&astra);
     assert_eq!(astra["use_responses_lite"], false);
     assert_eq!(astra["additional_speed_tiers"], serde_json::json!(["fast"]));
     assert_eq!(astra["service_tiers"][0]["id"], "priority");
@@ -5207,8 +5286,7 @@ base_url = "https://relay.example/v1"
     assert_eq!(model["slug"], "gpt-6.1-sol");
     assert_eq!(model["display_name"], "GPT-6.1-Sol");
     assert_eq!(model["default_reasoning_level"], "medium");
-    assert_eq!(model["context_window"], 272_000);
-    assert_eq!(model["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&model);
     assert_eq!(model["use_responses_lite"], false);
     assert_eq!(model["multi_agent_version"], "v2");
     assert_eq!(model["additional_speed_tiers"], serde_json::json!(["fast"]));
@@ -5268,8 +5346,7 @@ base_url = "https://relay.example/v1"
         if model["slug"] == "gpt-6-sol" {
             expected_efforts.push("ultra");
         }
-        assert_eq!(model["context_window"], 272_000);
-        assert_eq!(model["max_context_window"], 872_000);
+        pinned_model_metadata::assert_pinned_default_windows(&model);
         assert_eq!(model["use_responses_lite"], false);
         assert_eq!(model["multi_agent_version"], "v2");
         assert_eq!(model["additional_speed_tiers"], serde_json::json!(["fast"]));
@@ -6576,7 +6653,11 @@ fn generated_catalog_model(home: &tempfile::TempDir, id: &str) -> serde_json::Va
 #[test]
 fn lite_disabled_for_relay_base_url() {
     let temp = tempfile::tempdir().unwrap();
-    let profile = lite_test_profile("relay-lite-relay", RelayMode::PureApi, "https://relay.example/v1");
+    let profile = lite_test_profile(
+        "relay-lite-relay",
+        RelayMode::PureApi,
+        "https://relay.example/v1",
+    );
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
     // 中转上游：官方目录的 lite=true 必须翻转为 false
     assert_eq!(

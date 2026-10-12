@@ -272,12 +272,10 @@ fn ai_shell_hook_output(settings: &BackendSettings, input: &Value, launcher_path
         let Some(command) = tool_input.get("command") else {
             return json!({});
         };
-        let wrapped = if settings.codex_app_shared_terminal {
-            shared_terminal_command_value(input, command, launcher_path)
-        } else {
-            let selected_shell = available_ai_shell(settings.codex_app_ai_shell);
-            wrap_command_value(command, selected_shell)
-        };
+        // The legacy shared-terminal submit endpoint was retired upstream.
+        // Preserve the selected native AI shell instead of emitting a dead proxy command.
+        let selected_shell = available_ai_shell(settings.codex_app_ai_shell);
+        let wrapped = wrap_command_value(command, selected_shell);
         let Some(wrapped) = wrapped else {
             return json!({});
         };
@@ -1328,9 +1326,10 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn shared_terminal_hook_routes_current_shell_command_through_launcher() {
+    fn retired_shared_terminal_flag_keeps_native_ai_shell_command_and_workdir() {
         let settings = BackendSettings {
             codex_app_shared_terminal: true,
+            codex_app_ai_shell: CodexAiShell::PowerShell,
             ..BackendSettings::default()
         };
         let input = json!({
@@ -1352,16 +1351,27 @@ mod tests {
             .as_str()
             .unwrap();
 
-        assert!(command.contains("--alunixa-x-shared-terminal"));
-        assert!(!command.contains("Write-Output 'hello'"));
-        assert!(!command.contains("-NonInteractive"));
+        assert!(command.starts_with("powershell.exe "));
+        assert!(!command.contains("--alunixa-x-shared-terminal"));
+        assert!(!command.contains("/shared-terminal/submit"));
+        let encoded = command.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let utf16: Vec<_> = bytes.chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output 'hello'");
+        assert_eq!(
+            output["hookSpecificOutput"]["updatedInput"]["workdir"],
+            input["tool_input"]["workdir"]
+        );
     }
 
     #[cfg(windows)]
     #[test]
-    fn shared_terminal_hook_keeps_legacy_bash_compatibility() {
+    fn retired_shared_terminal_flag_keeps_legacy_bash_command_without_dead_proxy() {
         let settings = BackendSettings {
             codex_app_shared_terminal: true,
+            codex_app_ai_shell: CodexAiShell::PowerShell,
             ..BackendSettings::default()
         };
         let input = json!({
@@ -1374,12 +1384,19 @@ mod tests {
 
         let output = ai_shell_hook_output(&settings, &input, Path::new("launcher.exe"));
 
-        assert!(
-            output["hookSpecificOutput"]["updatedInput"]["command"]
-                .as_str()
-                .unwrap()
-                .contains("--alunixa-x-shared-terminal")
-        );
+        let command = output["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(command.starts_with("powershell.exe "));
+        assert!(!command.contains("--alunixa-x-shared-terminal"));
+        assert!(!command.contains("/shared-terminal/submit"));
+        let encoded = command.split_whitespace().last().unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap();
+        let utf16: Vec<_> = bytes.chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&utf16).unwrap(), "Write-Output legacy");
+        assert_eq!(input["cwd"], r"D:\legacy");
     }
 
     fn memory_chunk(path: &str, text: &str) -> MemoryChunk {

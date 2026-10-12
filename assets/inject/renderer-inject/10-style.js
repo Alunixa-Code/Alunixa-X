@@ -1063,11 +1063,7 @@
        * 一张卡 = 图标 + 名称/简介 + 右上箭头 + 底部优惠条。用 auto-fill + minmax
        * 让列数随宽度自适应（宽屏 4 列、窄屏递减），卡片等高对齐。
        */
-      .alunixa-x-ad-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
-        gap: 12px;
-      }
+
       .alunixa-x-ad-card {
         display: flex;
         flex-direction: column;
@@ -1716,7 +1712,7 @@
         line-height: 24px;
       }
       .alunixa-x-extensions-grid,
-      .alunixa-x-discovery .alunixa-x-ad-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; }
+
       .alunixa-x-extensions-grid > .alunixa-x-extensions-detail-empty,
       .alunixa-x-discovery .alunixa-x-ad-empty { grid-column: 1 / -1; }
       .alunixa-x-extension-card {
@@ -1852,7 +1848,7 @@
       }
       @container alunixa-x-discovery (max-width: 600px) {
         .alunixa-x-extensions-grid,
-        .alunixa-x-discovery .alunixa-x-ad-list { grid-template-columns: minmax(0, 1fr); }
+
       }
       @container alunixa-x-discovery-page (max-width: 700px) {
         .${alunixaXPageClass} .alunixa-x-modal-content[data-alunixa-x-active-tab="extensions"] .alunixa-x-page-nav { width: 180px; flex-basis: 180px; }

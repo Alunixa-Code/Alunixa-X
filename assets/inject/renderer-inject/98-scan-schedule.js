@@ -24,7 +24,7 @@
       '[data-testid="conversation-turn"]',
       '[class*="user-message"]',
       '[class*="UserMessage"]',
-      ".composer-footer",
+      codexServiceTierComposerFooterSelector,
       selectors.appHeader,
       selectors.archiveNav,
       selectors.pluginNavButton,

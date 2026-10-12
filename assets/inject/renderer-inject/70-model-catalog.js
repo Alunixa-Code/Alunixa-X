@@ -694,6 +694,7 @@
 
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
+    if (typeof patchCodexQueuedFollowUpCoordinator === "function") patchCodexQueuedFollowUpCoordinator(client);
     registerNativeHostClient(client);
     try {
       if (!Object.isExtensible(client)) return false;

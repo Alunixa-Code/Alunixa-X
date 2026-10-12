@@ -1082,8 +1082,9 @@ fn launch_codex_multi_instance_blocking(
     // 保持 relay_profiles_enabled，让 `ensure_active_protocol_proxy_config_in_home`
     // 用多开进程的 ALUNIXA_X_PROTOCOL_PROXY_PORT 修正 config.toml 中的本地代理地址；
     // 否则父进程写入的默认 57321 会让多个实例互相抢同一个代理端口。
-    worker_settings.relay_profiles_enabled =
-        profile.protocol == alunixa_x_core::settings::RelayProtocol::ChatCompletions;
+    worker_settings.relay_profiles_enabled = worker_settings.active_relay_transport_uses_protocol_proxy()
+        || worker_settings.active_relay_session_provider() == alunixa_x_core::settings::RelaySessionProvider::Openai
+        || (profile.relay_mode == alunixa_x_core::settings::RelayMode::Official && profile.official_mix_api_key);
     worker_settings.codex_extra_args = multi_instance_extra_args(&settings.codex_extra_args);
     worker_settings
         .codex_extra_args

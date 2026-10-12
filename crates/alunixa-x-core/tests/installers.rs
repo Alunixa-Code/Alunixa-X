@@ -66,7 +66,7 @@ fn macos_bundle_metadata_has_one_native_gui_app_with_url_protocols() {
     );
     assert!(
         app.info_plist
-            .contains("<string>com.bigpizzav3.codexplusplus</string>")
+            .contains("<string>io.github.alunixacode.alunixax</string>")
     );
     assert!(app.info_plist.contains("<string>dreamskin</string>"));
     assert!(app.info_plist.contains("<string>codexplusplus</string>"));
@@ -86,7 +86,8 @@ fn installer_name_helpers_and_legacy_constants_keep_api_compatibility() {
     assert_eq!(SILENT_BINARY, APP_BINARY);
     assert_eq!(SILENT_BUNDLE_ID, APP_BUNDLE_ID);
     assert_eq!(MANAGER_BINARY, "alunixa-x-plus-manager");
-    assert_eq!(MANAGER_BUNDLE_ID, "com.bigpizzav3.codexplusplus.manager");
+    assert_eq!(APP_BUNDLE_ID, "io.github.alunixacode.alunixax");
+    assert_eq!(MANAGER_BUNDLE_ID, "io.github.alunixacode.alunixax.manager");
 }
 
 #[test]
@@ -119,7 +120,9 @@ fn windows_installer_migrates_existing_shortcuts_without_reviving_deleted_ones()
         assert!(text.contains("StrCmp $ExistingInstall \"\" desktop_entry_create 0"));
         assert!(text.contains("StrCmp $HadDesktopEntry 1 desktop_entry_create desktop_entry_done"));
         assert!(
-            text.contains(r#"IfFileExists "$DESKTOP\Alunixa X 管理工具.lnk" desktop_entry_found 0"#)
+            text.contains(
+                r#"IfFileExists "$DESKTOP\Alunixa X 管理工具.lnk" desktop_entry_found 0"#
+            )
         );
         assert!(
             text.contains(
@@ -154,11 +157,23 @@ fn windows_installer_waits_for_normal_exit_and_cancels_without_writing_apps() {
             .unwrap()
             .0;
         let last_wait = section.rfind(wait).unwrap();
-        let first_write = section.find("\n  Delete ").unwrap();
-        assert!(last_wait < first_write);
-        if let Some(file) = section.find("\n  File ") {
-            assert!(last_wait < file);
+        let mut write_count = 0;
+        for instruction in [
+            "\n  Delete ",
+            "\n  File ",
+            "\n  CopyFiles ",
+            "\n  CreateShortcut ",
+            "\n  WriteUninstaller ",
+        ] {
+            if let Some(first_write) = section.find(instruction) {
+                assert!(last_wait < first_write, "{name}: {instruction}");
+                write_count += 1;
+            }
         }
+        assert!(
+            write_count > 0,
+            "{name} must contain real installer operations"
+        );
     }
 }
 
@@ -381,7 +396,11 @@ mod macos_install {
         let error =
             alunixa_x_core::install::macos::native_application_bundle_from_executable(&auxiliary)
                 .unwrap_err();
-        assert!(error.to_string().contains("不是 Alunixa X 原生界面的主程序"));
+        assert!(
+            error
+                .to_string()
+                .contains("不是 Alunixa X 原生界面的主程序")
+        );
     }
 
     #[test]
@@ -390,9 +409,8 @@ mod macos_install {
         let binary = root.path().join("alunixa-x-plus");
         std::fs::write(&binary, vec![0_u8; 2048]).unwrap();
         let target = root.path().join("apps");
-        let error =
-            alunixa_x_core::install::macos::install_app_bundles(&options(&target, &binary))
-                .unwrap_err();
+        let error = alunixa_x_core::install::macos::install_app_bundles(&options(&target, &binary))
+            .unwrap_err();
         assert!(error.to_string().contains("完整的 Alunixa X.app"));
         assert!(!target.exists());
     }

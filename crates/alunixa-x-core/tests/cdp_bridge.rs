@@ -1,4 +1,3 @@
-use base64::Engine;
 use alunixa_x_core::assets;
 use alunixa_x_core::bridge::{self, BRIDGE_BINDING_NAME};
 use alunixa_x_core::cdp::{
@@ -7,6 +6,7 @@ use alunixa_x_core::cdp::{
     validate_cdp_websocket_url,
 };
 use alunixa_x_core::settings::BackendSettings;
+use base64::Engine;
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
@@ -605,26 +605,22 @@ fn official_login_usage_alert_setting_controls_renderer_injection() {
         }
     };
 
-    assert!(assets::injection_script_with_settings(
-        57321,
-        &settings(RelayMode::Official, true, false)
-    )
-    .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;"));
-    assert!(assets::injection_script_with_settings(
-        57321,
-        &settings(RelayMode::Official, false, true)
-    )
-    .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = true;"));
-    assert!(assets::injection_script_with_settings(
-        57321,
-        &settings(RelayMode::Official, false, false)
-    )
-    .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;"));
-    assert!(assets::injection_script_with_settings(
-        57321,
-        &settings(RelayMode::PureApi, true, false)
-    )
-    .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;"));
+    assert!(
+        assets::injection_script_with_settings(57321, &settings(RelayMode::Official, true, false))
+            .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;")
+    );
+    assert!(
+        assets::injection_script_with_settings(57321, &settings(RelayMode::Official, false, true))
+            .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = true;")
+    );
+    assert!(
+        assets::injection_script_with_settings(57321, &settings(RelayMode::Official, false, false))
+            .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;")
+    );
+    assert!(
+        assets::injection_script_with_settings(57321, &settings(RelayMode::PureApi, true, false))
+            .contains("window.__ALUNIXA_X_HIDE_OFFICIAL_USAGE_ALERT__ = false;")
+    );
 }
 
 #[test]
@@ -1094,13 +1090,14 @@ fn injection_script_marks_diagnostic_build_and_reports_script_loaded() {
 }
 
 #[test]
-fn injection_script_fetches_ads_without_bridge() {
+fn injection_script_does_not_fetch_advertisements_with_or_without_bridge() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("directFetchCodexPlusAds"));
-    assert!(script.contains("cacheBustCodexPlusAdUrl"));
-    assert!(script.contains("Date.now()"));
-    assert!(script.contains("BigPizzaV3/Ad-List"));
+    assert!(!script.contains("directFetchCodexPlusAds"));
+    assert!(!script.contains("directFetchAlunixaXAds"));
+    assert!(!script.contains("Ad-List"));
+    assert!(!script.contains("cacheBustCodexPlusAdUrl"));
+    assert!(!script.contains("BigPizzaV3/Ad-List"));
     assert!(!script.contains("alunixaXAds = normalizeCodexPlusAds(await postJson(\"/ads\", {}));"));
 }
 
@@ -1244,8 +1241,10 @@ fn stepwise_keeps_settings_sync_alive_when_features_are_disabled() {
     assert!(script.contains("function scheduleSettingsSync("));
     assert!(script.contains("await reloadSettings();"));
     assert!(script.contains("scheduleSettingsSync();"));
-    assert!(script
-        .contains("if (state.settingsSyncTimer) window.clearTimeout(state.settingsSyncTimer);"));
+    assert!(
+        script
+            .contains("if (state.settingsSyncTimer) window.clearTimeout(state.settingsSyncTimer);")
+    );
     assert!(!script.contains("function stopRuntime() {\n    if (state.settingsSyncTimer)"));
 }
 
@@ -1341,8 +1340,11 @@ fn stepwise_manual_mode_waits_for_refresh_while_auto_mode_reuses_successful_cach
         "if (generationMode === \"manual\" && !manualResultVisible && !manualRequestPending) {"
     ));
     assert!(script.contains("} else if (manualRequestPending) {"));
-    assert!(script
-        .contains("if (normalizedMode === \"manual\" && options.userInitiated !== true) return;"));
+    assert!(
+        script.contains(
+            "if (normalizedMode === \"manual\" && options.userInitiated !== true) return;"
+        )
+    );
     assert!(script.contains("state.bridgeStatus = \"manual-ready\";"));
     assert!(script.contains("title: \"当前为手动模式\","));
     assert!(script.contains("state: \"manual\","));
@@ -1359,14 +1361,19 @@ fn stepwise_generation_mode_is_shared_through_backend_settings() {
 
     assert!(script.contains("bridgeCall(\"/settings/set\", {"));
     assert!(script.contains("codexAppStepwiseGenerationMode: nextMode"));
-    assert!(script
-        .contains("Object.prototype.hasOwnProperty.call(normalizedPatch, \"generationMode\")"));
+    assert!(
+        script
+            .contains("Object.prototype.hasOwnProperty.call(normalizedPatch, \"generationMode\")")
+    );
     assert!(script.contains("settingsSyncEpoch += 1;"));
     assert!(
         script.contains("pendingSettingsPatch = { ...pendingSettingsPatch, ...normalizedPatch };")
     );
-    assert!(script
-        .contains("if (!Object.prototype.hasOwnProperty.call(nextSettings, \"generationMode\"))"));
+    assert!(
+        script.contains(
+            "if (!Object.prototype.hasOwnProperty.call(nextSettings, \"generationMode\"))"
+        )
+    );
     assert!(script.contains("nextSettings.generationMode = stepwiseGenerationMode();"));
 }
 
@@ -1396,8 +1403,11 @@ fn stepwise_releases_only_the_stale_request_that_still_owns_pending_state() {
     assert!(script.contains("state.bridgePendingRequestId = 0;"));
     assert!(script.contains("if (state.bridgeStatus === \"pending\") {"));
     assert!(script.contains("state.bridgeStatus = \"idle\";"));
-    assert!(!script
-        .contains("if (!requestCurrent()) return;\n        if (state.bridgePendingHash === key)"));
+    assert!(
+        !script.contains(
+            "if (!requestCurrent()) return;\n        if (state.bridgePendingHash === key)"
+        )
+    );
 }
 
 #[test]
@@ -1405,7 +1415,9 @@ fn stepwise_rejects_generation_results_after_the_answer_identity_changes() {
     let script = assets::stepwise_script();
 
     assert!(script.contains("bridgeActiveKey: \"\","));
-    assert!(script.contains("const requestAssistantMessageId = requestContext.assistantMessageId;"));
+    assert!(
+        script.contains("const requestAssistantMessageId = requestContext.assistantMessageId;")
+    );
     assert!(script.contains("&& contextMatches(requestContext)"));
     assert!(
         script.contains("&& state.activeContext.assistantMessageId === requestAssistantMessageId")
@@ -1461,8 +1473,11 @@ fn stepwise_records_only_real_bridge_generation_requests() {
     assert_eq!(script.matches("bridge:generate-request").count(), 1);
     assert!(script.contains("function requestBridgeStepwise(key, userText, assistantText, requestMode = stepwiseGenerationMode(), options = {})"));
     assert!(script.contains("if (!stepwiseEnabled() || !key || state.bridgePendingHash === key || state.bridgeCache.has(key)) return;"));
-    assert!(script
-        .contains("if (normalizedMode === \"manual\" && options.userInitiated !== true) return;"));
+    assert!(
+        script.contains(
+            "if (normalizedMode === \"manual\" && options.userInitiated !== true) return;"
+        )
+    );
     assert!(script.contains("pushDiagnostic(\"bridge:generate-request\""));
 }
 
@@ -2172,8 +2187,11 @@ fn stepwise_keeps_context_stable_during_passive_scrolling() {
     assert!(script.contains("latestTurnAnchor: null,"));
     assert!(script.contains("function latestConversationTurnByKey(turns)"));
     assert!(script.contains("function nextLatestTurnAnchor(previous, turns, sessionId)"));
-    assert!(script
-        .contains("const sameSession = Boolean(sessionId) && previous?.sessionId === sessionId;"));
+    assert!(
+        script.contains(
+            "const sameSession = Boolean(sessionId) && previous?.sessionId === sessionId;"
+        )
+    );
     assert!(script.contains(
         "if (sameSession && compareConversationTurnKeys(mounted.turnKey, previous.turnKey) < 0) return previous;"
     ));
@@ -2371,8 +2389,9 @@ fn injection_script_defers_backend_mapped_toggles_until_settings_load() {
     let script = assets::injection_script(57321);
 
     assert!(script.contains("const alunixaXBackendMappedSettings = new Set"));
-    assert!(script
-        .contains("alunixaXBackendMappedSettings.has(key) && !alunixaXBackendSettingsLoaded"));
+    assert!(
+        script.contains("alunixaXBackendMappedSettings.has(key) && !alunixaXBackendSettingsLoaded")
+    );
     assert!(script.contains("button.dataset.pending = String(waitsForBackend)"));
     assert!(script.contains(
         "button.disabled = waitsForBackend || button.dataset.relayUnneeded === \"true\""
@@ -2547,7 +2566,8 @@ fn injection_script_expands_api_key_plugin_marketplace_requests() {
     assert!(!script.contains("marketplace.name = alias"));
     assert!(script.contains("if (name === \"openai-curated\") return \"OpenAI插件2(Alunixa X)\""));
     assert!(
-        script.contains("if (name === \"openai-primary-runtime\") return \"OpenAI插件3(Alunixa X)\"")
+        script
+            .contains("if (name === \"openai-primary-runtime\") return \"OpenAI插件3(Alunixa X)\"")
     );
     assert!(script.contains("restored === \"openai-api-curated\""));
     assert!(script.contains("restored === \"openai-curated-remote\""));
@@ -3143,10 +3163,21 @@ process.stdout.write(JSON.stringify(cases));
 
 #[test]
 fn remote_delete_uses_only_the_matching_native_host_without_local_fallback() {
-    let shard = std::fs::read_to_string("../../assets/inject/renderer-inject/60-plugin-marketplace.js").unwrap();
-    let helpers = &shard[shard.find("  function isClientNewThreadId(value)").unwrap()..shard.find("  if (window.__ALUNIXA_X_TEST_SESSION_REF__)").unwrap()];
-    let native = &shard[shard.find("  const codexNativeHostClients =").unwrap()..shard.find("  function threadIdBadgeTitleNode(row)").unwrap()];
-    let post = &shard[shard.find("  async function postJson(path, payload)").unwrap()..shard.find("  function downloadMarkdownFallback(").unwrap()];
+    let shard =
+        std::fs::read_to_string("../../assets/inject/renderer-inject/60-plugin-marketplace.js")
+            .unwrap();
+    let helpers = &shard[shard.find("  function isClientNewThreadId(value)").unwrap()
+        ..shard
+            .find("  if (window.__ALUNIXA_X_TEST_SESSION_REF__)")
+            .unwrap()];
+    let native = &shard[shard.find("  const codexNativeHostClients =").unwrap()
+        ..shard
+            .find("  function threadIdBadgeTitleNode(row)")
+            .unwrap()];
+    let post = &shard[shard
+        .find("  async function postJson(path, payload)")
+        .unwrap()
+        ..shard.find("  function downloadMarkdownFallback(").unwrap()];
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("native-delete.cjs");
     std::fs::write(&path, format!(r#"
@@ -3220,12 +3251,32 @@ class NativeClient {{
 }})().catch(error=>{{console.error(error);process.exit(1);}});
 "#)).unwrap();
     let output = Command::new("node").arg(&path).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let cases: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    for name in ["isolated", "unknownSafe", "failureSafe", "wrongSafe", "missingSafe", "localKept", "freshSafe", "freshWrongSafe"] {
+    for name in [
+        "isolated",
+        "unknownSafe",
+        "failureSafe",
+        "wrongSafe",
+        "missingSafe",
+        "localKept",
+        "freshSafe",
+        "freshWrongSafe",
+    ] {
         assert_eq!(cases[name], true, "{name}: {cases}");
     }
-    for name in ["unknown", "conflicting", "failure", "wrongHost", "missing", "freshWrong"] {
+    for name in [
+        "unknown",
+        "conflicting",
+        "failure",
+        "wrongHost",
+        "missing",
+        "freshWrong",
+    ] {
         assert_eq!(cases[name]["status"], "failed");
     }
     for name in ["success", "freshSuccess"] {
@@ -3506,8 +3557,10 @@ fn injection_script_exposes_fast_service_tier_control() {
 fn injection_script_keeps_remote_provider_patch_installed_for_openai_identity() {
     let script = assets::injection_script(57321);
 
-    assert!(script
-        .contains("alunixaXBackendSettingsLoaded && codexRemoteSessionProviderPatchEnabled()"));
+    assert!(
+        script
+            .contains("alunixaXBackendSettingsLoaded && codexRemoteSessionProviderPatchEnabled()")
+    );
     assert!(script.contains("if (!codexRemoteSessionProviderPatchEnabled()) return;"));
 }
 
@@ -3642,9 +3695,11 @@ fn injection_script_applies_fast_service_tier_contract() {
         cases["projectlessStartConversation"]["projectlessOutputDirectory"],
         "C:/projectless/outputs"
     );
-    assert!(cases["projectlessStartConversation"]
-        .get("projectAssignment")
-        .is_none());
+    assert!(
+        cases["projectlessStartConversation"]
+            .get("projectAssignment")
+            .is_none()
+    );
     assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
     assert_eq!(
         cases["fetchSendCliRequest"]["params"]["serviceTier"],
@@ -3763,8 +3818,14 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["failedModelSwitchResumeAttempts"], 2);
     assert_eq!(cases["failedModelSwitchTurnAttempts"], 2);
     assert_eq!(cases["delayedResumeWaited"], true);
-    assert_eq!(cases["hungSettingsForwarded"], json!(["instance", "prototype"]));
-    assert_eq!(cases["lateSettingsIgnored"], json!(["stale_vendor", "stale_vendor"]));
+    assert_eq!(
+        cases["hungSettingsForwarded"],
+        json!(["instance", "prototype"])
+    );
+    assert_eq!(
+        cases["lateSettingsIgnored"],
+        json!(["stale_vendor", "stale_vendor"])
+    );
     assert_eq!(cases["turnCompletedBeforeCatalogRead"], true);
     assert_eq!(cases["hungCatalogListReturned"], true);
     assert_eq!(cases["lateCatalogIgnored"], "failed");
@@ -5083,9 +5144,11 @@ fn pick_page_target_rejects_non_pages_and_pages_without_websocket() {
 
     let error = pick_page_target(&targets).expect_err("no injectable page should be selected");
 
-    assert!(error
-        .to_string()
-        .contains("No injectable page target found"));
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable page target found")
+    );
 }
 
 #[test]
@@ -5110,9 +5173,11 @@ fn pick_injectable_codex_page_target_rejects_non_codex_pages() {
     let error = pick_injectable_codex_page_target(&targets)
         .expect_err("non-Codex page must not be selected for injection");
 
-    assert!(error
-        .to_string()
-        .contains("No injectable Codex page target found"));
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
 }
 
 #[test]
@@ -5178,9 +5243,11 @@ fn pick_injectable_codex_page_target_rejects_embedded_browser_only_page() {
     let error = pick_injectable_codex_page_target(&targets)
         .expect_err("embedded browser content must not be selected for injection");
 
-    assert!(error
-        .to_string()
-        .contains("No injectable Codex page target found"));
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
 }
 
 #[test]
@@ -5384,9 +5451,11 @@ fn quick_chat_only_target_is_not_injectable_as_codex_main_page() {
     let error = pick_injectable_codex_page_target(&targets)
         .expect_err("Quick Chat helper renderer must not be selected for injection");
 
-    assert!(error
-        .to_string()
-        .contains("No injectable Codex page target found"));
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
 }
 
 #[test]
@@ -5396,9 +5465,11 @@ fn pick_injectable_codex_page_target_requires_websocket() {
     let error = pick_injectable_codex_page_target(&targets)
         .expect_err("Codex page without websocket must not be selected for injection");
 
-    assert!(error
-        .to_string()
-        .contains("No injectable Codex page target found"));
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
 }
 
 #[tokio::test]
@@ -5474,10 +5545,12 @@ async fn install_bridge_routes_binding_while_waiting_for_command_response() {
 
         let response = recv_json(&mut socket).await;
         assert_eq!(response["method"], "Runtime.evaluate");
-        assert!(response["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteResolve"));
+        assert!(
+            response["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteResolve")
+        );
         send_json(&mut socket, json!({ "id": response["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -5614,10 +5687,12 @@ async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() 
         .await;
 
         let resolve = recv_json(&mut socket).await;
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("after-return"));
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("after-return")
+        );
         send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -5731,25 +5806,33 @@ async fn install_bridge_rejects_bad_payload_with_id_and_continues_after_unparsea
         .await;
 
         let reject = recv_json(&mut socket).await;
-        assert!(reject["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteReject"));
-        assert!(reject["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("bad-1"));
+        assert!(
+            reject["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteReject")
+        );
+        assert!(
+            reject["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("bad-1")
+        );
         send_json(&mut socket, json!({ "id": reject["id"], "result": {} })).await;
 
         let resolve = recv_json(&mut socket).await;
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteResolve"));
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("ok-1"));
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteResolve")
+        );
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("ok-1")
+        );
         send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -6188,8 +6271,8 @@ async fn spawn_two_session_cdp_server() -> (String, oneshot::Receiver<bool>, one
     (websocket_url(address), stale_rx, fresh_rx)
 }
 
-async fn spawn_failed_reinstall_cdp_server(
-) -> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>) {
+async fn spawn_failed_reinstall_cdp_server()
+-> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("test listener should bind");

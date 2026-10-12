@@ -1626,11 +1626,7 @@
        * 一张卡 = 图标 + 名称/简介 + 右上箭头 + 底部优惠条。用 auto-fill + minmax
        * 让列数随宽度自适应（宽屏 4 列、窄屏递减），卡片等高对齐。
        */
-      .alunixa-x-ad-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
-        gap: 12px;
-      }
+
       .alunixa-x-ad-card {
         display: flex;
         flex-direction: column;
@@ -2279,7 +2275,7 @@
         line-height: 24px;
       }
       .alunixa-x-extensions-grid,
-      .alunixa-x-discovery .alunixa-x-ad-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; }
+
       .alunixa-x-extensions-grid > .alunixa-x-extensions-detail-empty,
       .alunixa-x-discovery .alunixa-x-ad-empty { grid-column: 1 / -1; }
       .alunixa-x-extension-card {
@@ -2415,7 +2411,7 @@
       }
       @container alunixa-x-discovery (max-width: 600px) {
         .alunixa-x-extensions-grid,
-        .alunixa-x-discovery .alunixa-x-ad-list { grid-template-columns: minmax(0, 1fr); }
+
       }
       @container alunixa-x-discovery-page (max-width: 700px) {
         .${alunixaXPageClass} .alunixa-x-modal-content[data-alunixa-x-active-tab="extensions"] .alunixa-x-page-nav { width: 180px; flex-basis: 180px; }
@@ -3673,6 +3669,204 @@
     return { modules, candidates, sources, discovery: usedFallback ? "fallback" : "named-assets" };
   }
 
+  function codexModuleFunctionSource(candidate) {
+    if (typeof candidate !== "function") return "";
+    try {
+      return Function.prototype.toString.call(candidate);
+    } catch {
+      return "";
+    }
+  }
+
+  const codexQueuedFollowUpLifecycle = window.__alunixaXQueuedFollowUpLifecycle
+    || (window.__alunixaXQueuedFollowUpLifecycle = { enabled: true, epoch: 0 });
+
+  function patchCodexQueuedFollowUpQueue(queue) {
+    if (!queue || typeof queue !== "object") return false;
+    const methods = ["read", "enqueue", "remove", "restore", "dispose"];
+    const marker = "__alunixaXQueuedFollowUpEditPatch";
+    let original;
+    let originalDescriptors;
+    try {
+      if (queue[marker] === "1") return true;
+      if (!Object.isExtensible(queue) || !methods.every((name) => typeof queue[name] === "function")) return false;
+      originalDescriptors = Object.fromEntries([...methods, marker]
+        .map((name) => [name, Object.getOwnPropertyDescriptor(queue, name)]));
+      if (![...methods, marker].every((name) => {
+        const descriptor = originalDescriptors[name];
+        return !descriptor || ("value" in descriptor && descriptor.writable === true);
+      })) return false;
+      const source = codexModuleFunctionSource(queue.enqueue);
+      // Only repair the native update-after-delete contract, never an arbitrary queue.
+      if (!source.includes("App-server queued follow-up no longer exists")
+          || !source.includes("thread/queue/update") || !source.includes("thread/queue/add")) return false;
+      original = Object.fromEntries(methods.map((name) => [name, queue[name]]));
+    } catch {
+      return false;
+    }
+    const removed = new Map();
+    const lifecycle = typeof codexQueuedFollowUpLifecycle === "object"
+      ? codexQueuedFollowUpLifecycle : { enabled: true, epoch: 0 };
+    const keyFor = (threadId, messageId) => JSON.stringify([threadId, messageId]);
+    const enabled = () => {
+      const active = (typeof alunixaXBackendSettingsLoaded === "undefined" || alunixaXBackendSettingsLoaded)
+        && alunixaXBackendSettings.enhancementsEnabled !== false;
+      if (!active && lifecycle.enabled) lifecycle.epoch += 1;
+      lifecycle.enabled = active;
+      return active;
+    };
+    let disposed = false;
+    const replacements = {
+      remove: async function (threadId, messageId, ...rest) {
+        const result = await original.remove.call(this, threadId, messageId, ...rest);
+        if (!disposed && enabled() && typeof threadId === "string" && threadId.length > 0
+            && typeof messageId === "string" && messageId.length > 0
+            && result?.serverSubmission?.id === messageId) {
+          if (removed.size >= 256) removed.delete(removed.keys().next().value);
+          removed.set(keyFor(threadId, messageId), { at: Date.now(), epoch: lifecycle.epoch });
+        }
+        return result;
+      },
+      enqueue: async function (threadId, message, position, ...rest) {
+        const key = keyFor(threadId, position?.messageId);
+        const evidence = removed.get(key);
+        const active = enabled();
+        // Consume before any await, even when expired or disabled. An ambiguous
+        // native write must never leave a marker that can replay the submission.
+        removed.delete(key);
+        if (disposed || !active || !evidence || evidence.epoch !== lifecycle.epoch
+            || Date.now() - evidence.at >= 30 * 60 * 1000) {
+          return original.enqueue.call(this, threadId, message, position, ...rest);
+        }
+        const rows = original.read.call(this, threadId);
+        if (!Array.isArray(rows) || rows.some((item) => item.id === position.messageId)) {
+          return original.enqueue.call(this, threadId, message, position, ...rest);
+        }
+        const { messageId: _removedId, ...insertionPosition } = position;
+        // Keep the exact message and prepared payload, including attachments,
+        // reasoning/model and native ordering hints. Do not retry failed writes.
+        const result = await original.enqueue.call(this, threadId, message, insertionPosition, ...rest);
+        sendAlunixaXDiagnostic("queued_follow_up_edit_requeued", {});
+        return result;
+      },
+      restore: function (threadId, snapshot, ...rest) {
+        removed.delete(keyFor(threadId, snapshot?.message?.id));
+        removed.delete(keyFor(threadId, snapshot?.serverSubmission?.id));
+        return original.restore.call(this, threadId, snapshot, ...rest);
+      },
+      dispose: function (...args) {
+        disposed = true;
+        removed.clear();
+        return original.dispose.apply(this, args);
+      },
+    };
+    try {
+      const descriptors = Object.fromEntries(Object.entries(replacements).map(([name, value]) => [
+        name, { ...(originalDescriptors[name]
+          || { writable: true, configurable: true, enumerable: true }), value },
+      ]));
+      descriptors[marker] = {
+        ...(originalDescriptors[marker] || { writable: true, configurable: true }), value: "1",
+      };
+      Object.defineProperties(queue, descriptors);
+      return true;
+    } catch {
+      // Fail closed for RPC stubs; restore all native descriptors if a proxy
+      // rejected one definition after another had already been applied.
+      for (const name of [...Object.keys(replacements), marker]) {
+        try {
+          if (originalDescriptors[name]) Object.defineProperty(queue, name, originalDescriptors[name]);
+          else delete queue[name];
+        } catch {}
+      }
+      return false;
+    }
+  }
+
+  function patchCodexQueuedFollowUpCoordinator(candidate) {
+    const coordinator = candidate?.turnCoordinator || candidate;
+    if (!coordinator || typeof coordinator.setServerQueue !== "function"
+        || typeof coordinator.sendMessage !== "function"
+        || typeof coordinator.removeQueuedMessage !== "function") return false;
+    const marker = "__alunixaXQueuedFollowUpEditPatch";
+    try {
+      if (coordinator[marker] === "1") {
+        patchCodexQueuedFollowUpQueue(coordinator.serverQueue);
+        return true;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(coordinator, "setServerQueue");
+      const markerDescriptor = Object.getOwnPropertyDescriptor(coordinator, marker);
+      if (!Object.isExtensible(coordinator)
+          || (descriptor && (!("value" in descriptor) || !descriptor.writable))
+          || (markerDescriptor && (!("value" in markerDescriptor) || !markerDescriptor.writable))) return false;
+      const original = coordinator.setServerQueue;
+      Object.defineProperties(coordinator, {
+        setServerQueue: {
+          ...(descriptor || { writable: true, configurable: true, enumerable: true }),
+          value: function (queue, ...rest) {
+            const result = original.call(this, queue, ...rest);
+            if (!this.disposed) patchCodexQueuedFollowUpQueue(this.serverQueue);
+            return result;
+          },
+        },
+        [marker]: { ...(markerDescriptor || { writable: true, configurable: true }), value: "1" },
+      });
+      patchCodexQueuedFollowUpQueue(coordinator.serverQueue);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  let codexQueuedFollowUpDiscovery = { key: "", attempts: 0, at: 0, pending: null };
+
+  function installCodexQueuedFollowUpEditPatch() {
+    if (!alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false) {
+      if (typeof codexQueuedFollowUpLifecycle === "object" && codexQueuedFollowUpLifecycle.enabled) {
+        codexQueuedFollowUpLifecycle.enabled = false;
+        codexQueuedFollowUpLifecycle.epoch += 1;
+      }
+      return;
+    }
+    if (codexQueuedFollowUpDiscovery.pending) return;
+    const key = `${window.location.href}\n${codexAppAssetCandidateUrls().join("\n")}`;
+    if (key !== codexQueuedFollowUpDiscovery.key) {
+      codexQueuedFollowUpDiscovery = { key, attempts: 0, at: 0, pending: null };
+    }
+    const state = codexQueuedFollowUpDiscovery;
+    if (state.attempts >= 8 || (state.attempts > 0 && Date.now() - state.at < 30000)) return;
+    state.attempts += 1;
+    state.at = Date.now();
+    state.pending = loadAppServerRequestCandidates().then(({ candidates }) => {
+      if (!alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false) return;
+      const count = candidates.filter(patchCodexQueuedFollowUpCoordinator).length;
+      if (count > 0 && state.attempts === 1) {
+        sendAlunixaXDiagnostic("queued_follow_up_edit_patch_ready", { coordinatorCount: count });
+      }
+    }).catch(() => {
+      // Optional discovery failure must not submit or retry a user message.
+    }).finally(() => { state.pending = null; });
+  }
+
+  const codexRetiredSharedTerminalRuntimes = window.__alunixaXRetiredSharedTerminalRuntimes
+    || (window.__alunixaXRetiredSharedTerminalRuntimes = new WeakSet());
+
+  function retireCodexSharedTerminalRuntime() {
+    const runtime = window.__alunixaXSharedTerminalRuntime;
+    if (!runtime || typeof runtime !== "object" || codexRetiredSharedTerminalRuntimes.has(runtime)) return false;
+    codexRetiredSharedTerminalRuntimes.add(runtime);
+    try {
+      if (typeof runtime.dispose === "function") {
+        runtime.dispose();
+        return true;
+      }
+    } catch {}
+    try { runtime.setEnabled?.(false); } catch {}
+    // No terminal discovery, command execution or closing native sessions.
+    // Retain local records and settings so retirement never discards user data.
+    return true;
+  }
+
   function codexSettingStorageFromModule(module, assetPrefix = "") {
     const values = module && typeof module === "object" ? Object.values(module) : [];
     const functionSource = (candidate) => {
@@ -4169,6 +4363,7 @@
       node.textContent = state.label;
       node.title = state.title;
       node.setAttribute("aria-label", state.title);
+      node.setAttribute("aria-disabled", String(!!state.disabled));
     });
   }
 
@@ -4857,12 +5052,12 @@
   function installCodexServiceTierDispatcherPatch() {
     if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
     if (serviceTierDispatcherPatchDisabled) return;
-    // 上一轮没跑完就不要再起一轮：loadDispatcher() 会依次试三个前缀，
+    // 上一轮没跑完就不要再起一轮：loadDispatcher() 会依次试有界的四个前缀，
     // 没有这道去重时 scan 的频率就直接变成并发全量扫描的频率。
     if (serviceTierDispatcherPatchPromise) return;
     const loadDispatcher = async () => {
       const errors = [];
-      for (const assetPrefix of ["setting-storage-", "vscode-api-", "app-initial-"]) {
+      for (const assetPrefix of ["app-shared-", "setting-storage-", "vscode-api-", "app-initial-"]) {
         try {
           const module = await loadCodexAppModule(assetPrefix);
           const dispatcher = codexServiceTierDispatcherFromModule(module);
@@ -6859,19 +7054,20 @@
   }
   // 结构式匹配 `<arr>.filter(p => !<list>.includes(p.name))`：
   // list 标识符每版都换名，写死会失效（历史写死过 "!t.includes(e.name)"）。
-  // 必须锚定 filter 箭头形态且箭头参数与 `.name` 的宿主同名，
+  // filter 实际传入的是箭头回调，不含外层 `.filter(`；兼容两种源码形态。
+  // 必须锚定箭头形态且箭头参数与 `.name` 的宿主同名，
   // 否则会误伤 bundle 里 `!w4.includes(t.name)` 这类与插件无关的守卫（实测存在）。
   const codexPluginHiddenFilterSourcePattern =
-    /filter\s*\(\s*([A-Za-z_$][\w$]*)\s*=>\s*!\s*[A-Za-z_$][\w$]*\s*\.includes\s*\(\s*\1\s*\.name\s*\)/;
+    /(?:filter\s*\(\s*|^\s*\(?\s*)([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*!\s*[A-Za-z_$][\w$]*\s*\.includes\s*\(\s*\1\s*\.name\s*\)/;
 
   function isCodexPluginMarketplaceHiddenFilter(callback, sample, filtered = null) {
-    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function") return false;
+    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function" || !Array.isArray(filtered)) return false;
     if (!sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name))) return false;
     const source = codexPluginFilterCallbackSource(callback);
     if (!source) return false;
     if (!codexPluginHiddenFilterSourcePattern.test(source)) return false;
     return sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name)
-      && (Array.isArray(filtered) ? !filtered.includes(marketplace) : !callback(marketplace)));
+      && !filtered.includes(marketplace));
   }
 
   function installPluginBuildFlavorFilterPatch() {
@@ -6892,6 +7088,7 @@
     const patchedFilter = function codexPluginBuildFlavorFilterPatch(callback, thisArg) {
       const filtered = originalFilter.call(this, callback, thisArg);
       if (filtered.length === this.length) return filtered;
+      if (!codexPluginMarketplacePatchEnabled()) return filtered;
       if (isCodexPluginBuildFlavorFilter(callback, this, filtered)) {
         sendCodexPlusDiagnostic("plugin_build_flavor_filter_bypassed", { pluginCount: this.length });
         return Array.from(this);
@@ -10124,6 +10321,7 @@
 
   function patchAppServerModelRequestClient(client) {
     if (!client || typeof client.sendRequest !== "function") return false;
+    if (typeof patchCodexQueuedFollowUpCoordinator === "function") patchCodexQueuedFollowUpCoordinator(client);
     registerNativeHostClient(client);
     try {
       if (!Object.isExtensible(client)) return false;
@@ -11904,8 +12102,11 @@
 
   function codexServiceTierBadgeVisibleElement(element) {
     if (!(element instanceof HTMLElement) || !element.isConnected) return false;
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (element.closest?.('[hidden], [aria-hidden="true"], [inert]')) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
@@ -11950,7 +12151,7 @@
       });
   }
 
-  const codexServiceTierComposerFooterSelector = ".composer-footer, [data-composer-footer-responsive]";
+  const codexServiceTierComposerFooterSelector = '.composer-footer, [data-composer-footer-responsive], [class*="_ComposerFooter_"], [class*="_ComposerLayoutFooter_"]';
 
   function codexServiceTierVisibleComposerFooters(root = document) {
     const footers = [
@@ -12022,7 +12223,11 @@
   function codexServiceTierBadgeFooterGroup(composer) {
     const footer = codexServiceTierComposerFooter(composer);
     if (!footer) return null;
-    const children = Array.from(footer.children).filter(codexServiceTierBadgeVisibleElement);
+    const children = Array.from(footer.children)
+      .filter(codexServiceTierBadgeVisibleElement)
+      .filter((child) => !child.closest?.('[data-codex-service-tier-badge="true"]')
+        && !child.matches?.("button, [role='button'], a, input, select, textarea, label")
+        && child.children?.length > 0);
     if (!children.length) return footer;
     const providerNames = codexServiceTierKnownProviderNames();
     const providerGroup = children.find((child) => {
@@ -12036,7 +12241,11 @@
     const anchor = composer ? codexServiceTierBadgeAnchor(composer) : null;
     if (anchor?.parentElement) return { parent: anchor.parentElement, before: anchor };
     const group = composer ? codexServiceTierBadgeFooterGroup(composer) : null;
-    if (group) return { parent: group, before: group.firstChild };
+    if (group) return {
+      parent: group,
+      before: Array.from(group.childNodes || group.children || [])
+        .find((node) => !node.matches?.('[data-codex-service-tier-badge="true"]')) || null,
+    };
     return null;
   }
 
@@ -12048,14 +12257,14 @@
     badge.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (codexServiceTierState.status === "loading") return;
+      if (codexServiceTierState.status === "loading" || badge.dataset.disabled === "true") return;
       toggleCodexServiceTierFromBadge();
     });
     badge.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       event.stopPropagation();
-      if (codexServiceTierState.status === "loading") return;
+      if (codexServiceTierState.status === "loading" || badge.dataset.disabled === "true") return;
       toggleCodexServiceTierFromBadge();
     });
   }
@@ -14710,6 +14919,8 @@
   }
 
   function scanDeferred() {
+    retireCodexSharedTerminalRuntime();
+    installCodexQueuedFollowUpEditPatch();
     if (codexPluginMarketplacePatchEnabled()) {
       const pluginUnlockStrategy = codexPluginUnlockStrategy();
       const settings = alunixaXSettings();
@@ -15377,7 +15588,7 @@
       '[data-testid="conversation-turn"]',
       '[class*="user-message"]',
       '[class*="UserMessage"]',
-      ".composer-footer",
+      codexServiceTierComposerFooterSelector,
       selectors.appHeader,
       selectors.archiveNav,
       selectors.pluginNavButton,

@@ -19,18 +19,19 @@ function declarations(...names: string[]) {
   }).join("\n");
 }
 
-test("missing module discovery is coalesced, bounded, and resumes for new assets", async () => {
+test("missing module discovery stays bounded across reinjection and resets only in a new document", async () => {
   let now = 100;
-  let signature = "initial";
   let searches = 0;
-  const api = new Function("Date", "codexAppAssetCandidateUrls", "codexAppAssetUrl", "codexAppAssetUrlFromScriptText", `
-    const codexServiceTierModulePromises = new Map();
-    const codexAppModuleFailures = new Map();
-    const codexAppModuleRetryCooldownMs = 30000;
-    const codexAppModuleMaxAttempts = 8;
-    ${functions("codexAppAssetMissingError", "loadCodexAppModule")}
-    return loadCodexAppModule;
-  `)({ now: () => now }, () => [signature], () => "", async () => { searches++; return ""; });
+  const failures = new Map();
+  const loader = (failures: Map<unknown, unknown>, found = "") => new Function("Date", "codexAppModuleFailures",
+    "codexAppAssetUrl", "codexAppAssetUrlFromScriptText", `
+      const codexServiceTierModulePromises = new Map();
+      const codexAppModuleRetryCooldownMs = 30000;
+      const codexAppModuleMaxAttempts = 8;
+      ${functions("codexAppAssetMissingError", "loadCodexAppModule")}
+      return loadCodexAppModule;
+    `)({ now: () => now }, failures, () => "", async () => { searches++; return found; });
+  const api = loader(failures);
   await Promise.all(Array.from({ length: 20 }, () => api("missing-").catch(() => null)));
   assert.equal(searches, 1);
   for (let attempt = 0; attempt < 12; attempt++) {
@@ -38,26 +39,37 @@ test("missing module discovery is coalesced, bounded, and resumes for new assets
     await assert.rejects(api("missing-"));
   }
   assert.equal(searches, 8);
-  signature = "late-loaded";
-  await assert.rejects(api("missing-"));
-  assert.equal(searches, 9);
+  await assert.rejects(loader(failures)("missing-"));
+  assert.equal(searches, 8, "reinjection must not restart an exhausted scan budget");
+  const newDocument = loader(new Map(), "data:text/javascript,export%20const%20ready%20%3D%20true%3B");
+  assert.equal((await newDocument("missing-")).ready, true);
+  assert.equal(searches, 9, "a new document owns a fresh discovery budget");
 });
 
-test("asset lookup accepts template literals and shares source requests", async () => {
+test("asset lookup resolves emitted quoted imports and caches positive and negative prefix results", async () => {
   let requests = 0;
-  const api = new Function("fetch", "document", "codexAppAssetCandidateUrls", `
-    const codexAppAssetTextPromises = new Map();
+  let now = 100;
+  const api = new Function("fetch", "Date", "codexAppAssetCandidateUrls", `
     const codexAppAssetUrlLookups = new Map();
     const codexAppModuleRetryCooldownMs = 30000;
     ${functions("scanCodexAppAssetUrlFromScriptText", "codexAppAssetUrlFromScriptText")}
     return codexAppAssetUrlFromScriptText;
   `)(async () => {
     requests++;
-    return { ok: true, text: async () => 'import(`./app-initial-new.js`);import("./vscode-api-old.js")' };
-  }, { baseURI: "https://codex.test/index.html" }, () => ["https://codex.test/assets/app-main-new.js"]);
+    return { ok: true, text: async () => 'import("./app-initial-new.js");import(\'./vscode-api-old.js\')' };
+  }, { now: () => now }, () => ["https://codex.test/assets/app-main-new.js"]);
   assert.equal(await api("app-initial-"), "https://codex.test/assets/app-initial-new.js");
   assert.equal(await api("vscode-api-"), "https://codex.test/assets/vscode-api-old.js");
-  assert.equal(requests, 1);
+  assert.equal(requests, 2, "each distinct prefix has its own lookup cache");
+  assert.equal(await api("app-initial-"), "https://codex.test/assets/app-initial-new.js");
+  assert.equal(await api("vscode-api-"), "https://codex.test/assets/vscode-api-old.js");
+  assert.equal(requests, 2);
+  assert.equal(await api("absent-"), "");
+  for (let i = 0; i < 20; i++) assert.equal(await api("absent-"), "");
+  assert.equal(requests, 3, "a missing prefix must not re-fetch during cooldown");
+  now += 30001;
+  assert.equal(await api("absent-"), "");
+  assert.equal(requests, 4);
 });
 
 test("plugin filters survive renamed minifier variables without replaying callbacks", () => {
@@ -68,7 +80,8 @@ test("plugin filters survive renamed minifier variables without replaying callba
     const codexPluginFilterSourceCache = new WeakMap();
     ${declarations("codexPluginBuildFlavorFilterSourcePattern", "codexPluginFeaturedFilterSourcePattern", "codexPluginHiddenFilterSourcePattern")}
     const pluginPatchDisabledInRelayMode = () => false;
-    const alunixaXSettings = () => ({ pluginMarketplaceUnlock: true });
+    const settings = { pluginMarketplaceUnlock: true };
+    const alunixaXSettings = () => settings;
     const sendAlunixaXDiagnostic = () => {};
     const sendCodexPlusDiagnostic = sendAlunixaXDiagnostic;
     ${functions("codexPluginMarketplacePatchEnabled", "restorePluginMarketplaceName", "codexPluginOfficialMarketplaceName",
@@ -82,12 +95,19 @@ test("plugin filters survive renamed minifier variables without replaying callba
     const visible = entries.filter(z=>!reserved(z.marketplaceName)||z.marketplaceName===current);
     const searched = entries.filter(z=>z.marketplaceName===current);
     const hidden = ["openai-bundled"];
+    let hiddenChecks = 0;
+    const includes = hidden.includes.bind(hidden);
+    hidden.includes = name => { hiddenChecks++; return includes(name); };
     const markets = [{name:"openai-bundled"}, {name:"user"}].filter(q=>!hidden.includes(q.name));
+    settings.pluginMarketplaceUnlock = false;
+    const disabled = [{name:"openai-bundled"}, {name:"user"}].filter(q=>!hidden.includes(q.name));
     let contexts = 0;
     entries.filter(function() { if (this.ok) contexts++; return false; }, {ok: true});
-    JSON.stringify({ calls, visible: visible.length, searched: searched.length, markets: markets.length, contexts });
+    JSON.stringify({ calls, visible: visible.length, searched: searched.length, markets: markets.length,
+      disabled: disabled.length, hiddenChecks, contexts });
   `);
-  assert.deepEqual(JSON.parse(result), { calls: 3, visible: 3, searched: 1, markets: 2, contexts: 3 });
+  assert.deepEqual(JSON.parse(result), { calls: 3, visible: 3, searched: 1, markets: 2,
+    disabled: 1, hiddenChecks: 4, contexts: 3 });
 });
 
 test("pure API resume corrects inherited official providers but preserves explicit providers", () => {
@@ -118,27 +138,38 @@ test("Fast availability agrees with explicit current model tier metadata", () =>
   assert.equal(api("unknown-model").supported, false);
 });
 
-test("native model/list metadata enables newly introduced Fast models", () => {
-  const resultPatch = new Function(`${functions("patchAppServerModelResult")}; return patchAppServerModelResult;`)();
+test("catalogue metadata enables new Fast models while native model/list fields remain intact", () => {
+  const catalogue = {
+    modelMetadata: {
+      "new-model": { serviceTiers: [{ id: "priority" }] },
+      "standard-model": { serviceTiers: [], prioritySupportOverride: false },
+      "gpt-5.5": { prioritySupportOverride: false },
+    },
+  };
+  const api = new Function("codexModelCatalog", `
+    const window = {};
+    const codexServiceTierSupportedFastModels = new Set(["gpt-5.5"]);
+    const alunixaXModelCollectionSnapshots = new WeakMap();
+    const codexPureApiAllowedModelSet = () => null;
+    const alunixaXModelNames = () => [];
+    const sendCodexPlusDiagnostic = () => {};
+    ${functions("codexServiceTierModelFromValue", "alunixaXModelMetadata",
+      "normalizeCodexServiceTierModelName", "codexServiceTierFastSupportedForModel",
+      "modelArrayLooksPatchable", "modelFilterPolicy", "sameModelCollection",
+      "prepareModelCollection", "finishModelCollection", "patchModelArray",
+      "modelResponseHostId", "patchAppServerModelResult")}
+    return { supported: codexServiceTierFastSupportedForModel, patch: patchAppServerModelResult };
+  `)(catalogue);
   const unrelated = { data: [{ model: "keep", serviceTiers: [{ id: "priority" }] }] };
   const before = structuredClone(unrelated);
-  assert.equal(resultPatch("turn/start", unrelated), unrelated, "non-model RPC results must keep their identity");
+  assert.equal(api.patch("turn/start", unrelated), unrelated, "non-model RPC results must keep their identity");
   assert.deepEqual(unrelated, before);
-  const api = new Function(`
-    const codexServiceTierSupportedFastModels = new Set();
-    const codexNativeModelServiceTiers = new Map();
-    const alunixaXModelMetadata = () => null;
-    const alunixaXModelDetail = () => null;
-    ${functions("rememberCodexNativeModelServiceTiers", "normalizeCodexServiceTierModelName",
-      "isFastServiceTierValue", "codexServiceTierFastSupportedForModel")}
-    return { rememberCodexNativeModelServiceTiers, codexServiceTierFastSupportedForModel };
-  `)();
-  api.rememberCodexNativeModelServiceTiers({ data: [
-    { model: "new-model", serviceTiers: [{ id: "priority" }] },
-    { model: "standard-model", serviceTiers: [] },
-  ] });
-  assert.equal(api.codexServiceTierFastSupportedForModel("new-model"), true);
-  assert.equal(api.codexServiceTierFastSupportedForModel("standard-model"), false);
+  assert.equal(api.patch("model/list", unrelated, "local"), unrelated);
+  assert.deepEqual(unrelated, before, "native tier metadata must not be stripped or rewritten");
+  assert.equal(api.supported("new-model"), true);
+  assert.equal(api.supported("standard-model"), false);
+  assert.equal(api.supported("gpt-5.5"), false, "an explicit provider override beats the builtin allowlist");
+  assert.equal(api.supported("unverified-fast-model"), false);
   assert.match(functions("patchAppServerModelResult"), /"model\/list"/);
 });
 

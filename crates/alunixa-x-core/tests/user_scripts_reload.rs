@@ -11,7 +11,9 @@ fn global_switch_preserves_individual_script_choices_after_reload() {
     fs::write(user.join("disabled.js"), "window.disabledScript = true;").unwrap();
     let config_path = temp.path().join("config.json");
     let manager = UserScriptManager::new(temp.path().join("builtin"), &user, &config_path);
-    manager.set_script_enabled("user:disabled.js", false).unwrap();
+    manager
+        .set_script_enabled("user:disabled.js", false)
+        .unwrap();
     manager.set_global_enabled(false).unwrap();
 
     let reloaded = UserScriptManager::new(temp.path().join("builtin"), &user, &config_path);
@@ -96,7 +98,7 @@ assert.equal(window.active, 0);
 run('first'); run('deleted');
 assert.equal(window.active, 0);
 run('legacy');
-assert.throws(() => run('first'), /Codex\+\+/);
+assert.throws(() => run('first'), /Alunixa X/);
 assert.equal(window.active, 0); // 不能不清理就追加新实例
 window.__alunixaXUserScriptsBootstrap = true;
 assert.equal(run('first').mode, 'page');

@@ -82,7 +82,7 @@ fn legacy_state_db_path(home: &Path) -> PathBuf {
 }
 
 fn codex_sqlite_dir_session_dbs(home: &Path) -> Vec<PathBuf> {
-    codex_sqlite_dir_dbs_with_tables(home, &["threads", "automation_runs", "inbox_items"])
+    codex_sqlite_dir_dbs_with_tables(home, &["threads", "local_thread_catalog", "automation_runs", "inbox_items"])
 }
 
 fn codex_sqlite_dir_thread_reference_dbs(home: &Path) -> Vec<PathBuf> {
@@ -106,9 +106,8 @@ fn codex_sqlite_dir_thread_reference_dbs(home: &Path) -> Vec<PathBuf> {
 
 fn codex_sqlite_dir_dbs_with_tables(home: &Path, tables: &[&str]) -> Vec<PathBuf> {
     let sqlite_dir = home.join("sqlite");
-    let Ok(entries) = fs::read_dir(sqlite_dir) else {
-        return Vec::new();
-    };
+    let entries = [sqlite_dir, home.to_path_buf()].into_iter()
+        .flat_map(|dir| fs::read_dir(dir).into_iter().flatten());
     let mut candidates = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -124,6 +123,7 @@ fn codex_sqlite_dir_dbs_with_tables(home: &Path, tables: &[&str]) -> Vec<PathBuf
             path.file_name().map(|name| name.to_os_string()),
         )
     });
+    candidates.dedup();
     candidates
 }
 

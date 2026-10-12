@@ -483,13 +483,10 @@ fn app_paths_rejects_alunixa_x_plus_app_bundle_by_its_macos_executable() {
     let bundle = temp.path().join("Applications").join("Alunixa X.app");
     let macos_dir = bundle.join("Contents").join("MacOS");
     std::fs::create_dir_all(&macos_dir).unwrap();
-    std::fs::write(macos_dir.join("AlunixaXManager"), "").unwrap();
+    std::fs::write(macos_dir.join("AlunixaX"), "").unwrap();
 
     assert_eq!(normalize_codex_app_path(&bundle), None);
-    assert_eq!(
-        normalize_codex_app_path(&macos_dir.join("AlunixaXManager")),
-        None
-    );
+    assert_eq!(normalize_codex_app_path(&macos_dir.join("AlunixaX")), None);
 }
 
 #[test]
@@ -729,7 +726,7 @@ fn launcher_appends_extra_codex_arguments_after_debug_arguments() {
 }
 
 #[test]
-fn launcher_ignores_retired_fast_startup_and_preserves_manual_extra_arguments() {
+fn launcher_preserves_fast_startup_compatibility_without_implicit_cli_arguments() {
     for old_value in [
         serde_json::json!(true),
         serde_json::json!(false),
@@ -741,11 +738,10 @@ fn launcher_ignores_retired_fast_startup_and_preserves_manual_extra_arguments() 
         .unwrap();
         let args = build_codex_arguments_for_settings(9229, &settings);
         assert_eq!(args, build_codex_arguments(9229, &[]));
-        assert!(
-            serde_json::to_value(&settings)
-                .unwrap()
-                .get("codexAppFastStartup")
-                .is_none()
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["codexAppFastStartup"],
+            old_value.as_bool().unwrap_or(false),
+            "retain typed AX compatibility settings without inventing CLI flags"
         );
     }
 
@@ -881,7 +877,7 @@ fn launcher_no_longer_contains_mobile_control_runtime() {
 }
 
 #[test]
-fn retired_plugin_cache_features_have_no_command_or_startup_entrypoints() {
+fn restored_plugin_marketplace_does_not_implicitly_clean_user_agent_caches() {
     let launcher_source = include_str!("../src/launcher.rs");
     let core_source = include_str!("../src/lib.rs");
     let launcher_binary_source = include_str!("../../../apps/alunixa-x-launcher/src/main.rs");
@@ -889,19 +885,14 @@ fn retired_plugin_cache_features_have_no_command_or_startup_entrypoints() {
     let command_source = include_str!("../../../apps/alunixa-x-manager/src-tauri/src/commands.rs");
     let command_registry = include_str!("../../../apps/alunixa-x-manager/src-tauri/src/lib.rs");
 
-    assert!(!core_source.contains("pub mod plugin_marketplace;"));
-    assert!(!launcher_source.contains("ensure_plugin_marketplace_config"));
-    assert!(!launcher_binary_source.contains("ensure_plugin_marketplace_config"));
-    assert!(!launcher_source.contains("plugin_marketplace::"));
-    assert!(!relay_source.contains("plugin_marketplace::"));
-    for command in [
-        "plugin_marketplace_status",
-        "repair_plugin_marketplace",
-        "remote_plugin_marketplace_status",
-        "repair_remote_plugin_marketplace",
-    ] {
-        assert!(!command_source.contains(command));
-        assert!(!command_registry.contains(command));
+    assert!(core_source.contains("pub mod plugin_marketplace;"));
+    assert!(core_source.contains("pub mod plugin_market;"));
+    assert!(core_source.contains("pub mod agent_cache;"));
+    assert!(command_source.contains("agent_cache"));
+    assert!(command_registry.contains("agent_cache"));
+    for startup in [launcher_source, launcher_binary_source] {
+        assert!(!startup.contains("cleanup_agent_cache("));
+        assert!(!startup.contains("clear_agent_cache("));
     }
     assert!(core_source.contains("pub mod skills;"));
     assert!(relay_source.contains("preserve_live_marketplace_configs"));
@@ -2026,13 +2017,23 @@ async fn launch_starts_helper_when_web_search_history_compat_is_enabled() {
     )
     .await
     .unwrap();
-    assert!(events.lock().unwrap().contains(&"start-helper:57321".to_string()));
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .contains(&"start-helper:57321".to_string())
+    );
     handle.wait_for_codex_exit().await.unwrap();
-    assert!(events.lock().unwrap().contains(&"shutdown-helper:57321".to_string()));
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .contains(&"shutdown-helper:57321".to_string())
+    );
 }
 
 #[tokio::test]
-async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
+async fn launch_lifecycle_keeps_codex_and_helper_when_post_launch_status_save_fails() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -2050,7 +2051,7 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
             process_id: Some(4242),
         });
 
-    let error = launch_and_inject_with_hooks(
+    let handle = launch_and_inject_with_hooks(
         LaunchOptions {
             app_dir: Some(app_dir),
             debug_port: 9229,
@@ -2060,22 +2061,30 @@ async fn launch_lifecycle_cleans_helper_and_codex_when_status_save_fails() {
         &hooks,
     )
     .await
-    .unwrap_err();
+    .expect("a post-launch status write failure must not kill a launched desktop");
 
-    assert!(error.to_string().contains("failed to create directory"));
+    let before_exit = events.lock().unwrap().clone();
+    assert!(before_exit.contains(&"start-helper:57321".to_string()));
+    assert!(before_exit.contains(&"launch:9229".to_string()));
+    assert!(before_exit.contains(&"inject:9229:57321".to_string()));
+    assert!(
+        !before_exit
+            .iter()
+            .any(|event| event.starts_with("terminate-"))
+    );
+    assert!(!before_exit.contains(&"shutdown-helper:57321".to_string()));
     assert_eq!(
-        *events.lock().unwrap(),
-        vec![
-            "select-debug:9229",
-            "select-helper:57321",
-            "load-settings",
-            "start-helper:57321",
-            "launch:9229",
-            "inject:9229:57321",
-            "shutdown-helper:57321",
-            "terminate-packaged:4242",
-            "status:failed",
-        ]
+        std::fs::read_to_string(temp.path().join("status-parent-file")).unwrap(),
+        "not a directory",
+        "the fixture must still prevent status persistence"
+    );
+    handle.wait_for_codex_exit().await.unwrap();
+    let after_exit = events.lock().unwrap().clone();
+    assert!(after_exit.contains(&"shutdown-helper:57321".to_string()));
+    assert!(
+        !after_exit
+            .iter()
+            .any(|event| event.starts_with("terminate-"))
     );
 }
 
@@ -2116,7 +2125,8 @@ async fn launch_lifecycle_keeps_packaged_process_id_running_and_retries_when_inj
 }
 
 #[tokio::test]
-async fn degraded_packaged_launch_captures_identity_before_monitoring_and_keeps_helper_until_exit() {
+async fn degraded_packaged_launch_captures_identity_before_monitoring_and_keeps_helper_until_exit()
+{
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
     std::fs::create_dir_all(&app_dir).unwrap();
@@ -2143,21 +2153,52 @@ async fn degraded_packaged_launch_captures_identity_before_monitoring_and_keeps_
     .await
     .unwrap();
     assert_eq!(
-        events.lock().unwrap().iter().filter(|event| *event == "capture-identity:9229").count(),
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| *event == "capture-identity:9229")
+            .count(),
         1,
     );
-    assert_eq!(handle.status_store.load_latest().unwrap().unwrap().status, "running_degraded");
+    assert_eq!(
+        handle.status_store.load_latest().unwrap().unwrap().status,
+        "running_degraded"
+    );
     let mut waiting = std::pin::pin!(handle.wait_for_codex_exit());
-    assert!(tokio::time::timeout(std::time::Duration::from_millis(10), &mut waiting).await.is_err());
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(10), &mut waiting)
+            .await
+            .is_err()
+    );
     let current = events.lock().unwrap().clone();
-    let captured = current.iter().position(|event| event == "capture-identity:9229").unwrap();
-    let monitor = current.iter().position(|event| event == "wait-codex").unwrap();
+    let captured = current
+        .iter()
+        .position(|event| event == "capture-identity:9229")
+        .unwrap();
+    let monitor = current
+        .iter()
+        .position(|event| event == "wait-codex")
+        .unwrap();
     assert!(captured < monitor);
-    assert!(!current.iter().any(|event| event.starts_with("shutdown-helper:")));
+    assert!(
+        !current
+            .iter()
+            .any(|event| event.starts_with("shutdown-helper:"))
+    );
     exit.notify_one();
     waiting.await.unwrap();
-    assert!(events.lock().unwrap().iter().any(|event| event == "shutdown-helper:57321"));
-    assert_eq!(handle.status_store.load_latest().unwrap().unwrap().status, "stopped");
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event == "shutdown-helper:57321")
+    );
+    assert_eq!(
+        handle.status_store.load_latest().unwrap().unwrap().status,
+        "stopped"
+    );
 }
 
 #[tokio::test]
@@ -2176,15 +2217,30 @@ async fn proxy_only_packaged_launch_captures_identity_without_attempting_rendere
     hooks.record_identity_capture = true;
     let handle = launch_and_inject_with_hooks(
         LaunchOptions {
-            app_dir: Some(app_dir), debug_port: 9229, helper_port: 57321,
+            app_dir: Some(app_dir),
+            debug_port: 9229,
+            helper_port: 57321,
             status_store: StatusStore::new(temp.path().join("latest-status.json")),
-        }, &hooks,
-    ).await.unwrap();
+        },
+        &hooks,
+    )
+    .await
+    .unwrap();
     let current = events.lock().unwrap().clone();
-    assert_eq!(current.iter().filter(|event| *event == "capture-identity:9229").count(), 1);
+    assert_eq!(
+        current
+            .iter()
+            .filter(|event| *event == "capture-identity:9229")
+            .count(),
+        1
+    );
     assert!(!current.iter().any(|event| event.starts_with("inject:")));
     assert!(current.iter().any(|event| event == "start-helper:57321"));
-    assert!(!current.iter().any(|event| event.starts_with("shutdown-helper:")));
+    assert!(
+        !current
+            .iter()
+            .any(|event| event.starts_with("shutdown-helper:"))
+    );
     handle.wait_for_codex_exit().await.unwrap();
 }
 
@@ -2633,14 +2689,18 @@ impl LaunchHooks for FakeHooks {
     ) -> anyhow::Result<()> {
         self.event("wait-codex");
         if self.record_identity_capture {
-            assert!(*self.captured_launch_identity.lock().unwrap(), "monitoring must use the launch identity even after injection failure");
+            assert!(
+                *self.captured_launch_identity.lock().unwrap(),
+                "monitoring must use the launch identity even after injection failure"
+            );
         }
         if let Some(exit) = &self.wait_until_exit {
             exit.notified().await;
         }
         if self.wait_error {
-            return Err(anyhow::anyhow!("native process handle failed")
-                .context("monitoring Codex process"));
+            return Err(
+                anyhow::anyhow!("native process handle failed").context("monitoring Codex process")
+            );
         }
         Ok(())
     }

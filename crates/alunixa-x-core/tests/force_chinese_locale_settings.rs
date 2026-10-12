@@ -2,7 +2,7 @@ use alunixa_x_core::assets::injection_script_with_settings;
 use alunixa_x_core::settings::{BackendSettings, SettingsStore};
 use serde_json::{Value, json};
 
-const RETIRED_KEYS: &[&str] = &[
+const RESTORED_AX_KEYS: &[&str] = &[
     "codexAppFastStartup",
     "codexAppForceChineseLocale",
     "codexAppNativeMenuLocalization",
@@ -26,28 +26,34 @@ fn old_settings() -> Value {
 }
 
 #[test]
-fn retired_features_are_ignored_when_loading_old_settings() {
+fn restored_ax_preferences_survive_legacy_settings_loading() {
     let settings: BackendSettings = serde_json::from_value(old_settings()).unwrap();
     let serialized = serde_json::to_value(&settings).unwrap();
-    for key in RETIRED_KEYS {
-        assert!(serialized.get(*key).is_none(), "{key}");
+    for key in RESTORED_AX_KEYS {
+        assert_eq!(serialized.get(*key), old_settings().get(*key), "{key}");
     }
     assert!(settings.codex_app_native_menu_placement);
     assert!(settings.codex_app_stepwise_enabled);
     assert!(settings.dictation.enabled);
+    assert_eq!(serialized["codexAppFastStartup"], true);
+    assert_eq!(serialized["codexAppForceChineseLocale"], true);
 }
 
 #[test]
-fn updates_discard_retired_fields_and_preserve_other_settings() {
+fn updates_preserve_restored_ax_preferences_and_unrelated_user_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("settings.json");
     std::fs::write(&path, serde_json::to_vec(&old_settings()).unwrap()).unwrap();
     let store = SettingsStore::new(path.clone());
     let updated = store.update(old_settings()).unwrap();
     let raw: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    for key in RETIRED_KEYS {
-        assert!(raw.get(*key).is_none(), "{key}");
+    let serialized = serde_json::to_value(&updated).unwrap();
+    for key in RESTORED_AX_KEYS {
+        assert_eq!(serialized.get(*key), old_settings().get(*key), "{key}");
+        assert_eq!(raw.get(*key), old_settings().get(*key), "{key}");
     }
+    assert_eq!(raw["codexAppFastStartup"], true);
+    assert_eq!(raw["codexAppForceChineseLocale"], true);
     assert_eq!(raw["preservedUnknownSetting"], "keep");
     assert!(updated.codex_app_native_menu_placement);
     assert!(updated.codex_app_stepwise_enabled);

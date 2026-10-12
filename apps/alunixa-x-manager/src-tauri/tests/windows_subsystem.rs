@@ -129,7 +129,9 @@ fn only_the_gui_binary_is_built_with_the_codex_icon() {
     let config = std::fs::read_to_string(manifest_dir.join("tauri.conf.json")).unwrap();
     assert!(launcher.contains("autobins = false"));
     assert!(launcher.contains("build = false"));
-    assert!(!launcher.contains("[[bin]]"));
+    assert!(launcher.contains("[lib]"));
+    assert!(launcher.contains("name = \"alunixa-x-imagegen-mcp\""));
+    assert!(!launcher.contains("name = \"alunixa-x\""));
     assert!(manager.contains("name = \"alunixa-x-plus\""));
     assert!(config.contains("icons/icon.ico"));
 }
@@ -215,12 +217,12 @@ fn macos_packager_builds_one_visible_native_gui_with_legacy_update_shim() {
     assert!(script.contains("<key>LSUIElement</key>"));
     assert!(script.contains("ARCH=\"${2:-$(uname -m)}\""));
     assert!(script.contains("BINARY_DIR=\"${BINARY_DIR:-$ROOT/target/release}\""));
-    assert!(script.contains("AlunixaX-${VERSION}-macos-${ARCH}.dmg"));
+    assert!(script.contains("Alunixa-X-${VERSION}-macos-${ARCH}.dmg"));
     assert!(script.contains(
-        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-plus\" \"com.bigpizzav3.codexplusplus\" \"false\""
+        "create_app \"Alunixa X\" \"AlunixaX\" \"$BINARY_DIR/alunixa-x-plus\" \"io.github.alunixacode.alunixax\" \"false\""
     ));
     assert!(script.contains(
-        "create_app \"Alunixa X 管理工具\" \"AlunixaXManager\" \"$BINARY_DIR/alunixa-x-legacy-shim\" \"com.bigpizzav3.codexplusplus.manager\" \"true\""
+        "create_app \"Alunixa X 管理工具\" \"AlunixaXManager\" \"$BINARY_DIR/alunixa-x-legacy-shim\" \"io.github.alunixacode.alunixax.manager\" \"true\""
     ));
     assert!(script.contains("printf '%s\\n' \"Alunixa X 管理工具.app\" > \"$STAGE/.hidden\""));
     assert!(script.contains("chflags hidden \"$STAGE/Alunixa X 管理工具.app\""));
@@ -229,7 +231,7 @@ fn macos_packager_builds_one_visible_native_gui_with_legacy_update_shim() {
 }
 
 #[test]
-fn github_release_workflow_builds_one_universal_macos_dmg() {
+fn github_release_workflow_preserves_ax_split_architecture_installers() {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let workflow = manifest_dir
         .parent()
@@ -239,15 +241,25 @@ fn github_release_workflow_builds_one_universal_macos_dmg() {
         .join(".github/workflows/release-assets.yml");
     let workflow = std::fs::read_to_string(&workflow).expect("read release assets workflow");
 
-    // 通用包：单个 job 在两个 target 上各编一遍，由 build-universal.sh
-    // 用 lipo 合并。两个架构的 std 都要装。
+    // AX explicitly retains x64/arm64 DMG+ZIP pairs and Windows setup+ZIP.
     assert!(workflow.contains("macos-14"));
-    assert!(workflow.contains("x86_64-apple-darwin,aarch64-apple-darwin"));
-    assert!(workflow.contains("build-universal.sh \"$VERSION\""));
-
-    // 分架构的 matrix 形态不应再出现，否则会回到「用户自己挑架构」的老问题。
-    assert!(!workflow.contains("matrix.arch"));
-    assert!(!workflow.contains("macos-15-intel"));
+    assert!(workflow.contains("target: x86_64-apple-darwin"));
+    assert!(workflow.contains("target: aarch64-apple-darwin"));
+    assert!(workflow.contains("matrix.arch"));
+    assert!(workflow.contains("macos-15-intel"));
+    for asset in [
+        "windows-x64-setup.exe",
+        "windows-x64.zip",
+        "macos-x64.dmg",
+        "macos-x64.zip",
+        "macos-arm64.dmg",
+        "macos-arm64.zip",
+    ] {
+        assert!(
+            workflow.contains(asset),
+            "missing AX installation asset: {asset}"
+        );
+    }
 }
 
 #[test]
@@ -261,9 +273,28 @@ fn github_release_workflow_uploads_static_latest_json() {
         .join(".github/workflows/release-assets.yml");
     let workflow = std::fs::read_to_string(&workflow).expect("read release assets workflow");
 
-    assert!(workflow.contains("latest-json:"));
-    assert!(workflow.contains("latest.json"));
-    assert!(workflow.contains("gh release upload \"$TAG\" latest.json --clobber"));
+    assert_eq!(
+        workflow
+            .matches("node scripts/installer/release-assets.mjs latest \"$RELEASE_TAG\"")
+            .count(),
+        2,
+        "normal and verified-artifact publication must both generate metadata"
+    );
+    assert!(workflow.contains("gh release upload \"$RELEASE_TAG\" dist/release/* --clobber"));
+    let root = manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let generator =
+        std::fs::read_to_string(root.join("scripts/installer/release-assets.mjs")).unwrap();
+    assert!(generator.contains("version: tag"));
+    assert!(generator.contains("body: checkedNotes(tag, notesFile)"));
+    assert!(generator.contains("assets: inspectAssets(directory, tag)"));
+    assert!(generator.contains("latest.json"));
+    assert!(generator.contains("readdirSync(directory).length, 7"));
 }
 
 #[test]

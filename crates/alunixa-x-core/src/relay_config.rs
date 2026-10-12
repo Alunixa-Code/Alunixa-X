@@ -454,6 +454,8 @@ pub fn apply_relay_config_to_home_with_session_provider(
     // 整体覆盖成只含代理 Key 的 JSON 会清掉登录态，重启后 Codex 退回登录页
     // （issue #1604 / PR #1813 的数据完整性风险）。
     let auth_contents = auth_contents_with_proxy_key(home, "", bearer_token)?;
+    let updated = preserve_live_app_settings(home, &updated)?;
+    let updated = preserve_live_native_capabilities(home, &updated)?;
     let backup_path =
         write_codex_live_atomic(home, Some(&updated), Some(auth_contents.as_bytes()), false)?;
     let status = relay_config_status_from_home(home);

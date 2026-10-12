@@ -325,6 +325,204 @@
     return { modules, candidates, sources, discovery: usedFallback ? "fallback" : "named-assets" };
   }
 
+  function codexModuleFunctionSource(candidate) {
+    if (typeof candidate !== "function") return "";
+    try {
+      return Function.prototype.toString.call(candidate);
+    } catch {
+      return "";
+    }
+  }
+
+  const codexQueuedFollowUpLifecycle = window.__alunixaXQueuedFollowUpLifecycle
+    || (window.__alunixaXQueuedFollowUpLifecycle = { enabled: true, epoch: 0 });
+
+  function patchCodexQueuedFollowUpQueue(queue) {
+    if (!queue || typeof queue !== "object") return false;
+    const methods = ["read", "enqueue", "remove", "restore", "dispose"];
+    const marker = "__alunixaXQueuedFollowUpEditPatch";
+    let original;
+    let originalDescriptors;
+    try {
+      if (queue[marker] === "1") return true;
+      if (!Object.isExtensible(queue) || !methods.every((name) => typeof queue[name] === "function")) return false;
+      originalDescriptors = Object.fromEntries([...methods, marker]
+        .map((name) => [name, Object.getOwnPropertyDescriptor(queue, name)]));
+      if (![...methods, marker].every((name) => {
+        const descriptor = originalDescriptors[name];
+        return !descriptor || ("value" in descriptor && descriptor.writable === true);
+      })) return false;
+      const source = codexModuleFunctionSource(queue.enqueue);
+      // Only repair the native update-after-delete contract, never an arbitrary queue.
+      if (!source.includes("App-server queued follow-up no longer exists")
+          || !source.includes("thread/queue/update") || !source.includes("thread/queue/add")) return false;
+      original = Object.fromEntries(methods.map((name) => [name, queue[name]]));
+    } catch {
+      return false;
+    }
+    const removed = new Map();
+    const lifecycle = typeof codexQueuedFollowUpLifecycle === "object"
+      ? codexQueuedFollowUpLifecycle : { enabled: true, epoch: 0 };
+    const keyFor = (threadId, messageId) => JSON.stringify([threadId, messageId]);
+    const enabled = () => {
+      const active = (typeof alunixaXBackendSettingsLoaded === "undefined" || alunixaXBackendSettingsLoaded)
+        && alunixaXBackendSettings.enhancementsEnabled !== false;
+      if (!active && lifecycle.enabled) lifecycle.epoch += 1;
+      lifecycle.enabled = active;
+      return active;
+    };
+    let disposed = false;
+    const replacements = {
+      remove: async function (threadId, messageId, ...rest) {
+        const result = await original.remove.call(this, threadId, messageId, ...rest);
+        if (!disposed && enabled() && typeof threadId === "string" && threadId.length > 0
+            && typeof messageId === "string" && messageId.length > 0
+            && result?.serverSubmission?.id === messageId) {
+          if (removed.size >= 256) removed.delete(removed.keys().next().value);
+          removed.set(keyFor(threadId, messageId), { at: Date.now(), epoch: lifecycle.epoch });
+        }
+        return result;
+      },
+      enqueue: async function (threadId, message, position, ...rest) {
+        const key = keyFor(threadId, position?.messageId);
+        const evidence = removed.get(key);
+        const active = enabled();
+        // Consume before any await, even when expired or disabled. An ambiguous
+        // native write must never leave a marker that can replay the submission.
+        removed.delete(key);
+        if (disposed || !active || !evidence || evidence.epoch !== lifecycle.epoch
+            || Date.now() - evidence.at >= 30 * 60 * 1000) {
+          return original.enqueue.call(this, threadId, message, position, ...rest);
+        }
+        const rows = original.read.call(this, threadId);
+        if (!Array.isArray(rows) || rows.some((item) => item.id === position.messageId)) {
+          return original.enqueue.call(this, threadId, message, position, ...rest);
+        }
+        const { messageId: _removedId, ...insertionPosition } = position;
+        // Keep the exact message and prepared payload, including attachments,
+        // reasoning/model and native ordering hints. Do not retry failed writes.
+        const result = await original.enqueue.call(this, threadId, message, insertionPosition, ...rest);
+        sendAlunixaXDiagnostic("queued_follow_up_edit_requeued", {});
+        return result;
+      },
+      restore: function (threadId, snapshot, ...rest) {
+        removed.delete(keyFor(threadId, snapshot?.message?.id));
+        removed.delete(keyFor(threadId, snapshot?.serverSubmission?.id));
+        return original.restore.call(this, threadId, snapshot, ...rest);
+      },
+      dispose: function (...args) {
+        disposed = true;
+        removed.clear();
+        return original.dispose.apply(this, args);
+      },
+    };
+    try {
+      const descriptors = Object.fromEntries(Object.entries(replacements).map(([name, value]) => [
+        name, { ...(originalDescriptors[name]
+          || { writable: true, configurable: true, enumerable: true }), value },
+      ]));
+      descriptors[marker] = {
+        ...(originalDescriptors[marker] || { writable: true, configurable: true }), value: "1",
+      };
+      Object.defineProperties(queue, descriptors);
+      return true;
+    } catch {
+      // Fail closed for RPC stubs; restore all native descriptors if a proxy
+      // rejected one definition after another had already been applied.
+      for (const name of [...Object.keys(replacements), marker]) {
+        try {
+          if (originalDescriptors[name]) Object.defineProperty(queue, name, originalDescriptors[name]);
+          else delete queue[name];
+        } catch {}
+      }
+      return false;
+    }
+  }
+
+  function patchCodexQueuedFollowUpCoordinator(candidate) {
+    const coordinator = candidate?.turnCoordinator || candidate;
+    if (!coordinator || typeof coordinator.setServerQueue !== "function"
+        || typeof coordinator.sendMessage !== "function"
+        || typeof coordinator.removeQueuedMessage !== "function") return false;
+    const marker = "__alunixaXQueuedFollowUpEditPatch";
+    try {
+      if (coordinator[marker] === "1") {
+        patchCodexQueuedFollowUpQueue(coordinator.serverQueue);
+        return true;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(coordinator, "setServerQueue");
+      const markerDescriptor = Object.getOwnPropertyDescriptor(coordinator, marker);
+      if (!Object.isExtensible(coordinator)
+          || (descriptor && (!("value" in descriptor) || !descriptor.writable))
+          || (markerDescriptor && (!("value" in markerDescriptor) || !markerDescriptor.writable))) return false;
+      const original = coordinator.setServerQueue;
+      Object.defineProperties(coordinator, {
+        setServerQueue: {
+          ...(descriptor || { writable: true, configurable: true, enumerable: true }),
+          value: function (queue, ...rest) {
+            const result = original.call(this, queue, ...rest);
+            if (!this.disposed) patchCodexQueuedFollowUpQueue(this.serverQueue);
+            return result;
+          },
+        },
+        [marker]: { ...(markerDescriptor || { writable: true, configurable: true }), value: "1" },
+      });
+      patchCodexQueuedFollowUpQueue(coordinator.serverQueue);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  let codexQueuedFollowUpDiscovery = { key: "", attempts: 0, at: 0, pending: null };
+
+  function installCodexQueuedFollowUpEditPatch() {
+    if (!alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false) {
+      if (typeof codexQueuedFollowUpLifecycle === "object" && codexQueuedFollowUpLifecycle.enabled) {
+        codexQueuedFollowUpLifecycle.enabled = false;
+        codexQueuedFollowUpLifecycle.epoch += 1;
+      }
+      return;
+    }
+    if (codexQueuedFollowUpDiscovery.pending) return;
+    const key = `${window.location.href}\n${codexAppAssetCandidateUrls().join("\n")}`;
+    if (key !== codexQueuedFollowUpDiscovery.key) {
+      codexQueuedFollowUpDiscovery = { key, attempts: 0, at: 0, pending: null };
+    }
+    const state = codexQueuedFollowUpDiscovery;
+    if (state.attempts >= 8 || (state.attempts > 0 && Date.now() - state.at < 30000)) return;
+    state.attempts += 1;
+    state.at = Date.now();
+    state.pending = loadAppServerRequestCandidates().then(({ candidates }) => {
+      if (!alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false) return;
+      const count = candidates.filter(patchCodexQueuedFollowUpCoordinator).length;
+      if (count > 0 && state.attempts === 1) {
+        sendAlunixaXDiagnostic("queued_follow_up_edit_patch_ready", { coordinatorCount: count });
+      }
+    }).catch(() => {
+      // Optional discovery failure must not submit or retry a user message.
+    }).finally(() => { state.pending = null; });
+  }
+
+  const codexRetiredSharedTerminalRuntimes = window.__alunixaXRetiredSharedTerminalRuntimes
+    || (window.__alunixaXRetiredSharedTerminalRuntimes = new WeakSet());
+
+  function retireCodexSharedTerminalRuntime() {
+    const runtime = window.__alunixaXSharedTerminalRuntime;
+    if (!runtime || typeof runtime !== "object" || codexRetiredSharedTerminalRuntimes.has(runtime)) return false;
+    codexRetiredSharedTerminalRuntimes.add(runtime);
+    try {
+      if (typeof runtime.dispose === "function") {
+        runtime.dispose();
+        return true;
+      }
+    } catch {}
+    try { runtime.setEnabled?.(false); } catch {}
+    // No terminal discovery, command execution or closing native sessions.
+    // Retain local records and settings so retirement never discards user data.
+    return true;
+  }
+
   function codexSettingStorageFromModule(module, assetPrefix = "") {
     const values = module && typeof module === "object" ? Object.values(module) : [];
     const functionSource = (candidate) => {

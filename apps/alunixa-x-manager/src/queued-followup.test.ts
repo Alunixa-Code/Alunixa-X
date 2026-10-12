@@ -15,20 +15,24 @@ function harness() {
   let now = 0;
   const settings = { enhancementsEnabled: true };
   const events: unknown[] = [];
-  let compiled: { patch: Function; coordinator: Function } | undefined;
+  const lifecycle = { enabled: true, epoch: 0 };
+  let compiled: { patch: Function; coordinator: Function; setLoaded: Function } | undefined;
   function productionApi() {
-    if (!compiled) compiled = new Function("alunixaXBackendSettings", "sendAlunixaXDiagnostic", "Date", `
+    if (!compiled) compiled = new Function("alunixaXBackendSettings", "sendAlunixaXDiagnostic", "Date", "codexQueuedFollowUpLifecycle", `
+      let alunixaXBackendSettingsLoaded = true;
       const sendCodexPlusDiagnostic = sendAlunixaXDiagnostic;
       const codexModuleFunctionSource = value => typeof value === "function" ? Function.prototype.toString.call(value) : "";
       ${functions("patchCodexQueuedFollowUpQueue", "patchCodexQueuedFollowUpCoordinator")}
-      return { patch: patchCodexQueuedFollowUpQueue, coordinator: patchCodexQueuedFollowUpCoordinator };
-    `)(settings, (...args: unknown[]) => events.push(args), { now: () => now });
+      return { patch: patchCodexQueuedFollowUpQueue, coordinator: patchCodexQueuedFollowUpCoordinator,
+        setLoaded: value => { alunixaXBackendSettingsLoaded = value; } };
+    `)(settings, (...args: unknown[]) => events.push(args), { now: () => now }, lifecycle);
     return compiled!;
   }
   // A baseline native queue must remain testable even if the production compatibility patch is absent.
   const api = {
     patch: (...args: unknown[]) => productionApi().patch(...args),
     coordinator: (...args: unknown[]) => productionApi().coordinator(...args),
+    setLoaded: (value: boolean) => productionApi().setLoaded(value),
   };
   const rows = new Map<string, any[]>([["t", [{ id: "old", context: { prompt: "before" } }, { id: "next" }]]]);
   const writes: any[] = [];
@@ -59,7 +63,7 @@ function harness() {
     },
     dispose() {},
   };
-  return { api, queue, rows, writes, events, settings,
+  return { api, queue, rows, writes, events, settings, lifecycle,
     fail: (error: Error) => { failure = error; },
     advance: (ms: number) => { now += ms; } };
 }
@@ -116,14 +120,19 @@ test("missing deletion arguments cannot turn a fresh submission into an edit", a
   assert.equal(h.writes[0].position, undefined);
 });
 
-test("manager discovery finds registry maps without looping through cyclic values", () => {
+test("manager discovery supports local-host signals and bounds cyclic registry inspection", () => {
   const collect = new Function(`${functions("collectAppServerRequestCandidatesFromModule")};
     return collectAppServerRequestCandidatesFromModule;`)();
   const manager = { turnCoordinator: {} };
   const registry = new Map<any, any>([["remote", manager]]);
   registry.set("cycle", registry);
-  const candidates = collect({ signal: { get: () => registry } });
+  const reads: unknown[] = [];
+  const candidates = collect({ signal: { get: (hostId?: string) => {
+    reads.push(hostId);
+    return hostId === "local" ? manager : registry;
+  } } });
   assert.equal(candidates.filter((candidate: any) => candidate === manager).length, 1);
+  assert.deepEqual(reads, [undefined, "local"]);
 });
 
 test("network failure after add is not retried and its deletion marker is consumed", async () => {
@@ -206,6 +215,125 @@ test("coordinator installs on current and replacement queues without repeated wr
   const original = next.enqueue;
   coordinator.setServerQueue(next);
   assert.notEqual(next.enqueue, original);
+});
+
+test("failed queue patch restores every original descriptor rather than leaving partial wrappers", () => {
+  const h = harness();
+  const original = Object.getOwnPropertyDescriptors(h.queue);
+  const queue = new Proxy(h.queue, {
+    defineProperty(target, name, descriptor) {
+      if (name === "enqueue" && descriptor.value !== original.enqueue.value) {
+        throw new Error("native RPC property rejected replacement");
+      }
+      return Reflect.defineProperty(target, name, descriptor);
+    },
+  });
+  assert.equal(h.api.patch(queue), false);
+  assert.deepEqual(Object.getOwnPropertyDescriptors(h.queue), original);
+});
+
+test("native prototype queues preserve receivers and rejected installs leave no own method shadows", async () => {
+  const h = harness();
+  const prototype = { ...h.queue };
+  const queue = Object.create(prototype);
+  assert.equal(h.api.patch(queue), true);
+  await queue.remove("t", "old");
+  await queue.enqueue("t", { id: "draft" }, { messageId: "old" });
+  assert.equal(h.writes[0].method, "thread/queue/add");
+  const rejected = Object.create(prototype);
+  const proxy = new Proxy(rejected, {
+    defineProperty(target, name, descriptor) {
+      if (name === "enqueue") throw new Error("fixture rejects wrapper");
+      return Reflect.defineProperty(target, name, descriptor);
+    },
+  });
+  assert.equal(h.api.patch(proxy), false);
+  assert.deepEqual(Reflect.ownKeys(rejected), []);
+  assert.equal(rejected.enqueue, prototype.enqueue);
+});
+
+test("unknown settings and pending removal after disposal cannot authorize a queue replay", async () => {
+  const unloaded = harness();
+  unloaded.api.patch(unloaded.queue);
+  unloaded.api.setLoaded(false);
+  await unloaded.queue.remove("t", "old");
+  unloaded.api.setLoaded(true);
+  await assert.rejects(unloaded.queue.enqueue("t", { id: "draft" }, { messageId: "old" }), /no longer exists/);
+  assert.equal(unloaded.writes.length, 0);
+
+  const pending = harness();
+  const remove = pending.queue.remove;
+  let release: Function | undefined;
+  pending.queue.remove = async function (...args: Parameters<typeof remove>) {
+    const snapshot = await remove.apply(this, args);
+    await new Promise((resolve) => { release = resolve; });
+    return snapshot;
+  };
+  pending.api.patch(pending.queue);
+  const removal = pending.queue.remove("t", "old");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.ok(release);
+  pending.queue.dispose();
+  release();
+  await removal;
+  await assert.rejects(pending.queue.enqueue("t", { id: "draft" }, { messageId: "old" }), /no longer exists/);
+  assert.equal(pending.writes.length, 0);
+});
+
+test("a master-switch cycle invalidates deletion evidence even without an intervening queue call", async () => {
+  const h = harness();
+  h.api.patch(h.queue);
+  await h.queue.remove("t", "old");
+  const install = new Function("window", "Date", "alunixaXBackendSettings", "codexQueuedFollowUpLifecycle", `
+    const alunixaXBackendSettingsLoaded = true;
+    const codexQueuedFollowUpDiscovery = { key: "", attempts: 0, at: 0, pending: null };
+    const loadAppServerRequestCandidates = () => { throw new Error("disabled discovery must not load a module"); };
+    ${functions("installCodexQueuedFollowUpEditPatch")}
+    return installCodexQueuedFollowUpEditPatch;
+  `)({}, { now: () => 0 }, h.settings, h.lifecycle);
+  h.settings.enhancementsEnabled = false;
+  install();
+  h.settings.enhancementsEnabled = true;
+  await assert.rejects(h.queue.enqueue("t", { id: "draft" }, { messageId: "old" }), /no longer exists/);
+  assert.equal(h.writes.length, 0);
+});
+
+test("queue discovery installs the real coordinator patch independently of provider and Fast and rejects late disabled discovery", async () => {
+  for (const disableDuringDiscovery of [false, true]) {
+    const h = harness();
+    Object.assign(h.settings, { providerSyncEnabled: false, serviceTierControls: false });
+    const coordinator = { serverQueue: h.queue, sendMessage() {}, removeQueuedMessage() {},
+      setServerQueue(queue: typeof h.queue) { this.serverQueue = queue; } };
+    const original = h.queue.enqueue;
+    let release: Function | undefined;
+    const api = new Function("window", "alunixaXBackendSettings", "codexQueuedFollowUpLifecycle",
+      "patchCodexQueuedFollowUpCoordinator", "loadAppServerRequestCandidates", `
+      const alunixaXBackendSettingsLoaded = true;
+      let codexQueuedFollowUpDiscovery = { key: "", attempts: 0, at: 0, pending: null };
+      const codexAppAssetCandidateUrls = () => [];
+      const sendAlunixaXDiagnostic = () => {};
+      ${functions("installCodexQueuedFollowUpEditPatch")}
+      return () => { installCodexQueuedFollowUpEditPatch(); return codexQueuedFollowUpDiscovery.pending; };
+    `)({ location: { href: "app://-/index.html#/thread/local" } }, h.settings, h.lifecycle,
+      h.api.coordinator, () => new Promise((resolve) => {
+        release = () => resolve({ candidates: [{ turnCoordinator: coordinator }] });
+      }));
+    const pending = api();
+    assert.ok(release);
+    if (disableDuringDiscovery) h.settings.enhancementsEnabled = false;
+    release();
+    await pending;
+    if (disableDuringDiscovery) {
+      assert.equal(h.queue.enqueue, original);
+      assert.deepEqual(h.events, []);
+    } else {
+      assert.notEqual(h.queue.enqueue, original);
+      await h.queue.remove("t", "old");
+      await h.queue.enqueue("t", { id: "draft" }, { messageId: "old" });
+      assert.equal(h.writes[0].method, "thread/queue/add");
+    }
+  }
 });
 
 test("queue compatibility discovery is independent of provider and Fast toggles and bounded", async () => {

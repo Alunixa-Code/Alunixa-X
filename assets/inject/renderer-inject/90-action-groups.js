@@ -647,8 +647,11 @@
 
   function codexServiceTierBadgeVisibleElement(element) {
     if (!(element instanceof HTMLElement) || !element.isConnected) return false;
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (element.closest?.('[hidden], [aria-hidden="true"], [inert]')) return false;
+    for (let node = element; node; node = node.parentElement) {
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse") return false;
+    }
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   }
@@ -693,7 +696,7 @@
       });
   }
 
-  const codexServiceTierComposerFooterSelector = ".composer-footer, [data-composer-footer-responsive]";
+  const codexServiceTierComposerFooterSelector = '.composer-footer, [data-composer-footer-responsive], [class*="_ComposerFooter_"], [class*="_ComposerLayoutFooter_"]';
 
   function codexServiceTierVisibleComposerFooters(root = document) {
     const footers = [
@@ -765,7 +768,11 @@
   function codexServiceTierBadgeFooterGroup(composer) {
     const footer = codexServiceTierComposerFooter(composer);
     if (!footer) return null;
-    const children = Array.from(footer.children).filter(codexServiceTierBadgeVisibleElement);
+    const children = Array.from(footer.children)
+      .filter(codexServiceTierBadgeVisibleElement)
+      .filter((child) => !child.closest?.('[data-codex-service-tier-badge="true"]')
+        && !child.matches?.("button, [role='button'], a, input, select, textarea, label")
+        && child.children?.length > 0);
     if (!children.length) return footer;
     const providerNames = codexServiceTierKnownProviderNames();
     const providerGroup = children.find((child) => {
@@ -779,7 +786,11 @@
     const anchor = composer ? codexServiceTierBadgeAnchor(composer) : null;
     if (anchor?.parentElement) return { parent: anchor.parentElement, before: anchor };
     const group = composer ? codexServiceTierBadgeFooterGroup(composer) : null;
-    if (group) return { parent: group, before: group.firstChild };
+    if (group) return {
+      parent: group,
+      before: Array.from(group.childNodes || group.children || [])
+        .find((node) => !node.matches?.('[data-codex-service-tier-badge="true"]')) || null,
+    };
     return null;
   }
 
@@ -791,14 +802,14 @@
     badge.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (codexServiceTierState.status === "loading") return;
+      if (codexServiceTierState.status === "loading" || badge.dataset.disabled === "true") return;
       toggleCodexServiceTierFromBadge();
     });
     badge.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       event.stopPropagation();
-      if (codexServiceTierState.status === "loading") return;
+      if (codexServiceTierState.status === "loading" || badge.dataset.disabled === "true") return;
       toggleCodexServiceTierFromBadge();
     });
   }

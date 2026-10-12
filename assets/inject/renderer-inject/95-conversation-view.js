@@ -875,6 +875,8 @@
   }
 
   function scanDeferred() {
+    retireCodexSharedTerminalRuntime();
+    installCodexQueuedFollowUpEditPatch();
     if (codexPluginMarketplacePatchEnabled()) {
       const pluginUnlockStrategy = codexPluginUnlockStrategy();
       const settings = alunixaXSettings();

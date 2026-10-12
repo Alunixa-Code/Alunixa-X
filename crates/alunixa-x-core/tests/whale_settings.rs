@@ -76,7 +76,7 @@ fn custom_balance_settings_round_trip_and_preserve_unrelated_fields() {
     assert_eq!(configured.codex_app_whale_balance_protocol, "custom");
     assert_eq!(configured.codex_app_whale_balance_path, "/api/balance");
     assert_eq!(configured.codex_app_whale_balance_field, "data.balance");
-    assert_eq!(configured.codex_app_whale_balance_currency, "CNY");
+    assert_eq!(configured.codex_app_whale_balance_currency, "cny");
     assert_eq!(configured.codex_app_whale_balance_scale, 0.000002);
     assert_eq!(store.load().unwrap(), configured);
     for invalid in [json!(null), json!(-1), json!(0), json!("1"), json!(true)] {

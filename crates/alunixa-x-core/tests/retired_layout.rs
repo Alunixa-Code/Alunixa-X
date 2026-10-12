@@ -26,7 +26,7 @@ fn retired_layout_flag_is_ignored_without_affecting_other_enhancements() {
 }
 
 #[test]
-fn saving_old_settings_and_partial_updates_never_reintroduce_the_retired_flag() {
+fn saving_preserves_opaque_legacy_layout_data_without_reactivating_the_feature() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("settings.json");
     std::fs::write(
@@ -46,7 +46,14 @@ fn saving_old_settings_and_partial_updates_never_reintroduce_the_retired_flag() 
     store.save(&loaded).unwrap();
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved.get("codexAppCustomLayoutEnabled").is_none());
+    assert_eq!(saved["codexAppCustomLayoutEnabled"], true);
+    assert!(
+        serde_json::to_value(&loaded)
+            .unwrap()
+            .get("codexAppCustomLayoutEnabled")
+            .is_none(),
+        "persisted opaque data must not become an active layout option"
+    );
     let updated = store
         .update(json!({
             "codexAppCustomLayoutEnabled": true,
@@ -61,7 +68,13 @@ fn saving_old_settings_and_partial_updates_never_reintroduce_the_retired_flag() 
     assert_eq!(store.load().unwrap(), updated);
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved.get("codexAppCustomLayoutEnabled").is_none());
+    assert_eq!(saved["codexAppCustomLayoutEnabled"], true);
+    assert!(
+        serde_json::to_value(&updated)
+            .unwrap()
+            .get("codexAppCustomLayoutEnabled")
+            .is_none()
+    );
     assert_eq!(saved["codexAppConversationView"], true);
     assert_eq!(saved["codexAppWhaleWidgetEnabled"], true);
 }

@@ -83,36 +83,49 @@ fn bundled_target_renderers_and_styles_remain_byte_exact() {
 }
 
 #[test]
-fn bundled_skin_pack_theme_files_remain_byte_exact() {
+fn bundled_skin_pack_theme_files_remain_byte_exact_after_promotion_removal() {
     for (path, hash) in [
         (
             "caishen-lite",
-            "379CB601522E7A5C2FC906E3D8BD5C7C64385FBD2A428798F8D169DEB7026F2E",
+            "CB58204AC17B5D73859193A6C7C1EE4CE33568DEE88582D5B9AC2CEB35E0B6D7",
         ),
         (
             "caishen-max",
-            "0CFF815EC9582B88ECF4AD9E7562D7DFF32904FA8F09338811397960D62FD7D4",
+            "AF1E5844A8015EC6B8AF7ABCF28D002A1A3A5AF99F95F1D492A42175F096EF84",
         ),
         (
             "caishen-readable",
-            "EB1FFD4F2F49137B4AEDDBED435513D42685C8ED9E97DF644C693FD7859CC62D",
+            "9EA843898488827C4A311644F69E2BBE8DF3C98F09E24C942EA2B68D8E98D299",
         ),
         (
             "export-night",
-            "C312329AABEE84B9A8443B08D4DB64863EC49DEEA3C7F7C942B57E4391B87B59",
+            "836738F5EF3C10142463671050D898E90F5B25C7E391FA7A4E0280C7FA391312",
         ),
         (
             "global-founder-bright",
-            "EAFB018494225ABABD83AE0E7B940E3F565232CF8F30C53AAFA63E7652178810",
+            "0816234B0BC8AE64194B7327168F9C353998FC17E4A5178B8E9BF1984B1820BB",
         ),
         (
             "mythic-guardian-noir",
-            "2A57716D0161F7405D713912BCD0CD329038657518537F3EFDB5F7EE53DBAE3D",
+            "0D984F68A0B6841E72CE062E6E56830B4FA305E6B8A1808A97A2B21E9F6F0B38",
         ),
     ] {
         assert_sha256(
             &format!("assets/inject/upstream/skin-packs/packs/{path}/theme.json"),
             hash,
         );
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(format!(
+                "assets/inject/upstream/skin-packs/packs/{path}/theme.json"
+            ));
+        let theme: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file).unwrap()).unwrap();
+        for promotional_key in ["promoUrl", "promoTitle", "promoSub"] {
+            assert!(
+                theme.get(promotional_key).is_none(),
+                "non-advertising synchronization must not restore {promotional_key}"
+            );
+        }
     }
 }

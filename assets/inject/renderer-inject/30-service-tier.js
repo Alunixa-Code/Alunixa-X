@@ -265,6 +265,7 @@
       node.textContent = state.label;
       node.title = state.title;
       node.setAttribute("aria-label", state.title);
+      node.setAttribute("aria-disabled", String(!!state.disabled));
     });
   }
 
@@ -953,12 +954,12 @@
   function installCodexServiceTierDispatcherPatch() {
     if (window.__codexServiceTierRequestOverrideInstalled === codexServiceTierRequestOverrideVersion) return;
     if (serviceTierDispatcherPatchDisabled) return;
-    // 上一轮没跑完就不要再起一轮：loadDispatcher() 会依次试三个前缀，
+    // 上一轮没跑完就不要再起一轮：loadDispatcher() 会依次试有界的四个前缀，
     // 没有这道去重时 scan 的频率就直接变成并发全量扫描的频率。
     if (serviceTierDispatcherPatchPromise) return;
     const loadDispatcher = async () => {
       const errors = [];
-      for (const assetPrefix of ["setting-storage-", "vscode-api-", "app-initial-"]) {
+      for (const assetPrefix of ["app-shared-", "setting-storage-", "vscode-api-", "app-initial-"]) {
         try {
           const module = await loadCodexAppModule(assetPrefix);
           const dispatcher = codexServiceTierDispatcherFromModule(module);

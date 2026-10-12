@@ -19,13 +19,15 @@ function compile(name: string, dependencies: Record<string, unknown> = {}) {
 }
 const functionSource = (value: unknown) => typeof value === "function" ? Function.prototype.toString.call(value) : "";
 
-test("modern shared bundle resolves settings and state RPC by shape, not legacy short names", async () => {
+test("modern shared bundle uses native setting fallback without invoking unrelated minified exports", async () => {
+  const calls: Array<{ method: unknown; params: unknown }> = [];
   const bridge = async (method: string, _request: unknown) => method;
   const read = async (key: string) => bridge("get-setting", { params: { key } });
   const write = async (key: string, value: unknown) => bridge("set-setting", { params: { key, value } });
   async function rpc(method: unknown, { params, select, signal, source, ...rest }: Record<string, unknown>) {
     const endpoint = method === "get-global-state" ? "get-global-state" : "set-global-state";
-    return { method, endpoint, params, select, signal, source, ...rest };
+    calls.push({ method, params });
+    return { method, endpoint, params, select, signal, source, value: "priority", ...rest };
   }
   const wrong = () => { throw new Error("unrelated minified export must not run"); };
   const shared = { n: wrong, s: wrong, changedRead: read, changedWrite: write, changedRpc: rpc };
@@ -45,16 +47,29 @@ test("modern shared bundle resolves settings and state RPC by shape, not legacy 
     `let codexStateApiPromise = null; ${source("codexStateApi")}; return codexStateApi;`)(load, rpcResolver);
   assert.equal(await getStateApi(), rpc);
   assert.equal(await getStateApi(), rpc);
-  const storage = await compile("codexSettingStorageModule", {
+  const legacyStorage = compile("codexSettingStorageModule", {
     loadCodexAppModule: load, codexSettingStorageFromModule: storageResolver,
-  })();
-  assert.equal(storage.n, read);
-  assert.equal(storage.s, write);
+  });
+  const deadlines: number[] = [];
+  const getSetting = compile("getCodexServiceTierSetting", {
+    codexSettingStorageModule: legacyStorage,
+    codexDefaultServiceTierSetting: { key: "default-service-tier", default: null },
+    codexServiceTierReadTimeoutMs: 5000,
+    codexStateCall: async (method: string, request: Record<string, unknown>) => (await getStateApi())(method, request),
+    setTimeout: (_callback: Function, delay: number) => { deadlines.push(delay); return deadlines.length; },
+  });
+  assert.equal(await getSetting(), "priority");
+  assert.deepEqual(calls, [{ method: "get-setting", params: { key: "default-service-tier" } }]);
+  assert.ok(deadlines.length <= 2 && deadlines.every(delay => delay === 5000));
 });
 
 test("dispatcher discovery through the actual installer supports split and legacy layouts without invoking unrelated exports", async () => {
   for (const location of ["app-shared-", "app-initial-"]) {
-    const original = function () {};
+    const deliveries: Array<[unknown, unknown, unknown]> = [];
+    const original = function (this: unknown, type: unknown, payload: unknown) {
+      deliveries.push([this, type, payload]);
+      return "native-result";
+    };
     const dispatcher = { dispatchMessage: original, subscribe() {} };
     const registrations: Array<[unknown, string]> = [];
     const context = vm.createContext({
@@ -68,8 +83,11 @@ test("dispatcher discovery through the actual installer supports split and legac
         ? { changedName: dispatcher, unrelated: () => { throw new Error("unrelated export invoked"); } } : {},
       codexServiceTierDispatcherFromModule: compile("codexServiceTierDispatcherFromModule"),
       codexServiceTierDispatcherPatchable: compile("codexServiceTierDispatcherPatchable"),
-      registerCodexDispatcher: (value: unknown, prefix: string) => registrations.push([value, prefix]),
-      dispatchCodexPlusMessageWithServiceTier: (_target: unknown, fn: Function, type: string, payload: unknown) => fn(type, payload),
+      installCodexRemoteSessionDispatcherSubscription: (value: unknown, prefix: string) => registrations.push([value, prefix]),
+      dispatchCodexPlusMessage: compile("dispatchCodexPlusMessage", {
+        codexServiceTierRequestOverride: (value: unknown) => value,
+        observeCodexRemoteSessionNotification: () => { throw new Error("unrelated notification"); },
+      }),
       sendCodexPlusDiagnostic: () => {},
     });
     vm.runInContext(source("installCodexServiceTierDispatcherPatch"), context);
@@ -78,27 +96,55 @@ test("dispatcher discovery through the actual installer supports split and legac
     assert.equal(registrations[0]?.[0], dispatcher, location);
     assert.equal(registrations[0]?.[1], location);
     assert.notEqual(dispatcher.dispatchMessage, original);
+    const payload = { hostId: "local", fixture: "preserve" };
+    assert.equal((dispatcher.dispatchMessage as Function)("native-message", payload), "native-result");
+    assert.deepEqual(deliveries, [[dispatcher, "native-message", payload]]);
     const patched = dispatcher.dispatchMessage;
     context.installCodexServiceTierDispatcherPatch();
     assert.equal(dispatcher.dispatchMessage, patched, "successful installation must not wrap again");
   }
 });
 
-test("shared terminal discovery supports split and legacy layouts without invoking exports", async () => {
-  const methods = ["create", "attach", "write", "runHeadlessAction", "register", "getSnapshot",
-    "getConversationSnapshot", "closeSessionForConversation", "subscribeToSessionSnapshot",
-    "addSessionForConversation", "setActiveSessionForConversation", "handleHostEvent"];
-  const terminal = Object.fromEntries(methods.map((method) => [method, () => {}]));
-  for (const location of ["app-shared-", "app-initial-"]) {
-    const load = async (prefix: string) => prefix === location ? { terminal } : {};
-    const actualTerminal = await compile("loadCodexTerminalManager", {
-      loadCodexAppModule: load, codexTerminalManagerFromModule: compile("codexTerminalManagerFromModule"),
-    })();
-    assert.equal(actualTerminal, terminal);
-  }
-  await assert.rejects(compile("loadCodexTerminalManager", {
-    loadCodexAppModule: async () => ({}), codexTerminalManagerFromModule: compile("codexTerminalManagerFromModule"),
-  })(), /unavailable/);
+test("retired shared terminal stops the previous runtime once without invoking exports or touching sessions", () => {
+  const timers = new Set(["poll", "heartbeat", "retention"]);
+  const listeners = new Set(["snapshot", "activity"]);
+  const records = [{ threadId: "fixture-thread", sessionId: "fixture-session" }];
+  let disposals = 0;
+  const runtime = { dispose() { disposals++; timers.clear(); listeners.clear(); } };
+  const window = { __alunixaXSharedTerminalRuntime: runtime };
+  const retired = new WeakSet();
+  const retire = compile("retireCodexSharedTerminalRuntime", {
+    window, codexRetiredSharedTerminalRuntimes: retired,
+    loadCodexAppModule: () => { throw new Error("retired runtime must not load unrelated exports"); },
+    localStorage: { setItem: () => { throw new Error("retirement must preserve session records"); } },
+  });
+  assert.equal(retire(), true);
+  for (let i = 0; i < 20; i++) assert.equal(retire(), false);
+  assert.equal(disposals, 1);
+  assert.equal(timers.size + listeners.size, 0);
+  assert.deepEqual(records, [{ threadId: "fixture-thread", sessionId: "fixture-session" }]);
+  assert.match(source("scanDeferred"), /retireCodexSharedTerminalRuntime\(\)/);
+  assert.doesNotMatch(renderer, /function (?:loadCodexTerminalManager|installCodexSharedTerminalRuntime)\(/);
+  assert.doesNotMatch(renderer, /postJson\("\/shared-terminal\//);
+});
+
+test("shared terminal retirement disables legacy runtimes and bounds cleanup failures", () => {
+  const calls: boolean[] = [];
+  const retired = new WeakSet();
+  const window = { __alunixaXSharedTerminalRuntime: {
+    dispose() { throw new Error("fixture-private-path"); },
+    setEnabled(value: boolean) { calls.push(value); },
+  } };
+  const retire = compile("retireCodexSharedTerminalRuntime", { window, codexRetiredSharedTerminalRuntimes: retired });
+  assert.equal(retire(), true);
+  assert.equal(retire(), false);
+  assert.deepEqual(calls, [false]);
+  window.__alunixaXSharedTerminalRuntime = {
+    dispose() { throw new Error("second fixture-private-path"); },
+    setEnabled() { throw new Error("cleanup failure"); },
+  };
+  assert.doesNotThrow(() => retire());
+  assert.equal(retire(), false, "failed cleanup must not cause an unbounded scan loop");
 });
 
 function nativeRecoveryFixture(initial: Record<string, unknown> | null) {
@@ -198,12 +244,24 @@ test("unavailable native IPC fails closed and cleans timers/listeners", async ()
   assert.equal((await fixture.run()).status, "unavailable");
 });
 
-test("request candidates prioritize shared services without discarding legacy bundles", () => {
+test("captured-client candidates prioritize shared services, retain legacy bundles and cap scanning", () => {
   const urls = ["app-initial-old.js", "app-main-old.js", "app-shared-new.js", "app-primary-new.js"]
     .map((name) => `app://-/assets/${name}`);
-  const result = compile("appServerFallbackAssetUrls", { codexAppAssetCandidateUrls: () => urls })();
+  const hints = renderer.match(/^  const codexAppServerClientBundleHints = [\s\S]*?;$/m)?.[0];
+  assert.ok(hints);
+  const candidateUrls = new Function("codexAppAssetCandidateUrls", `
+    ${hints}
+    const codexAppServerClientAssetFetchLimit = 24;
+    ${source("codexAppServerClientAssetCandidateUrls")}
+    return codexAppServerClientAssetCandidateUrls;
+  `);
+  const result = candidateUrls(() => urls)();
   assert.equal(result[0], urls[2]);
   assert.deepEqual(new Set(result), new Set(urls));
+  const crowded = [...urls, ...Array.from({ length: 50 }, (_, index) => `app://-/assets/unrelated-${index}.js`)];
+  assert.equal(candidateUrls(() => crowded)().length, 24);
+  assert.deepEqual(urls, ["app-initial-old.js", "app-main-old.js", "app-shared-new.js", "app-primary-new.js"]
+    .map(name => `app://-/assets/${name}`), "candidate sorting must not mutate native discovery input");
 });
 
 function retiredStartupBoot(win: Record<string, any>) {

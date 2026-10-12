@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+
+#[path = "support/pinned_model_metadata.rs"]
+mod pinned_model_metadata;
 use std::ffi::OsString;
 use std::sync::Mutex;
 
@@ -16,7 +19,10 @@ fn priority_only_unknown_metadata_never_fabricates_native_descriptor_defaults() 
     let mode = serde_json::json!({"alunixa_x_fast_support":"supported"});
     let ui = model_ui_metadata_with_override("custom-2443-priority-only", Some(&mode)).unwrap();
     for field in ["displayName", "description", "defaultReasoningEffort"] {
-        assert!(ui.get(field).is_none(), "Fast-only metadata cannot invent {field}");
+        assert!(
+            ui.get(field).is_none(),
+            "Fast-only metadata cannot invent {field}"
+        );
     }
     assert_eq!(ui["prioritySupportOverride"], true);
     let explicit = serde_json::json!({
@@ -28,7 +34,9 @@ fn priority_only_unknown_metadata_never_fabricates_native_descriptor_defaults() 
     assert_eq!(ui["description"], "Provider description");
     assert_eq!(ui["defaultReasoningEffort"], "high");
     let known = model_ui_metadata("gpt-5.6-sol").unwrap();
-    for field in ["displayName", "description", "defaultReasoningEffort"] { assert!(known[field].is_string()); }
+    for field in ["displayName", "description", "defaultReasoningEffort"] {
+        assert!(known[field].is_string());
+    }
 }
 
 #[test]
@@ -37,7 +45,11 @@ fn custom_priority_declarations_preserve_other_tiers_and_explicitly_override_kno
         "description":"provider description", "service_tiers":[{"id":"flex", "name":"Flex", "description":"Existing tier"}],
         "additional_speed_tiers":["slow"]
     });
-    for (mode, expected) in [("supported", Some(true)), ("unsupported", Some(false)), ("inherit", Some(false))] {
+    for (mode, expected) in [
+        ("supported", Some(true)),
+        ("unsupported", Some(false)),
+        ("inherit", Some(false)),
+    ] {
         let mut metadata = original.clone();
         metadata["alunixa_x_fast_support"] = serde_json::json!(mode);
         let ui = model_ui_metadata_with_override("gpt-5.4", Some(&metadata)).unwrap();
@@ -45,18 +57,35 @@ fn custom_priority_declarations_preserve_other_tiers_and_explicitly_override_kno
         assert_eq!(ui["description"], "provider description");
         assert_eq!(ui["serviceTiers"][0], original["service_tiers"][0]);
         assert_eq!(ui["additionalSpeedTiers"][0], "slow");
-        assert_eq!(ui["serviceTiers"].as_array().unwrap().iter().any(|tier| tier["id"] == "priority"), mode == "supported");
+        assert_eq!(
+            ui["serviceTiers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tier| tier["id"] == "priority"),
+            mode == "supported"
+        );
         assert!(ui.get("alunixa_x_fast_support").is_none());
     }
-    assert!(model_ui_metadata_with_override("gpt-5.4", None).unwrap().get("prioritySupportOverride").is_none());
+    assert!(
+        model_ui_metadata_with_override("gpt-5.4", None)
+            .unwrap()
+            .get("prioritySupportOverride")
+            .is_none()
+    );
     assert!(model_ui_metadata_with_override("grok-fast-without-a-declaration", None).is_none());
 
     // 原生 ModelServiceTier 的 id/name/description 都是无 default 的必填 String。
     #[derive(serde::Deserialize)]
-    struct NativeModelServiceTier { id: String, name: String, description: String }
+    struct NativeModelServiceTier {
+        id: String,
+        name: String,
+        description: String,
+    }
     let declared = serde_json::json!({"alunixa_x_fast_support":"supported"});
     let ui = model_ui_metadata_with_override("grok-custom", Some(&declared)).unwrap();
-    let tiers: Vec<NativeModelServiceTier> = serde_json::from_value(ui["serviceTiers"].clone()).unwrap();
+    let tiers: Vec<NativeModelServiceTier> =
+        serde_json::from_value(ui["serviceTiers"].clone()).unwrap();
     assert_eq!(tiers[0].id, "priority");
     assert_eq!(tiers[0].name, "Fast");
     assert!(!tiers[0].description.is_empty());
@@ -248,9 +277,7 @@ fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
             .iter()
             .filter_map(|entry| entry["effort"].as_str())
             .collect::<Vec<_>>();
-        assert_eq!(model["context_window"], 272_000);
-        // 官方 gpt-5.6 目录为 272000/872000：未显式配置窗口时保留官方上限（issue #2191）。
-        assert_eq!(model["max_context_window"], 872_000);
+        pinned_model_metadata::assert_pinned_default_windows(&model);
         assert_eq!(model["default_reasoning_level"], default_reasoning);
         assert_eq!(efforts, expected_efforts);
         assert!(!efforts.contains(&"minimal"));
@@ -314,9 +341,7 @@ fn astra_metadata_exposes_max_ultra_in_catalog_and_ui() {
     assert_eq!(metadata["displayName"], model["display_name"]);
     assert_eq!(model["default_reasoning_level"], "medium");
     assert_eq!(metadata["defaultReasoningEffort"], "medium");
-    assert_eq!(model["context_window"], 272_000);
-    // 官方 gpt-6-astra 目录为 272000/872000：未显式配置窗口时保留官方上限（issue #2191）。
-    assert_eq!(model["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&model);
     assert_eq!(model["supports_search_tool"], true);
     assert_eq!(model["supports_image_detail_original"], true);
     assert_eq!(model["use_responses_lite"], false);
@@ -378,8 +403,7 @@ fn gpt61_sol_metadata_exposes_max_ultra_fast_and_272k_default() {
     assert_eq!(ui["description"], model["description"]);
     assert_eq!(model["default_reasoning_level"], "medium");
     assert_eq!(ui["defaultReasoningEffort"], "medium");
-    assert_eq!(model["context_window"], 272_000);
-    assert_eq!(model["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&model);
     assert_eq!(model["effective_context_window_percent"], 100);
     assert!(model["auto_compact_token_limit"].is_null());
     assert_eq!(model["additional_speed_tiers"], serde_json::json!(["fast"]));
@@ -387,7 +411,10 @@ fn gpt61_sol_metadata_exposes_max_ultra_fast_and_272k_default() {
     assert_eq!(model["service_tiers"][0]["id"], "priority");
     assert_eq!(model["service_tiers"][0]["name"], "Fast");
     assert_eq!(ui["serviceTiers"], model["service_tiers"]);
-    assert_eq!(model["input_modalities"], serde_json::json!(["text", "image"]));
+    assert_eq!(
+        model["input_modalities"],
+        serde_json::json!(["text", "image"])
+    );
     assert_eq!(model["supports_search_tool"], true);
     assert_eq!(model["use_responses_lite"], false);
 
@@ -404,7 +431,10 @@ fn gpt61_sol_metadata_exposes_max_ultra_fast_and_272k_default() {
         let overridden: serde_json::Value =
             serde_json::from_str(&build_model_catalog_json(entries, fallback)).unwrap();
         assert_eq!(overridden["models"][0]["context_window"], expected_window);
-        assert_eq!(overridden["models"][0]["max_context_window"], expected_window);
+        assert_eq!(
+            overridden["models"][0]["max_context_window"],
+            expected_window
+        );
     }
 }
 
@@ -653,8 +683,7 @@ fn compat_overlay_composes_with_runtime_cache_base() {
         serde_json::from_str(&build_model_catalog_json(&entries, None)).unwrap();
     let model = &catalog["models"][0];
     // 精调覆盖：窗口与 Fast 档保持产品级取值
-    assert_eq!(model["context_window"], 272_000);
-    assert_eq!(model["max_context_window"], 872_000);
+    pinned_model_metadata::assert_pinned_default_windows(&model);
     assert_eq!(model["additional_speed_tiers"], serde_json::json!(["fast"]));
     // 官方流入：精调未定义的截断策略取缓存最新值
     assert_eq!(model["truncation_policy"]["limit"], 999);
@@ -688,12 +717,14 @@ fn builtin_resolution_and_catalog_requirement_share_suffix_and_case_rules() {
 
     let _lock = RUNTIME_CACHE_ENV_LOCK.lock().unwrap();
 
-    let metadata = builtin_model_metadata("  GPT-6-SOL[1M]  ")
-        .expect("规范化后应命中 gpt-6-sol 兼容元数据");
+    let metadata =
+        builtin_model_metadata("  GPT-6-SOL[1M]  ").expect("规范化后应命中 gpt-6-sol 兼容元数据");
     assert_eq!(metadata.entry["slug"], "gpt-6-sol");
     assert!(requires_bundled_metadata_catalog("GPT-6-SOL[1M]"));
     assert!(requires_bundled_metadata_catalog("gpt-6-sol"));
-    assert!(!requires_bundled_metadata_catalog(" unknown-model-xyz[1M] "));
+    assert!(!requires_bundled_metadata_catalog(
+        " unknown-model-xyz[1M] "
+    ));
 
     let entries = collect_catalog_entries("GPT-6-SOL[1M]", &HashMap::new(), &HashMap::new(), "");
     let catalog: serde_json::Value =
@@ -796,7 +827,11 @@ fn builtin_model_metadata_index_dedupes_case_variants_and_skips_invalid() {
     // glm-5.3 静态层先命中（Kimi 等供应商顺序在前），大小写变体被去重
     let glm: Vec<_> = index
         .iter()
-        .filter(|e| e["slug"].as_str().is_some_and(|s| s.eq_ignore_ascii_case("glm-5.3")))
+        .filter(|e| {
+            e["slug"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case("glm-5.3"))
+        })
         .collect();
     assert_eq!(glm.len(), 1, "大小写变体只应保留首次命中的来源");
     assert_eq!(glm[0]["source"], "GLM");
@@ -860,8 +895,7 @@ fn gpt6_sol_luna_metadata_matches_official_efforts_fast_and_default_window() {
         assert_eq!(ui["displayName"], model["display_name"]);
         assert_eq!(model["default_reasoning_level"], "medium");
         assert_eq!(ui["defaultReasoningEffort"], "medium");
-        assert_eq!(model["context_window"], 272_000);
-        assert_eq!(model["max_context_window"], 872_000);
+        pinned_model_metadata::assert_pinned_default_windows(&model);
         assert_eq!(model["additional_speed_tiers"], serde_json::json!(["fast"]));
         assert_eq!(ui["additionalSpeedTiers"], model["additional_speed_tiers"]);
         assert_eq!(model["service_tiers"][0]["id"], "priority");

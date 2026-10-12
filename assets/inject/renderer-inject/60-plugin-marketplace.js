@@ -1,18 +1,19 @@
   // 结构式匹配 `<arr>.filter(p => !<list>.includes(p.name))`：
   // list 标识符每版都换名，写死会失效（历史写死过 "!t.includes(e.name)"）。
-  // 必须锚定 filter 箭头形态且箭头参数与 `.name` 的宿主同名，
+  // filter 实际传入的是箭头回调，不含外层 `.filter(`；兼容两种源码形态。
+  // 必须锚定箭头形态且箭头参数与 `.name` 的宿主同名，
   // 否则会误伤 bundle 里 `!w4.includes(t.name)` 这类与插件无关的守卫（实测存在）。
   const codexPluginHiddenFilterSourcePattern =
-    /filter\s*\(\s*([A-Za-z_$][\w$]*)\s*=>\s*!\s*[A-Za-z_$][\w$]*\s*\.includes\s*\(\s*\1\s*\.name\s*\)/;
+    /(?:filter\s*\(\s*|^\s*\(?\s*)([A-Za-z_$][\w$]*)\s*\)?\s*=>\s*!\s*[A-Za-z_$][\w$]*\s*\.includes\s*\(\s*\1\s*\.name\s*\)/;
 
   function isCodexPluginMarketplaceHiddenFilter(callback, sample, filtered = null) {
-    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function") return false;
+    if (!Array.isArray(sample) || sample.length === 0 || typeof callback !== "function" || !Array.isArray(filtered)) return false;
     if (!sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name))) return false;
     const source = codexPluginFilterCallbackSource(callback);
     if (!source) return false;
     if (!codexPluginHiddenFilterSourcePattern.test(source)) return false;
     return sample.some((marketplace) => codexPluginOfficialMarketplaceName(marketplace?.name)
-      && (Array.isArray(filtered) ? !filtered.includes(marketplace) : !callback(marketplace)));
+      && !filtered.includes(marketplace));
   }
 
   function installPluginBuildFlavorFilterPatch() {
@@ -33,6 +34,7 @@
     const patchedFilter = function codexPluginBuildFlavorFilterPatch(callback, thisArg) {
       const filtered = originalFilter.call(this, callback, thisArg);
       if (filtered.length === this.length) return filtered;
+      if (!codexPluginMarketplacePatchEnabled()) return filtered;
       if (isCodexPluginBuildFlavorFilter(callback, this, filtered)) {
         sendCodexPlusDiagnostic("plugin_build_flavor_filter_bypassed", { pluginCount: this.length });
         return Array.from(this);

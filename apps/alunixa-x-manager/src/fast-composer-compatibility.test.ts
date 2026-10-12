@@ -212,6 +212,36 @@ test("explicitly disabling Fast controls still removes injected buttons", () => 
   assert.equal(body.querySelectorAll(badgeSelector).length, 0);
 });
 
+test("a modern footer in a review pane or extension cannot own the native Fast control", () => {
+  const { body, api } = harness();
+  const review = body.append(new Element("div", { "data-review-pane": "" }));
+  review.append(new Element("div", { class: "_ComposerLayoutFooter_review_1" }));
+  const extension = body.append(new Element("div", { "data-alunixa-x-ext": "" }));
+  extension.append(new Element("div", { class: "_ComposerFooter_extension_1" }));
+  const native = body.append(new Element("div", { class: "_ComposerLayoutFooter_native_1" }));
+  api.installCodexServiceTierBadge();
+  assert.equal(body.querySelector(badgeSelector)?.parentElement, native);
+  assert.equal(review.querySelector(badgeSelector), null);
+  assert.equal(extension.querySelector(badgeSelector), null);
+});
+
+test("hidden CSS ancestors and disabled badge state preserve native controls without dispatching", () => {
+  const { body, api, badgeState, toggles } = harness();
+  const hidden = body.append(new Element("div"));
+  hidden.style.display = "none";
+  hidden.append(new Element("div", { class: "_ComposerLayoutFooter_hidden_1" }));
+  const native = body.append(new Element("div", { class: "_ComposerLayoutFooter_native_1" }));
+  Object.assign(badgeState, { label: "未连接", disabled: true });
+  api.installCodexServiceTierBadge();
+  const badge = body.querySelector(badgeSelector)!;
+  assert.equal(badge.parentElement, native);
+  assert.equal(api.codexServiceTierVisibleComposerFooters().length, 1);
+  badge.listeners.keydown({ key: "Enter", preventDefault() {}, stopPropagation() {} });
+  badge.listeners.click({ preventDefault() {}, stopPropagation() {} });
+  assert.equal(toggles(), 0);
+  assert.equal(badge.getAttribute("aria-disabled"), "true");
+});
+
 test("modern footer insertion participates in the existing bounded mutation scan", () => {
   assert.match(functions("scanRelevantSelector"), /codexServiceTierComposerFooterSelector/);
   assert.match(functions("shouldScheduleScan"), /isExtensionUiNode/);

@@ -9,6 +9,9 @@ use alunixa_x_core::relay_config::{
 use alunixa_x_core::settings::{RelayMode, RelayModelRoute, RelayProfile, RelayProtocol};
 use serde_json::{Value, json};
 
+#[path = "support/pinned_model_metadata.rs"]
+mod pinned_model_metadata;
+
 type ApplyProfile = fn(&Path, &RelayProfile, &str) -> anyhow::Result<RelayApplyResult>;
 
 const APPLY_PATHS: [(&str, ApplyProfile); 3] = [
@@ -108,8 +111,7 @@ fn managed_responses_defaults_are_independent_of_session_identity() {
                     assert_eq!(model["web_search_tool_type"], "text_and_image");
                     assert_eq!(model["tool_mode"], "code_mode_only");
                     assert_eq!(model["multi_agent_version"], "v2");
-                    assert_eq!(model["context_window"], 272_000);
-                    assert_eq!(model["max_context_window"], 872_000);
+                    pinned_model_metadata::assert_pinned_default_windows(model);
                 }
                 assert_auth_and_identity(temp.path(), &profile, identity);
             }
@@ -307,6 +309,41 @@ fn explicit_windows_keep_upstream_clamp_and_metadata_precedence() {
     }
 }
 
+#[test]
+fn explicit_large_user_windows_are_written_without_inflating_builtin_defaults() {
+    for requested in [872_000u64, 1_050_000, 2_000_000] {
+        for mode in API_MODES {
+            for identity in ["custom", "openai"] {
+                for (path_name, apply) in APPLY_PATHS {
+                    let temp = tempfile::tempdir().unwrap();
+                    let mut profile = profile(mode, identity);
+                    profile.model_windows =
+                        json!({"gpt-5.6-sol": requested.to_string()}).to_string();
+                    std::fs::write(temp.path().join("auth.json"), &profile.auth_contents).unwrap();
+                    apply(temp.path(), &profile, "").unwrap();
+                    let persisted = catalog(temp.path());
+                    let sol = persisted["models"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|model| model["slug"] == "gpt-5.6-sol")
+                        .unwrap();
+                    assert_eq!(
+                        sol["context_window"].as_u64(),
+                        Some(requested),
+                        "{path_name}"
+                    );
+                    assert_eq!(
+                        sol["max_context_window"].as_u64(),
+                        Some(requested),
+                        "{path_name}"
+                    );
+                    assert_auth_and_identity(temp.path(), &profile, identity);
+                }
+            }
+        }
+    }
+}
 #[test]
 fn openai_chat_rejection_leaves_live_files_unchanged() {
     for mode in API_MODES {
