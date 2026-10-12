@@ -374,7 +374,7 @@ pub trait LaunchHooks: Send + Sync {
 pub struct DefaultLaunchHooks {
     child: Mutex<Option<Child>>,
     helper: Mutex<Option<HelperRuntime>>,
-    shared_terminal: Arc<crate::shared_terminal::SharedTerminalBroker>,
+    shared_terminal: std::sync::Mutex<Arc<crate::shared_terminal::SharedTerminalBroker>>,
     bridge_watchdog: Mutex<Option<BridgeWatchdogRuntime>>,
     bridge_reinjector: Mutex<Option<BridgeReinjector>>,
     #[cfg(windows)]
@@ -919,6 +919,12 @@ impl IntoLaunchHooks for DefaultLaunchHooks {
 }
 
 impl DefaultLaunchHooks {
+    pub fn shared_terminal_broker(&self) -> Arc<crate::shared_terminal::SharedTerminalBroker> {
+        self.shared_terminal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
     pub fn shared() -> Arc<dyn LaunchHooks> {
         Arc::new(Self::default())
     }
@@ -1063,7 +1069,11 @@ impl LaunchHooks for DefaultLaunchHooks {
             }),
         );
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let shared_terminal = self.shared_terminal.clone();
+        let shared_terminal = crate::shared_terminal::SharedTerminalBroker::shared();
+        *self
+            .shared_terminal
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = shared_terminal.clone();
         let task = tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -1120,7 +1130,7 @@ impl LaunchHooks for DefaultLaunchHooks {
                 });
             if let Some(activation) = activation {
                 #[cfg(windows)]
-                {
+                if settings.codex_app_packaged_proxy_repair {
                     let executable =
                         crate::install::companion_binary_path(crate::install::APP_BINARY);
                     let report = crate::packaged_proxy::inspect_or_repair(
@@ -1565,7 +1575,7 @@ async fn handle_helper_connection_with_broker(
         let enabled = SettingsStore::default().load().is_ok_and(|settings| {
             settings.enhancements_enabled && settings.codex_app_shared_terminal
         });
-        if !local || !enabled {
+        if !local || (!enabled && path != "/shared-terminal/cancel") {
             let body = serde_json::to_vec(
                 &serde_json::json!({"status":"failed","message":"共享终端未启用或请求不是本机连接"}),
             )?;
@@ -1578,11 +1588,19 @@ async fn handle_helper_connection_with_broker(
             .await?;
             return Ok(());
         }
+        if method == "OPTIONS" {
+            write_http_response(&mut stream, "204 No Content", "application/json", &[]).await?;
+            return Ok(());
+        }
         let payload = serde_json::from_slice::<Value>(&request.body).unwrap_or(Value::Null);
         let response: anyhow::Result<Value> = async {
             anyhow::ensure!(method == "POST", "共享终端请求方法无效");
             let request_id = || payload["requestId"].as_str().context("缺少共享终端请求 ID");
             match path {
+                "/shared-terminal/cancel" => {
+                    shared_terminal.cancel_all().await;
+                    Ok(serde_json::json!({"status":"ok"}))
+                }
                 "/shared-terminal/submit" => Ok(serde_json::to_value(
                     shared_terminal
                         .submit(serde_json::from_value(payload)?)
@@ -5480,6 +5498,7 @@ mod proxy_stream_tests {
     use super::forward_protocol_proxy_stream;
     use crate::protocol_proxy::UpstreamWireApi;
     use serde_json::{Value, json};
+    use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
@@ -5502,8 +5521,9 @@ mod proxy_stream_tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let broker = crate::shared_terminal::SharedTerminalBroker::shared();
+        let bridge_broker = broker.clone();
         let service = tokio::spawn(async move {
-            for _ in 0..8 {
+            loop {
                 let (socket, peer) = listener.accept().await.unwrap();
                 let broker = broker.clone();
                 tokio::spawn(async move {
@@ -5514,6 +5534,17 @@ mod proxy_stream_tests {
             }
         });
         let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let preflight = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://{address}/shared-terminal/next"),
+            )
+            .header("Origin", "app://-")
+            .header("Access-Control-Request-Method", "POST")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(preflight.status().as_u16(), 204);
         let submission=client.post(format!("http://{address}/shared-terminal/submit"))
             .json(&json!({"requestId":"fixture-command","threadId":"fixture-thread","cwd":"fixture","command":"echo fixture"}));
         let submitted = tokio::spawn(async move {
@@ -5565,6 +5596,38 @@ mod proxy_stream_tests {
         let response = submitted.await.unwrap();
         assert_eq!(response["exitCode"], 0);
         assert_eq!(response["output"], "fixture result");
+        let context = crate::routes::BridgeContext::core(Arc::new(
+            crate::routes::CoreRuntimeService::new(0, crate::status::StatusStore::default()),
+        ))
+        .with_shared_terminal(bridge_broker);
+        let request=client.post(format!("http://{address}/shared-terminal/submit"))
+            .json(&json!({"requestId":"bridge-command","threadId":"fixture-thread","cwd":"fixture","command":"echo bridge"}));
+        let submitted =
+            tokio::spawn(
+                async move { request.send().await.unwrap().json::<Value>().await.unwrap() },
+            );
+        let mut work = Value::Null;
+        for _ in 0..5 {
+            work = crate::routes::handle_bridge_request(
+                context.clone(),
+                "/shared-terminal/next",
+                json!({}),
+            )
+            .await;
+            if !work.is_null() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(work["requestId"], "bridge-command");
+        let completed = crate::routes::handle_bridge_request(
+            context,
+            "/shared-terminal/complete",
+            json!({"requestId":"bridge-command","exitCode":0,"output":"bridge fixture","error":""}),
+        )
+        .await;
+        assert_eq!(completed["status"], "ok");
+        assert_eq!(submitted.await.unwrap()["output"], "bridge fixture");
         let denied = client
             .get(format!("http://{address}/shared-terminal/next"))
             .send()

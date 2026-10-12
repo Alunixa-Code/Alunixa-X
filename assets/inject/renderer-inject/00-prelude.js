@@ -35,6 +35,7 @@
         }
         if (window.localStorage.getItem(managedKey) !== marker) return false;
         window.sessionStorage.removeItem(reloadKey);
+        window.sessionStorage.removeItem("alunixaX.forceChineseLocale.reload.v2");
         window.localStorage.removeItem(managedKey);
         return true;
       } catch {

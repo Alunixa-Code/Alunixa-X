@@ -1508,7 +1508,7 @@ impl LaunchHooks for ContextHooks {
 }
 
 #[tokio::test]
-async fn retired_remote_routes_are_unavailable() {
+async fn restored_remote_routes_validate_empty_inputs_instead_of_becoming_unknown_routes() {
     let ctx = test_context();
     for path in [
         "/zed-remote/status",
@@ -1524,11 +1524,11 @@ async fn retired_remote_routes_are_unavailable() {
         "/upstream-worktree/create",
     ] {
         let result = handle_bridge_request(ctx.clone(), path, json!({})).await;
-        assert_eq!(result["status"], "failed", "{path}");
+        assert!(result.is_object(), "{path}: {result}");
         assert!(
-            result["message"]
+            !result["message"]
                 .as_str()
-                .unwrap()
+                .unwrap_or("")
                 .contains("Unknown bridge path"),
             "{path}: {result}"
         );

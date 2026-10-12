@@ -2857,6 +2857,7 @@ pub fn repair_responses_item_ids_for_upstream_error(
 fn canonical_response_tool_item_prefix(prefix: &str) -> Option<&'static str> {
     match prefix.trim().trim_end_matches('_') {
         "fc" => Some("fc_"),
+        "fco" => Some("fco_"),
         "ctc" => Some("ctc_"),
         "ctco" => Some("ctco_"),
         _ => None,
@@ -2864,7 +2865,7 @@ fn canonical_response_tool_item_prefix(prefix: &str) -> Option<&'static str> {
 }
 
 fn response_tool_item_id_prefix(id: &str) -> Option<&'static str> {
-    ["ctco_", "ctc_", "fc_"]
+    ["ctco_", "ctc_", "fco_", "fc_"]
         .into_iter()
         .find(|prefix| id.starts_with(prefix))
 }

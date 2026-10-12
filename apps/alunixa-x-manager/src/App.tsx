@@ -91,6 +91,8 @@ import { WallpaperSettings } from "@/components/WallpaperSettings";
 import { AgentHealthPanel } from "@/components/AgentHealthPanel";
 import { RestoredOperationsScreen } from "@/components/RestoredOperationsScreen";
 import { CustomModelsEditor, createEmptyCustomModel, type CustomModel } from "@/components/CustomModelsEditor";
+import { customModelsValidationIssue } from "./custom-models-validation";
+import { codexGoalsFeatureState, setCodexGoalsFeatureInConfig } from "./goals-config";
 const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 import { AgentCachePanel } from "./agent-cache";
 import { PluginMarketScreen } from "./PluginMarketScreen";
@@ -2475,6 +2477,9 @@ export function App() {
         return saved;
       }
       if (requestId === settingsSaveRequestRef.current) {
+        for(const key of writes) {
+          if(nativeCapabilityWritesRef.current.get(key)===generations.get(key)) nativeCapabilityWritesRef.current.delete(key);
+        }
         setSettingsForm(normalizeSettings(committedSettingsRef.current ?? settings?.settings ?? defaultSettings));
       }
       if (result) showNotice(t("设置保存"), result.message, result.status);
@@ -3710,7 +3715,7 @@ export function App() {
           {route === "pluginMarket" ? <PluginMarketScreen /> : null}
           
           {route === "agentCache" ? <AgentCachePanel /> : null}
-          {route === "officialRemote" ? <RestoredOperationsScreen key="remote" section="remote" onSettingsChanged={()=>actions.refreshSettings(true)} /> : null}
+          {route === "officialRemote" ? <RestoredOperationsScreen key="remote" section="remote" onSettingsChanged={()=>actions.refreshSettings(true)} onOpenExternal={actions.openExternalUrl} /> : null}
           {route === "remoteProjects" ? <RestoredOperationsScreen key="projects" section="projects" /> : null}
           {route === "usageAnalytics" ? <RestoredOperationsScreen key="usage" section="usage" /> : null}
           {route === "maintenance" ? (
@@ -5401,6 +5406,10 @@ function EnhanceScreen({
     finally { setPluginRepairBusy(false); }
   };
   useEffect(() => { setNativeEdits([]); }, [savedRevision]);
+  useEffect(() => {
+    setNativeEdits(keys=>keys.every(key=>actions.nativeCapabilityPending(key)) ? keys
+      : keys.filter(key=>actions.nativeCapabilityPending(key)));
+  },[form,actions]);
   type NativeBooleanKey = "codexAppFastMode" | "codexAppDisableWss" | "codexGoalsEnabled";
   const nativeCapabilityEditable = (key: string) => ["saved_pending_restart","different"].includes(nativeCapabilityStates[key] || "")
     || (key === "codexAppSubAgentMaxThreads" && nativeCapabilityStates[key] === "unknown");
@@ -7994,7 +8003,18 @@ function RelayProfileDetail({
     setModelWindowRows(modelWindowRowsFromProfile(nextDraft.modelList, nextDraft.modelWindows || "", nextDraft.modelVlm, nextDraft.modelAutoCompact, nextDraft.modelProtocols));
   }, [profile.id, profile.modelList, profile.modelWindows, profile.modelAutoCompact, profile.modelMetadata, profile.modelVlm, profile.modelProtocols, profileUsesLiveFiles, isActive, isNew, relayFiles?.configContents, relayFiles?.authContents]);
   const validationSettings = relaySettingsWithDraft(form, profile.id, draft, isNew);
-  const validationError = relaySessionProviderValidation(draft)
+  const customIssue = draft.relayMode==="customModels"
+    ? customModelsValidationIssue(draft.customModels || [],draft.upstreamBaseUrl || draft.baseUrl) : null;
+  const customIssueMessages = {
+    empty:t("请至少添加一个自定义模型。"),
+    name:t("请填写每个模型的名称。"),
+    duplicate:t("自定义模型名称不能重复。"),
+    url:t("请为每个模型填写有效的 HTTP 或 HTTPS 地址。"),
+    protocol:t("请选择有效的模型协议。"),
+    window:t("上下文窗口必须为正整数，支持 K/M 单位。"),
+    compression:t("自动压缩阈值必须为正数且小于该模型的上下文窗口。"),
+  };
+  const validationError = (customIssue ? customIssueMessages[customIssue] : null) ?? relaySessionProviderValidation(draft)
     ?? (isAggregateRelayProfile(draft)
       ? aggregateRelayProfileValidation(draft)
       : relayModelRoutesSettingsValidation(validationSettings));
@@ -8782,13 +8802,31 @@ function RelayProfileEditor({
       <Field className="relay-field-name" label={t("名称")}>
         <Input value={profile.name} onChange={(event) => updateDraft({ name: event.currentTarget.value })} />
       </Field>
+      <Field label={t("Codex 目标")}>
+        <label className="inline-toggle">
+          <input type="checkbox" aria-label={t("启用目标功能")}
+            checked={codexGoalsFeatureState(profile.configContents,form.relayCommonConfigContents,profile.useCommonConfig).enabled}
+            onChange={event=>updateDraft({configContents:setCodexGoalsFeatureInConfig(profile.configContents,event.currentTarget.checked)})}/>
+          <span>{t("启用目标功能")}</span>
+        </label>
+      </Field>
       <CustomModelsEditor models={profile.customModels || []}
         defaultId={profile.defaultCustomModelId || profile.customModels?.[0]?.id || ""}
         efforts={profile.modelReasoningEfforts}
         onEffortChange={(model,effort)=>updateDraft({modelReasoningEfforts:{...profile.modelReasoningEfforts,[modelProtocolKey(model.model)]:effort}})}
         onChange={(customModels, defaultCustomModelId) => {
           const selected = customModels.find(model => model.id === defaultCustomModelId);
-          updateDraft({customModels,defaultCustomModelId,model:selected?.model || "",lastUsedModel:selected?.model || ""});
+          const efforts={...profile.modelReasoningEfforts};
+          for(const previous of profile.customModels || []) {
+            const oldKey=modelProtocolKey(previous.model);
+            const next=customModels.find(model=>model.id===previous.id);
+            const newKey=next ? modelProtocolKey(next.model) : "";
+            if(oldKey && newKey && oldKey!==newKey && Object.hasOwn(efforts,oldKey)) {
+              efforts[newKey]=efforts[oldKey];
+            }
+            if(oldKey!==newKey && !customModels.some(model=>modelProtocolKey(model.model)===oldKey)) delete efforts[oldKey];
+          }
+          updateDraft({customModels,defaultCustomModelId,model:selected?.model || "",lastUsedModel:selected?.model || "",modelReasoningEfforts:efforts});
         }}
         onTest={(model) => void actions.testRelayProfile({
           ...profile, relayMode:"pureApi", model:model.model, testModel:model.model,

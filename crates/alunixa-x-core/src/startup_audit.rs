@@ -308,7 +308,7 @@ fn audit_hooks(contents: &[u8], settings: &BackendSettings) -> anyhow::Result<()
         })
         .count();
     let expected = if settings.enhancements_enabled {
-        if cfg!(windows) { 3 } else { 1 }
+        if cfg!(windows) { 5 } else { 1 }
     } else {
         0
     };

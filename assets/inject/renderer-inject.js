@@ -35,6 +35,7 @@
         }
         if (window.localStorage.getItem(managedKey) !== marker) return false;
         window.sessionStorage.removeItem(reloadKey);
+        window.sessionStorage.removeItem("alunixaX.forceChineseLocale.reload.v2");
         window.localStorage.removeItem(managedKey);
         return true;
       } catch {
@@ -7633,7 +7634,8 @@
   }
 
   function codexPluginMarketplacePatchEnabled() {
-    return alunixaXBackendSettingsLoaded && !!alunixaXSettings().pluginMarketplaceUnlock;
+    return alunixaXBackendSettingsLoaded && alunixaXBackendSettings.launchMode !== "relay"
+      && !!alunixaXSettings().pluginMarketplaceUnlock;
   }
 
   let cachedSessionRows = [];
@@ -15775,7 +15777,7 @@
     const locale = typeof config.locale === "string" && config.locale ? config.locale : "zh-CN";
     const installationKey = `3:${enabled ? "on" : "off"}:${locale}`;
     const previousRuntime = window.__alunixaXForceChineseLocaleRuntime;
-    if (previousRuntime?.key === installationKey && previousRuntime.status !== "failed") return;
+    if (previousRuntime?.key === installationKey && !previousRuntime.disposed && previousRuntime.status !== "failed") return;
     previousRuntime?.dispose?.();
     window.__alunixaXForceChineseLocaleInstalled = installationKey;
     const cleanups = [];
@@ -16331,7 +16333,7 @@
     const enabled = alunixaXBackendSettings.enhancementsEnabled !== false && alunixaXBackendSettings.codexAppSharedTerminal === true;
     const retentionMinutes = alunixaXBackendSettings.codexAppSharedTerminalRetentionMinutes;
     const existing = window.__alunixaXSharedTerminalRuntime;
-    if (existing?.version === codexSharedTerminalRuntimeVersion) {
+    if (existing?.version === codexSharedTerminalRuntimeVersion && !existing.state?.()?.disposed) {
       existing.setEnabled(enabled);
       existing.setRetentionMinutes(retentionMinutes);
       return;
@@ -16370,12 +16372,14 @@
     };
 
     const manager = async () => {
+      if(state.disposed) throw new Error("Shared terminal runtime stopped");
       if (state.manager) return state.manager;
       state.modulePromise = state.modulePromise || loadCodexTerminalManager();
       const terminalManager = await state.modulePromise.catch((error) => {
         state.modulePromise = null;
         throw error;
       });
+      if(state.disposed) throw new Error("Shared terminal runtime stopped");
       state.manager = terminalManager;
       if (!terminalManager.__alunixaXSharedTerminalOriginalWrite) {
         terminalManager.__alunixaXSharedTerminalActivityListeners = new Set();
@@ -16571,6 +16575,10 @@
     };
 
     const execute = async (work) => {
+      if(state.disposed || !state.enabled) {
+        if(work?.requestId) void postJson("/shared-terminal/cancel",{}).catch(()=>{});
+        return;
+      }
       if (!work?.requestId || state.activeRequests.has(work.requestId)) return;
       // Reserve the single execution slot before loading the Codex module so a slow
       // first attach cannot claim another command and change the visible terminal.
@@ -16616,8 +16624,10 @@
           terminalManager.setActiveSessionForConversation(work.threadId, sessionId);
           record = createRecord(work, terminalManager, sessionId);
           const snapshot = await waitForShell(terminalManager, sessionId);
+          if(state.disposed || !state.enabled) throw new Error("Shared terminal stopped before dispatch");
           record.lastBuffer = String(snapshot.buffer || "");
           await postJson("/shared-terminal/started", { requestId: work.requestId, terminalSessionId: sessionId });
+          if(state.disposed || !state.enabled) throw new Error("Shared terminal stopped before dispatch");
           const wrapped = codexSharedTerminalWrappedCommand(work.command, snapshot.shell, record.startMarker, record.doneMarker);
           terminalManager.runHeadlessAction(sessionId, { command: wrapped, cwd: work.cwd });
           if (typeof terminalManager.setTitle === "function") terminalManager.setTitle(sessionId, work.command);
@@ -16702,6 +16712,7 @@
         if (state.disposed) return;
         state.disposed = true;
         state.enabled = false;
+        void postJson("/shared-terminal/cancel",{}).catch(()=>{});
         clearTimeout(state.pollTimer);
         state.records.forEach((record) => {
           clearInterval(record.heartbeatTimer);
@@ -16710,7 +16721,7 @@
         });
         state.manager?.__alunixaXSharedTerminalActivityListeners?.delete(activityListener);
       },
-      state: () => ({ enabled: state.enabled, activeRequests: state.activeRequests.size, sessions: state.records.size }),
+      state: () => ({ enabled: state.enabled, disposed:state.disposed, activeRequests: state.activeRequests.size, sessions: state.records.size }),
     };
     void restoreCompletedRecords();
     void poll();
@@ -18722,6 +18733,7 @@ html:not(.light):not([data-theme="light"]) .codex-project-move-item-path,
   if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
     runScanStep(installAlunixaXForceChineseLocale);
   } else {
+    window.__alunixaXForceChineseLocaleRuntime?.dispose?.();
     void restoreCodexPlusManagedLocale();
   }
   runScanStep(installRestoredFeatureStyles);

@@ -157,7 +157,8 @@ pub fn openai_curated_remote_marketplace_status(home: &Path) -> MarketplaceStatu
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MarketplaceStatus {
     pub marketplace_root: Option<PathBuf>,
     pub config_registered: bool,

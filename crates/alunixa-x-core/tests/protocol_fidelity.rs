@@ -707,6 +707,38 @@ fn id_prefix_negotiation_never_replays_after_output() {
     assert!(repair_responses_item_ids_for_upstream_error(request, &upstream).is_none());
 }
 
+#[tokio::test]
+async fn explicit_id_negotiation_retries_only_a_rejected_http_input_once() {
+    use alunixa_x_core::settings::{BackendSettings, RelayMode, RelayProtocol};
+    use wiremock::matchers::{body_partial_json, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let server = MockServer::start().await;
+    let error = json!({"error":{"code":"invalid_id_prefix","message":"Invalid 'input[0].id': 'ctco_x'. Expected an ID that begins with 'fco_'."}});
+    Mock::given(method("POST")).and(path("/v1/responses"))
+        .and(body_partial_json(json!({"input":[{"type":"custom_tool_call_output","id":"ctco_x","call_id":"x","output":"ok"}]})))
+        .respond_with(ResponseTemplate::new(400).set_body_json(error)).expect(1).mount(&server).await;
+    Mock::given(method("POST")).and(path("/v1/responses"))
+        .and(body_partial_json(json!({"input":[{"type":"custom_tool_call_output","id":"fco_x","call_id":"x","output":"ok"}]})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id":"resp_repaired","output":[]}))).expect(1).mount(&server).await;
+    let mut settings = BackendSettings::default();
+    settings.relay_profiles_enabled = true;
+    settings.codex_app_responses_id_negotiation = true;
+    settings.relay_profiles[0].base_url = format!("{}/v1", server.uri());
+    settings.relay_profiles[0].upstream_base_url = settings.relay_profiles[0].base_url.clone();
+    settings.relay_profiles[0].protocol = RelayProtocol::Responses;
+    settings.relay_profiles[0].relay_mode = RelayMode::MixedApi;
+    settings.relay_profiles[0].api_key = "fixture-only".into();
+    let request = json!({"model":"fixture","stream":false,"input":[{"type":"custom_tool_call_output","id":"ctco_x","call_id":"x","output":"ok"}]});
+    let mut response = open_responses_proxy_request_with_settings(&request.to_string(), settings)
+        .await
+        .unwrap();
+    assert_eq!(response.status_code, 200);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&response.read_body().await.unwrap()).unwrap()["id"],
+        "resp_repaired"
+    );
+}
+
 #[test]
 fn missing_response_ids_are_unique_between_requests() {
     assert_ne!(

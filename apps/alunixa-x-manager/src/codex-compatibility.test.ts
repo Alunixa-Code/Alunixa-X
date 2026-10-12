@@ -76,6 +76,7 @@ test("plugin filters survive renamed minifier variables without replaying callba
   const result = vm.runInNewContext(`
     const window = {};
     const alunixaXBackendSettingsLoaded = true;
+    const alunixaXBackendSettings = { launchMode: "patch" };
     const codexPluginMarketplaceUnlockVersion = "16";
     const codexPluginFilterSourceCache = new WeakMap();
     ${declarations("codexPluginBuildFlavorFilterSourcePattern", "codexPluginFeaturedFilterSourcePattern", "codexPluginHiddenFilterSourcePattern")}

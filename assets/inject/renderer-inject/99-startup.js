@@ -62,6 +62,7 @@
   if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
     runScanStep(installAlunixaXForceChineseLocale);
   } else {
+    window.__alunixaXForceChineseLocaleRuntime?.dispose?.();
     void restoreCodexPlusManagedLocale();
   }
   runScanStep(installRestoredFeatureStyles);

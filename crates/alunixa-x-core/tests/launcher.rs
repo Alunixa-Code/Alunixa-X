@@ -727,14 +727,21 @@ fn launcher_appends_extra_codex_arguments_after_debug_arguments() {
 }
 
 #[test]
-fn launcher_preserves_fast_startup_compatibility_without_implicit_cli_arguments() {
+fn launcher_applies_explicit_fast_startup_only_to_target_process_arguments() {
     for old_value in [serde_json::json!(true), serde_json::json!(false)] {
         let settings: BackendSettings = serde_json::from_value(serde_json::json!({
             "codexAppFastStartup": old_value,
         }))
         .unwrap();
         let args = build_codex_arguments_for_settings(9229, &settings);
-        assert_eq!(args, build_codex_arguments(9229, &[]));
+        if old_value == true {
+            assert_eq!(&args[..2], build_codex_arguments(9229, &[]).as_slice());
+            assert_eq!(args.len(), 3);
+            assert!(args[2].starts_with("--host-resolver-rules="));
+            assert!(args[2].contains("MAP ab.chatgpt.com 127.0.0.1"));
+        } else {
+            assert_eq!(args, build_codex_arguments(9229, &[]));
+        }
         assert_eq!(
             serde_json::to_value(&settings).unwrap()["codexAppFastStartup"],
             old_value.as_bool().unwrap(),

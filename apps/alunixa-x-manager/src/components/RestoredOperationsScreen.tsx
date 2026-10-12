@@ -6,8 +6,9 @@ import { t } from "../i18n";
 
 type Operation = Record<string, unknown>;
 
-export function RestoredOperationsScreen({ section, onSettingsChanged }: {
+export function RestoredOperationsScreen({ section, onSettingsChanged, onOpenExternal }: {
   section: "remote" | "projects" | "usage"; onSettingsChanged?: () => Promise<unknown>;
+  onOpenExternal?: (url: string) => Promise<void>;
 }) {
   const [status, setStatus] = useState<Operation | null>(null);
   const [login, setLogin] = useState<Operation | null>(null);
@@ -63,7 +64,7 @@ export function RestoredOperationsScreen({ section, onSettingsChanged }: {
         }}>{t("退出登录")}</Button>
       </div>
       {login ? <div className="feature-choice-row">
-        {safeUrl ? <a href={safeUrl} target="_blank" rel="noreferrer">{t("打开登录网页")}</a> : null}
+        {safeUrl ? <Button disabled={busy} onClick={()=>void onOpenExternal?.(safeUrl)}>{t("打开登录网页")}</Button> : null}
         <code>{String(login.userCode || login.loginId || "")}</code>
         <Button disabled={busy} onClick={() => void request("login/status", { loginId: login.loginId }).then(result => {
           if (result) setLogin(result);
@@ -103,7 +104,7 @@ export function RestoredOperationsScreen({ section, onSettingsChanged }: {
       </div>
       <Button disabled={busy || !host.trim() || !path.trim()} onClick={() => void request("zed/open", { ssh:{host}, path, source:"manager" })}>{t("在 Zed 打开")}</Button>
       {projects.map(project => <article className="custom-model-block" key={String(project.id || project.path)}>
-        <strong>{String(project.name || project.path || project.cwd)}</strong>
+        <strong>{String(project.label || project.name || project.path || project.cwd)}</strong>
         <p>{String(project.host || project.hostId || "")}</p>
         <Button disabled={busy} onClick={() => void request("zed/open", project)}>{t("打开")}</Button>
         <Button disabled={busy} variant="outline" onClick={() => void request("zed/forget", project).then(result => {
@@ -113,8 +114,8 @@ export function RestoredOperationsScreen({ section, onSettingsChanged }: {
     </> : null}
     {section === "usage" ? <>
       <div className="relay-options-grid">
-        {[["累计 Token","totalTokens"],["输入 Token","inputTokens"],["输出 Token","outputTokens"],["缓存 Token","cachedTokens"],["调用回合","turns"],["扫描会话","sessionsScanned"]].map(([label,key]) =>
-          <div className="custom-model-block" key={key}><span>{t(label)}</span><strong>{Number(status?.[key] || 0).toLocaleString()}</strong></div>)}
+        {[[t("累计 Token"),"totalTokens"],[t("输入 Token"),"inputTokens"],[t("输出 Token"),"outputTokens"],[t("缓存 Token"),"cachedTokens"],[t("调用回合"),"turns"],[t("扫描会话"),"sessionsScanned"]].map(([label,key]) =>
+          <div className="custom-model-block" key={key}><span>{label}</span><strong>{Number(status?.[key] || 0).toLocaleString()}</strong></div>)}
       </div>
       <div className="agent-health-table"><table><thead><tr><th>{t("模型名称")}</th><th>{t("调用回合")}</th><th>Token</th></tr></thead>
         <tbody>{(Array.isArray(status?.modelUsage) ? status.modelUsage as Operation[] : []).map(row =>

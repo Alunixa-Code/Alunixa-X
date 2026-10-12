@@ -52,16 +52,16 @@ fn codex_auto_update_control_uses_the_official_codex_environment_gate() {
 }
 
 #[test]
-fn retired_update_switch_does_not_return_as_an_available_gui_capability() {
+fn update_switch_is_available_and_independent_of_ax_release_updates() {
     let source = include_str!("../../../apps/alunixa-x-manager/src/App.tsx");
-    assert!(!source.contains("setPersistedEnhanceFlag(\"codexAppDisableAutoUpdate\""));
+    assert!(source.contains("setPersistedEnhanceFlag(\"codexAppDisableAutoUpdate\""));
     assert!(source.contains("check_update"));
 }
 
 #[test]
-fn retired_update_preference_is_not_replayed_by_the_new_launcher() {
+fn selected_update_preference_reaches_the_native_updater_policy() {
     let source = include_str!("../src/launcher.rs");
-    assert!(!source.contains("apply_codex_auto_update_policy"));
+    assert!(source.contains("apply_codex_auto_update_policy"));
     assert!(source.contains("isolated_multi_instance"));
 }
 
@@ -79,9 +79,10 @@ fn disable_wss_setting_defaults_and_round_trips() {
 }
 
 #[test]
-fn removed_wss_toggle_is_not_advertised_as_an_effective_native_control() {
+fn restored_wss_toggle_is_a_revision_protected_explicit_native_control() {
     let source = include_str!("../../../apps/alunixa-x-manager/src/App.tsx");
-    assert!(!source.contains("editNative(\"codexAppDisableWss\""));
+    assert!(source.contains("editNative(\"codexAppDisableWss\""));
+    assert!(source.contains("nativeCapabilityEditable(\"codexAppDisableWss\")"));
     let manager = include_str!("../../../apps/alunixa-x-manager/src-tauri/src/commands.rs");
     assert!(manager.contains("apply_wss_policy_to_home("));
 }

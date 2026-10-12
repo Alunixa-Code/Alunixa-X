@@ -24,6 +24,12 @@ window.localStorage.setItem("restored-feature-fixture",JSON.stringify(args.setti
 window.__fixtureSaves.push(structuredClone(args.settings));
 ''')
 init = init.replace('throw new Error("Unknown fixture: "+cmd);', '''
+ if(cmd==="restored_agent_operation"){
+   if(args.action==="usage")return {sessionsScanned:2,turns:3,inputTokens:30,outputTokens:5,cachedTokens:10,totalTokens:35,modelUsage:[{model:"fixture-model",turns:3,tokens:35}]};
+   if(args.action==="zed/projects")return {status:"ok",projects:[{id:"fixture-project",label:"Fixture project",path:"/fixture",ssh:{host:"fixture.invalid"}}]};
+   if(args.action==="remote/status")return {status:"disabled",accountType:"none",accountLabel:"Fixture account",clients:[]};
+   return {status:"ok"};
+ }
  if(cmd==="inspect_agent_capabilities")return {
   revision:"1",configPath:"fixture/config.toml",overrides:[],
   entries:["codexAppFastMode","codexGoalsEnabled","codexAppDisableWss","codexAppSubAgentMaxThreads","codexAppPackagedProxyRepair"].map(key=>({
@@ -52,6 +58,7 @@ with fixture.server_url() as url, sync_playwright() as playwright:
         page.get_by_label("上下文窗口", exact=True).fill("200000")
         page.get_by_label("自动压缩", exact=True).check()
         page.get_by_label("自动压缩 Token 阈值", exact=True).fill("180000")
+        page.get_by_label("模型最高思考等级", exact=True).select_option("adaptive")
         page.get_by_role("button", name="添加模型", exact=True).click()
         page.get_by_label("模型名称", exact=True).nth(1).fill("gemini-restored")
         page.get_by_label("Base URL", exact=True).nth(1).fill("https://fixture.invalid/gemini/v1")
@@ -74,6 +81,7 @@ with fixture.server_url() as url, sync_playwright() as playwright:
         assert saved["customModels"][1]["protocol"] == "anthropicMessages"
         assert saved["customModels"][1]["autoCompactEnabled"] is True
         assert saved["customModels"][1]["autoCompactLimit"] == "180000"
+        assert saved["modelReasoningEfforts"]["claude-restored"] == "adaptive"
         assert saved["defaultCustomModelId"] == saved["customModels"][0]["id"]
         card.hover()
         card.get_by_title("编辑", exact=True).click()
@@ -106,6 +114,13 @@ with fixture.server_url() as url, sync_playwright() as playwright:
         assert set(writes) == {"codexAppDisableWss", "codexAppSubAgentMaxThreads"}, writes
         assert len(settings["relayProfiles"]) == 4, "saving enhancements must preserve every supplier"
         page.screenshot(path=str(ROOT / ".tmp/restore-features-20261012/enhancements-restored.png"), full_page=True)
+        for name, action in [
+            ("官方手机远控","remote/status"),("远程项目","zed/projects"),("Token 与模型使用统计","usage"),
+        ]:
+            page.get_by_role("button",name=name,exact=True).click()
+            page.get_by_role("button",name="刷新",exact=True).click()
+            expect(page.get_by_role("alert")).to_have_count(0)
+        expect(page.get_by_text("fixture-model",exact=True)).to_be_visible()
         assert not errors, errors
         print(json.dumps({"status": "PASS", "checks": [
             "new advanced supplier is reachable", "two independent endpoints/keys/protocols/windows",

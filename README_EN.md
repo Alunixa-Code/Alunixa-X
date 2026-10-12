@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.39: restored advanced providers and enhancements
+
+Restored direct advanced-provider creation, independent model protocols/windows/credentials, complete enhancement controls and runtime connections, remote-control/projects, and local usage pages. The modern UI and Anthropic fix remain intact, without resetting user data. See [release notes](docs/releases/v1.0.39.md).
+
 ## v1.0.38: Codex / Anthropic protocol repair
 
 The local Responses ↔ Anthropic bridge now uses an independent CC Switch adapter, with the production HTTP dispatch fixed. This covers stream completion, JSON fallback, signed tool continuations, resumed histories, thinking controls, and cache-write usage. Three isolated flows passed with installed Codex CLI 0.157.1; see the [multilingual release notes](docs/releases/v1.0.38.md).

@@ -571,7 +571,8 @@
   }
 
   function codexPluginMarketplacePatchEnabled() {
-    return alunixaXBackendSettingsLoaded && !!alunixaXSettings().pluginMarketplaceUnlock;
+    return alunixaXBackendSettingsLoaded && alunixaXBackendSettings.launchMode !== "relay"
+      && !!alunixaXSettings().pluginMarketplaceUnlock;
   }
 
   let cachedSessionRows = [];

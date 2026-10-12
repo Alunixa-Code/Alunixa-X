@@ -89,7 +89,7 @@
       "source": "CHANGELOG.md",
       "destination": "CHANGELOG.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "8983e1de48872b299d35a6300d21b97c6a15347d63503e9a7f855131c6de4e25"
+      "sha256": "67c79266c503388a77999756f15eb5f4faeb9f00c7a80f9e5ff7753050406cf8"
     },
     {
       "source": "CONTRIBUTING.md",
@@ -101,13 +101,13 @@
       "source": "Cargo.lock",
       "destination": "Cargo.lock",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "305ec801932ee6c76a5e02ea5c649f8132a90cb24204f6570251ecdbc7c18810"
+      "sha256": "b27a77517271400676eefd94ea4bf755e26c3271325d6279e229b6e52d7907ab"
     },
     {
       "source": "Cargo.toml",
       "destination": "Cargo.toml",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "94c33016091ae5149f1832836c22d15966d602359426de63834e89d2bb6a0d01"
+      "sha256": "729ef3abc084569224800e13f0a1c4fa3b30c42c09ac0ede3ffd3b83c5ea4926"
     },
     {
       "source": "EXTENSIONS.md",
@@ -131,13 +131,13 @@
       "source": "README.md",
       "destination": "README.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "bd42ee02ce53a1f6c29edc50243d26c6a0f650ede59c3acdecfc0d19667de5f7"
+      "sha256": "4d6195fd6dd17ea4a0a8beafc82da4c2615e841f4d60e2bd879f6a7670db17c8"
     },
     {
       "source": "README_EN.md",
       "destination": "README_EN.md",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "99798de39edfcb4d33c00c44210677177eb65b2239f470ad37cc0dfac9d42855"
+      "sha256": "751efd1780f88c89aeed2f8f1e6837635a1b4ed96c69039c0124bcda643ae150"
     },
     {
       "source": "THIRD_PARTY_NOTICES.md",
@@ -161,7 +161,7 @@
       "source": "apps/codex-plus-launcher/src/main.rs",
       "destination": "apps/alunixa-x-launcher/src/main.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "5cab0577616d2fec1654cbaf5b9713dbb8c2ce1d2cb91a59c82e46f303ac1448"
+      "sha256": "9020a7f64866c9df9fef0622a3de2f36c9ea196d1fe7a0d34ebabd5f40e72127"
     },
     {
       "source": "apps/codex-plus-manager/components.json",
@@ -179,13 +179,13 @@
       "source": "apps/codex-plus-manager/package-lock.json",
       "destination": "apps/alunixa-x-manager/package-lock.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "e8e416f66f55f7c6f3a161a2909b457ff27bee9ab0305126371f23aad66c8d91"
+      "sha256": "f0002e3d3cbd050962afbf5f98548f9f5455b9ab04ef8fb95fd84b7ad9da52fa"
     },
     {
       "source": "apps/codex-plus-manager/package.json",
       "destination": "apps/alunixa-x-manager/package.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "7fa3c97cd9c2673c24e0b49733a2be8ad489eead249af0e0866df5c1c3035e52"
+      "sha256": "23e776ebe724e261972012fe9b79010af784d4a739309303f3dd8384c4ba008a"
     },
     {
       "source": "apps/codex-plus-manager/src-tauri/Cargo.toml",
@@ -245,7 +245,7 @@
       "source": "apps/codex-plus-manager/src-tauri/src/lib.rs",
       "destination": "apps/alunixa-x-manager/src-tauri/src/lib.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "3f7f08545d67aa5453b35f849ea7499a35a1a1b399fae3127d7943d6a4600067"
+      "sha256": "6b1053375527c2f60dd91774047e0bffefd5155a6f17d718c59aee35381bbd9e"
     },
     {
       "source": "apps/codex-plus-manager/src-tauri/src/main.rs",
@@ -263,7 +263,7 @@
       "source": "apps/codex-plus-manager/src-tauri/tauri.conf.json",
       "destination": "apps/alunixa-x-manager/src-tauri/tauri.conf.json",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "ac76ba7efe330abc08d59ca18f59a786f88c164660daf5a5e648186fb0a40eb5"
+      "sha256": "cb9ff353a8ae3387cd6736de7cc689dacb4d81c5915d9b6f6e369718d0d7bd74"
     },
     {
       "source": "apps/codex-plus-manager/src-tauri/tests/windows_subsystem.rs",
@@ -281,7 +281,7 @@
       "source": "apps/codex-plus-manager/src/App.tsx",
       "destination": "apps/alunixa-x-manager/src/App.tsx",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "93f89cade3e6512e8afe5e98a453164f31b5a571f0598e25612dc6d0b0aeaa93"
+      "sha256": "0b935e57fa721ed611026635cbe7ed668898e43527dd8f19759474dd4c078598"
     },
     {
       "source": "apps/codex-plus-manager/src/ManagementExtra.tsx",
@@ -484,8 +484,8 @@
     {
       "source": "apps/codex-plus-manager/src/enhancement-settings.test.ts",
       "destination": "apps/alunixa-x-manager/src/enhancement-settings.test.ts",
-      "resolution": "integrated",
-      "sha256": "3ddf483ce691e56a5a4ee9fe021cd50b58c63fc666c12bf9c52fe80d7e5995fe"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "8a291559bdbb0969301aa2ed667ed9442c9363e631891b182c86b8e1650a5e65"
     },
     {
       "source": "apps/codex-plus-manager/src/fast-support.test.ts",
@@ -521,7 +521,7 @@
       "source": "apps/codex-plus-manager/src/i18n-en.ts",
       "destination": "apps/alunixa-x-manager/src/i18n-en.ts",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "c0d01f85fccae83bd0588d35d8ab322ddfd5c937ddd7b3edb1b60886806613dd"
+      "sha256": "c56dcd40e3a3bf62ebb029f5144358c0aedbc9e3c23d50401aa35b7c9cd91e10"
     },
     {
       "source": "apps/codex-plus-manager/src/i18n.ts",
@@ -779,7 +779,7 @@
       "source": "apps/codex-plus-manager/src/renderer-inject.test.ts",
       "destination": "apps/alunixa-x-manager/src/renderer-inject.test.ts",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "45af46ed03efc895c9a6c701d56856e23b7e4da1055b0191181984ae7ab5836b"
+      "sha256": "f08cb10e9ed95c4f8e309d06a7c8a723ea92316b8a05298ca1283953c5c8903a"
     },
     {
       "source": "apps/codex-plus-manager/src/retired-layout.test.ts",
@@ -809,7 +809,7 @@
       "source": "apps/codex-plus-manager/src/styles.css",
       "destination": "apps/alunixa-x-manager/src/styles.css",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "bb51fd26ee498ee1dda62ac6045cd7f65ded2cd21024c22a00e78e372cba9933"
+      "sha256": "74d15b9b872483f447f43e3728174e86e376ff4b7983a0c5d6684c7d79701ebc"
     },
     {
       "source": "apps/codex-plus-manager/src/typing-effects-runtime.test.ts",
@@ -1272,13 +1272,13 @@
       "source": "assets/inject/renderer-inject.js",
       "destination": "assets/inject/renderer-inject.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "98b81b6e6ffc5ecc3a3a98a75fb5904f73579546068fdb8a6eeba05f3893ee37"
+      "sha256": "6112d9e98490d65d4616ad3cec1681ff4976ced82e812ce3cc2324db7473c1d4"
     },
     {
       "source": "assets/inject/renderer-inject/00-prelude.js",
       "destination": "assets/inject/renderer-inject/00-prelude.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "218843bcbd55b4931614aa3fe52577e16edb6455f0c0df5301a30ffcea63656a"
+      "sha256": "6cc90eb98c1fab0614bf741034d4fd80be9bfc451c776cd02f09624a91d512e2"
     },
     {
       "source": "assets/inject/renderer-inject/01-registry.js",
@@ -1290,7 +1290,7 @@
       "source": "assets/inject/renderer-inject/10-style.js",
       "destination": "assets/inject/renderer-inject/10-style.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "6cad8868a049593f3ec1f871bc5e2da113e420b4ffbf85657f1c91087dff863c"
+      "sha256": "709247d368322b61617d899463177cad606c6e7c2c0983601a656076e0adca31"
     },
     {
       "source": "assets/inject/renderer-inject/20-menu.js",
@@ -1320,7 +1320,7 @@
       "source": "assets/inject/renderer-inject/60-plugin-marketplace.js",
       "destination": "assets/inject/renderer-inject/60-plugin-marketplace.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "2ea98791db6a7e27b55b6b5008c447984a55b81998145233c003e023771a427e"
+      "sha256": "73188972b5780159be76b5ac3f2aadf7991d50f463013d164911fe9648aa0314"
     },
     {
       "source": "assets/inject/renderer-inject/61-plugin-market-ui.js",
@@ -1350,7 +1350,7 @@
       "source": "assets/inject/renderer-inject/90-action-groups.js",
       "destination": "assets/inject/renderer-inject/90-action-groups.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "105092a5145966fda64e813666d19a4a3df741bff25fb981c4ee5a9fc3ac8baf"
+      "sha256": "e7781a47af187b94c4e3b96653e7a66c2005a18fcf3566dfd512aae0fcbb1b38"
     },
     {
       "source": "assets/inject/renderer-inject/91-extension-api.js",
@@ -1380,7 +1380,7 @@
       "source": "assets/inject/renderer-inject/95-conversation-view.js",
       "destination": "assets/inject/renderer-inject/95-conversation-view.js",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "18c59f38ce9730014cd8bf8aa6a0e8ee076810489e583b96359b428f20eb5fba"
+      "sha256": "0347253558d8a2bdfcc5ec2f7a6b7e119aabd533b57f34adc98c5fee13f00ae5"
     },
     {
       "source": "assets/inject/renderer-inject/96-whale-compat.js",
@@ -1403,8 +1403,8 @@
     {
       "source": "assets/inject/renderer-inject/99-startup.js",
       "destination": "assets/inject/renderer-inject/99-startup.js",
-      "resolution": "integrated",
-      "sha256": "0823c305cc38b646617d607c855dc6f8f43e22ef00702dea067b0e1946368f50"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "c87ad27dc442c4b8d6ac1fdf62f733b70e83d8bfc979572b6278c2252f31c2cb"
     },
     {
       "source": "assets/inject/renderer-inject/99-tail.js",
@@ -1415,8 +1415,8 @@
     {
       "source": "assets/inject/renderer-inject/manifest.json",
       "destination": "assets/inject/renderer-inject/manifest.json",
-      "resolution": "integrated",
-      "sha256": "b04c56c873c72b88b26bb4bf3e5b361b0fc47e99f368dc9eaa82fc09ce073689"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "d95c3320e27462f5c14d315e8e68da090f582823c95a9b2b1345a878fdd5c70e"
     },
     {
       "source": "assets/inject/renderer-inject/zz-paste-fix.js",
@@ -1878,7 +1878,7 @@
       "source": "crates/codex-plus-core/src/assets.rs",
       "destination": "crates/alunixa-x-core/src/assets.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "04231f60a06c7a561bd2995b62d1a0d952f45a1538a34827f75daf04c21bd232"
+      "sha256": "95244e80eb92119b10bbd0d3ee6a4b34e1ca38de892f776c5ae0f53a2802697f"
     },
     {
       "source": "crates/codex-plus-core/src/bridge.rs",
@@ -2046,13 +2046,13 @@
       "source": "crates/codex-plus-core/src/launcher.rs",
       "destination": "crates/alunixa-x-core/src/launcher.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "d09da1d781a80e32621263e1a50ec8a92df9cb45573be4cf52c76ad9d16d6a43"
+      "sha256": "8d8dc3d2e187672245cb3adeb3142a4b9a02c31926663ab179f50e02698effa8"
     },
     {
       "source": "crates/codex-plus-core/src/lib.rs",
       "destination": "crates/alunixa-x-core/src/lib.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "902e727ecd113c8f89dd0fde6693333649d575c2f73dc7b42cbe56878737500e"
+      "sha256": "3e05aad94a6a10149dd1b672cf36dd8d22a025a4e01c402d25aded1483c5cef6"
     },
     {
       "source": "crates/codex-plus-core/src/manager_navigation.rs",
@@ -2123,8 +2123,8 @@
     {
       "source": "crates/codex-plus-core/src/plugin_marketplace.rs",
       "destination": "crates/alunixa-x-core/src/plugin_marketplace.rs",
-      "resolution": "integrated",
-      "sha256": "2146a6dead47204bac2043f841973715a20c75c1989a0ad7d54dee1121545282"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "54ec99a0ec3e129ac9f00e5fb10aa14dee73294fb30dce3fac5233141fbb250e"
     },
     {
       "source": "crates/codex-plus-core/src/ports.rs",
@@ -2136,7 +2136,7 @@
       "source": "crates/codex-plus-core/src/protocol_proxy.rs",
       "destination": "crates/alunixa-x-core/src/protocol_proxy.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "f88680bd93c8f101c8b0165c7c58f0c1dc6b7cee590f30df18d552786af9f8ee"
+      "sha256": "32a9d6c23d3f9ac4d0e35c05ccf272f23483b55c42467e8e53c0cfd47e94d359"
     },
     {
       "source": "crates/codex-plus-core/src/provider_import.rs",
@@ -2189,8 +2189,8 @@
     {
       "source": "crates/codex-plus-core/src/routes.rs",
       "destination": "crates/alunixa-x-core/src/routes.rs",
-      "resolution": "integrated",
-      "sha256": "7f1bf658bd868e75f1e9dcfc79070b1501ad4f142dddfc2afa9a05824e686b19"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "13fb2787b4c9e86382ae92bfa68a14924540075214611883cbc84a9dbd272cec"
     },
     {
       "source": "crates/codex-plus-core/src/script_market.rs",
@@ -2208,7 +2208,7 @@
       "source": "crates/codex-plus-core/src/settings.rs",
       "destination": "crates/alunixa-x-core/src/settings.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "614f2026c30cdace7e9a7e67073732cb9c2aaf4f0227e9ae9a125653f471d34c"
+      "sha256": "82585a8b3074da1a1f5ca34cc4a277c7f73289ec181c5a08df88d7b5d2070157"
     },
     {
       "source": "crates/codex-plus-core/src/share.rs",
@@ -2387,13 +2387,13 @@
       "source": "crates/codex-plus-core/tests/bridge_routes.rs",
       "destination": "crates/alunixa-x-core/tests/bridge_routes.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "daff1687da80e3a1cd2a891578662c10750645aff8324398d76ba708aeeaee0a"
+      "sha256": "2b21b8f82ae7a7a0304a6d95ca8c20cd42884c2c72c81d98fad6710fdb2a941e"
     },
     {
       "source": "crates/codex-plus-core/tests/cdp_bridge.rs",
       "destination": "crates/alunixa-x-core/tests/cdp_bridge.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "df495dc663f060501d262ca6e1a9883e36d3257480c07c6b136b847013c0016d"
+      "sha256": "1242c55bf0f9e9fbd855025affbc2bb45e6b239b6f0e8fdf4499bee251556a18"
     },
     {
       "source": "crates/codex-plus-core/tests/codex_app_state.rs",
@@ -2483,7 +2483,7 @@
       "source": "crates/codex-plus-core/tests/force_chinese_locale_settings.rs",
       "destination": "crates/alunixa-x-core/tests/force_chinese_locale_settings.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "fa015454f87c3cf7ed7478499b46f26b470656fc272ee90e89a2e845291606d6"
+      "sha256": "f3e48c9ee565db8314a0a018265f07cb1db08f944143447b47c7ccc70ebebe6e"
     },
     {
       "source": "crates/codex-plus-core/tests/full_whale_contract.rs",
@@ -2501,7 +2501,7 @@
       "source": "crates/codex-plus-core/tests/launcher.rs",
       "destination": "crates/alunixa-x-core/tests/launcher.rs",
       "resolution": "adapted-AX-identity-contract-or-safety",
-      "sha256": "e73c1722b10ff971f4ad8b8b9fc65c6abdae9809d4591220ac81b05901fd5729"
+      "sha256": "d13a6de3e6cd4755c91a432ab65310098ee044b01b59b7060fdb99e581e732e6"
     },
     {
       "source": "crates/codex-plus-core/tests/live_settings_migration.rs",
@@ -2650,8 +2650,8 @@
     {
       "source": "crates/codex-plus-core/tests/upstream_worktree.rs",
       "destination": "crates/alunixa-x-core/tests/upstream_worktree.rs",
-      "resolution": "integrated",
-      "sha256": "3dc8f779dc9520c0f4fd0d3d0f15dfefea26396327f5d187bb44256739a95a83"
+      "resolution": "adapted-AX-identity-contract-or-safety",
+      "sha256": "848aa39f7d78ba366ba388239a6b1f600202ce6da47affc219e79be30b4f7dc3"
     },
     {
       "source": "crates/codex-plus-core/tests/user_scripts_reload.rs",
@@ -3905,6 +3905,27 @@
       "anthropicCases": 25,
       "cliScenarios": 3,
       "installerCases": 12
+    }
+  },
+  "featureRestoration": {
+    "version": "1.0.39",
+    "baseline": "v1.0.35",
+    "regressionVersion": "v1.0.38",
+    "preservesNewAnthropicBridge": true,
+    "independentCustomModels": true,
+    "instanceScopedBrokerHttpAndBridge": true,
+    "liveDesktopModified": false,
+    "localValidation": {
+      "rustSuites": 74,
+      "rustPassed": 2243,
+      "rustFailed": 0,
+      "rustIgnored": 9,
+      "frontendTests": 639,
+      "frontendPassed": 638,
+      "frontendFailed": 0,
+      "frontendExistingSkip": 1,
+      "installerPassed": 12,
+      "chromium": "PASS"
     }
   }
 }

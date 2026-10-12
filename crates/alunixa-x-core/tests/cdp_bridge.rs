@@ -1193,13 +1193,13 @@ runCase(2, 99, 1, {{ timers: 1, clears: 1, checks: 1 }});
 }
 
 #[test]
-fn injection_script_uses_one_enhancement_behavior() {
+fn injection_script_keeps_one_renderer_and_gates_complete_plugin_rewrites_by_mode() {
     let script = assets::injection_script(57321);
 
     assert!(!script.contains("兼容增强"));
     assert!(!script.contains("完整增强"));
     assert!(!script.contains("data-relay-unneeded"));
-    assert!(!script.contains("alunixaXBackendSettings.launchMode"));
+    assert!(script.contains("alunixaXBackendSettings.launchMode !== \"relay\""));
 }
 
 #[test]
@@ -2431,21 +2431,21 @@ fn injection_script_controls_plugin_patch_with_enhancement_settings() {
 
     assert!(script.contains("function codexPluginMarketplacePatchEnabled()"));
     assert!(script.contains(
-        "return alunixaXBackendSettingsLoaded && !!alunixaXSettings().pluginMarketplaceUnlock"
+        "return alunixaXBackendSettingsLoaded && alunixaXBackendSettings.launchMode !== \"relay\""
     ));
     assert!(script.contains("if (!codexPluginMarketplacePatchEnabled()) return"));
     assert!(!script.contains("pluginPatchDisabledInRelayMode"));
-    assert!(!script.contains("codexMenuLocalizationScopeSelector()"));
+    assert!(script.contains("!!alunixaXSettings().pluginMarketplaceUnlock"));
 }
 
 #[test]
-fn injection_script_omits_plugin_auto_expand() {
+fn injection_script_restores_bounded_plugin_auto_expand_without_legacy_route_names() {
     let script = assets::injection_script(57321);
 
-    assert!(!script.contains("schedulePluginAutoExpand"));
-    assert!(!script.contains("pluginAutoExpand"));
-    assert!(!script.contains("codexPluginAutoExpand"));
-    assert!(!script.contains("plugin_auto_expand"));
+    assert!(script.contains("runPluginAutoExpand"));
+    assert!(script.contains("pluginAutoExpand:"));
+    assert!(script.contains("codexPluginAutoExpandMaxClicks"));
+    assert!(!script.contains("\"/plugin_auto_expand\""));
 }
 
 #[test]
@@ -4994,15 +4994,15 @@ fn manager_ui_exposes_pure_api_relay_mode_button() {
 }
 
 #[test]
-fn manager_ui_omits_plugin_auto_expand() {
+fn manager_ui_restores_plugin_auto_expand_with_persisted_controls() {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("core crate should live under crates/alunixa-x-core");
     let source = std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src/App.tsx")).unwrap();
 
-    assert!(!source.contains("codexAppPluginAutoExpand"));
-    assert!(!source.contains("插件列表全量展示"));
+    assert!(source.contains("setEnhanceFlag(\"codexAppPluginAutoExpand\",value)"));
+    assert!(source.contains("插件列表全量展示"));
 }
 
 #[test]
@@ -6503,17 +6503,18 @@ fn parse_app_server_client_capture_location_reads_renderer_report() {
 }
 
 #[test]
-fn injection_script_has_no_retired_remote_worktree_entrypoints() {
+fn injection_script_restores_remote_and_worktree_adapters_without_obsolete_dropdowns() {
     let script = assets::injection_script(57321);
     for removed in [
         "installUpstreamBranchDropdownAdapter",
         "annotateBranchMenuWorktreeUsage",
         "data-codex-branch-worktree-path",
-        "/upstream-worktree/",
-        "/zed-remote/",
     ] {
         assert!(!script.contains(removed), "retired entrypoint: {removed}");
     }
+    assert!(script.contains("/upstream-worktree/create"));
+    assert!(script.contains("/zed-remote/open"));
+    assert!(script.contains("installUpstreamWorktreeNativeAdapter"));
 }
 
 #[test]

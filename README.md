@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.39：恢复高级供应商和增强功能
+
+恢复“添加供应商(可自定义)”及每模型独立地址/密钥/协议/上下文/压缩/思考配置，补回增强页遗漏的已实现功能与后端连接，并恢复远控、远程项目和用量页；保留新界面与 Anthropic 修复，不回退或清空用户数据。详见 [v1.0.39 说明](docs/releases/v1.0.39.md)。
+
 ## v1.0.38：Codex / Anthropic 协议修复
 
 本地 Responses ↔ Anthropic 桥改用 CC Switch 的独立原生实现，并修复正式 HTTP 服务误接 Chat 转换器的问题；覆盖流收尾、JSON 回退、签名工具续轮、恢复历史、思考参数及缓存写入用量。已用实际 Codex CLI 0.157.1 完成三种隔离链路验证，详见 [v1.0.38 中英俄说明](docs/releases/v1.0.38.md)。

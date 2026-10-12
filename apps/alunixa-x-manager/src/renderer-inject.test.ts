@@ -158,7 +158,7 @@ describe("renderer injection header compatibility", () => {
     assert.match(navigation, /codexPluginFilterSourceCache = new WeakMap/);
   });
 
-  it("uses the same plugin enhancement settings regardless of a legacy launch mode", async () => {
+  it("retains plugin preferences but disables request rewriting in compatibility launch mode", async () => {
     const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
     const settingsStart = renderer.indexOf("  function defaultCodexPlusSettings()");
     const settingsEnd = renderer.indexOf("  // Dream skin runtime", settingsStart);
@@ -178,12 +178,12 @@ describe("renderer injection header compatibility", () => {
           const result = runtime({}, { getItem: () => "{}" }, settings, true, 900, "fixture");
           const expected = enhancementsEnabled && codexAppPluginMarketplaceUnlock;
           assert.equal(result.settings.pluginMarketplaceUnlock, expected);
-          assert.equal(result.patchEnabled, expected);
+            assert.equal(result.patchEnabled, expected && launchMode !== "relay");
           assert.equal(runtime({}, { getItem: () => "{}" }, settings, false, 900, "fixture").patchEnabled, false);
         }
       }
     }
-    assert.doesNotMatch(renderer, /alunixaXBackendSettings\.launchMode|data-relay-unneeded|兼容增强|完整增强/);
+      assert.match(renderer, /alunixaXBackendSettings\.launchMode !== "relay"/);
     assert.doesNotMatch(renderer, /codexMenuLocalizationScopeSelector\(\)/);
     assert.match(renderer, /data-codex-backend-setting="enhancementsEnabled"/);
     assert.match(renderer, /data-alunixa-x-setting="pluginMarketplaceUnlock"/);

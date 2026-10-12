@@ -111,10 +111,10 @@ pub fn apply_alunixa_x_hooks_in_home(
         #[cfg(windows)]
         {
             for matcher in [
-                "Bash",
-                "shell_command",
-                "exec_command",
-                "functions.exec_command",
+                "^Bash$",
+                "^shell_command$",
+                "^exec_command$",
+                r"^functions\.exec_command$",
             ] {
                 append_hook(
                     hooks,

@@ -1149,7 +1149,8 @@ impl LaunchHooks for LauncherHooks {
             self.runtime.clone(),
             self.data.clone(),
             app_dir.to_path_buf(),
-        );
+        )
+        .with_shared_terminal(self.core.shared_terminal_broker());
         *self
             .bridge_context
             .lock()

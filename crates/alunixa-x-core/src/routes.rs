@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use serde_json::{Value, json};
@@ -20,6 +21,7 @@ pub struct BridgeContext {
     settings: Arc<dyn BridgeSettingsService>,
     runtime: Arc<dyn BridgeRuntimeService>,
     data: Arc<dyn BridgeDataService>,
+    shared_terminal: Option<Arc<crate::shared_terminal::SharedTerminalBroker>>,
 }
 
 impl BridgeContext {
@@ -32,7 +34,16 @@ impl BridgeContext {
             settings,
             runtime,
             data,
+            shared_terminal: None,
         }
+    }
+
+    pub fn with_shared_terminal(
+        mut self,
+        broker: Arc<crate::shared_terminal::SharedTerminalBroker>,
+    ) -> Self {
+        self.shared_terminal = Some(broker);
+        self
     }
 
     pub fn core(runtime: Arc<dyn BridgeRuntimeService>) -> Self {
@@ -200,6 +211,48 @@ pub async fn handle_bridge_request(
     path: &str,
     payload: Value,
 ) -> serde_json::Value {
+    if path.starts_with("/shared-terminal/") {
+        let result: anyhow::Result<Value> = async {
+            let settings = ctx.settings.get_settings().await?;
+            anyhow::ensure!(
+                (settings.enhancements_enabled && settings.codex_app_shared_terminal)
+                    || path == "/shared-terminal/cancel",
+                "共享终端未启用"
+            );
+            let broker = ctx
+                .shared_terminal
+                .as_ref()
+                .context("共享终端会话未初始化")?;
+            let id = payload["requestId"].as_str().unwrap_or("");
+            match path {
+                "/shared-terminal/next" => Ok(serde_json::to_value(broker.next().await)?),
+                "/shared-terminal/started" => {
+                    broker
+                        .started(id, payload["terminalSessionId"].as_str().unwrap_or(""))
+                        .await?;
+                    Ok(json!({"status":"ok"}))
+                }
+                "/shared-terminal/heartbeat" => {
+                    broker.heartbeat(id).await?;
+                    Ok(json!({"status":"ok"}))
+                }
+                "/shared-terminal/complete" => {
+                    broker
+                        .complete(serde_json::from_value(payload.clone())?)
+                        .await?;
+                    Ok(json!({"status":"ok"}))
+                }
+                "/shared-terminal/cancel" => {
+                    broker.cancel_all().await;
+                    Ok(json!({"status":"ok"}))
+                }
+                _ => anyhow::bail!("未知共享终端操作"),
+            }
+        }
+        .await;
+        return result
+            .unwrap_or_else(|error| json!({"status":"failed","message":error.to_string()}));
+    }
     let restored: Option<anyhow::Result<Value>> = match path {
         "/move-thread-workspace" => Some(
             ctx.data

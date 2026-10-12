@@ -71,6 +71,10 @@ test("shared terminal is wired at both the native producer and the local service
   assert.match(hook, /settings\s*\.\s*codex_app_shared_terminal/);
   assert.match(launcher, /"\/shared-terminal\/submit"/);
   assert.match(launcher, /"\/shared-terminal\/next"/);
+  const routes=readFileSync(new URL("../../../crates/alunixa-x-core/src/routes.rs",import.meta.url),"utf8");
+  const appLauncher=readFileSync(new URL("../../../apps/alunixa-x-launcher/src/main.rs",import.meta.url),"utf8");
+  assert.match(routes, /"\/shared-terminal\/next"/);
+  assert.match(appLauncher, /with_shared_terminal\(self\.core\.shared_terminal_broker\(\)\)/);
 });
 
 test("provider recovery does not remove or reduce the new native Anthropic bridge", () => {

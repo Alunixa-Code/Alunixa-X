@@ -61,13 +61,21 @@ fn updates_preserve_restored_ax_preferences_and_unrelated_user_data() {
 }
 
 #[test]
-fn retired_language_and_fast_startup_do_not_affect_injection() {
+fn explicit_language_and_fast_startup_settings_reach_guarded_runtime_configuration() {
     let settings: BackendSettings = serde_json::from_value(old_settings()).unwrap();
     let script = injection_script_with_settings(0, &settings);
-    assert!(!script.contains("__ALUNIXA_X_FORCE_CHINESE_LOCALE__"));
-    assert!(!script.contains("__alunixaXForceChineseLocaleInstalled"));
+    assert!(script.contains("__ALUNIXA_X_FORCE_CHINESE_LOCALE__"));
+    assert!(script.contains("__alunixaXForceChineseLocaleInstalled"));
     assert!(!script.contains("installForceChineseLocalePatch"));
-    assert!(!script.contains("__ALUNIXA_X_FAST_STARTUP__"));
-    assert!(!script.contains("__alunixaXFastStartupInstalled"));
-    assert!(!script.contains("statsigTimeoutMs"));
+    assert!(script.contains("__ALUNIXA_X_FAST_STARTUP__"));
+    assert!(script.contains("__alunixaXFastStartupInstalled"));
+    assert!(script.contains("statsigTimeoutMs"));
+    let disabled = injection_script_with_settings(
+        0,
+        &BackendSettings {
+            enhancements_enabled: false,
+            ..settings
+        },
+    );
+    assert!(disabled.contains(r#"__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {"enabled":false"#));
 }
