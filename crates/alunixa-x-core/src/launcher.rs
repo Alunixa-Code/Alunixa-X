@@ -5231,6 +5231,7 @@ mod tests {
 mod proxy_stream_tests {
     use super::forward_protocol_proxy_stream;
     use crate::protocol_proxy::UpstreamWireApi;
+    use serde_json::{Value, json};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn forward_fixture(
@@ -5370,5 +5371,131 @@ mod proxy_stream_tests {
         assert!(failure.is_none());
         assert!(output.contains("event: response.completed"));
         assert!(!output.contains("event: response.failed"));
+    }
+
+    fn anthropic_fixture(reason: &str) -> String {
+        [
+            json!({"type":"message_start","message":{"id":"msg_http","model":"claude-opus-4-6","usage":{"input_tokens":12,"cache_read_input_tokens":3,"cache_creation_input_tokens":4}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"fixture answer"}}),
+            json!({"type":"content_block_stop","index":0}),
+            json!({"type":"message_delta","delta":{"stop_reason":reason},"usage":{"output_tokens":5}}),
+            json!({"type":"message_stop"}),
+        ]
+        .iter()
+        .map(|value| format!("event: {}\ndata: {value}\n\n", value["type"].as_str().unwrap()))
+        .collect()
+    }
+
+    fn parsed_events(body: &str) -> Vec<Value> {
+        body.lines()
+            .filter_map(|line| line.strip_prefix("data: "))
+            .filter_map(|data| serde_json::from_str(data).ok())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn anthropic_production_forwarder_uses_the_native_content_block_converter() {
+        for reason in ["end_turn", "max_tokens"] {
+            let (failure, output) = forward_fixture(
+                &anthropic_fixture(reason), false, UpstreamWireApi::AnthropicMessages,
+            ).await;
+            assert!(failure.is_none(), "{failure:?}");
+            let events = parsed_events(&output);
+            let completed = events.iter().find(|event| event["type"] == "response.completed")
+                .expect("Codex's completed envelope");
+            assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "fixture answer");
+            assert_eq!(completed["response"]["usage"]["input_tokens"], 19);
+            assert_eq!(completed["response"]["usage"]["output_tokens"], 5);
+            assert_eq!(completed["response"]["status"], if reason == "max_tokens" { "incomplete" } else { "completed" });
+        }
+    }
+
+    #[tokio::test]
+    async fn anthropic_production_forwarder_accepts_json_fallback_without_losing_stream_framing() {
+        let json = json!({"id":"msg_json","content":[{"type":"text","text":"JSON fallback"}],"stop_reason":"max_tokens"});
+        let (failure, output) = forward_fixture(
+            &json.to_string(), false, UpstreamWireApi::AnthropicMessages,
+        ).await;
+        assert!(failure.is_none(), "{failure:?}");
+        let events = parsed_events(&output);
+        let completed = events.iter().find(|event| event["type"] == "response.completed").unwrap();
+        assert_eq!(completed["response"]["status"], "incomplete");
+        assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "JSON fallback");
+    }
+
+    #[tokio::test]
+    async fn anthropic_helper_http_endpoint_converts_requests_and_json_or_sse_responses() {
+        let _guard = crate::paths::settings_path_test_guard();
+        let temp = tempfile::tempdir().unwrap();
+        struct RestoreSettingsPath(Option<std::path::PathBuf>);
+        impl Drop for RestoreSettingsPath {
+            fn drop(&mut self) { crate::paths::set_settings_path_for_tests(self.0.take()); }
+        }
+        let settings_path = temp.path().join("settings.json");
+        let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(settings_path.clone())));
+        for (request_stream, upstream_sse) in [(true, true), (true, false), (false, false)] {
+            let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = upstream.local_addr().unwrap();
+            std::fs::write(&settings_path, serde_json::to_vec(&json!({
+                "enhancementsEnabled":true,"relayProfilesEnabled":true,"activeRelayId":"anthropic-http",
+                "relayProfiles":[{
+                    "id":"anthropic-http","name":"Anthropic fixture","relayMode":"mixedApi",
+                    "baseUrl":format!("http://{address}/v1"),"apiKey":"fixture-key",
+                    "protocol":"anthropicMessages","model":"claude-opus-4-6"
+                }]
+            })).unwrap()).unwrap();
+            let upstream_task = tokio::spawn(async move {
+                let (mut socket, _) = upstream.accept().await.unwrap();
+                let request = super::read_http_request(&mut socket).await.unwrap();
+                let headers = String::from_utf8(request.headers).unwrap();
+                assert!(headers.starts_with("POST /v1/messages HTTP/1.1"));
+                assert!(headers.to_ascii_lowercase().contains("x-api-key: fixture-key"));
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert_eq!(body["messages"][0]["role"], "user");
+                assert_eq!(body["messages"][0]["content"][0]["text"], "fixture question");
+                assert_eq!(body["thinking"]["type"], "adaptive");
+                assert!(body.get("temperature").is_none());
+                assert!(body.get("prompt_cache_key").is_none());
+                let response = if upstream_sse {
+                    anthropic_fixture("end_turn")
+                } else {
+                    json!({"id":"msg_json","content":[{"type":"text","text":"fixture answer"}],"stop_reason":"end_turn","usage":{"input_tokens":12,"cache_read_input_tokens":3,"cache_creation_input_tokens":4,"output_tokens":5}}).to_string()
+                };
+                let mime = if upstream_sse { "text/event-stream" } else { "application/json" };
+                socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+            });
+            let helper = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let helper_addr = helper.local_addr().unwrap();
+            let helper_task = tokio::spawn(async move {
+                let (socket, remote) = helper.accept().await.unwrap();
+                super::handle_helper_connection(socket, Some(remote)).await.unwrap();
+            });
+            let response = reqwest::Client::builder().no_proxy().build().unwrap()
+                .post(format!("http://{helper_addr}/v1/responses"))
+                .json(&json!({
+                    "model":"claude-opus-4-6","input":"fixture question","stream":request_stream,
+                    "reasoning":{"effort":"high"},"temperature":0.3,"prompt_cache_key":"fixture"
+                }))
+                .send().await.unwrap();
+            assert!(response.status().is_success());
+            let mime = response.headers()[reqwest::header::CONTENT_TYPE].to_str().unwrap().to_string();
+            let response = response.text().await.unwrap();
+            if request_stream {
+                assert!(mime.contains("text/event-stream"));
+                let events = parsed_events(&response);
+                let completed = events.iter().find(|event| event["type"] == "response.completed").expect("completed helper response");
+                assert_eq!(completed["response"]["output"][0]["content"][0]["text"], "fixture answer");
+                assert_eq!(completed["response"]["usage"]["input_tokens"], 19);
+            } else {
+                assert!(mime.contains("application/json"));
+                let response: Value = serde_json::from_str(&response).unwrap();
+                assert_eq!(response["status"], "completed");
+                assert_eq!(response["output"][0]["content"][0]["text"], "fixture answer");
+            }
+            helper_task.await.unwrap();
+            upstream_task.await.unwrap();
+        }
     }
 }
