@@ -24,9 +24,11 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
-## v1.0.36: complete non-advertising upstream integration
+## v1.0.37: complete non-advertising upstream integration
 
-This update integrates the upstream tree through `BigPizzaV3/CodexPlusPlus@e53549ca8c2b2b1edf4199084460af0919f2ded4`, covering April 11–October 12, 2026 (1,456 commits in the six-month range and 656 upstream files). It is a full-tree integration, not another small selection of v1.5.0 patches. Advertising pages, sponsor carousels, remote ad requests, theme promotion links and promotional images are excluded. See the [file-level synchronization report](docs/reports/2026-10-12-upstream-sync.md) and [release notes](docs/releases/v1.0.36.md).
+This version also fixes cross-platform read-only atomic-write protection and corrects AX bundle identity and target-architecture macOS update fixtures. v1.0.36 was not published after macOS checks failed; v1.0.37 is rebuilt from a new tag without relaxing verification.
+
+This update integrates the upstream tree through `BigPizzaV3/CodexPlusPlus@e53549ca8c2b2b1edf4199084460af0919f2ded4`, covering April 11–October 12, 2026 (1,456 commits in the six-month range and 656 upstream files). It is a full-tree integration, not another small selection of v1.5.0 patches. Advertising pages, sponsor carousels, remote ad requests, theme promotion links and promotional images are excluded. See the [file-level synchronization report](docs/reports/2026-10-12-upstream-sync.md) and [release notes](docs/releases/v1.0.37.md).
 
 ### New architecture and workflow
 
