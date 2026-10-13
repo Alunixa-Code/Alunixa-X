@@ -911,6 +911,7 @@
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
     refreshConversationView();
     installCodexServiceTierBadge();
+    if (typeof installCodexNativeFastControls === "function") void installCodexNativeFastControls();
     scheduleThreadScrollSync();
     refreshCodexModelWhitelistFromScan(window.__codexSessionDeleteLastMutations);
   }
