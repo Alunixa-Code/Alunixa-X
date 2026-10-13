@@ -5861,8 +5861,20 @@ mod proxy_stream_tests {
         let _restore = RestoreSettingsPath(crate::paths::set_settings_path_for_tests(Some(
             settings_path.clone(),
         )));
-        for (request_stream, upstream_sse) in
+        for (request_stream, upstream_sse, text_options) in
             [(true, true), (true, false), (false, false), (false, true)]
+                .into_iter()
+                .flat_map(|(request_stream, upstream_sse)| {
+                    [
+                        Value::Null,
+                        json!({}),
+                        json!({"format":{"type":"text"},"verbosity":null}),
+                        json!({"format":{"type":"text"},"verbosity":"low"}),
+                        json!({"format":{"type":"text"},"verbosity":"medium"}),
+                        json!({"format":{"type":"text"},"verbosity":"high"}),
+                    ]
+                    .map(move |text_options| (request_stream, upstream_sse, text_options))
+                })
         {
             let upstream = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = upstream.local_addr().unwrap();
@@ -5893,6 +5905,8 @@ mod proxy_stream_tests {
                 assert_eq!(body["thinking"]["type"], "adaptive");
                 assert!(body.get("temperature").is_none());
                 assert!(body.get("prompt_cache_key").is_none());
+                assert!(body.get("text").is_none());
+                assert!(body.get("verbosity").is_none());
                 let response = if upstream_sse {
                     anthropic_fixture("end_turn")
                 } else {
@@ -5921,7 +5935,8 @@ mod proxy_stream_tests {
                 .post(format!("http://{helper_addr}/v1/responses"))
                 .json(&json!({
                     "model":"claude-opus-4-6","input":"fixture question","stream":request_stream,
-                    "reasoning":{"effort":"high"},"temperature":0.3,"prompt_cache_key":"fixture"
+                    "reasoning":{"effort":"high"},"temperature":0.3,"prompt_cache_key":"fixture",
+                    "text":text_options
                 }))
                 .send()
                 .await

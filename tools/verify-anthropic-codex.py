@@ -8,7 +8,10 @@ import socket
 import subprocess
 import tempfile
 import threading
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def unused_port():
@@ -17,9 +20,40 @@ def unused_port():
         return sock.getsockname()[1]
 
 
-def run_scenario(codex, helper, mode):
+def run_scenario(codex, helper, mode, verbosity):
     requests = []
+    responses_requests = []
     errors = []
+    port = unused_port()
+
+    class Ingress(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_POST(self):
+            connection = HTTPConnection("127.0.0.1", port, timeout=30)
+            try:
+                assert self.path == "/v1/responses"
+                payload = self.rfile.read(int(self.headers["Content-Length"]))
+                body = json.loads(payload)
+                # Observe the actual CLI request, without injecting or rewriting text.
+                responses_requests.append(body)
+                assert body.get("text", {}).get("verbosity") == verbosity, body.get("text")
+                headers = {key: value for key, value in self.headers.items()
+                           if key.lower() not in ("host", "connection")}
+                connection.request("POST", self.path, body=payload, headers=headers)
+                response = connection.getresponse()
+                output = response.read()
+                self.send_response(response.status)
+                self.send_header("Content-Type", response.getheader("Content-Type", "application/json"))
+                self.send_header("Content-Length", str(len(output)))
+                self.end_headers()
+                self.wfile.write(output)
+            except Exception as error:
+                errors.append(str(error))
+                self.send_error(500, "fixture ingress validation failed")
+            finally:
+                connection.close()
 
     class Gateway(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -32,6 +66,8 @@ def run_scenario(codex, helper, mode):
                 requests.append(body)
                 assert body["thinking"]["type"] == "adaptive", body.get("thinking")
                 assert "prompt_cache_key" not in body
+                assert "text" not in body
+                assert "verbosity" not in body
                 assert body["messages"][0]["role"] == "user"
                 if mode == "tools" and len(requests) == 1:
                     tool = next(
@@ -105,22 +141,34 @@ def run_scenario(codex, helper, mode):
     gateway = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
     gateway_thread = threading.Thread(target=gateway.serve_forever, daemon=True)
     gateway_thread.start()
+    ingress = ThreadingHTTPServer(("127.0.0.1", 0), Ingress)
+    ingress_thread = threading.Thread(target=ingress.serve_forever, daemon=True)
+    ingress_thread.start()
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     with tempfile.TemporaryDirectory(prefix="alunixa-anthropic-fixture-") as directory:
         root = Path(directory)
         home, state, workspace = [root / name for name in ("codex", "state", "workspace")]
         for path in (home, state, workspace):
             path.mkdir()
-        port = unused_port()
+        model = json.loads((ROOT / "assets" / "codex-models.json").read_text(encoding="utf-8"))["models"][0]
+        model.update({
+            "slug": "claude-opus-4-6", "display_name": "Local Anthropic fixture",
+            "support_verbosity": True, "default_verbosity": verbosity,
+            "supports_search_tool": False,
+        })
+        catalog = home / "models.json"
+        catalog.write_text(json.dumps({"models": [model]}), encoding="utf-8")
         (home / "config.toml").write_text(f'''
 model_provider = "fixture"
 model = "claude-opus-4-6"
 model_reasoning_effort = "high"
+model_verbosity = "{verbosity}"
+model_catalog_json = '{catalog.as_posix()}'
 approval_policy = "never"
 sandbox_mode = "read-only"
 [model_providers.fixture]
 name = "Local Anthropic fixture"
-base_url = "http://127.0.0.1:{port}/v1"
+base_url = "http://127.0.0.1:{ingress.server_port}/v1"
 wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
@@ -139,9 +187,12 @@ stream_idle_timeout_ms = 15000
                 "apiKey": "fixture-only",
             }],
         }), encoding="utf-8")
-        env = {**os.environ, "CODEX_HOME": str(home),
+        env = {key: value for key, value in os.environ.items()
+               if key.upper() not in {"OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_PROFILE",
+                                      "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}}
+        env.update({"CODEX_HOME": str(home),
                "ALUNIXA_X_MULTI_INSTANCE": "1", "ALUNIXA_X_STATE_HOME": str(state),
-               "ALUNIXA_X_HELPER_BIND": "127.0.0.1", "NO_PROXY": "127.0.0.1,localhost"}
+               "ALUNIXA_X_HELPER_BIND": "127.0.0.1", "NO_PROXY": "127.0.0.1,localhost"})
         process = subprocess.Popen(
             [str(helper), str(port)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", env=env,
@@ -165,15 +216,18 @@ stream_idle_timeout_ms = 15000
             assert not any(event["type"] in ("error", "turn.failed") for event in events), events
             assert any(event.get("item", {}).get("text") == "fixture-ok" for event in events), events
             assert len(requests) == (2 if mode == "tools" else 1), len(requests)
+            assert len(responses_requests) == len(requests), len(responses_requests)
             usage = next(event.get("usage") for event in events if event["type"] == "turn.completed")
             assert usage["input_tokens"] == 19 * len(requests), usage
             assert usage["cached_input_tokens"] == 3 * len(requests), usage
             assert usage["cache_write_input_tokens"] == 4 * len(requests), usage
             assert usage["output_tokens"] == 5 * len(requests), usage
             return {
-                "scenario": mode, "result": "PASS", "requests": len(requests),
+                "scenario": mode, "verbosity": verbosity, "result": "PASS", "requests": len(requests),
                 "upstream": f"127.0.0.1:{gateway.server_port}",
                 "downstream": f"127.0.0.1:{port}",
+                "ingress": f"127.0.0.1:{ingress.server_port}",
+                "codex_text_options": [body["text"] for body in responses_requests],
                 "request_fields": sorted(requests[0]),
                 "usage": usage,
             }
@@ -187,6 +241,9 @@ stream_idle_timeout_ms = 15000
                     process.terminate()
                     process.wait(timeout=10)
             process.communicate()
+            ingress.shutdown()
+            ingress.server_close()
+            ingress_thread.join(timeout=5)
             gateway.shutdown()
             gateway.server_close()
             gateway_thread.join(timeout=5)
@@ -197,13 +254,16 @@ def main():
     parser.add_argument("--codex", type=Path, required=True)
     parser.add_argument("--helper", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--scenario", choices=("sse", "json-limit", "tools"))
+    parser.add_argument("--verbosity", choices=("low", "medium", "high"))
     args = parser.parse_args()
     codex, helper = args.codex.resolve(strict=True), args.helper.resolve(strict=True)
     version = subprocess.run([str(codex), "--version"], capture_output=True, text=True, check=True).stdout.strip()
     results = []
-    for scenario in ("sse", "json-limit", "tools"):
-        results.append(run_scenario(codex, helper, scenario))
-        print(f"CODEX_ANTHROPIC_PASS {scenario}", flush=True)
+    for scenario in (args.scenario,) if args.scenario else ("sse", "json-limit", "tools"):
+        for verbosity in (args.verbosity,) if args.verbosity else ("low", "medium", "high"):
+            results.append(run_scenario(codex, helper, scenario, verbosity))
+            print(f"CODEX_ANTHROPIC_PASS {scenario} verbosity={verbosity}", flush=True)
     args.output.write_text(json.dumps({"codex": version, "results": results}, indent=2) + "\n", encoding="utf-8")
 
 

@@ -176,6 +176,128 @@ fn codex_transport_cache_fields_do_not_block_anthropic_requests() {
 }
 
 #[test]
+fn codex_plain_text_verbosity_does_not_change_native_anthropic_input() {
+    let base = json!({
+        "model":"claude-opus-4-6","input":"inspect","instructions":"Keep the fixture intact.",
+        "reasoning":{"effort":"high"},"prompt_cache_key":"fixture","store":false,
+        "tools":[{"type":"function","name":"exec","parameters":{"type":"object"}}],
+        "tool_choice":"auto","parallel_tool_calls":false
+    });
+    let expected = responses_to_anthropic_messages(base.clone()).unwrap();
+    for verbosity in ["low", "medium", "high"] {
+        for include_format in [false, true] {
+            let mut input = base.clone();
+            input["text"] = json!({"verbosity":verbosity});
+            if include_format {
+                input["text"]["format"] = json!({"type":"text"});
+            }
+            let converted = responses_to_anthropic_messages(input).unwrap();
+            assert_eq!(
+                converted, expected,
+                "verbosity must not alter native instructions, tools, thinking or messages"
+            );
+            assert!(converted.get("text").is_none());
+            assert!(converted.get("verbosity").is_none());
+        }
+    }
+}
+
+#[test]
+fn codex_empty_and_null_text_options_use_anthropic_defaults() {
+    let expected = responses_to_anthropic_messages(json!({"input":"hello"})).unwrap();
+    for text in [
+        Value::Null,
+        json!({}),
+        json!({"verbosity":null}),
+        json!({"format":null}),
+        json!({"format":{"type":"text"}}),
+        json!({"format":{"type":"text"},"verbosity":null}),
+        json!({"format":null,"verbosity":"medium"}),
+    ] {
+        let converted =
+            responses_to_anthropic_messages(json!({"input":"hello","text":text})).unwrap();
+        assert_eq!(converted, expected);
+    }
+}
+
+#[test]
+fn anthropic_structured_text_constraints_are_not_silently_discarded() {
+    for format in [
+        json!({"type":"json_object"}),
+        json!({"type":"json_schema","name":"answer","strict":true,
+            "schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}}),
+    ] {
+        for verbosity in [Value::Null, json!("medium")] {
+            let error = responses_to_anthropic_messages(json!({
+                "input":"hello","text":{"format":format,"verbosity":verbosity}
+            }))
+            .unwrap_err();
+            assert!(error.to_string().contains("protocol_conversion_error"));
+        }
+    }
+}
+
+#[test]
+fn anthropic_rejects_malformed_text_options() {
+    for text in [json!("text"), json!([]), json!(true), json!(1)] {
+        let error =
+            responses_to_anthropic_messages(json!({"input":"hello","text":text})).unwrap_err();
+        assert!(error.to_string().contains("protocol_conversion_error"));
+    }
+}
+
+#[test]
+fn anthropic_rejects_unknown_text_options() {
+    for text in [
+        json!({"unsupported":true}),
+        json!({"unsupported":null}),
+        json!({"format":{"type":"text"},"verbosity":"medium","strict":true}),
+    ] {
+        let error =
+            responses_to_anthropic_messages(json!({"input":"hello","text":text})).unwrap_err();
+        assert!(error.to_string().contains("protocol_conversion_error"));
+    }
+}
+
+#[test]
+fn anthropic_rejects_invalid_text_verbosity() {
+    for verbosity in [
+        json!(""),
+        json!("ultra"),
+        json!(1),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        let error = responses_to_anthropic_messages(json!({
+            "input":"hello","text":{"verbosity":verbosity}
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("protocol_conversion_error"));
+    }
+}
+
+#[test]
+fn anthropic_rejects_malformed_or_augmented_plain_text_formats() {
+    for format in [
+        json!("text"),
+        json!([]),
+        json!(true),
+        json!(1),
+        json!({}),
+        json!({"type":null}),
+        json!({"type":"text","schema":{"type":"object"}}),
+        json!({"type":"text","strict":true}),
+    ] {
+        let error = responses_to_anthropic_messages(json!({
+            "input":"hello","text":{"format":format}
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("protocol_conversion_error"));
+    }
+}
+
+#[test]
 fn tool_definitions_omit_null_description_and_preserve_strict() {
     let request = responses_to_anthropic_messages(json!({
         "input":"hello",
