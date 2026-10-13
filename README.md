@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.40：修复 Anthropic 文本选项报错
+
+修复 Codex 的合法 `text.verbosity` 被本地 Anthropic 转换器拒绝的问题，兼容三种详略和空值，同时保留结构化输出校验、工具/签名/缓存及高级供应商和增强功能。安装后完整退出旧 Codex/Helper，再经 Alunixa X 启动；详见 [v1.0.40 说明](docs/releases/v1.0.40.md)。
+
 ## v1.0.39：恢复高级供应商和增强功能
 
 恢复“添加供应商(可自定义)”及每模型独立地址/密钥/协议/上下文/压缩/思考配置，补回增强页遗漏的已实现功能与后端连接，并恢复远控、远程项目和用量页；保留新界面与 Anthropic 修复，不回退或清空用户数据。详见 [v1.0.39 说明](docs/releases/v1.0.39.md)。

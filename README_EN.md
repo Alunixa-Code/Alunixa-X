@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.40: Anthropic text-option compatibility
+
+Fixed valid Codex `text.verbosity` being rejected by the local Anthropic bridge, while preserving structured-output validation, tools/signatures/cache accounting, advanced providers, and enhancements. After installation, fully close the old Codex/Helper and relaunch through Alunixa X; see [release notes](docs/releases/v1.0.40.md).
+
 ## v1.0.39: restored advanced providers and enhancements
 
 Restored direct advanced-provider creation, independent model protocols/windows/credentials, complete enhancement controls and runtime connections, remote-control/projects, and local usage pages. The modern UI and Anthropic fix remain intact, without resetting user data. See [release notes](docs/releases/v1.0.39.md).
