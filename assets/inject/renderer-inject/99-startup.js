@@ -59,6 +59,7 @@
     }
   }
 
+  runScanStep(scheduleAlunixaXImageOverlay);
   if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
     runScanStep(installAlunixaXForceChineseLocale);
   } else {

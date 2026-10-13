@@ -38,8 +38,8 @@ async fn main() -> anyhow::Result<()> {
                  window.alunixaX = buildCodexPlusExtensionApi();",
             );
             format!(
-                "window.electronBridge={{}};\nwindow.__ALUNIXA_X_TEST_SERVICE_TIER__=true;\n\
-                 Object.defineProperty(window,'fixtureEvents',{{configurable:true,get:()=>window.__alunixaXServiceTierTestDiagnostics||[]}});\n{renderer}"
+                "window.electronBridge={{}};\n\
+                 try {{ {renderer} }} catch(error) {{ window.fixtureProductionError=String(error?.stack||error); }}"
             )
         } else {
             let source = assets::renderer_script();
@@ -63,7 +63,14 @@ async fn main() -> anyhow::Result<()> {
         // launcher, not a fixture-only wallpaper dispatcher.
         let disconnected = bridge::install_renderer_bridge_with_disconnect(
             &websocket,
-            Arc::new(move |_, _| Box::pin(async { Ok(json!({"status":"ok"})) })),
+            Arc::new(move |method, payload| {
+                Box::pin(async move {
+                    if method == "/diagnostics/log" {
+                        println!("DIAGNOSTIC {payload}");
+                    }
+                    Ok(json!({"status":"ok"}))
+                })
+            }),
             &[script],
             &settings,
         )

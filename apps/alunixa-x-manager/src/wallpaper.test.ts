@@ -18,6 +18,9 @@ test("production Electron coverage runs the full renderer without manually booti
   const verifier = read("../../../tools/verify-wallpaper-electron.cjs");
   assert.ok(fixture.includes('input["productionStartup"] == true'));
   assert.ok(fixture.includes("assets::injection_script_with_settings"));
+  assert.ok(!fixture.includes("__ALUNIXA_X_TEST_SERVICE_TIER__"),
+    "the service-tier test flag returns before production startup");
+  assert.ok(fixture.includes('println!("DIAGNOSTIC {payload}")'));
   assert.ok(verifier.includes("--production-startup"));
 });
 

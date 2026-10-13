@@ -125,17 +125,35 @@ async function open(source, extra = {}) {
     if (child.exitCode === null) child.kill();
     children.delete(child);
   };
-  return { w, evaluate, done, diagnostics: () => ({ stdout, stderr, network }) };
+  const events = async () => argv.includes("--production-startup")
+    ? stdout.split("\n").slice(0, -1).filter(line => line.startsWith("DIAGNOSTIC ")).map(line => JSON.parse(line.slice(11)))
+    : evaluate("window.fixtureEvents || []");
+  const clearEvents = () => { stdout = ""; };
+  return { w, evaluate, done, events, clearEvents, diagnostics: () => ({ stdout, stderr, network }) };
 }
 async function verifyImage(name, animated = false, explicitSource = null) {
   const ctx = await open(explicitSource || path.join(work, name));
   try {
     await until(async () => {
-      const events = await ctx.evaluate(`window.fixtureEvents || []`);
+      const events = await ctx.events();
       assert(!events.some(e => e.event === "wallpaper_failed"), JSON.stringify(events));
       return events.some(e => e.event === "wallpaper_ready");
     }, name + " decoded", 30000);
-    assert(!await ctx.evaluate(`window.fixtureEvents.some(e=>e.event==="wallpaper_failed")`));
+    assert(!(await ctx.events()).some(e=>e.event==="wallpaper_failed"));
+    if (argv.includes("--production-startup")) {
+      assert.equal(await ctx.evaluate("typeof window.alunixaX"), "object", "whole renderer startup completed");
+      assert.equal(await ctx.evaluate("!!window.fixtureProductionError"), false);
+    }
+    assert.equal(await ctx.evaluate('document.querySelectorAll("#alunixa-x-image-overlay").length'), 1);
+    // Decoding can finish before the compositor uploads/rasterizes a large
+    // image. Require visible center pixels, not merely an onload diagnostic.
+    await until(async () => {
+      const capture = await ctx.w.webContents.capturePage();
+      const size = capture.getSize();
+      const bitmap = capture.getBitmap();
+      const index = (Math.floor(size.height / 2) * size.width + Math.floor(size.width / 2)) * 4;
+      return bitmap[index] !== 60 || bitmap[index + 1] !== 36 || bitmap[index + 2] !== 20;
+    }, name + " painted", 12000);
     if (name.startsWith("legacy-")) {
       assert(await ctx.evaluate(`window.__ALUNIXA_X_IMAGE_OVERLAY__.staticPreview===true`));
       assert.equal(await ctx.evaluate(`document.querySelectorAll("video,iframe").length`), 0);
@@ -155,13 +173,26 @@ async function verifyImage(name, animated = false, explicitSource = null) {
       await ctx.evaluate(`fetch("http://127.0.0.1:1/not-allowed").catch(()=>{})`);
       assert((await ctx.evaluate(`window.fixtureCsp`)).includes("connect-src"), "host CSP must remain active");
       fs.writeFileSync(path.join(output, "wallpaper-electron-large.png"), (await ctx.w.webContents.capturePage()).toPNG());
+      ctx.clearEvents();
       const reloaded = once(ctx.w.webContents, "did-finish-load");
       ctx.w.webContents.reload();
       await reloaded;
-      await until(() => ctx.evaluate(`window.fixtureEvents?.some(e=>e.event==="wallpaper_ready")`), "reload keeps transport");
+      await until(async () => (await ctx.events()).some(e=>e.event==="wallpaper_ready"), "reload keeps transport");
     }
     console.log("PASS", name, animated ? "decoded + real pixel animation" : "decoded under host CSP");
   } catch (error) {
+    console.error("BOOTSTRAP_DIAGNOSTICS", JSON.stringify(await ctx.evaluate(`({
+      url:location.href, electronBridge:!!window.electronBridge,
+      sameWindow:window.top===window && window.self===window,
+      productionApi:typeof window.alunixaX, testDiagnostics:!!window.__ALUNIXA_X_TEST_SERVICE_TIER__,
+      configured:!!window.__ALUNIXA_X_IMAGE_OVERLAY__?.enabled,
+      dataSource:!!window.__ALUNIXA_X_IMAGE_OVERLAY__?.dataUrl,
+      overlay:!!document.getElementById("alunixa-x-image-overlay"),
+      runtime:!!window.__alunixaXWallpaperRuntime, productionError:window.fixtureProductionError,
+      events:window.fixtureEvents || [],
+      failures:window.__codexSessionDeleteScanFailures || []
+    })`).catch(e => String(e))));
+    console.error("RECEIVED_DIAGNOSTICS", JSON.stringify(await ctx.events()));
     const transport = await Promise.race([
       ctx.evaluate(`fetch(window.__ALUNIXA_X_IMAGE_OVERLAY__?.sourceUrl).then(async r=>({status:r.status,length:(await r.arrayBuffer()).byteLength})).catch(e=>String(e))`).catch(e => String(e)),
       delay(3000).then(() => "fetch timed out"),
@@ -175,10 +206,15 @@ async function verifyVideo(name, source, extra = {}) {
   const ctx = await open(source, extra);
   try {
     await until(async () => {
-      const failures = await ctx.evaluate(`(window.fixtureEvents||[]).filter(e=>e.event==="wallpaper_failed")`);
+      const failures = (await ctx.events()).filter(e=>e.event==="wallpaper_failed");
       assert.equal(failures.length, 0, JSON.stringify(failures));
       return ctx.evaluate(`document.querySelector("video")?.currentTime>.25 && document.querySelector("video")?.videoWidth>0`);
     }, name + " playback", 45000);
+    if (argv.includes("--production-startup")) {
+      assert.equal(await ctx.evaluate("typeof window.alunixaX"), "object");
+      assert.equal(await ctx.evaluate("!!window.fixtureProductionError"), false);
+    }
+    assert.equal(await ctx.evaluate('document.querySelectorAll("#alunixa-x-image-overlay").length'), 1);
     assert.deepEqual(await ctx.evaluate(`window.__codexSessionDeleteBridge("fixture",{})`), { status: "ok" });
     assert.equal(await ctx.evaluate(`document.querySelectorAll("[data-alunixa-x-media-transfer]").length`), 0);
     assert(await ctx.evaluate(`document.querySelector("video").src.startsWith("blob:")`));
