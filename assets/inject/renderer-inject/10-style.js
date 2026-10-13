@@ -1009,6 +1009,7 @@
         white-space: nowrap;
         cursor: pointer;
       }
+      .${codexServiceTierBadgeClass}[hidden] { display: none !important; }
       .${codexServiceTierBadgeClass}:hover { border-color: rgba(16,163,127,.44); background: rgba(16,163,127,.13); }
       .${codexServiceTierBadgeClass}[data-tier="fast"] { border-color: rgba(16,163,127,.55); background: rgba(16,163,127,.18); color: #6ee7b7; }
       .${codexServiceTierBadgeClass}[data-tier="loading"] { color: #a1a1aa; }

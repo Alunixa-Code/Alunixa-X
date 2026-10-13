@@ -197,6 +197,7 @@ test("optimistic backend writes immediately clean up sharing before their respon
   const f = fixture(); f.install();
   let finish: (value: unknown) => void = () => {};
   const context = vm.createContext({ alunixaXBackendSettingsSeq: 0, alunixaXBackendSettings: {},
+    alunixaXSettings: () => ({ serviceTierControls: false }),
     postJson: () => new Promise((resolve) => { finish = resolve; }),
     refreshCodexPlusBackendToggles: () => { f.settings.sessionShare = context.alunixaXBackendSettings.codexAppSessionShare; f.install(); },
   });
