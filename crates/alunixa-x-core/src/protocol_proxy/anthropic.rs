@@ -26,6 +26,7 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
     }
     let body = fidelity::prepare_history(body, "anthropic")?;
     fidelity::validate_request(&body, "anthropic")?;
+    validate_text_options(&body)?;
     let (tool_context, chat_tools) = tool_context_from_request(&body);
     let model = body["model"].as_str().unwrap_or("");
     let mut result = json!({"stream":body.get("stream").cloned().unwrap_or(json!(false))});
@@ -199,18 +200,45 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
             json!([stop])
         };
     }
-    if let Some(text) = body.get("text") {
-        if text.get("verbosity").is_some()
-            || text
-                .pointer("/format/type")
-                .is_some_and(|kind| kind != "text")
-        {
-            return fidelity::reject(
-                "Anthropic text options require a native provider configuration",
-            );
+    Ok(result)
+}
+
+fn validate_text_options(body: &Value) -> anyhow::Result<()> {
+    let Some(text) = body.get("text").filter(|value| !value.is_null()) else {
+        return Ok(());
+    };
+    let Some(options) = text.as_object() else {
+        return fidelity::reject("text must be an object");
+    };
+    if options
+        .keys()
+        .any(|key| key != "format" && key != "verbosity")
+    {
+        return fidelity::reject("unsupported Anthropic text option");
+    }
+    if let Some(verbosity) = text.get("verbosity").filter(|value| !value.is_null()) {
+        if !matches!(verbosity.as_str(), Some("low" | "medium" | "high")) {
+            return fidelity::reject("unsupported text.verbosity");
+        }
+        // This is a style preference, not a structured-output constraint. Match
+        // cc-switch: Messages has no verbosity field, and changing the system
+        // prompt here would also change the user's instructions/cache prefix.
+    }
+    if let Some(format) = text.get("format").filter(|value| !value.is_null()) {
+        let Some(format) = format.as_object() else {
+            return fidelity::reject("text.format must be an object");
+        };
+        match format.get("type").and_then(Value::as_str) {
+            Some("text") if format.keys().all(|key| key == "type") => {}
+            Some("json_object" | "json_schema") => {
+                return fidelity::reject(
+                    "Anthropic structured text format requires a native provider configuration",
+                );
+            }
+            _ => return fidelity::reject("unsupported Anthropic text format"),
         }
     }
-    Ok(result)
+    Ok(())
 }
 
 fn thinking_enabled(body: &Value) -> bool {
