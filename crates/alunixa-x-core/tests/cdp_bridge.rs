@@ -897,14 +897,20 @@ process.exit(0);
 }
 
 #[test]
-fn injection_script_installs_image_overlay_from_data_uri() {
+fn injection_script_installs_image_and_video_overlays_from_data_or_blob() {
     let script = assets::injection_script(57321);
 
-    assert!(script.contains("const source = config.dataUrl || \"\""));
-    assert!(script.contains("backgroundImage: `url(\"${source.replace(/\"/g, \"%22\")}\")`"));
+    assert!(script.contains("const source = config.dataUrl || config.sourceUrl || \"\""));
+    assert!(script.contains("backgroundImage: `url(\"${url.replace(/\"/g, \"%22\")}\")`"));
     assert!(script.contains(
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
     ));
+    assert!(script.contains("runScanStep(scheduleAlunixaXImageOverlay)"));
+    assert!(!script.contains("  scheduleCodexPlusImageOverlay();"));
+    assert!(script.contains("window.__codexSessionDeleteBridge(\"/wallpaper/media\", {})"));
+    assert!(script.contains("URL.revokeObjectURL(blobUrl)"));
+    assert!(script.contains("video.removeAttribute(\"src\")"));
+    assert!(script.contains("pointerEvents: \"none\""));
     assert!(script.contains("image_overlay_installed"));
 }
 
