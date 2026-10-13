@@ -753,6 +753,12 @@ pub fn apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
             // 且没有任何配置报错。
             let auth_contents = pure_api_auth_contents_with_live_login(home, profile)?;
             apply_relay_files_to_home(home, &compatible_config, &auth_contents)
+        } else if profile.relay_mode == crate::settings::RelayMode::CustomModels {
+            // The manager already writes API authentication for this mode.
+            // Startup must use the same contract: the official branch below
+            // removes OPENAI_API_KEY and sends a working provider back to login.
+            let auth_contents = api_key_auth_with_mode(&profile.auth_contents)?;
+            apply_relay_files_to_home(home, &compatible_config, &auth_contents)
         } else if profile.relay_mode == crate::settings::RelayMode::Aggregate {
             // 聚合模式的实际请求发往本地代理，它需要 API 模式的凭据。
             // 不能走 Official 分支删 OPENAI_API_KEY，否则 auth.json 会被清成空文件/空对象，
