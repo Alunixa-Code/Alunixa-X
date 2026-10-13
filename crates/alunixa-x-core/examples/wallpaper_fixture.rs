@@ -29,21 +29,35 @@ async fn main() -> anyhow::Result<()> {
             codex_app_image_overlay_opacity: 100,
             ..Default::default()
         };
-        let source = assets::renderer_script();
-        let start = source
-            .find("  function installAlunixaXImageOverlay()")
-            .unwrap();
-        let end = source
-            .find("  function scheduleAlunixaXImageOverlay()")
-            .unwrap();
-        let script = format!(
-            "window.__ALUNIXA_X_IMAGE_OVERLAY__={};\n\
+        let script = if input["productionStartup"] == true {
+            // Only export the existing function for subsequent pause/teardown
+            // controls. Initial installation must come from production startup.
+            let renderer = assets::injection_script_with_settings(1, &settings).replace(
+                "window.alunixaX = buildCodexPlusExtensionApi();",
+                "window.installWallpaper = installAlunixaXImageOverlay;\n\
+                 window.alunixaX = buildCodexPlusExtensionApi();",
+            );
+            format!(
+                "window.electronBridge={{}};\nwindow.__ALUNIXA_X_TEST_SERVICE_TIER__=true;\n\
+                 Object.defineProperty(window,'fixtureEvents',{{configurable:true,get:()=>window.__alunixaXServiceTierTestDiagnostics||[]}});\n{renderer}"
+            )
+        } else {
+            let source = assets::renderer_script();
+            let start = source
+                .find("  function installAlunixaXImageOverlay()")
+                .unwrap();
+            let end = source
+                .find("  function scheduleAlunixaXImageOverlay()")
+                .unwrap();
+            format!(
+                "window.__ALUNIXA_X_IMAGE_OVERLAY__={};\n\
              (()=>{{ const alunixaXImageOverlayId='alunixa-x-image-overlay';\n\
              const sendAlunixaXDiagnostic=(event,payload)=>{{window.fixtureEvents??=[];window.fixtureEvents.push({{event,payload}})}};\n\
              {}\nwindow.installWallpaper=installAlunixaXImageOverlay;if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',installAlunixaXImageOverlay,{{once:true}});else installAlunixaXImageOverlay();}})();",
-            assets::image_overlay_config(1, &settings),
-            &source[start..end],
-        );
+                assets::image_overlay_config(1, &settings),
+                &source[start..end],
+            )
+        };
         let websocket = input["websocketUrl"].as_str().unwrap().to_owned();
         // This must be the same entry point used by the real data-aware
         // launcher, not a fixture-only wallpaper dispatcher.

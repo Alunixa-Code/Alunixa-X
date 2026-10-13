@@ -10,6 +10,11 @@ const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { once } = require("node:events");
 const argv = process.argv.slice(2);
+if (argv.includes("--help")) {
+  console.log("electron verify-wallpaper-electron.cjs --fixture <exe> --output <dir> [--production-startup] [--self-test-failure]");
+  app.exit(0);
+  return;
+}
 const option = key => argv[argv.indexOf(key) + 1];
 const fixture = option("--fixture");
 const output = path.resolve(option("--output"));
@@ -96,7 +101,10 @@ async function open(source, extra = {}) {
     targets.find(t => t.type === "page" && t.url === "app://-/index.html");
   assert(target?.webSocketDebuggerUrl);
   const configPath = path.join(work, `attach-${w.id}.json`);
-  fs.writeFileSync(configPath, JSON.stringify({ websocketUrl: target.webSocketDebuggerUrl, path: source, ...extra }));
+  fs.writeFileSync(configPath, JSON.stringify({
+    websocketUrl: target.webSocketDebuggerUrl, path: source,
+    productionStartup: argv.includes("--production-startup"), ...extra,
+  }));
   const child = spawn(fixture, ["attach", configPath], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   children.add(child);
   let stdout = "", stderr = "";

@@ -6,6 +6,21 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const source = read("../../../assets/inject/renderer-inject.js");
 const runtime = source.split("function installAlunixaXImageOverlay()")[1].split("function scheduleAlunixaXImageOverlay")[0];
 
+test("production startup schedules the media runtime instead of the obsolete image-only bootstrap", () => {
+  const startup = read("../../../assets/inject/renderer-inject/99-startup.js");
+  const prelude = read("../../../assets/inject/renderer-inject/00-prelude.js");
+  assert.ok(startup.includes("runScanStep(scheduleAlunixaXImageOverlay)"));
+  assert.ok(!prelude.includes("  scheduleCodexPlusImageOverlay();"));
+});
+
+test("production Electron coverage runs the full renderer without manually booting the media function", () => {
+  const fixture = read("../../../crates/alunixa-x-core/examples/wallpaper_fixture.rs");
+  const verifier = read("../../../tools/verify-wallpaper-electron.cjs");
+  assert.ok(fixture.includes('input["productionStartup"] == true'));
+  assert.ok(fixture.includes("assets::injection_script_with_settings"));
+  assert.ok(verifier.includes("--production-startup"));
+});
+
 test("wallpaper runtime uses media only and cannot capture windows or run project scripts", () => {
   assert.ok(!runtime.includes("getUserMedia"));
   assert.ok(!runtime.includes("chromeMediaSource"));
