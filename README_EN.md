@@ -24,9 +24,9 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
-## v1.0.41: persistent login and media backgrounds
+## v1.0.42: persistent login and media backgrounds
 
-Fixed advanced providers losing API authentication at startup and the full media runtime not being invoked. Preserves per-model protocols/windows and enhancements, with native fresh-auth reads and full Electron pixel/animation/playback tests. After installation, fully close the old Codex/Helper and relaunch through Alunixa X; see [release notes](docs/releases/v1.0.41.md).
+Fixed advanced providers losing API authentication at startup and the full media runtime not being invoked. Preserves per-model protocols/windows and enhancements, with native fresh-auth reads and full Electron pixel/animation/playback tests. After installation, fully close the old Codex/Helper and relaunch through Alunixa X; see [release notes](docs/releases/v1.0.42.md).
 
 ## v1.0.40: Anthropic text-option compatibility
 

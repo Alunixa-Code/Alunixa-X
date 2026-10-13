@@ -24,9 +24,9 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
-## v1.0.41：修复重复登录和图片/视频背景
+## v1.0.42：修复重复登录和图片/视频背景
 
-修复高级自定义供应商每次启动清掉 API 登录凭据，以及完整媒体运行时未被调用的问题。保留逐模型协议/窗口与增强功能，新增原生认证冷准备和完整 Electron 图片像素、动画、视频播放验证；安装后完整退出旧 Codex/Helper，再经 Alunixa X 启动，详见 [v1.0.41 说明](docs/releases/v1.0.41.md)。
+修复高级自定义供应商每次启动清掉 API 登录凭据，以及完整媒体运行时未被调用的问题。保留逐模型协议/窗口与增强功能，新增原生认证冷准备和完整 Electron 图片像素、动画、视频播放验证；安装后完整退出旧 Codex/Helper，再经 Alunixa X 启动，详见 [v1.0.42 说明](docs/releases/v1.0.42.md)。
 
 ## v1.0.40：修复 Anthropic 文本选项报错
 
