@@ -226,7 +226,7 @@ fn macos_packager_builds_one_visible_native_gui_with_legacy_update_shim() {
     ));
     assert!(script.contains("printf '%s\\n' \"Alunixa X 管理工具.app\" > \"$STAGE/.hidden\""));
     assert!(script.contains("chflags hidden \"$STAGE/Alunixa X 管理工具.app\""));
-    assert!(script.contains("set visible of item \"Alunixa X 管理工具.app\" to false"));
+    assert!(!script.contains("set visible of item \"Alunixa X 管理工具.app\" to false"));
     assert!(script.contains("<key>CodexPlusUnifiedApp</key>"));
 }
 

@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.45: PR #1, macOS DMG, and contract fixes
+
+Ships Fast-control hardening, the macOS x64 DMG detach fix, and the hidden-app contract migration. The v1.0.43/v1.0.44 candidates were not published; see [release notes](docs/releases/v1.0.45.md).
+
 ## v1.0.44: PR #1 hardening and macOS packaging fix
 
 Ships the PR #1 Fast-control retry/lifecycle/version hardening and fixes the macOS x64 DMG Finder detach failure for the hidden Chinese-named app. See [release notes](docs/releases/v1.0.44.md).

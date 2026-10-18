@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.45：PR #1、macOS DMG 与静态契约修复
+
+交付 Fast 控件优化、macOS x64 DMG detach 修复和隐藏应用静态测试迁移；v1.0.43/v1.0.44 候选未发布，详见 [v1.0.45 说明](docs/releases/v1.0.45.md)。
+
 ## v1.0.44：PR #1 优化与 macOS 打包修复
 
 完成 PR #1 的 Fast 控件重试、生命周期和当前版本适配优化，并修复 macOS x64 DMG Finder 隐藏中文应用导致无法卸载镜像的问题。详见 [v1.0.44 说明](docs/releases/v1.0.44.md)。
