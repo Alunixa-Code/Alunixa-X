@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.43：Fast 控件与原生模型菜单优化
+
+审查并优化 PR #1：Fast 服务模式读取失败会在后续心跳重试，原生 JSX 适配在重注入/客户端替换时正确清理，并支持已核验的 Codex `26.1007.2314.0` 与 `26.1007.30912`；未知版本继续 fallback。详见 [v1.0.43 说明](docs/releases/v1.0.43.md)。
+
 ## v1.0.42：修复重复登录和图片/视频背景
 
 修复高级自定义供应商每次启动清掉 API 登录凭据，以及完整媒体运行时未被调用的问题。保留逐模型协议/窗口与增强功能，新增原生认证冷准备和完整 Electron 图片像素、动画、视频播放验证；安装后完整退出旧 Codex/Helper，再经 Alunixa X 启动，详见 [v1.0.42 说明](docs/releases/v1.0.42.md)。

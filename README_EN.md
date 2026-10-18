@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.43: Fast controls and native picker hardening
+
+Reviewed and hardened PR #1: failed Fast-state reads retry on later heartbeats, native JSX adapters clean up on reinjection/client replacement, and verified Codex builds `26.1007.2314.0` and `26.1007.30912` are supported while unknown versions keep the fallback. See [release notes](docs/releases/v1.0.43.md).
+
 ## v1.0.42: persistent login and media backgrounds
 
 Fixed advanced providers losing API authentication at startup and the full media runtime not being invoked. Preserves per-model protocols/windows and enhancements, with native fresh-auth reads and full Electron pixel/animation/playback tests. After installation, fully close the old Codex/Helper and relaunch through Alunixa X; see [release notes](docs/releases/v1.0.42.md).
