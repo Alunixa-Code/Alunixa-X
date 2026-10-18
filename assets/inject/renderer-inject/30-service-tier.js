@@ -260,6 +260,7 @@
   function refreshCodexServiceTierBadges() {
     const state = codexServiceTierBadgeState();
     document.querySelectorAll(`[data-codex-service-tier-badge="true"]`).forEach((node) => {
+      node.hidden = typeof codexNativeFastControlVisible === "function" && codexNativeFastControlVisible();
       node.dataset.tier = state.tier;
       node.dataset.disabled = String(!!state.disabled);
       node.textContent = state.label;
@@ -271,6 +272,7 @@
 
   function refreshCodexServiceTierControls() {
     syncCodexServiceTierEffectiveState();
+    if (typeof notifyCodexNativeFastControls === "function") notifyCodexNativeFastControls();
     const featureEnabled = !!alunixaXSettings().serviceTierControls;
     const backendConnected = alunixaXBackendStatus.status === "ok";
     const backendChecking = alunixaXBackendStatus.status === "checking";
@@ -356,60 +358,78 @@
     return { serviceTier: appSetting, configServiceTier: configTier, serviceTierSource };
   }
 
+  let codexServiceTierStateLoadPromise = null;
+  let codexServiceTierStateLoadRevision = 0;
   async function loadCodexServiceTierState() {
     if (!alunixaXSettings().serviceTierControls) {
+      // 禁用使旧读取失效；重新启用时不能复用旧供应商/设置的结果。
+      codexServiceTierStateLoadRevision += 1;
+      codexServiceTierStateLoadPromise = null;
       codexServiceTierState = { ...codexServiceTierState, status: "idle", message: "未启用" };
       refreshCodexServiceTierControls();
       return;
     }
-    codexServiceTierState = { ...codexServiceTierState, status: "loading", message: "正在读取…" };
-    refreshCodexServiceTierControls();
-    try {
-      const { serviceTier, configServiceTier, serviceTierSource } = await resolveInheritedServiceTier();
-      codexServiceTierState = {
-        ...codexServiceTierState,
-        status: "ok",
-        serviceTier,
-        configServiceTier,
-        serviceTierSource,
-        message: serviceTierGlobalStatusMessage(serviceTier ?? configServiceTier),
-      };
-    } catch (error) {
-      codexServiceTierState = {
-        ...codexServiceTierState,
-        status: "failed",
-        message: "读取失败",
-      };
-      sendCodexPlusDiagnostic("service_tier_read_failed", {
-        errorName: error?.name || "",
-        errorMessage: error?.message || String(error),
-      });
-    } finally {
+    if (codexServiceTierStateLoadPromise) return codexServiceTierStateLoadPromise;
+    const revision = ++codexServiceTierStateLoadRevision;
+    const operation = (async () => {
+      codexServiceTierState = { ...codexServiceTierState, status: "loading", message: "正在读取…" };
       refreshCodexServiceTierControls();
+      try {
+        const { serviceTier, configServiceTier, serviceTierSource } = await resolveInheritedServiceTier();
+        if (revision !== codexServiceTierStateLoadRevision || !alunixaXSettings().serviceTierControls) return;
+        codexServiceTierState = {
+          ...codexServiceTierState,
+          status: "ok",
+          serviceTier,
+          configServiceTier,
+          serviceTierSource,
+          message: serviceTierGlobalStatusMessage(serviceTier ?? configServiceTier),
+        };
+      } catch (error) {
+        if (revision !== codexServiceTierStateLoadRevision || !alunixaXSettings().serviceTierControls) return;
+        codexServiceTierState = {
+          ...codexServiceTierState,
+          status: "failed",
+          message: "读取失败",
+        };
+        sendCodexPlusDiagnostic("service_tier_read_failed", {
+          errorName: error?.name || "",
+          errorMessage: error?.message || String(error),
+        });
+      } finally {
+        if (revision === codexServiceTierStateLoadRevision) refreshCodexServiceTierControls();
+      }
+    })();
+    codexServiceTierStateLoadPromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (codexServiceTierStateLoadPromise === operation) codexServiceTierStateLoadPromise = null;
     }
   }
 
-  function setCodexThreadServiceTierMode(mode) {
+  function setCodexThreadServiceTierMode(mode, modelName = "") {
     if (alunixaXBackendStatus.status !== "ok") {
       showToast("后端未连接，无法切换服务模式", null);
       refreshCodexServiceTierControls();
-      return;
+      return false;
     }
     const normalizedMode = normalizeCodexThreadServiceTierMode(mode);
+    const threadId = validThreadScrollSessionKey(currentSessionRef().session_id);
     if (normalizedMode === "fast") {
-      const fastAvailability = codexServiceTierFastAvailability();
+      const fastAvailability = codexServiceTierFastAvailability(modelName || codexServiceTierUiModelName(threadId));
       if (!fastAvailability.supported) {
         codexServiceTierMaybeLoadModelCatalog(true);
         showToast(codexServiceTierFastUnsupportedMessage(fastAvailability.modelName), null);
         refreshCodexServiceTierControls();
-        return;
+        return false;
       }
     }
-    const threadId = validThreadScrollSessionKey(currentSessionRef().session_id);
     setCodexThreadServiceTierOverride(threadId, normalizedMode);
     refreshCodexServiceTierControls();
     const target = threadId ? "当前 thread" : "新 thread 草稿";
     showToast(`${target}服务模式：${normalizedMode === "inherit" ? "继承" : normalizedMode}`, null);
+    return true;
   }
 
   function toggleCodexServiceTierFromBadge() {
