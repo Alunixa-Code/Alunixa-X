@@ -180,12 +180,14 @@ test("the in-app share toggle persists a backend update rather than a temporary 
 test("backend refresh synchronizes share immediately and skips failed heartbeat reads", async () => {
   const source = fragment("40-backend-settings.js");
   let loaded = true, installs = 0;
-  const context = vm.createContext({ alunixaXSettings: () => ({ conversationView: false }),
+  const context = vm.createContext({ alunixaXSettings: () => ({ conversationView: false, serviceTierControls: false }),
+    codexServiceTierState: { status: "idle" }, loadCodexServiceTierState: () => {},
+    removeCodexServiceTierBadges: () => {},
     loadBackendSettingsState: async () => loaded, syncOfficialUsagePolicy: () => {},
     syncCodexPlusTypingEffects: () => {}, renderCodexPlusMenu: () => {}, refreshConversationView: () => {},
     installSessionShareButton: () => { installs += 1; }, runScanStep: (fn: () => void) => fn(),
   });
-  const start = source.indexOf("  let syncBackendSettingsInFlight");
+  const start = source.indexOf("  function refreshCodexServiceTierStateAfterBackendSync(");
   const end = source.indexOf("  async function setBackendSetting(", start);
   vm.runInContext(source.slice(start, end), context);
   await context.syncBackendSettingsFromHeartbeat(); assert.equal(installs, 0);
@@ -198,10 +200,12 @@ test("optimistic backend writes immediately clean up sharing before their respon
   let finish: (value: unknown) => void = () => {};
   const context = vm.createContext({ alunixaXBackendSettingsSeq: 0, alunixaXBackendSettings: {},
     alunixaXSettings: () => ({ serviceTierControls: false }),
+    codexServiceTierState: { status: "idle" }, loadCodexServiceTierState: () => {},
+    removeCodexServiceTierBadges: () => {},
     postJson: () => new Promise((resolve) => { finish = resolve; }),
     refreshCodexPlusBackendToggles: () => { f.settings.sessionShare = context.alunixaXBackendSettings.codexAppSessionShare; f.install(); },
   });
-  const start = source.indexOf("  async function setBackendSetting(");
+  const start = source.indexOf("  function refreshCodexServiceTierStateAfterBackendSync(");
   const end = source.indexOf("  function refreshCodexPlusBackendToggles(", start);
   vm.runInContext(source.slice(start, end), context);
   const saved = context.setBackendSetting("codexAppSessionShare", false);

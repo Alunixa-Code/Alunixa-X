@@ -5188,7 +5188,14 @@
     return Object.keys(changes).length ? React.cloneElement(node, changes) : node;
   }
 
-  const codexNativeFastControlRuntime = window.__alunixaXNativeFastControlRuntime || (window.__alunixaXNativeFastControlRuntime = {
+  const previousCodexNativeFastControlRuntime = window.__alunixaXNativeFastControlRuntime;
+  if (previousCodexNativeFastControlRuntime?.dispose) {
+    try {
+      previousCodexNativeFastControlRuntime.dispose();
+    } catch (_) {}
+    previousCodexNativeFastControlRuntime.dispose = null;
+  }
+  const codexNativeFastControlRuntime = previousCodexNativeFastControlRuntime || (window.__alunixaXNativeFastControlRuntime = {
     revision: 0, signature: "", listeners: new Set(), pending: null,
     dispose: null, checkedAt: 0, authMethod: null, client: null, generation: 0,
     requirementsReady: false, fastAllowed: false,
@@ -5197,6 +5204,7 @@
   codexNativeFastControlRuntime.generation += 1;
   codexNativeFastControlRuntime.pending = null;
   codexNativeFastControlRuntime.checkedAt = 0;
+  codexNativeFastControlRuntime.dispose = null;
   // An already mounted adapter must read the newest injection's state/handlers.
   codexNativeFastControlRuntime.getContext = codexNativeFastControlContext;
   codexNativeFastControlRuntime.patchProps = patchCodexNativeFastControlProps;
@@ -5205,8 +5213,13 @@
   codexNativeFastControlRuntime.refreshBadges = () => refreshCodexServiceTierBadges();
 
   function codexNativeFastControlEnabled() {
+    // Both builds expose the inspected app-primary/app-shared picker contract.
+    // Unknown versions deliberately retain the Alunixa fallback.
     return !!alunixaXSettings().serviceTierControls
-      && alunixaXBackendSettings.codexAppVersion === "26.1007.30912";
+      && [
+        "26.1007.2314.0",
+        "26.1007.30912",
+      ].includes(String(alunixaXBackendSettings.codexAppVersion || "").trim());
   }
 
   function codexNativeFastControlClientReady() {
@@ -5282,7 +5295,10 @@
     // the established Alunixa control until their component contract is checked.
     const enabled = codexNativeFastControlEnabled();
     const client = enabled ? nativeHostClient("local") : null;
-    if (!enabled || !client || runtime.client !== client) {
+    const clientChanged = runtime.client !== client;
+    if (!enabled || !client || clientChanged) {
+      runtime.dispose?.();
+      runtime.dispose = null;
       runtime.generation += 1;
       runtime.pending = null;
       runtime.checkedAt = 0;
@@ -5290,10 +5306,6 @@
       runtime.authMethod = null;
       runtime.requirementsReady = false;
       runtime.fastAllowed = false;
-      if (!enabled) {
-        runtime.dispose?.();
-        runtime.dispose = null;
-      }
       notifyCodexNativeFastControls();
     }
     if (!enabled || !client) return;
@@ -5380,6 +5392,14 @@
     return loaded;
   }
 
+  function refreshCodexServiceTierStateAfterBackendSync(previousEnabled = null) {
+    const enabled = !!alunixaXSettings().serviceTierControls;
+    if (previousEnabled !== enabled || (enabled && codexServiceTierState.status !== "ok")) {
+      void loadCodexServiceTierState();
+    }
+    if (!enabled && previousEnabled !== enabled) removeCodexServiceTierBadges();
+  }
+
   function loadBackendSettingsForStartup(attempt = 0) {
     loadBackendSettings().then((loaded) => {
       if (loaded) {
@@ -5401,10 +5421,7 @@
       const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
       const loaded = await loadBackendSettingsState();
       if (loaded) {
-        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-          void loadCodexServiceTierState();
-          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-        }
+        refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
         syncOfficialUsagePolicy();
         runScanStep(syncCodexPlusTypingEffects);
         if (typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
@@ -5424,19 +5441,13 @@
     alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
     alunixaXBackendSettingsLoaded = true;
     refreshCodexPlusBackendToggles();
-    if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-      void loadCodexServiceTierState();
-      if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-    }
+    refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
     try {
       const settings = await postJson("/settings/set", { [key]: value });
       if (seq === alunixaXBackendSettingsSeq) {
         const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
         alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
-        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-          void loadCodexServiceTierState();
-          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-        }
+        refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
       }
     } finally {
       refreshCodexPlusBackendToggles();

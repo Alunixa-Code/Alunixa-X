@@ -52,14 +52,16 @@ test("backend heartbeat synchronizes live effects and updates the in-app selecto
   let syncs = 0;
   let renders = 0;
   const context = vm.createContext({
-    alunixaXSettings: () => ({ conversationView: false }),
+    alunixaXSettings: () => ({ conversationView: false, serviceTierControls: false }),
+    codexServiceTierState: { status: "idle" }, loadCodexServiceTierState: () => {},
+    removeCodexServiceTierBadges: () => {},
     loadBackendSettingsState: async () => loads,
     syncOfficialUsagePolicy: () => {}, refreshConversationView: () => {},
     syncCodexPlusTypingEffects: () => { syncs += 1; },
     renderCodexPlusMenu: () => { renders += 1; }, runScanStep: (fn: () => void) => fn(),
   });
   const source = fragment("40-backend-settings.js");
-  const start = source.indexOf("  let syncBackendSettingsInFlight");
+  const start = source.indexOf("  function refreshCodexServiceTierStateAfterBackendSync(");
   const end = source.indexOf("  async function setBackendSetting(", start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end), context);

@@ -292,6 +292,12 @@ test("native rendering and callbacks decline disappeared or replaced authenticat
   }
 });
 
+test("native Fast admits the current verified Codex Store contract", () => {
+  const f = liveContextFixture();
+  f.backendSettings.codexAppVersion = "26.1007.2314.0";
+  assert.equal(f.make().enabled, true);
+});
+
 test("native callbacks decline an older injection, unverified requirements or an enforced Fast prohibition", () => {
   for (const change of [
     (f: ReturnType<typeof liveContextFixture>) => { f.runtime.generation++; },
@@ -602,10 +608,14 @@ test("losing a native client invalidates cached authentication and immediately r
   await f.install();
   f.runtime.activeControls.set({}, "local:thread-12345678");
   assert.equal(f.visible(), true);
+  const patchedFactory = f.factories.jsx;
   f.setClient(null);
   assert.equal(f.ready(), false, "rendering fails closed before the next scan");
   assert.equal(f.visible(), false);
   await f.install();
+  assert.equal(f.factories.jsx, f.jsx, "client loss must restore the native JSX factory");
+  assert.notEqual(patchedFactory, f.factories.jsx);
+  assert.equal(f.runtime.dispose, null);
   assert.equal(f.runtime.authMethod, null);
   assert.equal(f.runtime.client, null);
   assert.equal(f.runtime.pending, null);

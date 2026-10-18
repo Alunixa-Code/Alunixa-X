@@ -13,6 +13,14 @@
     return loaded;
   }
 
+  function refreshCodexServiceTierStateAfterBackendSync(previousEnabled = null) {
+    const enabled = !!alunixaXSettings().serviceTierControls;
+    if (previousEnabled !== enabled || (enabled && codexServiceTierState.status !== "ok")) {
+      void loadCodexServiceTierState();
+    }
+    if (!enabled && previousEnabled !== enabled) removeCodexServiceTierBadges();
+  }
+
   function loadBackendSettingsForStartup(attempt = 0) {
     loadBackendSettings().then((loaded) => {
       if (loaded) {
@@ -34,10 +42,7 @@
       const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
       const loaded = await loadBackendSettingsState();
       if (loaded) {
-        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-          void loadCodexServiceTierState();
-          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-        }
+        refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
         syncOfficialUsagePolicy();
         runScanStep(syncCodexPlusTypingEffects);
         if (typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
@@ -57,19 +62,13 @@
     alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
     alunixaXBackendSettingsLoaded = true;
     refreshCodexPlusBackendToggles();
-    if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-      void loadCodexServiceTierState();
-      if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-    }
+    refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
     try {
       const settings = await postJson("/settings/set", { [key]: value });
       if (seq === alunixaXBackendSettingsSeq) {
         const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
         alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
-        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
-          void loadCodexServiceTierState();
-          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
-        }
+        refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
       }
     } finally {
       refreshCodexPlusBackendToggles();

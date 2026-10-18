@@ -9,8 +9,9 @@ changes to the service-tier feature or master enhancement setting refresh it.
 Concurrent reads share one operation; disabling the feature invalidates an older
 read so it cannot overwrite state after re-enabling.
 
-For Codex `26.1007.30912`, API-key sessions can also use the existing native Fast
-checkbox and model-label lightning icon. The renderer adapter supplies service-tier
+For Codex `26.1007.2314.0` and `26.1007.30912`, API-key sessions can also use the
+existing native Fast checkbox and model-label lightning icon. These are the two
+verified builds with the same inspected native component contract. The renderer adapter supplies service-tier
 props only to the inspected native model-picker component. Selection writes the
 existing Alunixa thread/draft override, which its request handling already uses.
 
@@ -30,7 +31,7 @@ existing Alunixa thread/draft override, which its request handling already uses.
   tier setter. Native Fast presentation does not establish that a relay honors
   `service_tier: "priority"`, changes latency, or applies any particular price.
 
-The version check is intentional: adding support for another Codex release requires
+The exact version allowlist is intentional: adding support for another Codex release requires
 checking its native component exports and props first. An unsupported release must
 continue to work through the Alunixa fallback.
 

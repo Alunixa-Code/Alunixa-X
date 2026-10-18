@@ -188,6 +188,19 @@ test("a failed service-tier read reports failure and releases the single-flight 
   assert.equal(f.api.codexServiceTierState.status, "ok");
 });
 
+test("a failed service-tier read is retried by an unchanged successful heartbeat", async () => {
+  const f = harness({ codexAppServiceTierControls: true });
+  const first = f.api.loadCodexServiceTierState();
+  f.reads[0].reject(new Error("temporary service-tier read failure"));
+  await first;
+  assert.equal(f.api.codexServiceTierState.status, "failed");
+  await f.api.syncBackendSettingsFromHeartbeat();
+  assert.equal(f.reads.length, 2);
+  f.reads[1].resolve(inherited(null));
+  await flush();
+  assert.equal(f.api.codexServiceTierState.status, "ok");
+});
+
 test("saving the backend Fast toggle starts state loading without waiting for a heartbeat", async () => {
   const f = harness({ codexAppServiceTierControls: false });
   await f.api.setBackendSetting("codexAppServiceTierControls", true);
