@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.44: PR #1 hardening and macOS packaging fix
+
+Ships the PR #1 Fast-control retry/lifecycle/version hardening and fixes the macOS x64 DMG Finder detach failure for the hidden Chinese-named app. See [release notes](docs/releases/v1.0.44.md).
+
 ## v1.0.43: Fast controls and native picker hardening
 
 Reviewed and hardened PR #1: failed Fast-state reads retry on later heartbeats, native JSX adapters clean up on reinjection/client replacement, and verified Codex builds `26.1007.2314.0` and `26.1007.30912` are supported while unknown versions keep the fallback. See [release notes](docs/releases/v1.0.43.md).

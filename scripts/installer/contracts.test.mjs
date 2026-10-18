@@ -188,6 +188,7 @@ test("all installer shell entry points parse with native Bash", { skip: !hasBash
   const packager = text("scripts/installer/macos/package-dmg.sh");
   assert(packager.includes("prepare_background()") && packager.includes("detach_dmg()"));
   assert(packager.includes("-format UDRW") && packager.includes("-format UDZO"));
+  assert(!packager.includes('set visible of item "Alunixa X 管理工具.app"'));
   assert(!packager.includes("pgrep -x") && !packager.includes("kill -KILL"));
   assert(!packager.includes("com.bigpizzav3"));
   assert(text("scripts/installer/macos/build-universal.sh").includes("alunixa-x-imagegen-mcp"));

@@ -407,7 +407,6 @@ with timeout of 30 seconds
     tell dmgDisk
       set position of item "Applications" to {1000, 390}
       set position of item "Alunixa X.app" to {460, 390}
-      set visible of item "Alunixa X 管理工具.app" to false
     end tell
 
     close dmgWindow

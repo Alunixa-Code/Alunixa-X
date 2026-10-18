@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.44：PR #1 优化与 macOS 打包修复
+
+完成 PR #1 的 Fast 控件重试、生命周期和当前版本适配优化，并修复 macOS x64 DMG Finder 隐藏中文应用导致无法卸载镜像的问题。详见 [v1.0.44 说明](docs/releases/v1.0.44.md)。
+
 ## v1.0.43：Fast 控件与原生模型菜单优化
 
 审查并优化 PR #1：Fast 服务模式读取失败会在后续心跳重试，原生 JSX 适配在重注入/客户端替换时正确清理，并支持已核验的 Codex `26.1007.2314.0` 与 `26.1007.30912`；未知版本继续 fallback。详见 [v1.0.43 说明](docs/releases/v1.0.43.md)。
