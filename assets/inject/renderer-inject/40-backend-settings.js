@@ -4,6 +4,9 @@
       void loadCodexModelCatalog();
     }
     refreshCodexPlusBackendToggles();
+    // 输入框徽标可先于增强设置页出现；后端设置就绪后启动服务模式读取，
+    // 不再依赖打开设置页才能结束初始的“正在读取…”。
+    if (loaded) void loadCodexServiceTierState();
     if (loaded) syncOfficialUsagePolicy();
     if (loaded) runScanStep(syncCodexPlusTypingEffects);
     if (loaded && typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
@@ -28,8 +31,13 @@
     syncBackendSettingsInFlight = true;
     try {
       const previousConversationView = !!alunixaXSettings().conversationView;
+      const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
       const loaded = await loadBackendSettingsState();
       if (loaded) {
+        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
+          void loadCodexServiceTierState();
+          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
+        }
         syncOfficialUsagePolicy();
         runScanStep(syncCodexPlusTypingEffects);
         if (typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
@@ -44,14 +52,24 @@
   }
 
   async function setBackendSetting(key, value) {
+    const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
     const seq = ++alunixaXBackendSettingsSeq;
     alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
     alunixaXBackendSettingsLoaded = true;
     refreshCodexPlusBackendToggles();
+    if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
+      void loadCodexServiceTierState();
+      if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
+    }
     try {
       const settings = await postJson("/settings/set", { [key]: value });
       if (seq === alunixaXBackendSettingsSeq) {
+        const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
         alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
+        if (previousServiceTierControls !== !!alunixaXSettings().serviceTierControls) {
+          void loadCodexServiceTierState();
+          if (!alunixaXSettings().serviceTierControls) removeCodexServiceTierBadges();
+        }
       }
     } finally {
       refreshCodexPlusBackendToggles();
