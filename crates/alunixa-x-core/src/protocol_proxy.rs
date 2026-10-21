@@ -11196,3 +11196,327 @@ mod exec_retry_after_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod native_responses_observer_tests {
+    use super::{NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT, NativeResponsesSseObserver};
+
+    #[test]
+    fn fragmented_crlf_and_data_only_terminal_events_are_observed() {
+        for payload in [
+            "event: response.completed\r\ndata: {\"type\":\"response.completed\",\"text\":\"摘要\"}\r\n\r\n",
+            "data: {\"response\":{},\"type\":\"response.completed\"}\n\n",
+        ] {
+            let mut observer = NativeResponsesSseObserver::default();
+            for byte in payload.as_bytes().chunks(1) {
+                observer.push_bytes(byte);
+            }
+            assert!(observer.finish().is_none());
+        }
+    }
+
+    #[test]
+    fn large_payloads_keep_diagnostic_memory_bounded_and_allow_terminal_observation() {
+        for prefix in [
+            "event: response.completed\ndata: {\"output\":\"",
+            "data: {\"type\":\"response.completed\",\"output\":\"",
+        ] {
+            let mut observer = NativeResponsesSseObserver::default();
+            observer.push_bytes(prefix.as_bytes());
+            observer.push_bytes(&vec![b'x'; NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT * 2]);
+            assert!(observer.event_prefix.len() <= NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT);
+            observer.push_bytes(b"\"}\n\n");
+            assert!(observer.finish().is_none());
+        }
+    }
+
+    #[test]
+    fn failed_event_after_completed_still_reports_fixed_failure_without_payload() {
+        let mut observer = NativeResponsesSseObserver::default();
+        observer.push_bytes(b"data: {\"type\":\"response.completed\"}\n\ndata: {\"type\":\"response.failed\",\"error\":\"private-payload\"}\n\n");
+        assert_eq!(
+            observer.finish().as_deref(),
+            Some("原生 Responses 上游返回 response.failed")
+        );
+    }
+
+    #[test]
+    fn unclassified_large_event_reports_unknown_state_without_payload() {
+        let mut observer = NativeResponsesSseObserver::default();
+        observer.push_bytes(b"data: {\"output\":\"");
+        observer.push_bytes(&vec![b'x'; NATIVE_SSE_DIAGNOSTIC_PREFIX_LIMIT * 2]);
+        observer.push_bytes(b"\",\"type\":\"response.completed\"}\n\n");
+        assert!(observer.finish().unwrap().contains("状态未知"));
+    }
+}
+
+#[cfg(test)]
+mod image_proxy_tests {
+    use super::UPSTREAM_IMAGE_HEADER_TIMEOUT;
+    use super::is_local_protocol_proxy_base_url;
+    use std::time::Duration;
+
+    #[test]
+    fn image_requests_allow_ten_minutes_for_response_headers() {
+        assert_eq!(UPSTREAM_IMAGE_HEADER_TIMEOUT, Duration::from_secs(600));
+    }
+
+    #[test]
+    fn local_protocol_proxy_detection_covers_common_loopback_forms() {
+        for base_url in [
+            "http://127.0.0.1:57321",
+            "http://127.0.0.1:57321/",
+            "http://127.0.0.1:57321/v1",
+            "http://localhost:57321/v1/",
+            "http://[::1]:57321/v1",
+        ] {
+            assert!(is_local_protocol_proxy_base_url(base_url), "{base_url}");
+        }
+
+        for base_url in [
+            "https://127.0.0.1:57321/v1",
+            "http://127.0.0.1:57322/v1",
+            "http://api.example.test:57321/v1",
+            "not-a-url",
+        ] {
+            assert!(!is_local_protocol_proxy_base_url(base_url), "{base_url}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod response_compatibility_tests {
+    use super::*;
+
+    #[test]
+    fn chat_search_filter_preserves_client_tools_and_rejects_forced_native_search() {
+        let native = json!({"type":"web_search"});
+        for client in [
+            json!({"type":"function", "name":"web_search", "parameters":{"type":"object"}}),
+            json!({"type":"custom", "name":"web_search"}),
+            json!({"type":"tool_search", "execution":"client"}),
+            json!({"type":"namespace", "name":"search", "tools":[]}),
+        ] {
+            let mut body =
+                json!({"tools":[native.clone(),client.clone()],"tool_choice":"required"});
+            remove_unsupported_native_search(&mut body).unwrap();
+            assert_eq!(body["tools"], json!([client]));
+        }
+        for choice in [json!("required"), json!({"type":"web_search"})] {
+            let mut body = json!({"tools":[native.clone()],"tool_choice":choice});
+            assert!(
+                remove_unsupported_native_search(&mut body)
+                    .unwrap_err()
+                    .is::<UnsupportedNativeWebSearch>()
+            );
+        }
+        let mut automatic = json!({"tools":[native],"tool_choice":"auto"});
+        remove_unsupported_native_search(&mut automatic).unwrap();
+        assert_eq!(automatic["tools"], json!([]));
+    }
+
+    #[test]
+    fn native_search_with_query_is_still_not_executed_by_chat_converter() {
+        let request = json!({"tools":[{"type":"web_search"}]});
+        let response = chat_completion_to_response_with_request(
+            json!({
+                "choices":[{"message":{"tool_calls":[{"id":"call_search", "function":{
+                    "name":"web_search", "arguments":"{\"query\":\"Codex\"}"
+                }}]},"finish_reason":"tool_calls"}]
+            }),
+            &request,
+        )
+        .unwrap();
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["output"][0]["status"], "failed");
+    }
+
+    #[test]
+    fn gemini_reasoning_conversion_respects_standard_protocol_opt_in() {
+        for standard in [false, true] {
+            let body = responses_to_chat_completions_with_options(
+                json!({
+                    "model":"gemini-3.8-flash", "input":"hi", "reasoning":{"effort":"high"}
+                }),
+                standard,
+            )
+            .unwrap();
+            assert_eq!(body["reasoning_effort"], "high");
+        }
+        let request =
+            json!({"model":"google/gemini-other", "input":"hi", "reasoning":{"effort":"high"}});
+        assert!(
+            responses_to_chat_completions(request.clone())
+                .unwrap()
+                .get("reasoning_effort")
+                .is_none()
+        );
+        assert_eq!(
+            responses_to_chat_completions_with_options(request, true).unwrap()["reasoning_effort"],
+            "high"
+        );
+    }
+
+    #[test]
+    fn gemini_models_receive_reasoning_effort() {
+        assert!(supports_reasoning_effort("gemini-3.8-flash"));
+        assert!(!supports_reasoning_effort("google/gemini-2.5-pro"));
+        assert!(!supports_reasoning_effort("glm-5.3"));
+    }
+
+    #[test]
+    fn empty_web_search_call_is_failed_in_non_stream_response() {
+        let request = json!({
+            "model": "gemini-3.8-flash",
+            "tools": [{ "type": "web_search" }]
+        });
+        let upstream = json!({
+            "id": "chatcmpl-search",
+            "model": "gemini-3.8-flash",
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": "call_search",
+                        "type": "function",
+                        "function": { "name": "web_search", "arguments": "{}" }
+                    }]
+                }
+            }]
+        });
+
+        let response = chat_completion_to_response_with_request(upstream, &request).unwrap();
+        assert_eq!(
+            response.get("status").and_then(Value::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            response.pointer("/error/type").and_then(Value::as_str),
+            Some("invalid_upstream_tool_call")
+        );
+    }
+
+    #[test]
+    fn empty_web_search_call_is_failed_in_stream_response() {
+        let request = json!({
+            "model": "gemini-3.8-flash",
+            "tools": [{ "type": "web_search" }]
+        });
+        let chunk = json!({
+            "id": "chatcmpl-search",
+            "model": "gemini-3.8-flash",
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "delta": {
+                    "tool_calls": [{
+                        "index": 0,
+                        "id": "call_search",
+                        "function": { "name": "web_search", "arguments": "{}" }
+                    }]
+                }
+            }]
+        });
+        let mut state = ChatSseState::with_request(&request);
+        let mut stream = String::new();
+        state.handle_chat_chunk_into(&chunk, &mut stream);
+        state.finalize_into(&mut stream);
+        assert!(stream.contains("response.failed"));
+        assert!(!stream.contains("response.completed"));
+    }
+
+    #[test]
+    fn web_search_action_requires_query_or_url() {
+        assert!(!web_search_action_has_target(&json!({ "type": "search" })));
+        assert!(web_search_action_has_target(
+            &json!({ "type": "search", "query": "Codex" })
+        ));
+        assert!(web_search_action_has_target(
+            &web_search_action_from_arguments(r#"{"input":"Codex"}"#)
+        ));
+        assert!(web_search_action_has_target(
+            &json!({ "type": "open_page", "url": "https://example.com" })
+        ));
+    }
+}
+
+/// 供应商自定义请求头必须真正写进发往上游的请求（issue #1685）。
+#[cfg(test)]
+mod relay_custom_header_tests {
+    use super::*;
+    use crate::settings::{RelayHeaderKeyValue, RelayMode, RelayProfile};
+
+    fn header(key: &str, value: &str) -> RelayHeaderKeyValue {
+        RelayHeaderKeyValue {
+            key: key.to_string(),
+            value: value.to_string(),
+        }
+    }
+
+    fn relay_with(headers: Vec<RelayHeaderKeyValue>) -> RelayProfile {
+        RelayProfile {
+            relay_mode: RelayMode::PureApi,
+            api_key: "sk-upstream".to_string(),
+            custom_headers: headers,
+            ..RelayProfile::default()
+        }
+    }
+
+    fn build_upstream_request(relay: &RelayProfile) -> reqwest::Request {
+        upstream_request_builder(
+            reqwest::Client::new(),
+            "http://upstream.example/v1/responses",
+            relay,
+            false,
+            &serde_json::json!({ "model": "m" }),
+            None,
+        )
+        .build()
+        .unwrap()
+    }
+
+    #[test]
+    fn upstream_request_carries_custom_headers() {
+        let request = build_upstream_request(&relay_with(vec![header("X-Tenant", "acme")]));
+        assert_eq!(request.headers().get("x-tenant").unwrap(), "acme");
+        assert_eq!(
+            request.headers().get("authorization").unwrap(),
+            "Bearer sk-upstream"
+        );
+    }
+
+    /// 代理路径与测试连接、模型列表一致：显式 Authorization 优先于 API Key。
+    #[test]
+    fn upstream_request_prefers_custom_authorization() {
+        let request = build_upstream_request(&relay_with(vec![header(
+            "Authorization",
+            "Bearer explicit",
+        )]));
+        assert_eq!(request.headers().get_all("authorization").iter().count(), 1);
+        assert_eq!(
+            request.headers().get("authorization").unwrap(),
+            "Bearer explicit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod compaction_probe_body_limit_tests {
+    use super::*;
+    use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
+
+    #[tokio::test]
+    async fn oversized_content_length_is_rejected_before_body_read() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("x"))
+            .mount(&server)
+            .await;
+
+        let mut response = reqwest::get(server.uri()).await.unwrap();
+        let error = read_limited_upstream_body(&mut response, 0)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("上游响应体超过"));
+    }
+}

@@ -530,3 +530,182 @@ fn base_theme_accepts_equivalent_existing_config_paths() {
         "model='current'\n"
     );
 }
+
+#[test]
+fn base_theme_accepts_an_equivalent_legacy_backup_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex-home");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        "[desktop]\nappearanceTheme = \"dark\"\n",
+    )
+    .unwrap();
+
+    let theme = DreamSkinThemeConfig::default();
+    sync_dream_skin_base_theme_in_home(&home, &state, true, &theme).unwrap();
+    let backup_path = state.join("dream-skin-base-theme-backup.json");
+    let mut backup: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&backup_path).unwrap()).unwrap();
+    backup["configPath"] = serde_json::Value::String(
+        home.join(".")
+            .join("config.toml")
+            .to_string_lossy()
+            .to_string(),
+    );
+    std::fs::write(&backup_path, serde_json::to_vec_pretty(&backup).unwrap()).unwrap();
+
+    sync_dream_skin_base_theme_in_home(&home, &state, false, &theme).unwrap();
+
+    assert!(!backup_path.exists());
+}
+
+#[test]
+fn base_theme_isolates_a_stale_backup_and_creates_one_for_the_current_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex-home");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        "[desktop]\nappearanceTheme = \"dark\"\n",
+    )
+    .unwrap();
+    let stale = serde_json::json!({
+        "schemaVersion": 2,
+        "configPath": temp.path().join("missing-home/config.toml").to_string_lossy(),
+        "desktopExisted": true,
+        "values": { "appearanceTheme": "\"light\"" }
+    });
+    let backup_path = state.join("dream-skin-base-theme-backup.json");
+    std::fs::write(&backup_path, serde_json::to_vec_pretty(&stale).unwrap()).unwrap();
+
+    sync_dream_skin_base_theme_in_home(&home, &state, true, &DreamSkinThemeConfig::default())
+        .unwrap();
+
+    assert!(backup_path.exists());
+    let current: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&backup_path).unwrap()).unwrap();
+    assert_ne!(current["configPath"], stale["configPath"]);
+    let stale_count = std::fs::read_dir(&state)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dream-skin-base-theme-backup.stale-")
+        })
+        .count();
+    assert_eq!(stale_count, 1);
+}
+
+#[test]
+fn base_theme_disable_isolates_a_stale_backup_without_changing_current_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex-home");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&state).unwrap();
+    let current_config = "[desktop]\nappearanceTheme = \"dark\"\n";
+    std::fs::write(home.join("config.toml"), current_config).unwrap();
+    let stale = serde_json::json!({
+        "schemaVersion": 2,
+        "configPath": temp.path().join("missing-home/config.toml").to_string_lossy(),
+        "desktopExisted": true,
+        "values": { "appearanceTheme": "\"light\"" }
+    });
+    let backup_path = state.join("dream-skin-base-theme-backup.json");
+    std::fs::write(&backup_path, serde_json::to_vec_pretty(&stale).unwrap()).unwrap();
+
+    sync_dream_skin_base_theme_in_home(&home, &state, false, &DreamSkinThemeConfig::default())
+        .unwrap();
+
+    assert!(!backup_path.exists());
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        current_config
+    );
+    assert_eq!(
+        std::fs::read_dir(&state)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dream-skin-base-theme-backup.stale-"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn base_theme_rejects_a_backup_for_an_existing_other_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path().join("codex-home");
+    let other_home = temp.path().join("other-home");
+    let state = temp.path().join("state");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&other_home).unwrap();
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::write(home.join("config.toml"), "model = \"current\"\n").unwrap();
+    std::fs::write(other_home.join("config.toml"), "model = \"other\"\n").unwrap();
+    let backup = serde_json::json!({
+        "schemaVersion": 2,
+        "configPath": other_home.join("config.toml").to_string_lossy(),
+        "desktopExisted": false,
+        "values": {}
+    });
+    let backup_path = state.join("dream-skin-base-theme-backup.json");
+    std::fs::write(&backup_path, serde_json::to_vec_pretty(&backup).unwrap()).unwrap();
+
+    let error =
+        sync_dream_skin_base_theme_in_home(&home, &state, true, &DreamSkinThemeConfig::default())
+            .unwrap_err();
+
+    assert!(error.to_string().contains("different config.toml"));
+    assert!(backup_path.exists());
+    assert_eq!(
+        std::fs::read_to_string(home.join("config.toml")).unwrap(),
+        "model = \"current\"\n"
+    );
+}
+
+#[test]
+fn dream_skin_api_bootstrap_marks_parts_without_rescanning_on_streaming() {
+    use alunixa_x_core::assets::injection_script_with_settings;
+
+    let mut settings = BackendSettings::default();
+    settings.codex_app_dream_skin_enabled = true;
+    let script = injection_script_with_settings(57321, &settings);
+    let marker = script
+        .find("data-ds-part")
+        .expect("dream skin bootstrap should mark skin parts");
+    let start = script[..marker]
+        .rfind("(() => {")
+        .expect("dream skin bootstrap IIFE start");
+    let end = script[marker..]
+        .find("})();")
+        .expect("dream skin bootstrap IIFE end")
+        + marker
+        + "})();".len();
+    let bootstrap = &script[start..end];
+
+    assert!(bootstrap.contains("window.__ALUNIXA_X_DREAM_SKIN_API_OBSERVER__"));
+    // 回归 issue #2181：流式输出不能触发皮肤挂载点全量重扫。
+    // 需要防抖、幂等打标，且纯文本节点增删（流式输出的全部形态）被直接跳过。
+    assert!(
+        bootstrap.contains("markTimer"),
+        "mark() should be debounced so streaming cannot trigger it per mutation batch"
+    );
+    assert!(
+        bootstrap.contains("nodeType === 3"),
+        "text-node-only mutation batches should be skipped entirely"
+    );
+    assert!(
+        !bootstrap.contains("MutationObserver(() => mark())"),
+        "observer must filter mutation records before marking"
+    );
+}

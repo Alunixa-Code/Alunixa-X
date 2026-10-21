@@ -407,64 +407,7 @@ struct ModelsRequest {
 }
 
 fn spawn_models_server(payload: serde_json::Value) -> ModelsServer {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    let address = listener.local_addr().unwrap();
-    let base_url = format!("http://{address}");
-    listener
-        .set_nonblocking(true)
-        .expect("listener should switch to nonblocking mode");
-    let models_body = payload.to_string();
-    let handle = thread::spawn(move || {
-        let started = std::time::Instant::now();
-        let mut requests = Vec::new();
-        while requests.is_empty() && started.elapsed() < std::time::Duration::from_secs(2) {
-            let Ok((mut stream, _)) = listener.accept() else {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-                continue;
-            };
-            let mut buffer = [0u8; 4096];
-            let mut read = 0;
-            let read_started = std::time::Instant::now();
-            while read == 0 && read_started.elapsed() < std::time::Duration::from_secs(2) {
-                match stream.read(&mut buffer) {
-                    Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
-                    Ok(bytes) => read = bytes,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(error) => panic!("failed to read test request: {error}"),
-                }
-            }
-            if read == 0 {
-                continue;
-            }
-            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-            let request_path = request
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .unwrap_or_default()
-                .to_string();
-            let authorization = request
-                .lines()
-                .find_map(|line| line.strip_prefix("authorization: "))
-                .unwrap_or_default()
-                .to_string();
-            let (status, body) = (200, models_body.as_str());
-            let response = format!(
-                "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).unwrap();
-            requests.push(ModelsRequest {
-                path: request_path,
-                authorization,
-            });
-        }
-        requests
-    });
-    ModelsServer { base_url, handle }
+    spawn_models_server_with_response(200, payload.to_string())
 }
 
 use alunixa_x_core::model_suffix::collect_catalog_entries;
@@ -498,4 +441,273 @@ fn catalog_entries_strip_suffix_from_row_name_and_look_up_window() {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].slug, "deepseek-v4-pro");
     assert_eq!(entries[0].suffix_window, Some(1_000_000));
+}
+
+#[tokio::test]
+async fn model_catalog_reports_effective_service_tier_from_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = spawn_models_server(json!({
+        "data": [
+            {"id": "qwen3-coder"}
+        ]
+    }));
+    write_config(
+        temp.path(),
+        &format!(
+            r#"
+model = "qwen3-coder"
+model_provider = "relay"
+service_tier = "fast"
+
+[model_providers.relay]
+name = "Relay"
+base_url = "{}"
+experimental_bearer_token = "relay-key"
+"#,
+            server.base_url
+        ),
+    );
+
+    let result = read_codex_model_catalog_from_home(
+        temp.path(),
+        &HashMap::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    )
+    .await;
+
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["service_tier"], "fast");
+    server.finish();
+}
+
+#[tokio::test]
+async fn model_catalog_service_tier_is_null_when_config_does_not_set_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = spawn_models_server(json!({
+        "data": [
+            {"id": "qwen3-coder"}
+        ]
+    }));
+    write_config(
+        temp.path(),
+        &format!(
+            r#"
+model = "qwen3-coder"
+model_provider = "relay"
+
+[model_providers.relay]
+name = "Relay"
+base_url = "{}"
+experimental_bearer_token = "relay-key"
+"#,
+            server.base_url
+        ),
+    );
+
+    let result = read_codex_model_catalog_from_home(
+        temp.path(),
+        &HashMap::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    )
+    .await;
+
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["service_tier"], serde_json::Value::Null);
+    server.finish();
+}
+
+#[tokio::test]
+async fn model_catalog_surfaces_business_error_from_http_200_envelope() {
+    // 智谱 Codex 专属端点（/api/v1）在 key 缺失或无效时返回 HTTP 200 + 业务错误信封，
+    // 之前只认状态码，会被解析成“0 个模型”，真因完全不可见（#2190）。
+    let temp = tempfile::tempdir().unwrap();
+    let server = spawn_models_server_with_response(
+        200,
+        json!({"code": 401, "msg": "令牌已过期或验证不正确", "success": false}).to_string(),
+    );
+    write_config(
+        temp.path(),
+        &format!(
+            r#"
+model = "glm-5.3"
+model_provider = "ZAI"
+
+[model_providers.ZAI]
+name = "ZAI"
+base_url = "{}"
+experimental_bearer_token = "bad-key"
+wire_api = "responses"
+"#,
+            server.base_url
+        ),
+    );
+
+    let result = read_codex_model_catalog_from_home(
+        temp.path(),
+        &HashMap::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    )
+    .await;
+
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["sources"][0]["status"], "failed");
+    assert_eq!(result["sources"][0]["message"], "令牌已过期或验证不正确");
+    assert_eq!(result["models"], json!([]));
+    server.finish();
+}
+
+#[tokio::test]
+async fn model_catalog_appends_upstream_reason_to_http_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = spawn_models_server_with_response(
+        401,
+        json!({
+            "error": {
+                "message": "Incorrect API key provided",
+                "type": "incorrect_api_key_error"
+            }
+        })
+        .to_string(),
+    );
+    write_config(
+        temp.path(),
+        &format!(
+            r#"
+model = "qwen3-coder"
+model_provider = "relay"
+
+[model_providers.relay]
+name = "Relay"
+base_url = "{}"
+experimental_bearer_token = "relay-key"
+"#,
+            server.base_url
+        ),
+    );
+
+    let result = read_codex_model_catalog_from_home(
+        temp.path(),
+        &HashMap::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    )
+    .await;
+
+    assert_eq!(result["status"], "failed");
+    assert_eq!(result["sources"][0]["status"], "failed");
+    let message = result["sources"][0]["message"].as_str().unwrap();
+    assert!(message.starts_with("HTTP 401"), "{message}");
+    assert!(message.contains("Incorrect API key provided"), "{message}");
+    server.finish();
+}
+
+#[tokio::test]
+async fn model_catalog_parses_gemini_style_model_names() {
+    let temp = tempfile::tempdir().unwrap();
+    let server = spawn_models_server(json!({
+        "models": [
+            {"name": "models/gemini-2.5-pro"},
+            {"name": "models/gemini-2.5-flash"}
+        ]
+    }));
+    write_config(
+        temp.path(),
+        &format!(
+            r#"
+model_provider = "gemini"
+
+[model_providers.gemini]
+name = "Gemini"
+base_url = "{}"
+"#,
+            server.base_url
+        ),
+    );
+
+    let result = read_codex_model_catalog_from_home(
+        temp.path(),
+        &HashMap::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+    )
+    .await;
+
+    assert_eq!(result["status"], "ok");
+    assert_eq!(
+        result["models"],
+        json!(["gemini-2.5-pro", "gemini-2.5-flash"])
+    );
+    server.finish();
+}
+
+fn spawn_models_server_with_response(status: u16, body: String) -> ModelsServer {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let base_url = format!("http://{address}");
+    listener
+        .set_nonblocking(true)
+        .expect("listener should switch to nonblocking mode");
+    let models_body = body;
+    let handle = thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut requests = Vec::new();
+        // 接受窗口留足时间：并行跑测试或机器负载高时，客户端连接可能晚到，
+        // 2 秒窗口会造成「connection refused」偶发失败（CI/本地实测）。
+        while requests.is_empty() && started.elapsed() < std::time::Duration::from_secs(30) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            };
+            let mut buffer = [0u8; 4096];
+            let mut read = 0;
+            let read_started = std::time::Instant::now();
+            while read == 0 && read_started.elapsed() < std::time::Duration::from_secs(10) {
+                match stream.read(&mut buffer) {
+                    Ok(0) => std::thread::sleep(std::time::Duration::from_millis(10)),
+                    Ok(bytes) => read = bytes,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("failed to read test request: {error}"),
+                }
+            }
+            if read == 0 {
+                continue;
+            }
+            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let request_path = request
+                .lines()
+                .next()
+                .and_then(|line| line.split_whitespace().nth(1))
+                .unwrap_or_default()
+                .to_string();
+            let authorization = request
+                .lines()
+                .find_map(|line| line.strip_prefix("authorization: "))
+                .unwrap_or_default()
+                .to_string();
+            let response = format!(
+                "HTTP/1.1 {status} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                http_reason(status),
+                models_body.len(),
+                models_body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            requests.push(ModelsRequest {
+                path: request_path,
+                authorization,
+            });
+        }
+        requests
+    });
+    ModelsServer { base_url, handle }
+}
+
+fn http_reason(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        401 => "Unauthorized",
+        403 => "Forbidden",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "Error",
+    }
 }

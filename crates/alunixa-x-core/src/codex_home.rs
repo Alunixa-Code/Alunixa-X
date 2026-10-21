@@ -93,6 +93,133 @@ mod tests {
             assert_eq!(crate::codex_sqlite::default_codex_home_dir(), missing);
         }
     }
+
+    #[test]
+    fn removal_guard_rejects_codex_home_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+        let error = ensure_safe_recursive_removal(&home, &home).unwrap_err();
+        assert!(error.to_string().contains("CODEX_HOME 本身"), "{error}");
+    }
+
+    #[test]
+    fn removal_guard_rejects_ancestors_of_codex_home() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("a").join("b").join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+        for candidate in [
+            temp.path().to_path_buf(),
+            temp.path().join("a"),
+            temp.path().join("a").join("b"),
+        ] {
+            let error = ensure_safe_recursive_removal(&candidate, &home).unwrap_err();
+            assert!(
+                error.to_string().contains("祖先目录"),
+                "{candidate:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn removal_guard_rejects_filesystem_root() {
+        let root = PathBuf::from(std::path::MAIN_SEPARATOR.to_string());
+        let home = root.join("somewhere").join(".codex");
+        let error = ensure_safe_recursive_removal(&root, &home).unwrap_err();
+        assert!(error.to_string().contains("文件系统根"), "{error}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn removal_guard_rejects_windows_root_variants() {
+        let home = Path::new(r"C:\Users\fixture\.codex");
+        for root in [
+            r"C:\",
+            r"D:\",
+            r"\\?\D:\",
+            r"\\server\share\",
+            r"\\?\UNC\server\share\",
+        ] {
+            let error = ensure_safe_recursive_removal(Path::new(root), home).unwrap_err();
+            assert!(error.to_string().contains("文件系统根"), "{root}: {error}");
+        }
+    }
+
+    #[test]
+    fn filesystem_root_detection_preserves_non_root_paths() {
+        assert!(is_filesystem_root(Path::new("/")));
+        for path in ["", ".", "..", "child", "/child"] {
+            assert!(!is_filesystem_root(Path::new(path)), "{path}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn filesystem_root_detection_handles_windows_prefixes() {
+        for path in [
+            r"C:\",
+            r"Z:\",
+            r"\\?\C:\",
+            r"\\server\share",
+            r"\\server\share\",
+            r"\\?\UNC\server\share\",
+        ] {
+            assert!(is_filesystem_root(Path::new(path)), "{path}");
+        }
+        for path in [
+            "C:",
+            r"C:\child",
+            r"\\?\C:\child",
+            r"\\server\share\child",
+            r"\\?\UNC\server\share\child",
+        ] {
+            assert!(!is_filesystem_root(Path::new(path)), "{path}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn root_normalization_does_not_add_a_verbatim_prefix() {
+        let root = Path::new(r"C:\");
+        assert_eq!(normalize_for_comparison(root), root);
+    }
+
+    #[test]
+    fn removal_guard_allows_normal_children() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+        for candidate in [
+            home.join("backups_state").join("provider-sync"),
+            home.join("model-catalogs"),
+            home.join("skills").join("fixture"),
+        ] {
+            std::fs::create_dir_all(&candidate).unwrap();
+            ensure_safe_recursive_removal(&candidate, &home).unwrap();
+        }
+        let outside = temp.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        ensure_safe_recursive_removal(&outside, &home).unwrap();
+    }
+
+    #[test]
+    fn removal_guard_sees_through_traversal_and_trailing_slash() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+        assert!(ensure_safe_recursive_removal(&home.join(".."), &home).is_err());
+        let mut with_slash = home.clone().into_os_string();
+        with_slash.push("/");
+        assert!(ensure_safe_recursive_removal(Path::new(&with_slash), &home).is_err());
+    }
+
+    #[test]
+    fn removal_guard_handles_nonexistent_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("not-yet").join(".codex");
+        assert!(ensure_safe_recursive_removal(temp.path(), &home).is_err());
+        assert!(ensure_safe_recursive_removal(&home, &home).is_err());
+    }
 }
 
 pub fn ensure_safe_recursive_removal(target: &Path, codex_home: &Path) -> anyhow::Result<()> {

@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.46：同步上游 v1.5.0 至 v1.10.0 非广告更新
+
+同步供应商命名 Key、本机配置快照、模型聚合、外部 Agent 协作、Skills 仓库、会话分页与备份、用量状态栏、Claude 与多开兼容等更新，补齐协议压缩、原始补丁和媒体启动修复。保留高级逐模型五协议/上下文/压缩、完整增强、独立 Anthropic 转换、独立生图和俄语，不导入广告。详见[三语发行说明](docs/releases/v1.0.46.md)和[范围与验证记录](docs/reports/2026-10-21-upstream-v110-sync.md)。
+
 ## v1.0.45：PR #1、macOS DMG 与静态契约修复
 
 交付 Fast 控件优化、macOS x64 DMG detach 修复和隐藏应用静态测试迁移；v1.0.43/v1.0.44 候选未发布，详见 [v1.0.45 说明](docs/releases/v1.0.45.md)。

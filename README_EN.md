@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.46: Non-advertising upstream v1.5.0 to v1.10.0 updates
+
+Integrates named provider keys, local configuration snapshots, model aggregation, external agent collaboration, Skills repositories, session paging/backups, usage status, Claude and multi-instance fixes, plus strict compaction, raw patch inputs and media startup fixes. Preserves advanced per-model protocols/context/compaction, all restored enhancements, independent Anthropic conversion, image-generation profiles and Russian. See the [release notes](docs/releases/v1.0.46.md) and [scope and verification record](docs/reports/2026-10-21-upstream-v110-sync.md).
+
 ## v1.0.45: PR #1, macOS DMG, and contract fixes
 
 Ships Fast-control hardening, the macOS x64 DMG detach fix, and the hidden-app contract migration. The v1.0.43/v1.0.44 candidates were not published; see [release notes](docs/releases/v1.0.45.md).

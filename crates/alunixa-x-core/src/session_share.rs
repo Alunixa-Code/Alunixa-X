@@ -51,8 +51,9 @@ pub fn clear_pending_session_share() -> anyhow::Result<()> {
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error)
-            .with_context(|| format!("清理待导入会话链接失败：{}", path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("清理待导入会话链接失败：{}", path.display()))
+        }
     }
 }
 
@@ -63,12 +64,12 @@ pub async fn import_shared_session_url(home: &Path, url: &str) -> anyhow::Result
         .find(|(key, _)| key == "s")
         .map(|(_, value)| value.into_owned())
         .or_else(|| {
-            parsed
-                .path_segments()
-                .and_then(|mut segments| match (segments.next(), segments.next()) {
+            parsed.path_segments().and_then(|mut segments| {
+                match (segments.next(), segments.next()) {
                     (Some("s"), Some(id)) => Some(id.to_string()),
                     _ => None,
-                })
+                }
+            })
         })
         .filter(|id| (20..=32).contains(&id.len()))
         .context("分享链接缺少有效的会话 ID")?;
@@ -85,16 +86,10 @@ pub async fn import_shared_session_url(home: &Path, url: &str) -> anyhow::Result
         .json::<Value>()
         .await
         .context("分享会话响应格式无效")?;
-    let encrypted = record
-        .get("encrypted")
-        .context("分享会话缺少加密内容")?;
+    let encrypted = record.get("encrypted").context("分享会话缺少加密内容")?;
     let key_value = parsed
         .fragment()
-        .and_then(|fragment| {
-            fragment
-                .split('&')
-                .find_map(|pair| pair.strip_prefix("k="))
-        })
+        .and_then(|fragment| fragment.split('&').find_map(|pair| pair.strip_prefix("k=")))
         .context("分享链接缺少解密密钥")?;
     let plaintext = decrypt_shared_payload(encrypted, key_value)?;
     let payload: Value = serde_json::from_slice(&plaintext).context("分享会话内容格式无效")?;
@@ -106,7 +101,11 @@ pub async fn import_shared_session_url(home: &Path, url: &str) -> anyhow::Result
 
 fn validate_share_url(url: &str) -> anyhow::Result<reqwest::Url> {
     let parsed = reqwest::Url::parse(url.trim()).context("分享 URL 格式无效")?;
-    if parsed.scheme() != "https" || !parsed.host_str().is_some_and(|host| SHARE_HOSTS.contains(&host)) {
+    if parsed.scheme() != "https"
+        || !parsed
+            .host_str()
+            .is_some_and(|host| SHARE_HOSTS.contains(&host))
+    {
         bail!("仅支持 Alunixa X 分享站点链接");
     }
     if parsed.fragment().is_none() {
