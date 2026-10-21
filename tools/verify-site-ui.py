@@ -1,6 +1,7 @@
 """Verify the static site without contacting live APIs or changing application state."""
 import json
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -51,9 +52,20 @@ with sync_playwright() as playwright:
                     box = page.locator(".screenshot-track").bounding_box()
                     assert abs(box["height"] - dimensions["height"]) <= 1, "gallery height shifted"
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "horizontal overflow"
+                assert page.locator(".skip-link").evaluate(
+                    "node => node === document.activeElement || node.getBoundingClientRect().bottom <= 0"
+                ), "unfocused skip link covers page content under reduced motion"
                 expect(controls.nth(1)).to_have_text(
                     "Advanced model configuration" if language == "en" else "高级多模型配置")
                 page.locator("#showcase").screenshot(path=str(OUTPUT / f"gallery-{width}-{language}.png"))
+        for element in page.locator('img[src],script[src],link[rel="stylesheet"]').all():
+            resource = element.get_attribute("src") or element.get_attribute("href")
+            parsed = urlparse(resource)
+            if parsed.scheme or not parsed.path:
+                continue
+            resource_path = (ROOT / "docs" / unquote(parsed.path)).resolve()
+            assert resource_path.is_relative_to(ROOT / "docs"), "asset outside the deployed docs tree"
+            assert resource_path.is_file(), f"missing published asset: {resource}"
         assert not errors, errors
         assert not any("Ad-List" in url or "/sponsors.json" in url for url in requests), requests
         page.close()

@@ -2446,13 +2446,6 @@ fn session_index_cleanup_write_failure_reports_backup_and_preserves_original() {
     );
 }
 
-use alunixa_x_data::{
-    ProviderSyncProgressPhase, run_provider_sync_with_target_and_progress,
-    validate_provider_sync_target,
-};
-
-use std::time::Instant;
-
 fn write_provider_config(home: &Path, provider: &str) {
     write_configured_provider_fixture(home, provider, &[]);
 }
@@ -2995,7 +2988,10 @@ fn provider_sync_reports_rollback_when_rewrite_write_fails() {
     write_rollout(&first_rollout, "openai", "thread-a", "C:/workspace");
     write_rollout(&blocked_rollout, "openai", "thread-b", "C:/workspace");
     let original_first_rollout = fs::read(&first_rollout).unwrap();
-    fs::create_dir(blocked_rollout.with_extension("jsonl.tmp")).unwrap();
+    let original_blocked_rollout = fs::read(&blocked_rollout).unwrap();
+    let mut permissions = fs::metadata(&blocked_rollout).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&blocked_rollout, permissions).unwrap();
     let mut progress = Vec::new();
 
     let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
@@ -3004,6 +3000,10 @@ fn provider_sync_reports_rollback_when_rewrite_write_fails() {
 
     assert_eq!(result.status, ProviderSyncStatus::Failed);
     assert_eq!(fs::read(&first_rollout).unwrap(), original_first_rollout);
+    assert_eq!(
+        fs::read(&blocked_rollout).unwrap(),
+        original_blocked_rollout
+    );
     assert!(
         progress
             .iter()
@@ -3078,6 +3078,8 @@ fn provider_sync_skips_rollout_locked_after_planning() {
     write_provider_config(&home, "apigather");
     let rollout = home.join("sessions/rollout-locked.jsonl");
     write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let writable = home.join("sessions/rollout-writable.jsonl");
+    write_rollout(&writable, "openai", "thread-2", "C:/workspace");
     let original_rollout = fs::read(&rollout).unwrap();
     let mut held_rollout: Option<fs::File> = None;
 
@@ -3095,9 +3097,14 @@ fn provider_sync_skips_rollout_locked_after_planning() {
 
     assert!(held_rollout.is_some());
     drop(held_rollout);
-    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.status, ProviderSyncStatus::Synced, "{result:?}");
+    assert_eq!(result.changed_session_files, 1);
     assert!(result.skipped_locked_rollout_files.contains(&rollout));
     assert_eq!(fs::read(&rollout).unwrap(), original_rollout);
+    let writable = fs::read_to_string(&writable).unwrap();
+    let metadata: serde_json::Value =
+        serde_json::from_str(writable.lines().next().unwrap()).unwrap();
+    assert_eq!(metadata["payload"]["model_provider"], "apigather");
 }
 
 #[test]

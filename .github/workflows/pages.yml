@@ -25,15 +25,29 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check Pages configuration
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/$GITHUB_REPOSITORY/pages" --silent; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "GitHub Pages is not configured for this repository; site validation still runs."
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Validate site
         run: node --test docs/site.test.cjs
       - uses: actions/configure-pages@v5
+        if: steps.pages.outputs.configured == 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outputs.configured == 'true'
         with:
           path: docs
       - name: Deploy
         id: deployment
+        if: steps.pages.outputs.configured == 'true'
         uses: actions/deploy-pages@v4

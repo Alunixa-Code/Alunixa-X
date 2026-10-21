@@ -74,18 +74,17 @@ button {
 
 .skip-link {
   position: fixed;
-  top: 10px;
+  top: -80px;
   left: 10px;
   z-index: 1000;
   padding: 9px 14px;
   background: var(--white);
   color: var(--ink);
   border-radius: 4px;
-  transform: translateY(-160%);
 }
 
 .skip-link:focus {
-  transform: translateY(0);
+  top: 10px;
 }
 
 .site-header {

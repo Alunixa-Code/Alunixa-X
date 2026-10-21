@@ -18,8 +18,7 @@
     "development-history-not-runtime": 76,
     "documentation-adapted": 3,
     "generated-from-merged-fragments": 1,
-    "mapped-upstream-integration": 26,
-    "merged-with-ax-contract": 171,
+    "merged-with-ax-contract": 197,
     "owner-domain-not-imported": 1,
     "owner-metadata-adapted": 29,
     "presentation-replaced": 15,
@@ -397,10 +396,11 @@
       "upstreamGitBlob": "8c437781ed925f28f4fe8303a1e0498d2b071dda",
       "upstreamMappedSha256": "cf8abd821868833253304e878fcfd9764267dbf1fb75948ad1c2bb1578e01d70",
       "localSha256": "efd24f4c60ab1d8326664e2b35d608d88d58fda26ae57ff431110ec1cbd52b40",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Retain AX line-ending and binary declarations so generated assets, snapshots and test fixtures preserve their required encoding across Windows and macOS.",
       "verification": [
-        "full regression and scope audit"
+        "diff/assembly checks",
+        "cross-platform checkout tests"
       ]
     },
     {
@@ -501,7 +501,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "45a76043c4fb00bf8b4520912a6e1c0c380e49d9",
       "upstreamMappedSha256": "a78f8afd52fcddb3164ed1da82af2f505071b3cc29e820945f454f0cbd74375b",
-      "localSha256": "005ee38d029c2d8114ede41931c7bb1a886528e6e0ad7dc6888263c3afb706a3",
+      "localSha256": "454eec5ef5104d72461f963a33bcd679857596117d4c42f730478f1665d1f425",
       "disposition": "owner-metadata-adapted",
       "rationale": "Use AX repository identity, version 1.0.46, AGPL/MIT notices, existing locked dependencies and full three-platform release gates; Pages workflow deploys the adapted docs tree.",
       "verification": [
@@ -591,7 +591,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "f7c4f4cb1191ad73f79e53456c73621eda2cad71",
       "upstreamMappedSha256": "1458a7bf746cfc76bfe04ed2ff22a888eb50288eeaa8edc0ce271786ddefdda3",
-      "localSha256": "df58bf3a88a772351462809a661fc95c0904e3953797db5a09a018a9c4169b8e",
+      "localSha256": "1550ff707ba1449dc6f40806386ce43585e50133708a828a4c8d9a30fd59bf3a",
       "disposition": "owner-metadata-adapted",
       "rationale": "Use AX repository identity, version 1.0.46, AGPL/MIT notices, existing locked dependencies and full three-platform release gates; Pages workflow deploys the adapted docs tree.",
       "verification": [
@@ -788,10 +788,10 @@
       "upstreamGitBlob": "b5752a2297b72e0a0606ffadee83a331abfdb439",
       "upstreamMappedSha256": "5bc1170ee15c273b755d96f262638977f7bb918ef4f6d5020194dcdf28e13b77",
       "localSha256": "9c245ebe455e2358758db5c8466d13bdefcbbbeadf86a7fb8ff4b2eaad8518a5",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry upstream launch/worker dispatch while retaining AX executable identity, Windows GUI subsystem and restored shared-terminal hook dispatch; do not alter the running application during verification.",
       "verification": [
-        "full regression and scope audit"
+        "Rust launcher/worker/hook/platform suites"
       ]
     },
     {
@@ -912,10 +912,11 @@
       "upstreamGitBlob": "ff2a71ea31cbb464b9954e1d82805c7d10aa2199",
       "upstreamMappedSha256": "dafaa7c7abdc1a77ccaaa94888d9f51c515d1416d08a2515257755cc0b1a5ef8",
       "localSha256": "6bcf15637b65d1566098299815d551926a3003cd08086f2ef179815fa532a650",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Keep the AX window/capability identifier rather than importing an upstream owner identity; existing Tauri command and dialog permissions remain scoped to the manager.",
       "verification": [
-        "full regression and scope audit"
+        "Rust platform/capability contracts",
+        "production manager fixture"
       ]
     },
     {
@@ -958,10 +959,10 @@
       "upstreamMappedSha256": "6edbcef52931d39aa0311c0ca0777e855cd42ba3a8385b26f541ce036a87d52f",
       "localSha256": "5ddf18ebce1e997ac53c1cde87eba93a14a47a7c7f48af6b5f7ef508d71180e9",
       "disposition": "merged-with-ax-contract",
-      "rationale": "Integrate external-agent/native CLI reuse, local voice and Claude/MSIX compatibility, Skills repository lifecycle and worker isolation; opt-in boundaries and AX state isolation remain intact.",
+      "rationale": "Integrate provider snapshots/keys, aggregate auth, Skills, MCP and collaboration commands with real producer/consumer registration; retain AX guarded save/apply, account/project/usage commands and process-local startup behavior.",
       "verification": [
-        "Rust collaboration/Skills/Claude/worker suites",
-        "production collaboration/Skills UI"
+        "Rust manager command/platform suites",
+        "production manager UI"
       ]
     },
     {
@@ -974,10 +975,10 @@
       "upstreamMappedSha256": "fe5d357b39d3c2096bc6a626ed90c05560828dd630c7a2bfb06316ec16ab1407",
       "localSha256": "197ce3dcbae1f43650db31ac298294731e2db766dbf9bbb19513a2d9b65046ed",
       "disposition": "merged-with-ax-contract",
-      "rationale": "Integrate native Fast, bounded initialization/recovery, proxy and isolated-instance fixes; retain AX startup authentication, full image/animation/video runtime and post-launch degraded survival.",
+      "rationale": "Integrate provider snapshots/keys, aggregate auth, Skills, MCP and collaboration commands with real producer/consumer registration; retain AX guarded save/apply, account/project/usage commands and process-local startup behavior.",
       "verification": [
-        "Rust startup/launcher/CDP/bridge suites",
-        "Electron production media and pixel tests"
+        "Rust manager command/platform suites",
+        "production manager UI"
       ]
     },
     {
@@ -989,10 +990,11 @@
       "upstreamGitBlob": "ddfc592d9aed2f9c7ee5aa99f0f645fe37e9c42c",
       "upstreamMappedSha256": "62cabc12623cef1ddab1b4debad0bbcbbb24dd69c56d16ecd04cc3d4a33ecbb5",
       "localSha256": "39fea5fbfcb294d65841462a9018720c5ebb1769fb77e942705e61072389c566",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate provider snapshots/keys, aggregate auth, Skills, MCP and collaboration commands with real producer/consumer registration; retain AX guarded save/apply, account/project/usage commands and process-local startup behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust manager command/platform suites",
+        "production manager UI"
       ]
     },
     {
@@ -1036,10 +1038,11 @@
       "upstreamGitBlob": "07699797cc35782330089003232c1cb38280face",
       "upstreamMappedSha256": "85d4190f776b56f24a0cfe42af792084d516e475a227c83e457ff74740c79cf1",
       "localSha256": "65e87dc3375f050d71a9d9a5c360aecafde719e420688bb4b40b7321c5f13278",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate provider snapshots/keys, aggregate auth, Skills, MCP and collaboration commands with real producer/consumer registration; retain AX guarded save/apply, account/project/usage commands and process-local startup behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust manager command/platform suites",
+        "production manager UI"
       ]
     },
     {
@@ -1051,10 +1054,11 @@
       "upstreamGitBlob": "e7c858e118a60638bd79eff9fc229a235ec5fb58",
       "upstreamMappedSha256": "19b781b0491fecf0a0e9a5b0b826660852009b24f7e8f9dd1ba3d928cfc8d8a7",
       "localSha256": "fa7f5611aeaed547cf3b0d597b713cc1535b526d07b026cea133281c94f1e361",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate provider snapshots/keys, aggregate auth, Skills, MCP and collaboration commands with real producer/consumer registration; retain AX guarded save/apply, account/project/usage commands and process-local startup behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust manager command/platform suites",
+        "production manager UI"
       ]
     },
     {
@@ -3518,10 +3522,11 @@
       "upstreamGitBlob": "a122c0ca9ce476445897219a46f8c337346ff963",
       "upstreamMappedSha256": "4efcd8fc366aa3a427d82486a9acbf6ccca7ebda3d173509365842d36932fc3c",
       "localSha256": "beb0a3c56e0fa84e7eeded6f7c2a9e55ff293de24af062cb5244ccba40216333",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry native Windows Claude/MSIX copy and localization changes with AX names, supported executable lookup and no WSL dependency.",
       "verification": [
-        "full regression and scope audit"
+        "Rust Claude/localization structural suites",
+        "PowerShell build-script contracts"
       ]
     },
     {
@@ -3629,10 +3634,11 @@
       "upstreamGitBlob": "404c94c330ad7b5d4542ba090f099e1744d8270d",
       "upstreamMappedSha256": "d283eb53569faa476d89d1b359649b17117c410a16507b39a99253eb699b63f6",
       "localSha256": "23fcf57689df8eee3c383c39566cd104b4a9af94ced1656a1aa6f53ec02dd7f4",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry native Windows Claude/MSIX copy and localization changes with AX names, supported executable lookup and no WSL dependency.",
       "verification": [
-        "full regression and scope audit"
+        "Rust Claude/localization structural suites",
+        "PowerShell build-script contracts"
       ]
     },
     {
@@ -6158,10 +6164,10 @@
       "upstreamGitBlob": "9066640906849827705a0b543ca3a5abbe9fe72d",
       "upstreamMappedSha256": "703e11295c0dadb904c39969cfe580a68c92a008964460ebb2c4a655a1077335",
       "localSha256": "0a7278de551774c4fcab950c8c73909231d5c0a74354f321f027007ffda214a2",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Keep the upstream executable example with AX crate/binary names and supported current interfaces; examples are compiled, not run against the user's application during the sync.",
       "verification": [
-        "full regression and scope audit"
+        "Rust all-target compilation"
       ]
     },
     {
@@ -6173,10 +6179,10 @@
       "upstreamGitBlob": "bcd90a04d6aaa420e8bce17a458d4c1c59952478",
       "upstreamMappedSha256": "593c291d3a6e2a81b3ae99c7e533bcdbeb612173113bace2945a9c7148250564",
       "localSha256": "0bdcc5c0d3a71a03abfbd5aec4e145184932ab35c50d79801cf4238b8f0a6fc8",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Keep the upstream executable example with AX crate/binary names and supported current interfaces; examples are compiled, not run against the user's application during the sync.",
       "verification": [
-        "full regression and scope audit"
+        "Rust all-target compilation"
       ]
     },
     {
@@ -6204,10 +6210,10 @@
       "upstreamGitBlob": "2ddab11625bf60b8c81950db0d0c9cc949e22b0a",
       "upstreamMappedSha256": "fcb561d766aa027f65598bb0057185f2fc4e4b02d121f23ff2ba349ece614e74",
       "localSha256": "5bab321b3cb056be83960b297c6449c4b6bf73cf8b6edda74db6798038746fbb",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Keep the upstream executable example with AX crate/binary names and supported current interfaces; examples are compiled, not run against the user's application during the sync.",
       "verification": [
-        "full regression and scope audit"
+        "Rust all-target compilation"
       ]
     },
     {
@@ -6219,10 +6225,10 @@
       "upstreamGitBlob": "746cc56f507a9cdba5b610afc5b9d8b0f8f04348",
       "upstreamMappedSha256": "0da5b5d2a365684475df553625d69543e1661a1d217395075cadef84f4368a60",
       "localSha256": "5b50c5b13ea1d0c445733312c405bdfcd1d42766acf59d07c216af3c71051a86",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Keep the upstream executable example with AX crate/binary names and supported current interfaces; examples are compiled, not run against the user's application during the sync.",
       "verification": [
-        "full regression and scope audit"
+        "Rust all-target compilation"
       ]
     },
     {
@@ -6473,10 +6479,10 @@
       "upstreamGitBlob": "764e7a0493f570206c1f061627196de00a13c3fb",
       "upstreamMappedSha256": "5f2ac1287dbcdef1eec17db8a5dcfb24490f2933268864ac50d9175d99c1454f",
       "localSha256": "344084edf2b2ebfff6e58281275025162eec8a0b25860f2fcd11c79bb877bb90",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry import, environment, auth/custom-header and routing fixes; preserve AX protocol extensions, stable identities, session-header deduplication and profile validation instead of overwriting user-owned fields.",
       "verification": [
-        "full regression and scope audit"
+        "Rust import/relay/rotation/environment/header suites"
       ]
     },
     {
@@ -6535,10 +6541,10 @@
       "upstreamGitBlob": "1492b135a0c9edb129128b62adebe6b2919b3c58",
       "upstreamMappedSha256": "966174ac84562610e1feba781b9cb5e29ed248bf1352e44427c51d5d68fcf997",
       "localSha256": "60cc9c741661e387258bae035b40e57f870603049c569d2122cb5b662e936e6e",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry login snapshots, native-state and watcher fixes; retain AX cold-start custom-model API authentication, targeted writes and bounded background index work.",
       "verification": [
-        "full regression and scope audit"
+        "Rust startup/auth/state/watcher suites"
       ]
     },
     {
@@ -6822,10 +6828,11 @@
       "upstreamGitBlob": "f5b11053071c580d334750bd013f014ca209a196",
       "upstreamMappedSha256": "82f943af083dcf95d84fbd708452eb15df90835225ac6948c247a15dc3bf657a",
       "localSha256": "4bb101db773953a45549db006837a2126d04388ff6bb845cb4dca8f7c22b6383",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate real helper/CDP/MCP/agent routes and bounded HTTP handling while retaining AX media, shared-terminal, strict local-only proxy and guarded settings contracts.",
       "verification": [
-        "full regression and scope audit"
+        "Rust route/bridge/proxy/HTTP suites",
+        "production renderer fixtures"
       ]
     },
     {
@@ -6904,10 +6911,10 @@
       "upstreamGitBlob": "ccec938b0c77c5882ae2dea32565db2647ab5d0d",
       "upstreamMappedSha256": "b3f8cf508c6555f47386d7f881d3e405f63737b0ee8a4d5a5b6e604552f6c61f",
       "localSha256": "8dc584d4750a2c184c67a3ab6ea8b7045230894c4f6e49c2a402a010b71518ba",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Export complete non-advertising upstream modules together with AX media, configuration transactions and restored feature modules; no module export automatically invokes network services.",
       "verification": [
-        "full regression and scope audit"
+        "Rust full workspace"
       ]
     },
     {
@@ -6919,10 +6926,11 @@
       "upstreamGitBlob": "f2245521003b36a4bb0dc2ae2bc345a6da271b03",
       "upstreamMappedSha256": "1a2bc1226480476de06532a29b3cf6c553d6f2256aaaecef710d5f10e87061bf",
       "localSha256": "30e9879b602d4ced0a9f73bedf38ffa3edefa9a7c450c8302eedd3951a5b9644",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry navigation, extension CDP and vision changes; keep restored AX pages, strict command/source boundaries, response content and credential redaction behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust navigation/market/vision suites",
+        "Node extension contracts"
       ]
     },
     {
@@ -7076,10 +7084,10 @@
       "upstreamGitBlob": "77aaf44861f081c564bd757afe34129308758586",
       "upstreamMappedSha256": "8c0caf67d88c8fd706348dd19acda8c0e6f9e1c3cd4ff56f5740165548ef0c07",
       "localSha256": "649d2ffbe06b37dd70ab37f64c0a63982622591b6376cb85f014c8e44bec52b2",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry login snapshots, native-state and watcher fixes; retain AX cold-start custom-model API authentication, targeted writes and bounded background index work.",
       "verification": [
-        "full regression and scope audit"
+        "Rust startup/auth/state/watcher suites"
       ]
     },
     {
@@ -7123,10 +7131,11 @@
       "upstreamGitBlob": "b9f563ddc823195a1aee2be526930847e9bd7f38",
       "upstreamMappedSha256": "e8ca265479a5ee0317ba4754ad68bfc4c9ee320aaf9161a087378130aabc213a",
       "localSha256": "7e17829f48e5660c9c103983a2a42bc3921f61c673017672b19a9f49eed1e9ff",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry navigation, extension CDP and vision changes; keep restored AX pages, strict command/source boundaries, response content and credential redaction behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust navigation/market/vision suites",
+        "Node extension contracts"
       ]
     },
     {
@@ -7169,7 +7178,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "07e516178ee19bc5687ed9f66c05b2d9040de943",
       "upstreamMappedSha256": "841da869a3cf55e82673536862162d01a9a23757bcbad85903abd645e51eec9e",
-      "localSha256": "e3bb6a49caa0951669c5b4b96a92ab10def0fb03cd3d83cea377e7be696e44e6",
+      "localSha256": "d196d7cb3828ce92f0cfc0386c32936aa297789b1340e7f886848e6e75bc7732",
       "disposition": "merged-with-ax-contract",
       "rationale": "Merge native route/auth/cache/thinking/1M, plaintext agent payloads, original patch input, bounded exec negotiation and strict compaction; retain independent CC Switch-derived Anthropic and AX fidelity validation instead of lossy fallbacks.",
       "verification": [
@@ -7185,10 +7194,10 @@
       "upstreamGitBlob": "e6d080f38d720c9fa9b0e0a3d80ac3e5f47dea2d",
       "upstreamMappedSha256": "d23c62873b32b50a1dc788e6d5a425652a49206b6603323edd5bd8305bd341a0",
       "localSha256": "f8eaee1db3d9a993fb87da74c20f388335292f74fd7b1854cc1f2f9e4ab97f3c",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry import, environment, auth/custom-header and routing fixes; preserve AX protocol extensions, stable identities, session-header deduplication and profile validation instead of overwriting user-owned fields.",
       "verification": [
-        "full regression and scope audit"
+        "Rust import/relay/rotation/environment/header suites"
       ]
     },
     {
@@ -7200,10 +7209,11 @@
       "upstreamGitBlob": "96493e87fc3acf8985ac636dd272ac4b7a212295",
       "upstreamMappedSha256": "6a7f9d2f870ce52fb7ae03c5a8569515fb1d4bc2abe20d6aecdec66ca24c0cad",
       "localSha256": "b49cdb96dda57c2e574bb322d35ad8b93d7636932743380b72c481413452a152",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate real helper/CDP/MCP/agent routes and bounded HTTP handling while retaining AX media, shared-terminal, strict local-only proxy and guarded settings contracts.",
       "verification": [
-        "full regression and scope audit"
+        "Rust route/bridge/proxy/HTTP suites",
+        "production renderer fixtures"
       ]
     },
     {
@@ -7247,10 +7257,10 @@
       "upstreamGitBlob": "440b9d53285a45b7abc59f4d77b6677fd4d3cd6d",
       "upstreamMappedSha256": "47e4b32a5a08fc67cca506e05e24e7f3b41b3ce3b0daaa7160ba4536cbba5d82",
       "localSha256": "06c3b7c4bacb53d7498744c0348b90b4d975dc9d7f9d6b45aa52f8d98215689b",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry import, environment, auth/custom-header and routing fixes; preserve AX protocol extensions, stable identities, session-header deduplication and profile validation instead of overwriting user-owned fields.",
       "verification": [
-        "full regression and scope audit"
+        "Rust import/relay/rotation/environment/header suites"
       ]
     },
     {
@@ -7262,10 +7272,10 @@
       "upstreamGitBlob": "82fac16c2fd7a9a0ce3f6479cd6a7622bc72b6b0",
       "upstreamMappedSha256": "dd72daebdf76f215be97557f32a37f58d674b254a54fef24f270621d9d2bcc0f",
       "localSha256": "0ecff5a780b512a57d2ef601536519bae6bd744f2b949714792f3b5d4029e4d8",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry import, environment, auth/custom-header and routing fixes; preserve AX protocol extensions, stable identities, session-header deduplication and profile validation instead of overwriting user-owned fields.",
       "verification": [
-        "full regression and scope audit"
+        "Rust import/relay/rotation/environment/header suites"
       ]
     },
     {
@@ -7357,10 +7367,11 @@
       "upstreamGitBlob": "2ddcf48189ec3c27d511cc83855156b2c39f172e",
       "upstreamMappedSha256": "d20983eb8cd3f6f868ecd55a7885e238b8dbce320e265d4d26b22809b99588e9",
       "localSha256": "975fb2fad9994588a2ce6ea677a427285f7b8e773cef75e7960162c335904a79",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Integrate real helper/CDP/MCP/agent routes and bounded HTTP handling while retaining AX media, shared-terminal, strict local-only proxy and guarded settings contracts.",
       "verification": [
-        "full regression and scope audit"
+        "Rust route/bridge/proxy/HTTP suites",
+        "production renderer fixtures"
       ]
     },
     {
@@ -7710,10 +7721,11 @@
       "upstreamGitBlob": "38d7a416e0c24cc95e7f8b4e836534cbab69b089",
       "upstreamMappedSha256": "8ef35879a8f0d54ea497c6c80a4d29a087c77a529d082387b80c126f198f39f2",
       "localSha256": "05b76c6b802f9f3b94e3aab8f6cdac1a0b5a1ee58ef13ed15e9bf307f8c038ab",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry navigation, extension CDP and vision changes; keep restored AX pages, strict command/source boundaries, response content and credential redaction behavior.",
       "verification": [
-        "full regression and scope audit"
+        "Rust navigation/market/vision suites",
+        "Node extension contracts"
       ]
     },
     {
@@ -7725,10 +7737,10 @@
       "upstreamGitBlob": "af1bf2d7a8227790134efd42bcc8fb52b5d83b50",
       "upstreamMappedSha256": "fdc34729bf675b65ed6fe22995a21b652ee852a0b5aeb86e1a191c3eb9d270fe",
       "localSha256": "080204764ccda29c4c80cdef54dc50f9ecc9d207d012fa0fa6c8447400183810",
-      "disposition": "mapped-upstream-integration",
-      "rationale": "Carry the complete fixed upstream implementation with AX naming/formatting and existing compatibility; no advertising behavior is introduced.",
+      "disposition": "merged-with-ax-contract",
+      "rationale": "Carry login snapshots, native-state and watcher fixes; retain AX cold-start custom-model API authentication, targeted writes and bounded background index work.",
       "verification": [
-        "full regression and scope audit"
+        "Rust startup/auth/state/watcher suites"
       ]
     },
     {
@@ -9100,9 +9112,9 @@
       "upstreamMappedSha256": "2d08fecdd949d2d3b8bf56b37b3ee673e3beb3196e764051173bfd5f7e1e9b14",
       "localSha256": "6adbd70e1da603adc4fb0e0b4672f544db968df43ffc56d7235608bfb11dce51",
       "disposition": "merged-with-ax-contract",
-      "rationale": "Integrate streaming backups, journals, paged reads, provider validation and catalog eligibility; retain AX session-index ownership, tombstones, partial-failure reporting and all-manifest restore preflight.",
+      "rationale": "Export complete non-advertising upstream modules together with AX media, configuration transactions and restored feature modules; no module export automatically invokes network services.",
       "verification": [
-        "Rust data library, provider sync, storage, paging and safety suites"
+        "Rust full workspace"
       ]
     },
     {
@@ -9129,7 +9141,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "a324a4e949cae1061c978a7e25677fd8a8e9b6b0",
       "upstreamMappedSha256": "bb079019146d6d913fbc420787ebb4e7bf79feb04d424dd86d5e5c4b2fba6873",
-      "localSha256": "e6212d50f7ea1f9a46954aff1514db842c17b4dd059e1cdeeb6e8739bf19aabd",
+      "localSha256": "c43aaff80b1209dae71b27961ae07b2226e6a7048d543035cfa917a2b2148777",
       "disposition": "merged-with-ax-contract",
       "rationale": "Integrate streaming backups, journals, paged reads, provider validation and catalog eligibility; retain AX session-index ownership, tombstones, partial-failure reporting and all-manifest restore preflight.",
       "verification": [
@@ -9300,7 +9312,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "d0602119ea263c62a98f9c667cbf958b30d79c88",
       "upstreamMappedSha256": "ee02a966b070e40da7b5c324575a7463cc5b4b0918a0786adfbdc8432d669e31",
-      "localSha256": "da2af53d7783ad6a2d6e22cd8fd5dec902b01f907942de419969b631ccd13b2d",
+      "localSha256": "419b2305aa856b50474020683f45cefc6052af3951919306dcacd79343f4e85c",
       "disposition": "merged-with-ax-contract",
       "rationale": "Carry upstream regressions and adapt expected contracts only where AX intentionally preserves functionality, strict protocol fidelity, transaction safety or platform packaging; no failing test is disabled for this sync.",
       "verification": [
@@ -9443,7 +9455,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "2bdae9774251719707b91b7e51653960e5816c39",
       "upstreamMappedSha256": "4f0d4c236e024aef2c0fb889532c18293ad22ba4efcd88b04a96adea648346db",
-      "localSha256": "9fab5e6df7fd3bc4f5d2e3710275e9bda59d05686795c9fa1d309f425bbcb069",
+      "localSha256": "aa0beabe3912cc3e0dd2fe01f9d710972b2d4b052555f5e098639024b5915cc0",
       "disposition": "documentation-adapted",
       "rationale": "Retain AX-specific operating instructions, release links and ownership while integrating non-advertising technical guidance.",
       "verification": [
@@ -10469,7 +10481,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "bcb8fae92f228fd963032ec4e5a1ff1762ddd339",
       "upstreamMappedSha256": "39ea3565e835f2ab3c2545f34a25ef99ae8ac272b47ece68866137831f8fb17c",
-      "localSha256": "cf02f653de1d47bf7be3ff690b8ce733180d131358e774fe5e8d945be17449f9",
+      "localSha256": "4a4dbc7c884b01228d8c17e2b54e5ac75619f63089b0eb69b28f88738177bb04",
       "disposition": "website-adapted",
       "rationale": "Adapt the upstream website capability to docs/index.html/site.js/site.css and AX Releases rather than publishing a second owner-branded site tree.",
       "verification": [
@@ -11272,7 +11284,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "15f2af8cd00d9918ca9d5bee8018f66f7594ee53",
       "upstreamMappedSha256": "71b0d029f463c71d62ca6bbeb36af73998e6dfd841beee89e01ddb1aff186869",
-      "localSha256": "e6f8bd43dde0274e3747388a823c63bdecc8fb2efad44d4ef5cd887dc65ccabc",
+      "localSha256": "da61dbedb63513df0bc250f44238d6c3b5cc8f9426118aa54ea9e5735503030a",
       "disposition": "website-adapted",
       "rationale": "Adapt the upstream website capability to docs/index.html/site.js/site.css and AX Releases rather than publishing a second owner-branded site tree.",
       "verification": [

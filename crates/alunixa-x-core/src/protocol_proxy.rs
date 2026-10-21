@@ -4838,6 +4838,18 @@ impl ChatSseState {
 
         let status = response_status(self.finish_reason.as_deref());
         if status == "completed" {
+            if self
+                .tools
+                .values()
+                .any(|tool| self.tool_context.is_builtin_web_search_proxy(&tool.name))
+            {
+                self.failed_into(
+                    output,
+                    "Native server-side search was not executed by the Chat upstream; use a client search tool or native Responses provider".into(),
+                    Some("invalid_upstream_tool_call".into()),
+                );
+                return;
+            }
             let mut ids = BTreeSet::new();
             for tool in self.tools.values() {
                 if tool.call_id.is_empty()
@@ -11403,26 +11415,51 @@ mod response_compatibility_tests {
             "model": "gemini-3.8-flash",
             "tools": [{ "type": "web_search" }]
         });
-        let chunk = json!({
-            "id": "chatcmpl-search",
-            "model": "gemini-3.8-flash",
-            "choices": [{
-                "finish_reason": "tool_calls",
-                "delta": {
-                    "tool_calls": [{
-                        "index": 0,
-                        "id": "call_search",
-                        "function": { "name": "web_search", "arguments": "{}" }
-                    }]
-                }
-            }]
-        });
+        for arguments in ["{}", r#"{"query":"Codex"}"#] {
+            let chunk = json!({
+                "id": "chatcmpl-search",
+                "model": "gemini-3.8-flash",
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": "call_search",
+                            "function": { "name": "web_search", "arguments": arguments }
+                        }]
+                    }
+                }]
+            });
+            let mut state = ChatSseState::with_request(&request);
+            let mut stream = String::new();
+            state.handle_chat_chunk_into(&chunk, &mut stream);
+            state.finalize_into(&mut stream);
+            assert!(stream.contains("response.failed"));
+            assert!(!stream.contains("response.completed"));
+            assert!(!stream.contains("response.function_call_arguments.done"));
+            assert!(!stream.contains("response.output_item.done"));
+        }
+    }
+
+    #[test]
+    fn client_web_search_tool_remains_executable_in_stream_response() {
+        let request = json!({"tools":[{"type":"function","name":"web_search","parameters":{"type":"object"}}]});
+        let chunk = json!({"choices":[{"finish_reason":"tool_calls","delta":{"tool_calls":[{
+            "index":0,"id":"call_client_search",
+            "function":{"name":"web_search","arguments":"{\"query\":\"Codex\"}"}
+        }]}}]});
         let mut state = ChatSseState::with_request(&request);
         let mut stream = String::new();
         state.handle_chat_chunk_into(&chunk, &mut stream);
         state.finalize_into(&mut stream);
-        assert!(stream.contains("response.failed"));
-        assert!(!stream.contains("response.completed"));
+        assert!(stream.contains("response.completed"));
+        assert!(stream.contains("response.function_call_arguments.done"));
+        assert!(!stream.contains("response.failed"));
+        assert_eq!(state.completed_output_items()[0]["type"], "function_call");
+        assert_eq!(
+            state.completed_output_items()[0]["call_id"],
+            "call_client_search"
+        );
     }
 
     #[test]
