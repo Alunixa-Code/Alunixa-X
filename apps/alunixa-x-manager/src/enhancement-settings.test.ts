@@ -266,7 +266,7 @@ test("standalone quota unlock lives in its own group inside the general tab and 
   for (const placement of placements) assert.ok(placement.pos > generalPane.pos && placement.pos < dictationPane.pos);
 });
 
-test("native Fast unlock is the only Fast enhancement toggle and keeps the provider support notice", () => {
+test("native Fast unlock is separate from retained service-tier controls and keeps the provider support notice", () => {
   const enhance = component("EnhanceScreen");
   const nativeFast = fieldControl(enhance, "form.codexAppNativeFastUnlock");
   assert.equal(nativeFast.tagName.getText(app), "FeatureToggle");
@@ -276,5 +276,5 @@ test("native Fast unlock is the only Fast enhancement toggle and keeps the provi
   const handler = eventHandlerNodes(enhance, nativeFast, "onChange");
   assert.ok(handler.some((node) => ts.isStringLiteral(node) && node.text === "codexAppNativeFastUnlock"));
   assert.match(appSource, /codexAppNativeFastUnlock: false,/);
-  assert.ok(!elements(enhance).some((element) => attribute(element, "checked") === "form.codexAppServiceTierControls"));
+  assert.ok(elements(enhance).some((element) => attribute(element, "checked") === "form.codexAppServiceTierControls"));
 });

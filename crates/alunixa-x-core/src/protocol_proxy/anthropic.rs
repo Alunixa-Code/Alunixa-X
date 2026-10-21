@@ -10,6 +10,17 @@ const MAX_THINKING_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
 pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<Value> {
+    responses_request_to_anthropic_with_options(body, &crate::anthropic_bridge::AnthropicRequestOptions {
+        max_tokens: DEFAULT_MAX_TOKENS, prompt_cache: false, ..Default::default()
+    })
+}
+
+pub(super) fn responses_request_to_anthropic_with_options(
+    mut body: Value,
+    options: &crate::anthropic_bridge::AnthropicRequestOptions,
+) -> anyhow::Result<Value> {
+    validate_protocol_attachments(&body, true)?;
+    body = normalize_plaintext_agent_messages(body)?;
     remove_unsupported_native_search(&mut body)?;
     expand_local_compaction_history(&mut body);
     if input_has_native_compaction(&body) {
@@ -66,13 +77,14 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
     }
     let history_supports_thinking = trailing_turn_supports_thinking(&messages);
     result["messages"] = json!(messages);
-    let max_tokens = body
+    let requested_max_tokens = body
         .get("max_output_tokens")
         .or_else(|| body.get("max_tokens"))
         .or_else(|| body.get("max_completion_tokens"))
         .and_then(Value::as_u64)
         .filter(|value| *value > 0)
-        .unwrap_or(DEFAULT_MAX_TOKENS);
+        .unwrap_or(options.max_tokens);
+    let max_tokens = if options.force_max_tokens { options.max_tokens } else { requested_max_tokens };
     result["max_tokens"] = json!(max_tokens);
 
     let reasoning = body.get("reasoning").filter(|value| !value.is_null());
@@ -90,9 +102,13 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
         .map(|effort| effort.trim().to_ascii_lowercase());
     let effort = effort.as_deref();
     let explicit_thinking = body.get("thinking").filter(|value| !value.is_null());
-    let adaptive_model = uses_adaptive_thinking(model)
+    let adaptive_model = match options.thinking_mode {
+        crate::anthropic_bridge::AnthropicThinkingMode::Adaptive => true,
+        crate::anthropic_bridge::AnthropicThinkingMode::Budget => false,
+        _ => uses_adaptive_thinking(model)
         // Preserve AX's explicit adaptive/xhigh/ultra selection for Claude aliases.
-        || (is_claude_model(model) && matches!(effort, Some("adaptive" | "xhigh" | "ultra")));
+        || (is_claude_model(model) && matches!(effort, Some("adaptive" | "xhigh" | "ultra"))),
+    };
     let cannot_disable = thinking_cannot_be_disabled(model);
     let explicitly_disabled = reasoning_explicitly_disabled(effort);
     let should_adapt = adaptive_model
@@ -118,7 +134,8 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
     } else if should_adapt && (!explicitly_disabled || cannot_disable) {
         result["thinking"] = json!({"type":"adaptive"});
         // AX's xhigh/ultra/adaptive mean model-controlled adaptive thinking.
-        if !matches!(effort, Some("adaptive" | "xhigh" | "ultra")) {
+        if options.thinking_mode == crate::anthropic_bridge::AnthropicThinkingMode::Adaptive
+            || !matches!(effort, Some("adaptive" | "xhigh" | "ultra")) {
             if let Some(mapped) = effort.and_then(codex_effort_to_anthropic) {
                 result["output_config"] = json!({"effort":mapped});
             } else if explicitly_disabled && cannot_disable {
@@ -186,6 +203,10 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
             result["tool_choice"]["disable_parallel_tool_use"] = json!(true);
         }
     }
+    if options.thinking_mode == crate::anthropic_bridge::AnthropicThinkingMode::Off {
+        result.as_object_mut().unwrap().remove("thinking");
+        result.as_object_mut().unwrap().remove("output_config");
+    }
     if !thinking_enabled(&result) {
         for field in ["temperature", "top_p"] {
             if let Some(value) = body.get(field) {
@@ -200,6 +221,11 @@ pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<
             json!([stop])
         };
     }
+    if let Some(model) = result.get("model").and_then(Value::as_str) {
+        result["model"] = json!(crate::anthropic_bridge::strip_context_marker(model));
+    }
+    if options.prompt_cache { crate::anthropic_bridge::inject_prompt_cache(&mut result); }
+    if options.impersonate_claude_code { crate::anthropic_bridge::prepend_claude_code_identity(&mut result); }
     Ok(result)
 }
 

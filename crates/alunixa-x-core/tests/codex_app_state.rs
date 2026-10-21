@@ -234,7 +234,6 @@ fn app_state_sync_normalizes_current_state_and_writes_backup_before_change() {
         json!(["C:/work/app", "C:\\work\\app\\"])
     );
 }
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\ours
 
 #[test]
 fn projectless_main_window_preparation_keeps_saved_projects_and_clears_active_root() {
@@ -309,8 +308,6 @@ hotkey-window-projectless-default-enabled = false
     assert!(!result.changed);
     assert_eq!(state["active-workspace-roots"], json!(["C:/work/app"]));
 }
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\base
-=======
 
 /// 切换目录后「最近使用」里上个目录的模型 ID 要被清掉，合法条目和其他字段原样保留。
 #[test]
@@ -391,4 +388,3 @@ fn prune_stale_recent_models_skips_when_no_published_models() {
     assert_eq!(removed, 0);
     assert_eq!(std::fs::read_to_string(&state_path).unwrap(), original);
 }
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\theirs

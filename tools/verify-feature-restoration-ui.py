@@ -67,7 +67,7 @@ with fixture.server_url() as url, sync_playwright() as playwright:
         page.get_by_label("上下文窗口", exact=True).nth(1).fill("1000000")
         page.get_by_label("启动模型", exact=True).nth(1).check()
         page.get_by_label("上移模型", exact=True).nth(1).click()
-        screenshot = ROOT / ".tmp/restore-features-20261012/advanced-provider.png"
+        screenshot = ROOT / ".tmp/upstream-v110-20261020/ui/advanced-provider.png"
         page.screenshot(path=str(screenshot), full_page=True)
         page.get_by_role("button", name="保存供应商", exact=True).click()
         card = page.locator("[data-relay-profile-id]").filter(has_text="Restored advanced supplier")

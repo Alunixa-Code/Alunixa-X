@@ -241,10 +241,8 @@ fn stale_general_settings_and_concurrent_image_saves_cannot_overwrite_new_order(
         .save_image_models(&old_revision, edits(&[model("b"), model("a")]))
         .unwrap();
     assert!(store.save_image_models(&old_revision, vec![]).is_err());
-    store.save(&stale).unwrap();
-    store
-        .save_preserving_runtime_model_selection(&stale)
-        .unwrap();
+    assert!(store.save(&stale).unwrap_err().to_string().contains("revision_conflict"));
+    assert!(store.save_preserving_runtime_model_selection(&stale).unwrap_err().to_string().contains("revision_conflict"));
     store.update(json!({"codexAppPath": "new-app"})).unwrap();
     assert_eq!(store.load().unwrap().image_models[0].id, "b");
 }

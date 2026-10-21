@@ -2125,7 +2125,7 @@ describe("拓展菜单项", () => {
  */
 function conversationViewRuntime(renderer: string) {
   const start = renderer.indexOf("  // 旧版（26.9xx 之前）内容容器类名清单");
-  const end = renderer.indexOf("  function removeLegacyCodexServiceTierBadges(", start);
+  const end = renderer.indexOf("  function codexServiceTierBadgeVisibleElement(", start);
   assert.ok(start >= 0 && end > start, "conversation view target finder block not found");
   const finderSource = renderer.slice(start, end);
   // 宽度计算与目标查找在文件里不相邻，单独切一段。

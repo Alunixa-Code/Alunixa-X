@@ -10,7 +10,7 @@ describe("custom model compaction configuration", () => {
 
     assert.match(app, /className="relay-model-row-editor"/);
     assert.match(app, /value=\{row\.window\}/);
-    assert.match(app, /value=\{row\.autoCompact\}/);
+    assert.match(app, /value=\{normalizeAutoCompactPercent\(row\.autoCompact\) \|\| DEFAULT_AUTO_COMPACT_PERCENT\}/);
     assert.match(app, /value=\{row\.protocol \|\| ""\}/);
     assert.doesNotMatch(app, /className="custom-model-effective-config"/);
   });

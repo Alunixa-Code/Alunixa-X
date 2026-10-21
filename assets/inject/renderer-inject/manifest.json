@@ -2,16 +2,18 @@
   "fragments": [
     {
       "name": "00-prelude.js",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "description": "IIFE 开头、环境守卫、平台探测、常量与工具函数",
-      "lines": 387
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "description": "IIFE 开头、环境守卫、平台探测、常量与工具函数",
-      "lines": 602
-=======
       "description": "IIFE 开头、环境守卫、平台探测、常量与图片覆盖层",
-      "lines": 1732
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 639
+    },
+    {
+      "name": "00-image-composite.js",
+      "description": "Image compositing with native content preserved",
+      "lines": 1281
+    },
+    {
+      "name": "00-media-dispatch.js",
+      "description": "AX image and video lifecycle",
+      "lines": 58
     },
     {
       "name": "01-registry.js",
@@ -19,60 +21,39 @@
       "lines": 177
     },
     {
+      "name": "02-retained-contracts.js",
+      "description": "AX retained runtime contracts",
+      "lines": 114
+    },
+    {
       "name": "10-style.js",
       "description": "样式注入、默认设置、后端设置映射、梦皮主题变量与持久化",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 2789
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 2037
-=======
-      "lines": 2728
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 2769
     },
     {
       "name": "20-menu.js",
       "description": "Alunixa X 菜单、后端设置加载、插件解锁策略与版本判定",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 754
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 472
-=======
-      "lines": 449
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 647
     },
     {
       "name": "30-service-tier.js",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "description": "服务等级（service tier）读写、线程覆盖与控件同步",
-      "lines": 1059
-    },
-    {
-      "name": "31-native-service-tier.js",
-      "description": "版本限定的原生 Fast 菜单兼容层",
-      "lines": 240
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "description": "服务等级（service tier）读写、线程覆盖与控件同步",
-      "lines": 1084
-=======
       "description": "供应商会话适配、请求桥接与原生状态模块定位",
-      "lines": 891
+      "lines": 1427
     },
     {
       "name": "31-config-read-deadline.js",
       "description": "原生只读配置请求超时取消与等待释放",
       "lines": 67
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+    },
+    {
+      "name": "31-native-service-tier.js",
+      "description": "版本限定的原生 Fast 菜单兼容层",
+      "lines": 252
     },
     {
       "name": "40-backend-settings.js",
       "description": "后端设置读写、心跳同步、用户脚本与市场状态、拓展 UI",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 1709
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 1491
-=======
-      "lines": 1912
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 1838
     },
     {
       "name": "50-navigation.js",
@@ -82,20 +63,12 @@
     {
       "name": "60-plugin-marketplace.js",
       "description": "插件市场请求/响应补丁、本地兜底与合并",
-      "lines": 1877
+      "lines": 1880
     },
     {
       "name": "61-plugin-market-ui.js",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "description": "独立 CodeX 插件市场、索引检索与按需单包安装",
-      "lines": 300
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "description": "独立 CodeX 插件市场、索引检索与按需单包安装",
-      "lines": 0
-=======
       "description": "独立 Codex 插件市场、索引检索与按需单包安装",
       "lines": 300
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "62-plugin-market-adapter.js",
@@ -105,27 +78,16 @@
     {
       "name": "70-model-catalog.js",
       "description": "全局状态、模型目录、模型白名单与解锁",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 1145
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 933
-=======
-      "lines": 1150
+      "lines": 1165
     },
     {
       "name": "71-model-picker-groups.js",
       "description": "原生模型选择器按供应商分组折叠（聚合供应商场景）",
       "lines": 1036
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "80-session-share.js",
       "description": "会话运行时工具；分享入口已撤出管理器扫描",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 683
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 1458
-=======
       "lines": 698
     },
     {
@@ -142,51 +104,26 @@
       "name": "83-usage-statusline.js",
       "description": "输入框下方用量状态栏：生成速度、缓存命中率与上下文占用",
       "lines": 460
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "90-action-groups.js",
       "description": "会话行操作按钮布局、更多菜单、工具提示",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 1106
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 808
-=======
-      "lines": 890
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 1105
     },
     {
       "name": "91-extension-api.js",
       "description": "对外接口层 window.alunixaX：路由白名单、UI 注册、toast",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 269
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 0
-=======
       "lines": 272
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "92-extension-host.js",
       "description": "拓展宿主：把注册中心里的第三方项渲染成 DOM",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 317
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 0
-=======
       "lines": 322
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "93-dictation.js",
       "description": "独立 ASR 听写入口、录音、取消重试与原生输入框回填",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 513
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 0
-=======
       "lines": 583
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
     },
     {
       "name": "94-typing-effects.js",
@@ -196,13 +133,7 @@
     {
       "name": "95-conversation-view.js",
       "description": "会话视图运行时、官方用量策略重写、扫描主循环",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 931
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 1240
-=======
-      "lines": 938
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 949
     },
     {
       "name": "96-whale-compat.js",
@@ -217,34 +148,22 @@
     {
       "name": "98-scan-schedule.js",
       "description": "扫描相关性判定与调度，启动重试",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 128
-    },
-    {
-      "name": "96-restored-features.js",
-      "description": "AX原生语言/启动/性能、共享终端、项目移动/工作树和远程编辑兼容功能",
-      "lines": 2946
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 120
-=======
       "lines": 174
     },
     {
       "name": "98-avatar-overlay-layout.js",
       "description": "Codex 原生活动悬浮层右侧布局与波形镜像",
-      "lines": 54
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 66
+    },
+    {
+      "name": "96-restored-features.js",
+      "description": "AX原生语言/启动/性能、共享终端、项目移动/工作树和远程编辑兼容功能",
+      "lines": 2946
     },
     {
       "name": "99-startup.js",
       "description": "启动序列：resize 处理、MutationObserver 与事件绑定",
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\ours
-      "lines": 107
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\base
-      "lines": 99
-=======
-      "lines": 96
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\assets\inject\renderer-inject\manifest.json\theirs
+      "lines": 105
     },
     {
       "name": "99-tail.js",

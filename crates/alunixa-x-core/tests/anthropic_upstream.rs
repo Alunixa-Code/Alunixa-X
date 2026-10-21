@@ -282,7 +282,7 @@ async fn provider_test_probe_hits_messages_endpoint() {
     );
     assert_eq!(sent["model"], "claude-sonnet-5");
     assert_eq!(sent["max_tokens"], 16);
-    assert_eq!(sent["messages"][0]["content"], "hi");
+    assert_eq!(sent["messages"][0]["content"][0]["text"], "hi");
 }
 
 #[tokio::test]

@@ -123,11 +123,11 @@
   const codexThreadServiceTierKey = "codexThreadServiceTierOverrides";
   const codexThreadServiceTierMaxEntries = 120;
   const codexThreadServiceTierDraftBindWindowMs = 60 * 1000;
-  const codexServiceTierRequestOverrideVersion = "9";
-  const codexAppServerModelRequestPatchVersion = "13";
+  const codexServiceTierRequestOverrideVersion = "10";
+  const codexAppServerModelRequestPatchVersion = "24";
   const codexAppServerClientCaptureMarker = "AppServerRequestClient is missing a message dispatcher";
   const codexAppServerClientCaptureAnchor = "async sendRequest(";
-  const codexRemoteSessionRecoveryVersion = "5";
+  const codexRemoteSessionRecoveryVersion = "8";
   const codexPluginMarketplaceUnlockVersion = "17";
   const codexThreadScrollMaxEntries = 120;
   const codexThreadScrollSaveThrottleMs = 120;
@@ -176,7 +176,7 @@
   };
   const headerContextButtonClass = "border-token-border user-select-none no-drag cursor-interaction flex items-center gap-1 border whitespace-nowrap focus:outline-none disabled:cursor-not-allowed disabled:opacity-40 rounded-lg border-token-border text-token-button-tertiary-foreground bg-token-bg-fog enabled:hover:bg-token-list-hover-background data-[state=open]:bg-token-list-hover-background border h-token-button-composer px-2 py-0 text-base leading-[18px]";
 
-  function installAlunixaXImageOverlay() {
+  function installAlunixaXMediaOverlay() {
     const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
     const source = config.dataUrl || config.sourceUrl || "";
     const signature = JSON.stringify(config);
@@ -318,12 +318,1663 @@
   }
 
   function scheduleAlunixaXImageOverlay() {
+    window.__alunixaXImageOverlayReadyCleanup?.();
+    window.__alunixaXImageOverlayReadyCleanup = null;
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", installAlunixaXImageOverlay, { once: true });
+      const onReady = () => {
+        window.__alunixaXImageOverlayReadyCleanup = null;
+        installAlunixaXImageOverlay();
+      };
+      document.addEventListener("DOMContentLoaded", onReady, { once: true });
+      window.__alunixaXImageOverlayReadyCleanup = () => document.removeEventListener("DOMContentLoaded", onReady);
       return;
     }
     installAlunixaXImageOverlay();
-    setTimeout(installAlunixaXImageOverlay, 250);
+  }
+
+function installCodexPlusForceChineseLocale() {
+    const config = window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__;
+    if (!config) return;
+    const enabled = config.enabled === true;
+    const locale = typeof config.locale === "string" && config.locale ? config.locale : "zh-CN";
+    const installationKey = `2:${enabled ? "on" : "off"}:${locale}`;
+    if (window.__alunixaXForceChineseLocaleInstalled === installationKey) return;
+    window.__alunixaXForceChineseLocaleInstalled = installationKey;
+    const languages = [locale, "zh", "en-US", "en"];
+    const managedLocaleStorageKey = "alunixaX.forceChineseLocale.managed.v1";
+    const localeReloadStorageKey = "alunixaX.forceChineseLocale.reload.v1";
+
+    const readManagedLocale = () => {
+      try {
+        const value = JSON.parse(window.localStorage.getItem(managedLocaleStorageKey) || "null");
+        return value && typeof value === "object" ? value : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const writeManagedLocale = (value) => {
+      try {
+        if (value) {
+          window.localStorage.setItem(managedLocaleStorageKey, JSON.stringify(value));
+        } else {
+          window.localStorage.removeItem(managedLocaleStorageKey);
+        }
+      } catch {
+      }
+    };
+
+    // 走 codexStateCall（60-plugin-marketplace.js 的能力探测通道）：老版的
+    // electronBridge + vscode://codex/ 自定义消息在 issue #2399 后已不可靠，
+    // state API 会随构建换模块位置，按能力识别才能一直找到。
+    //
+    // 但 state API 的 promise 是永久缓存的，且 asset 加载失败会留下 30 秒冷却
+    // （见 20-menu.js 的 codexAppModuleRetryCooldownMs）。注入发生在 App 的
+    // asset 就绪之前时第一次调用必然失败，而那次失败会被一直记住——所以这里
+    // 必须有界重试，不能像老版等 electronBridge 那样一次不成就算了。
+    const localeSyncRetryDelaysMs = [500, 1500, 3000, 6000, 12000, 20000];
+    const callCodexSettingApiOnce = (method, params) => codexStateCall(method, { params });
+    const callCodexSettingApi = async (method, params) => {
+      let lastError;
+      for (let attempt = 0; attempt <= localeSyncRetryDelaysMs.length; attempt += 1) {
+        try {
+          return await callCodexSettingApiOnce(method, params);
+        } catch (error) {
+          lastError = error;
+          const delay = localeSyncRetryDelaysMs[attempt];
+          if (delay === undefined) break;
+          await new Promise((resolve) => window.setTimeout(resolve, delay));
+        }
+      }
+      throw lastError;
+    };
+    const reloadAfterLocaleChange = (value) => {
+      const marker = JSON.stringify(value);
+      try {
+        if (window.sessionStorage.getItem(localeReloadStorageKey) === marker) return;
+        window.sessionStorage.setItem(localeReloadStorageKey, marker);
+        // 标记写不进去就不要刷新，否则下次加载读不到标记，会再次刷新。
+        if (window.sessionStorage.getItem(localeReloadStorageKey) !== marker) return;
+      } catch {
+        return;
+      }
+      window.location.reload();
+    };
+
+    const clearLocaleReloadMarker = () => {
+      try {
+        window.sessionStorage.removeItem(localeReloadStorageKey);
+      } catch {
+      }
+    };
+
+    const syncOfficialLocaleSetting = async () => {
+      const managed = readManagedLocale();
+      if (!enabled && !managed) return;
+      const response = await callCodexSettingApi("get-setting", { key: "localeOverride" });
+      const currentValue = response?.value ?? null;
+
+      if (enabled) {
+        if (currentValue === locale) {
+          clearLocaleReloadMarker();
+          return;
+        }
+        if (!managed) {
+          writeManagedLocale({ appliedLocale: locale, previousValue: currentValue });
+        }
+        await callCodexSettingApi("set-setting", { key: "localeOverride", value: locale });
+        reloadAfterLocaleChange(locale);
+        return;
+      }
+
+      if (currentValue !== managed.appliedLocale) {
+        writeManagedLocale(null);
+        clearLocaleReloadMarker();
+        return;
+      }
+      const previousValue = managed.previousValue ?? null;
+      await callCodexSettingApi("set-setting", {
+        key: "localeOverride",
+        value: previousValue,
+      });
+      writeManagedLocale(null);
+      reloadAfterLocaleChange(previousValue);
+    };
+
+    syncOfficialLocaleSetting().catch(() => {});
+    if (!enabled) return;
+
+    const defineNavigatorGetter = (name, value) => {
+      try {
+        Object.defineProperty(Navigator.prototype, name, {
+          configurable: true,
+          get: () => value,
+        });
+      } catch {
+        try {
+          Object.defineProperty(navigator, name, {
+            configurable: true,
+            get: () => value,
+          });
+        } catch {
+        }
+      }
+    };
+
+    defineNavigatorGetter("language", locale);
+    defineNavigatorGetter("languages", languages);
+
+    const patchI18nConfig = (dynamicConfig) => {
+      if (!dynamicConfig || typeof dynamicConfig !== "object") return dynamicConfig;
+      const value = dynamicConfig.value && typeof dynamicConfig.value === "object" ? dynamicConfig.value : {};
+      const nextValue = {
+        ...value,
+        enable_i18n: true,
+        locale_source: "SYSTEM",
+      };
+      try {
+        dynamicConfig.value = nextValue;
+      } catch {
+      }
+      if (typeof dynamicConfig.get === "function" && !dynamicConfig.__alunixaXForceChineseLocaleGetPatched) {
+        const originalGet = dynamicConfig.get.bind(dynamicConfig);
+        dynamicConfig.get = (key, fallback) => {
+          if (key === "enable_i18n") return true;
+          if (key === "locale_source") return "SYSTEM";
+          return originalGet(key, fallback);
+        };
+        dynamicConfig.__alunixaXForceChineseLocaleGetPatched = true;
+      }
+      return dynamicConfig;
+    };
+
+    const statsigClients = () => {
+      const root = window.__STATSIG__ || globalThis.__STATSIG__;
+      if (!root || typeof root !== "object") return [];
+      const clients = [root.firstInstance, typeof root.instance === "function" ? root.instance() : null];
+      if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances));
+      return clients.filter((client, index, array) => client && typeof client === "object" && array.indexOf(client) === index);
+    };
+
+    // 语言包的加载 gate 读的是 Layer 而不是 DynamicConfig（issue #2329 根因 a）：
+    // 应用用 useLayer('72216192').get('enable_i18n', false) 取开关，Layer 的 memo
+    // 缓存键恒为 NoValues，于是即使 DynamicConfig 被补成 enable_i18n:true 也不生效。
+    // 这里给 layer 对象补上同样的取值覆盖；__value 是 Statsig 存原始值的字段，
+    // 一并 assign，避免应用直接从 __value 读时绕过 get。
+    const patchI18nLayer = (layer) => {
+      if (!layer || typeof layer !== "object") return layer;
+      const value = layer.__value && typeof layer.__value === "object" ? layer.__value : {};
+      const nextValue = {
+        ...value,
+        enable_i18n: true,
+        locale_source: "SYSTEM",
+      };
+      try {
+        layer.__value = nextValue;
+      } catch {
+      }
+      try {
+        layer.value = nextValue;
+      } catch {
+      }
+      if (typeof layer.get === "function" && !layer.__alunixaXForceChineseLocaleLayerPatched) {
+        const originalGet = layer.get.bind(layer);
+        layer.get = (key, fallback) => {
+          if (key === "enable_i18n") return true;
+          if (key === "locale_source") return "SYSTEM";
+          return originalGet(key, fallback);
+        };
+        layer.__alunixaXForceChineseLocaleLayerPatched = true;
+      }
+      return layer;
+    };
+
+    const patchStatsigClient = (client) => {
+      if (!client || typeof client !== "object") return;
+      if (typeof client.getLayer === "function" && !client.__alunixaXForceChineseLocaleLayerChannelPatched) {
+        const originalGetLayer = client.getLayer.bind(client);
+        client.getLayer = (name, options) => {
+          const result = originalGetLayer(name, options);
+          return name === "72216192" ? patchI18nLayer(result) : result;
+        };
+        client.__alunixaXForceChineseLocaleLayerChannelPatched = true;
+      }
+      if (typeof client._getLayerImpl === "function" && !client.__alunixaXForceChineseLocaleLayerImplPatched) {
+        const originalGetLayerImpl = client._getLayerImpl.bind(client);
+        client._getLayerImpl = function (name, ...rest) {
+          const result = originalGetLayerImpl(name, ...rest);
+          return name === "72216192" ? patchI18nLayer(result) : result;
+        };
+        client.__alunixaXForceChineseLocaleLayerImplPatched = true;
+      }
+      if (typeof client.getDynamicConfig !== "function") return;
+      if (!client.__alunixaXForceChineseLocalePatched) {
+        const originalGetDynamicConfig = client.getDynamicConfig.bind(client);
+        client.getDynamicConfig = (name, options) => {
+          const result = originalGetDynamicConfig(name, options);
+          return name === "72216192" ? patchI18nConfig(result) : result;
+        };
+        client.__alunixaXForceChineseLocalePatched = true;
+      }
+      try {
+        patchI18nConfig(client.getDynamicConfig("72216192", { disableExposureLog: true }));
+      } catch {
+      }
+      try {
+        if (typeof client.getLayer === "function") {
+          patchI18nLayer(client.getLayer("72216192", { disableExposureLog: true }));
+        }
+      } catch {
+      }
+    };
+
+    const patchStatsigRoot = (root) => {
+      if (!root || typeof root !== "object" || root.__alunixaXForceChineseLocaleRootPatched) return;
+      root.__alunixaXForceChineseLocaleRootPatched = true;
+      ["firstInstance", "instance"].forEach((key) => {
+        let current;
+        try {
+          current = root[key];
+        } catch {
+          return;
+        }
+        patchStatsigClient(typeof current === "function" && key === "instance" ? current.call(root) : current);
+        try {
+          Object.defineProperty(root, key, {
+            configurable: true,
+            get: () => current,
+            set: (next) => {
+              current = next;
+              patchStatsigClient(typeof next === "function" && key === "instance" ? next.call(root) : next);
+            },
+          });
+        } catch {
+        }
+      });
+    };
+
+    const installStatsigRootSetter = () => {
+      const descriptor = Object.getOwnPropertyDescriptor(window, "__STATSIG__");
+      if (descriptor && descriptor.configurable === false) return;
+      let currentRoot = window.__STATSIG__;
+      patchStatsigRoot(currentRoot);
+      try {
+        Object.defineProperty(window, "__STATSIG__", {
+          configurable: true,
+          get: () => currentRoot,
+          set: (next) => {
+            currentRoot = next;
+            patchStatsigRoot(next);
+            statsigClients().forEach(patchStatsigClient);
+          },
+        });
+      } catch {
+      }
+    };
+
+    const patchStatsigI18nConfig = () => {
+      installStatsigRootSetter();
+      const root = window.__STATSIG__ || globalThis.__STATSIG__;
+      patchStatsigRoot(root);
+      statsigClients().forEach((client) => {
+        if (typeof client.getDynamicConfig !== "function") return;
+        patchStatsigClient(client);
+      });
+    };
+
+    patchStatsigI18nConfig();
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      patchStatsigI18nConfig();
+      if (Date.now() - startedAt > 5000) window.clearInterval(timer);
+    }, 50);
+  }
+
+const capacityAutoRetryDefaultMaxAttempts = 15;
+
+const capacityAutoRetryMaxAttemptsCeiling = 200;
+
+const capacityAutoRetryDefaultIntervalSeconds = 0;
+
+const capacityAutoRetryIntervalCeilingSeconds = 600;
+  function installAlunixaXCompositedImageOverlay() {
+    const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
+    const source = typeof config.dataUrl === "string" ? config.dataUrl : "";
+    const cached = window.__alunixaXImageOverlayResource;
+    const configuredOpacity = Number(config.opacity);
+    const opacity = Number.isFinite(configuredOpacity)
+      ? Math.min(1, Math.max(0.01, configuredOpacity)) : 0.35;
+    const fitMode = ["fill", "fit", "stretch", "tile", "center"].includes(config.fitMode)
+      ? config.fitMode : "fit";
+    const reuse = !!(config.enabled && source && cached?.version === 29 && cached.ready && cached.source === source);
+    if (reuse && cached.opacity === opacity && cached.fitMode === fitMode &&
+      document.getElementById(alunixaXImageOverlayId)?.getAttribute("data-alunixa-x-ext") === "image-overlay") return;
+    window.__alunixaXImageOverlayGeometryCleanup?.();
+    window.__alunixaXImageOverlayGeometryCleanup = null;
+    window.__alunixaXImageOverlayCleanup?.(reuse);
+    window.__alunixaXImageOverlayCleanup = null;
+    document.getElementById(alunixaXImageOverlayId)?.remove();
+    const root = document.documentElement;
+    window.__alunixaXImageOverlayReady = Promise.resolve(false);
+    if (!config.enabled || !source || !root) return;
+
+    const fitStyles = {
+      fill: { size: "cover", position: "center center", repeat: "no-repeat" },
+      fit: { size: "contain", position: "center center", repeat: "no-repeat" },
+      stretch: { size: "100% 100%", position: "center center", repeat: "no-repeat" },
+      tile: { size: "auto", position: "left top", repeat: "repeat" },
+      center: { size: "auto", position: "center center", repeat: "no-repeat" },
+    }[fitMode];
+    const viewerSelector = [
+      '[role="dialog"]:has([data-testid="image-preview-dismiss-area"])',
+      '[data-testid="image-preview-editor"]',
+      '[data-testid="image-preview-dismiss-area"]',
+      '.codex-dialog-overlay[class*="_imageOverlay_"]',
+      '.codex-dialog:has([data-image-preview-toolbar])',
+      '.codex-dialog:has([data-image-preview-composer])',
+      "[data-browser-sidebar-webview]",
+      "[data-browser-sidebar-toolbar]",
+    ].join(", ");
+    const toolbarSelector = "[data-browser-sidebar-toolbar]";
+    const browserSelector = `[data-browser-sidebar-webview], ${toolbarSelector}`;
+    const sidebarSelector = "aside.app-shell-left-panel, [data-app-action-sidebar-scroll], nav[data-app-navigation-rail]";
+    const sidebarRowSelector = "[data-app-action-sidebar-thread-row], [data-app-action-sidebar-project-row]";
+    const pageSelector = ".alunixa-x-page-overlay";
+    const timelineSelector = "[data-app-action-timeline-scroll], .thread-scroll-container";
+    const reviewHeaderSelector = '[class~="group/turn-diff-header"]';
+    const rightPanelSelector = '[data-app-shell-focus-area="right-panel"]';
+    const inactivePanel = node => node.closest?.(
+      `${rightPanelSelector}[inert], ${rightPanelSelector}[aria-hidden="true"]`);
+    const mediaSelector = `img, video, canvas, ${viewerSelector}, ${reviewHeaderSelector}`;
+    const nativeRangeSelector = 'input[type="range"], [role="slider"]';
+    const composerSelector = '[class*="_ComposerLayoutRoot_"]';
+    const headerSelector = '[data-app-shell-header-layout], [data-sticky][class*="_shell_"], .sticky.z-30.bg-surface';
+    const editorSelector = '[contenteditable="true"], .ProseMirror';
+    const composerOverlaySelector = "[data-composer-overlay-floating-ui]";
+    const diffPreviewSelector = '[data-testid="diff-preview-scroll"]';
+    const controlSelector = 'button, [role="button"], input, textarea, select, a';
+    const mediaAttribute = "data-alunixa-x-image-native";
+    const scopeAttribute = "data-alunixa-x-image-scope";
+    const containmentAttribute = "data-alunixa-x-image-contain";
+    const browserPortalAttribute = "data-alunixa-x-image-browser-portal";
+    const popupMaterialAttribute = "data-alunixa-x-image-popup-material";
+    const popupBoundaryAttribute = "data-alunixa-x-image-popup-boundary";
+    const controlAttribute = "data-alunixa-x-image-control";
+    const paintAttribute = "data-alunixa-x-image-paint";
+    const topControlAttribute = "data-alunixa-x-image-top-control";
+    const footerAttribute = "data-alunixa-x-image-footer-gutter";
+    const footerSelector = "[data-thread-scroll-footer]";
+    const topControlSelector = [
+      '[role="menu"]', '[role="listbox"]', '[role="dialog"]', '[role="tooltip"]',
+      "[data-radix-popper-content-wrapper]", '[data-slot="popover-content"]', "[popover]", composerOverlaySelector,
+    ].join(", ");
+    // Extensions keep their own layers; their full-page shell is the one wallpaper surface.
+    const owned = node => !!node?.closest?.('[data-alunixa-x-ext]') && !node.matches(pageSelector);
+    const wallpaperLayer = 1000;
+    const overlay = document.createElement("div");
+    overlay.id = alunixaXImageOverlayId;
+    overlay.setAttribute("aria-hidden", "true");
+    overlay.setAttribute("data-alunixa-x-ext", "image-overlay");
+    Object.assign(overlay.style, {
+      position: "fixed", inset: "0", width: "100vw", height: "100vh",
+      opacity: String(opacity), pointerEvents: "none", zIndex: String(wallpaperLayer),
+      userSelect: "none", backgroundSize: fitStyles.size,
+      backgroundPosition: fitStyles.position, backgroundRepeat: fitStyles.repeat,
+      transition: "none", animation: "none",
+    });
+    const style = document.createElement("style");
+    style.setAttribute("data-alunixa-x-ext", "image-overlay");
+    const nativeRules = `
+      [${scopeAttribute}] { isolation:auto!important;z-index:auto!important;will-change:auto!important; }
+      [${browserPortalAttribute}] { z-index:${wallpaperLayer + 1}!important; }
+      [${scopeAttribute}^="identity"] { transform:none!important; }
+      [${scopeAttribute}="identity-flow"] { position:relative!important; }
+      [${containmentAttribute}] { contain:none!important; }
+      [${containmentAttribute}^="flow"] { position:relative!important; }
+      [${containmentAttribute}$="-clip"] { overflow:clip!important; }
+      [${mediaAttribute}]:where(:not([${mediaAttribute}="review"], [${mediaAttribute}="composer"], [${mediaAttribute}="page"])) { z-index:${wallpaperLayer}!important; }
+      [${mediaAttribute}="flow"], [${mediaAttribute}="island-flow"] { position:relative!important; }
+      [${mediaAttribute}="viewer"] { z-index:${wallpaperLayer + 3}!important; }
+      [${mediaAttribute}="footer"] { z-index:${wallpaperLayer + 1}!important; }
+      [${mediaAttribute}^="header"] { z-index:${wallpaperLayer + 1}!important; }
+      [${mediaAttribute}="header-flow"] { position:relative!important; }
+      ${composerSelector} .top-full [data-composer-placement="home"].bg-background-composer-action-bar { background:none!important; }
+      [${mediaAttribute}="page"], [${mediaAttribute}="composer"] { isolation:isolate!important; }
+      [${mediaAttribute}="composer"]:not([${mediaAttribute}="footer"] *) { z-index:${wallpaperLayer + 1}!important; }
+      [${mediaAttribute}^="toolbar"] { background:none!important;box-shadow:none!important;filter:none!important;backdrop-filter:none!important; }
+      [${mediaAttribute}="toolbar-flow"] { position:relative!important; }
+      ${timelineSelector} { overscroll-behavior-y:none!important; }
+      [${popupMaterialAttribute}] { background-image:none!important;filter:none!important;backdrop-filter:none!important; }
+      [${paintAttribute}] { isolation:isolate!important; }
+      [${paintAttribute}]:not([${paintAttribute}^="before-"], [${paintAttribute}^="background-"])::after, [${paintAttribute}^="before-"]::before {
+        content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;
+        corner-shape:inherit;z-index:-1;opacity:${opacity};
+        background-size:${fitStyles.size};background-position:${fitStyles.position};
+        background-repeat:${fitStyles.repeat};background-attachment:fixed;
+      }
+      [${controlAttribute}] { z-index:${wallpaperLayer}!important; }
+      [${topControlAttribute}] { z-index:${wallpaperLayer + 2}!important; }
+      [${topControlAttribute}="flow"] { position:relative!important; }
+    `;
+    const ns = "http://www.w3.org/2000/svg";
+    const svgNode = (tag, attributes = {}) => {
+      const node = document.createElementNS(ns, tag);
+      for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, String(value));
+      return node;
+    };
+    const svg = svgNode("svg", { width: 0, height: 0, "aria-hidden": "true", "data-alunixa-x-ext": "image-overlay" });
+    Object.assign(svg.style, { position: "fixed", width: "0", height: "0", pointerEvents: "none" });
+    const defs = svgNode("defs");
+    svg.appendChild(defs);
+    let resource = reuse ? cached : null;
+    let disposed = false;
+    let raf = 0;
+    let nextControl = 0;
+    let nextSource = 0;
+    let previewVisible = false;
+    let sidebarScrollUntil = 0;
+    let finishReady;
+    const image = new Image();
+    const records = new Map();
+    const scopes = new Map();
+    const browserPortals = new Map();
+    const controls = new Map();
+    const popups = new Map();
+    const visibleMedia = new Set();
+    const visibleControls = new Set();
+    const activeControls = new Set();
+    const paintedNodes = new Set();
+    const viewers = new Set();
+    const scopeKeys = new Map();
+    const footers = new Map();
+    const themeInputs = new Map();
+    let geometryDirty = true;
+    const originalAttributes = new Map();
+    const stats = { frames: 0, rectReads: 0, styleReads: 0, queries: 0, maskWrites: 0, layerWrites: 0 };
+    window.__alunixaXImageOverlayStats = stats;
+    window.__alunixaXImageOverlayReady = new Promise(resolve => { finishReady = resolve; });
+    const mark = (node, name, value) => {
+      let attributes = originalAttributes.get(node);
+      if (!attributes) originalAttributes.set(node, attributes = new Map());
+      if (!attributes.has(name)) attributes.set(name, node.getAttribute(name));
+      if (node.getAttribute(name) !== value) node.setAttribute(name, value);
+    };
+    const unmark = (node, name) => {
+      const attributes = originalAttributes.get(node);
+      if (!attributes?.has(name)) return;
+      const previous = attributes.get(name);
+      if (previous === null) node.removeAttribute(name);
+      else node.setAttribute(name, previous);
+      attributes.delete(name);
+      if (!attributes.size) originalAttributes.delete(node);
+    };
+    const computed = (node, pseudo) => { stats.styleReads++; return getComputedStyle(node, pseudo); };
+    const bounds = node => { stats.rectReads++; return node.getBoundingClientRect(); };
+    const queryAll = (node, selector) => { stats.queries++; return node.querySelectorAll(selector); };
+    const scopeKey = node => [node.getAttribute("class"), ...[
+      "position", "z-index", "isolation", "contain", "transform", "translate", "scale", "rotate",
+      "will-change", "overflow", "overflow-x", "overflow-y", "animation", "transition",
+    ].map(name => node.style.getPropertyValue(name))].join("|");
+    const themeKey = node => [
+      [...node.classList].filter(name => node !== root ||
+        !/^_(?:active|opening|closing)_[a-zA-Z0-9]+_\d+$/.test(name)).sort().join(" "),
+      [...node.style].filter(name => node !== root || name !== "--image-preview-thumbnail-radius")
+        .sort().map(name => `${name}:${node.style.getPropertyValue(name)}:${node.style.getPropertyPriority(name)}`).join(";"),
+    ].join("|");
+    const viewerKey = node => [node.hidden, node.getAttribute("class"), node.getAttribute("role"),
+      node.getAttribute("data-testid"),
+      node.style.display, node.style.visibility, node.style.contentVisibility].join("|");
+    const release = record => {
+      if (record.browserPortal) {
+        const count = browserPortals.get(record.browserPortal) - 1;
+        if (count) browserPortals.set(record.browserPortal, count);
+        else {
+          browserPortals.delete(record.browserPortal);
+          unmark(record.browserPortal, browserPortalAttribute);
+        }
+      }
+      for (const ancestor of record.ancestors) {
+        const count = scopes.get(ancestor) - 1;
+        if (count) scopes.set(ancestor, count);
+        else {
+          scopes.delete(ancestor);
+          scopeKeys.delete(ancestor);
+          unmark(ancestor, scopeAttribute);
+          unmark(ancestor, containmentAttribute);
+        }
+      }
+    };
+    const refreshScope = node => {
+      unmark(node, scopeAttribute);
+      unmark(node, containmentAttribute);
+      const originalStyle = computed(node);
+      if (originalStyle.contain.includes("paint")) {
+        const flow = originalStyle.position === "static" ? "flow" : "positioned";
+        const clip = originalStyle.overflowX === "visible" && originalStyle.overflowY === "visible" ? "-clip" : "";
+        mark(node, containmentAttribute, flow + clip);
+      }
+      const transform = originalStyle.transform;
+      const identity = transform !== "none" && new DOMMatrix(transform).isIdentity &&
+        !node.getAnimations().some(animation => animation.playState === "running");
+      mark(node, scopeAttribute, identity ? originalStyle.position === "static" ? "identity-flow" : "identity" : "stack");
+      scopeKeys.set(node, scopeKey(node));
+    };
+    const nativeKind = node => node.matches(reviewHeaderSelector) ? "review" :
+      node.matches(toolbarSelector) ? computed(node).position === "static" ? "toolbar-flow" : "toolbar" :
+      node.matches(pageSelector) ? "page" : node.matches(composerSelector) ? "composer" :
+      node.matches(headerSelector) ? computed(node).position === "static" ? "header-flow" : "header" :
+      node.matches(footerSelector) ? "footer" :
+      node.matches(viewerSelector) && !node.matches("[data-browser-sidebar-webview]") ? "viewer" :
+      records.get(node)?.mediaIsland ? computed(node).position === "static" ? "island-flow" : "island" :
+      computed(node).position === "static" ? "flow" : "positioned";
+    const add = node => {
+      if (owned(node) || inactivePanel(node) || node.closest(editorSelector)) return;
+      const previous = records.get(node);
+      if (!node.matches(viewerSelector) && node.closest(viewerSelector) ||
+        !node.matches(reviewHeaderSelector) && node.closest(reviewHeaderSelector)) {
+        if (previous) removeMedia(node, previous);
+        return;
+      }
+      const nativeBoundary = node.parentElement?.closest(`[${popupMaterialAttribute}], [${popupBoundaryAttribute}], [${mediaAttribute}^="island"], ${pageSelector}, ${composerSelector}, ${footerSelector}, ${headerSelector}`);
+      if (nativeBoundary && !node.matches(`${composerSelector}, ${headerSelector}`)) {
+        if (previous) removeMedia(node, previous);
+        return;
+      }
+      if (node.matches("img, video, canvas")) {
+        let host = node;
+        // Keep an icon's badges and overlapping logo stack in native DOM order.
+        for (let parent = node.parentElement; parent && parent !== document.body && !owned(parent) &&
+          !parent.matches(`${topControlSelector}, ${controlSelector}`) && !parent.textContent.trim(); parent = parent.parentElement) {
+          const children = [...parent.children];
+          const sameBox = parent.offsetWidth > 0 && parent.offsetWidth === host.offsetWidth && parent.offsetHeight === host.offsetHeight;
+          const stack = children.length > 1 && children.every(child => child.matches("img,svg") || child.querySelector("img,svg")) &&
+            ["flex", "inline-flex"].includes(computed(parent).display) &&
+            parent.offsetWidth <= children.reduce((sum, child) => sum + child.offsetWidth, 0) &&
+            parent.offsetHeight <= Math.max(...children.map(child => child.offsetHeight));
+          if (!sameBox && !stack) break;
+          host = parent;
+        }
+        if (host !== node) {
+          if (previous) removeMedia(node, previous);
+          removeWithin(records, host, removeMedia, false);
+          removeWithin(controls, host, removeControl);
+          add(host);
+          const record = records.get(host);
+          if (record) {
+            record.mediaIsland = true;
+            unmark(host, mediaAttribute);
+            mark(host, mediaAttribute, nativeKind(host));
+          }
+          return;
+        }
+      }
+      let browserPortal = node.matches(browserSelector) ? node.closest("[data-embedded-frame-host-root]") : null;
+      if (node.matches(browserSelector)) {
+        for (let parent = node.parentElement; !browserPortal && parent && parent !== root; parent = parent.parentElement) {
+          const paint = computed(parent);
+          if (paint.position === "fixed" && paint.pointerEvents === "none") { browserPortal = parent; break; }
+        }
+      }
+      const ancestors = [];
+      for (let parent = nativeBoundary || node.matches(reviewHeaderSelector) ||
+        node.matches(viewerSelector) && !node.matches(browserSelector)
+        ? null : browserPortal ? browserPortal.parentElement : node.parentElement; parent && parent !== root && !parent.matches(pageSelector) &&
+          parent !== nativeBoundary; parent = parent.parentElement) {
+        ancestors.push(parent);
+      }
+      if (previous?.parent === node.parentElement && previous.browserPortal === browserPortal && previous.nativeBoundary === nativeBoundary &&
+        previous.ancestors.length === ancestors.length &&
+        ancestors.every((parent, index) => previous.ancestors[index] === parent)) return;
+      if (previous) release(previous);
+      for (const parent of ancestors) {
+        const count = scopes.get(parent) || 0;
+        scopes.set(parent, count + 1);
+        if (!count) refreshScope(parent);
+      }
+      if (browserPortal) {
+        browserPortals.set(browserPortal, (browserPortals.get(browserPortal) || 0) + 1);
+        mark(browserPortal, browserPortalAttribute, "");
+      }
+      records.set(node, { ...previous, parent: node.parentElement, ancestors, browserPortal, nativeBoundary, box: null });
+      unmark(node, mediaAttribute);
+      mark(node, mediaAttribute, nativeKind(node));
+      if (node.getAttribute(mediaAttribute) === "viewer") {
+        viewers.add(node);
+        records.get(node).viewerKey = viewerKey(node);
+      } else viewers.delete(node);
+      if (nativeBoundary || node.matches(`${browserSelector}, ${reviewHeaderSelector}, ${composerSelector}, ${footerSelector}, ${pageSelector}, ${headerSelector}`)) {
+        intersectionObserver.unobserve(node);
+        visibleMedia.delete(node);
+      } else if (!previous || previous.nativeBoundary) intersectionObserver.observe(node);
+      stats.layerWrites++;
+    };
+    const addControl = (node, origin = null) => {
+      if (owned(node) || inactivePanel(node) || node.closest(reviewHeaderSelector) ||
+        node.matches(nativeRangeSelector) || node.closest(browserSelector) ||
+        node.closest(sidebarSelector) || node.closest(pageSelector) || node.closest(viewerSelector) ||
+        node.closest(topControlSelector) || node.closest(`[${popupBoundaryAttribute}]`) ||
+        node.closest(`${composerSelector}, ${footerSelector}, ${editorSelector}, [${mediaAttribute}^="island"], ${headerSelector}`)) {
+        const previous = controls.get(node);
+        if (previous) removeControl(node, previous);
+        return;
+      }
+      let record = controls.get(node);
+      if (!record) {
+        record = { id: ++nextControl, origin, box: null, paintDirty: false,
+          filter: null, backdrop: null, rule: "", key: "", backdropKey: "" };
+        controls.set(node, record);
+        intersectionObserver.observe(node);
+        resizeObserver.observe(node);
+      }
+      return record;
+    };
+    const controlSurface = node => {
+      let surface = node;
+      for (let parent = node.parentElement; parent && parent !== root && !scopes.has(parent); parent = parent.parentElement) {
+        if (parent.querySelector(mediaSelector)) break;
+        const paint = computed(parent);
+        if (paint.zIndex !== "auto" || paint.transform !== "none" ||
+          paint.filter !== "none" || paint.backdropFilter !== "none" ||
+          paint.isolation === "isolate" || Number(paint.opacity) < 1)
+          surface = parent;
+      }
+      return surface;
+    };
+    const nativeSurfacePaint = surface => ({ id: ++nextControl, surface,
+      pseudo: ["after", "before"].find(pseudo => ["none", "normal"].includes(computed(surface, `::${pseudo}`).content)) });
+    const registerPaint = (node, paint = records.get(node).paint || nativeSurfacePaint(node)) => {
+      const previous = records.get(node).paint;
+      if (previous && previous.surface !== paint.surface) unmark(previous.surface, paintAttribute);
+      records.get(node).paint = paint;
+      if (node.matches(headerSelector)) {
+        unmark(paint.surface, paintAttribute);
+        const id = `background-${paint.id}`;
+        // Paint only existing opaque backing, including native top-edge extensions.
+        // Transparent headers already see the single global wallpaper underneath.
+        records.get(node).wallRule = ["", "::before", "::after"].map(pseudo => {
+          const native = computed(paint.surface, pseudo || undefined);
+          const color = native.backgroundColor;
+          if (color === "transparent" || color.startsWith("rgba(") || color.includes("/") || native.backgroundImage !== "none") return "";
+          const tint = `color-mix(in srgb, ${color} ${(1 - opacity) * 100}%, transparent)`;
+          return `[${paintAttribute}="${id}"]${pseudo}{background-image:linear-gradient(${tint},${tint}),url(${JSON.stringify(resource.imageSource)})!important;background-size:auto,${fitStyles.size}!important;background-position:0 0,${fitStyles.position}!important;background-repeat:no-repeat,${fitStyles.repeat}!important;background-attachment:fixed!important;}`;
+        }).join("\n");
+        mark(paint.surface, paintAttribute, id);
+        paintedNodes.add(node);
+        writeRules();
+        return;
+      }
+      // Leave a surface's two native pseudo-elements intact when both are used.
+      if (!paint.pseudo) {
+        unmark(paint.surface, paintAttribute);
+        paintedNodes.delete(node);
+        records.get(node).wallRule = "";
+        writeRules();
+        return;
+      }
+      const id = (paint.pseudo === "before" ? "before-" : "") + paint.id;
+      records.get(node).wallRule = `[${paintAttribute}="${id}"]::${paint.pseudo}{background-image:url(${JSON.stringify(resource.imageSource)});}`;
+      mark(paint.surface, paintAttribute, id);
+      paintedNodes.add(node);
+      writeRules();
+    };
+    const removeWithin = (registry, tree, remove, includeRoot = true) => {
+      for (const [node, record] of registry)
+        if ((includeRoot || node !== tree) && tree.contains(node)) remove(node, record);
+    };
+    const popupBackgroundKey = node => Array.from(node.style)
+      .filter(name => name.startsWith("background") || name === "color")
+      .sort().map(name => `${name}:${node.style.getPropertyValue(name)}:${node.style.getPropertyPriority(name)}`).join(";");
+    const addComposer = node => {
+      if (owned(node) || inactivePanel(node) || node.closest(viewerSelector)) return;
+      // Paint below the native children. Never annotate editor-owned node views.
+      const surface = node.matches('[data-composer-utility-bar-variant="home"]')
+        ? node.querySelector('[class*="_ComposerLayoutBody_"]') || node : node;
+      let surfacePaint = records.get(node)?.paint;
+      if (!surfacePaint) {
+        unmark(node, mediaAttribute);
+        surfacePaint = nativeSurfacePaint(surface);
+      }
+      add(node);
+      registerPaint(node, surfacePaint);
+    };
+    const addPopupSurface = (boundary, surface) => {
+      if (owned(surface) || inactivePanel(surface) || surface.closest(reviewHeaderSelector) ||
+        surface.closest(viewerSelector) || surface.closest(pageSelector)) return;
+      const previous = popups.get(surface);
+      if (previous?.boundary === boundary) return;
+      if (previous) removePopup(surface, previous);
+      removeWithin(controls, boundary, removeControl);
+      const paint = computed(surface);
+      const record = { boundary, owner: surface.closest(composerOverlaySelector) || boundary,
+        id: ++nextControl, backgroundKey: popupBackgroundKey(surface),
+        nativeBackground: paint.backgroundColor,
+        className: surface.getAttribute("class"), rule: "" };
+      // Only the background is translucent; native contents and positioning stay intact.
+      record.rule = `[${popupMaterialAttribute}="${record.id}"]{background-color:color-mix(in srgb, ${paint.backgroundColor} ${(1 - opacity) * 100}%, transparent)!important;}`;
+      popups.set(surface, record);
+      mark(boundary, popupBoundaryAttribute, "");
+      mark(boundary, topControlAttribute, computed(boundary).position === "static" ? "flow" : "positioned");
+      mark(surface, popupMaterialAttribute, String(record.id));
+      queryAll(boundary, mediaSelector).forEach(add);
+      writeRules();
+    };
+    const refreshPopupTheme = () => {
+      for (const [surface, popup] of popups) {
+        unmark(surface, popupMaterialAttribute);
+        const background = computed(surface).backgroundColor;
+        mark(surface, popupMaterialAttribute, String(popup.id));
+        if (background === popup.nativeBackground) continue;
+        popup.nativeBackground = background;
+        popup.rule = `[${popupMaterialAttribute}="${popup.id}"]{background-color:color-mix(in srgb, ${background} ${(1 - opacity) * 100}%, transparent)!important;}`;
+      }
+      writeRules();
+    };
+    const addDiffPreview = scroll => {
+      const surface = scroll.parentElement;
+      const tooltip = scroll.closest('[class~="group/diff-preview"]');
+      if (!surface || !tooltip || owned(scroll)) return;
+      addPopupSurface(tooltip.closest("[data-radix-popper-content-wrapper]") || tooltip, surface);
+    };
+    const addNativePopup = node => {
+      if (owned(node) || node.closest(viewerSelector) || node.closest(pageSelector)) return;
+      const composerOverlay = node.matches(composerOverlaySelector);
+      const parent = node.parentElement;
+      // The roleless composer menu uses a translated positioning wrapper.
+      const boundary = composerOverlay && parent?.childElementCount === 1 &&
+        ["fixed", "absolute"].includes(computed(parent).position)
+        ? parent : node.closest("[data-radix-popper-content-wrapper]") || node;
+      if (popups.has(boundary)) return;
+      if (node === boundary && [...popups.values()].some(popup => popup.boundary === boundary)) return;
+      const surface = composerOverlay ? node.firstElementChild :
+        node.matches("[data-radix-popper-content-wrapper]") &&
+        computed(node).backgroundColor === "rgba(0, 0, 0, 0)"
+        ? node.querySelector(topControlSelector) : node;
+      if (!surface) return;
+      addPopupSurface(boundary, surface);
+    };
+    const isPopupSurface = surface => surface.matches(topControlSelector) ||
+      surface.closest(`[class~="group/diff-preview"], ${composerOverlaySelector}`);
+    const removePopup = (surface, record) => {
+      popups.delete(surface);
+      unmark(surface, popupMaterialAttribute);
+      if (![...popups.values()].some(other => other.boundary === record.boundary)) {
+        unmark(record.boundary, popupBoundaryAttribute);
+        unmark(record.boundary, topControlAttribute);
+      }
+    };
+    const addPage = node => {
+      removeWithin(popups, node, removePopup);
+      removeWithin(controls, node, removeControl);
+      removeWithin(records, node, removeMedia, false);
+      add(node);
+      registerPaint(node);
+    };
+    const addHeader = node => {
+      if (owned(node) || inactivePanel(node) || node.closest(`${viewerSelector}, ${editorSelector}`)) return;
+      removeWithin(controls, node, removeControl);
+      removeWithin(records, node, removeMedia, false);
+      add(node);
+      registerPaint(node);
+    };
+    const updateFooter = (footer, record) => {
+      const scroller = record.scroller;
+      const parent = footer.offsetParent;
+      if (!parent) return false;
+      let left = 0, right = 0;
+      // The native footer is absolute in the outer frame, not in the scroller.
+      if (parent !== scroller) {
+        const scrollBox = bounds(scroller), parentBox = bounds(parent);
+        const scale = parentBox.width / (parent.offsetWidth || parentBox.width);
+        const scrollScale = scrollBox.width / (scroller.offsetWidth || scrollBox.width);
+        const origin = parentBox.left + parent.clientLeft * scale;
+        left = Math.max(0, (scrollBox.left + scroller.clientLeft * scrollScale - origin) / scale);
+        right = Math.max(0, parent.clientWidth - left - scroller.clientWidth * scrollScale / scale);
+      }
+      const rule = `[${footerAttribute}="${record.id}"]{left:${left}px!important;right:${right}px!important;}`;
+      if (record.rule === rule) return false;
+      record.rule = rule;
+      return true;
+    };
+    const removeFooter = (footer, record) => {
+      footers.delete(footer);
+      unmark(footer, footerAttribute);
+      if (![...footers.values()].some(other => other.scroller === record.scroller) &&
+        !records.has(record.scroller) && !controls.has(record.scroller)) resizeObserver.unobserve(record.scroller);
+    };
+    const addFooter = footer => {
+      if (owned(footer) || inactivePanel(footer) || footer.closest(reviewHeaderSelector)) return;
+      add(footer);
+      const surface = footer.querySelector(':scope > [aria-hidden="true"]');
+      if (surface && records.get(footer)?.paint?.surface !== surface) registerPaint(footer, nativeSurfacePaint(surface));
+      const scroller = footer.closest(timelineSelector);
+      if (!scroller) return;
+      const previous = footers.get(footer);
+      if (previous?.scroller === scroller) {
+        if (updateFooter(footer, previous)) writeRules();
+        return;
+      }
+      if (previous) removeFooter(footer, previous);
+      const paint = computed(footer);
+      // Only the full-width native footer can cover the scrollbar gutter.
+      if (!["absolute", "fixed"].includes(paint.position) ||
+        paint.left !== "0px" || paint.right !== "0px") return;
+      const record = { id: ++nextControl, scroller, rule: "" };
+      footers.set(footer, record);
+      mark(footer, footerAttribute, String(record.id));
+      updateFooter(footer, record);
+      resizeObserver.observe(scroller);
+      writeRules();
+    };
+    const addReviewHeader = node => {
+      removeWithin(popups, node, removePopup);
+      removeWithin(controls, node, removeControl);
+      removeWithin(records, node, removeMedia, false);
+      add(node);
+    };
+    const discoverySelector = [pageSelector, mediaSelector, controlSelector, composerSelector, footerSelector, headerSelector,
+      diffPreviewSelector, topControlSelector].join(", ");
+    const visit = node => {
+      if (node?.nodeType !== 1 || !node.isConnected || owned(node) || inactivePanel(node) ||
+        node.closest(editorSelector)) return;
+      if (node.matches(browserSelector)) { add(node); return; }
+      if (node.closest(browserSelector)) return;
+      const targets = [node, ...(node.childElementCount ? queryAll(node, discoverySelector) : [])]
+        .filter(target => !inactivePanel(target));
+      // Establish native boundaries before registering their media descendants.
+      for (const target of targets) if (target.matches(pageSelector)) addPage(target);
+      for (const target of targets) if (target.matches(footerSelector)) addFooter(target);
+      for (const target of targets) if (target.matches(composerSelector)) addComposer(target);
+      for (const target of targets) if (target.matches(headerSelector)) addHeader(target);
+      for (const target of targets) if (target.matches(reviewHeaderSelector)) addReviewHeader(target);
+      for (const target of targets) {
+        if (target.matches(diffPreviewSelector)) addDiffPreview(target);
+        if (target.matches(topControlSelector)) addNativePopup(target);
+      }
+      for (const target of targets) {
+        if (target.matches(mediaSelector)) add(target);
+        if (target.matches(controlSelector)) addControl(target);
+      }
+      const popup = node.closest(topControlSelector);
+      if (popup && popup !== node) {
+        if (popup.matches(viewerSelector)) add(popup);
+        else addNativePopup(popup);
+      }
+      if (node.parentElement?.matches(footerSelector)) addFooter(node.parentElement);
+    };
+    const intersectionObserver = new IntersectionObserver(entries => {
+      let changed = false;
+      const regions = new Set();
+      for (const entry of entries) {
+        if (inactivePanel(entry.target)) continue;
+        if (records.has(entry.target)) {
+          if (records.get(entry.target).nativeBoundary || entry.target.matches(browserSelector) || entry.target.matches(reviewHeaderSelector)) {
+            visibleMedia.delete(entry.target);
+            continue;
+          }
+          records.get(entry.target).box = null;
+          if (entry.isIntersecting) visibleMedia.add(entry.target);
+          else visibleMedia.delete(entry.target);
+          const region = entry.target.closest(`${timelineSelector}, ${composerSelector}, ${sidebarSelector}`);
+          if (region) regions.add(region);
+        }
+        if (controls.has(entry.target)) {
+          controls.get(entry.target).box = null;
+          if (entry.isIntersecting) visibleControls.add(entry.target);
+          else visibleControls.delete(entry.target);
+        }
+        changed ||= records.has(entry.target) || controls.has(entry.target);
+      }
+      for (const region of regions) invalidateRegion(region, false);
+      if (changed && !previewVisible) schedule();
+    });
+    const resizeObserver = new ResizeObserver(entries => {
+      let changed = false;
+      for (const { target } of entries) {
+        for (const [footer, record] of footers)
+          if (record.scroller === target && updateFooter(footer, record)) writeRules();
+        const control = controls.get(target);
+        if (control) control.box = null;
+        const record = records.get(target);
+        if (record) record.box = null;
+        changed ||= !!(control || record);
+      }
+      if (changed && !previewVisible) schedule();
+    });
+    const removeControl = (node, control) => {
+      control.filter?.remove();
+      control.backdrop?.remove();
+      unmark(node, controlAttribute);
+      unmark(node, topControlAttribute);
+      if (!records.has(node)) {
+        intersectionObserver.unobserve(node);
+        resizeObserver.unobserve(node);
+      }
+      visibleControls.delete(node);
+      activeControls.delete(node);
+      controls.delete(node);
+      stats.layerWrites++;
+    };
+    const removeMedia = (node, record) => {
+      release(record);
+      record.paint?.filter?.remove();
+      unmark(node, mediaAttribute);
+      unmark(record.paint?.surface || node, paintAttribute);
+      if (!controls.has(node)) {
+        intersectionObserver.unobserve(node);
+        resizeObserver.unobserve(node);
+      }
+      visibleMedia.delete(node);
+      viewers.delete(node);
+      paintedNodes.delete(node);
+      records.delete(node);
+      stats.layerWrites++;
+    };
+    const prune = () => {
+      for (const [footer, record] of footers) {
+        if (footer.isConnected && !inactivePanel(footer) && !footer.closest(reviewHeaderSelector) &&
+          record.scroller.isConnected && record.scroller.contains(footer)) continue;
+        removeFooter(footer, record);
+      }
+      for (const [surface, popup] of popups) {
+        if (surface.isConnected && !inactivePanel(surface) && !surface.closest(reviewHeaderSelector) &&
+          popup.boundary.isConnected && popup.boundary.contains(surface) &&
+          !surface.closest(viewerSelector) && !surface.closest(pageSelector) &&
+          isPopupSurface(surface)) continue;
+        removePopup(surface, popup);
+      }
+      for (const [node, record] of records) {
+        if (node.isConnected && !inactivePanel(node) &&
+          (node.matches(viewerSelector) || !node.closest(viewerSelector)) &&
+          (node.matches(reviewHeaderSelector) || !node.closest(reviewHeaderSelector)) &&
+          (node.matches(mediaSelector) || node.matches(`${composerSelector}, ${footerSelector}, ${pageSelector}, ${headerSelector}`) ||
+            record.mediaIsland && node.querySelector("img, video, canvas"))) {
+          if (record.nativeBoundary &&
+            !record.nativeBoundary.matches(`[${popupMaterialAttribute}], [${popupBoundaryAttribute}], ${pageSelector}, ${footerSelector}, ${composerSelector}, ${headerSelector}`)) add(node);
+          continue;
+        }
+        removeMedia(node, record);
+        if (node.isConnected && !node.closest(viewerSelector)) visit(node);
+      }
+      for (const [node, control] of controls) {
+        if (node.isConnected && !inactivePanel(node) && !node.closest(reviewHeaderSelector) &&
+          !node.closest(viewerSelector) && (node.matches(controlSelector) ||
+          control.origin?.isConnected && node.contains(control.origin))) continue;
+        removeControl(node, control);
+      }
+    };
+    const retireTree = tree => {
+      removeWithin(popups, tree, removePopup);
+      removeWithin(controls, tree, removeControl);
+      removeWithin(records, tree, removeMedia);
+      removeWithin(footers, tree, removeFooter);
+    };
+    const mutationObserver = new MutationObserver(mutations => {
+      let changed = false;
+      let pruneNeeded = false;
+      const added = new Set();
+      const attributes = new Set();
+      const semanticAttributes = new Set();
+      const panels = new Set();
+      const movedInactive = new Set();
+      for (const mutation of mutations) {
+        if (owned(mutation.target) || mutation.target.closest?.(editorSelector)) continue;
+        if (mutation.type === "childList") {
+          for (const node of mutation.removedNodes)
+            if (node.nodeType === 1 && node.isConnected && inactivePanel(node)) movedInactive.add(node);
+        }
+        if (mutation.type === "attributes" && mutation.target.matches(rightPanelSelector) &&
+          ["inert", "aria-hidden", "data-app-shell-focus-area"].includes(mutation.attributeName)) {
+          panels.add(mutation.target);
+          continue;
+        }
+        if (inactivePanel(mutation.target)) continue;
+        if (mutation.type === "attributes" && mutation.attributeName === "data-composer-overlay-floating-ui") {
+          for (const [surface, popup] of popups)
+            if (popup.owner === mutation.target) removePopup(surface, popup);
+          added.add(mutation.target);
+          changed = true;
+          pruneNeeded = true;
+          continue;
+        }
+        if (mutation.type === "childList") {
+          if (mutation.target.closest?.(browserSelector)) continue;
+          const nodes = [...mutation.addedNodes, ...mutation.removedNodes];
+          if (!nodes.some(node => node.nodeType === 1 && !owned(node))) continue;
+          pruneNeeded = true;
+          for (const node of mutation.addedNodes)
+            if (node.nodeType === 1 && node.isConnected && !owned(node)) added.add(node);
+          if ([...mutation.removedNodes].some(node =>
+            node.nodeType === 1 && !owned(node) && (node.matches(`[${mediaAttribute}],[${controlAttribute}],[${footerAttribute}]`) ||
+              node.querySelector(`[${mediaAttribute}],[${controlAttribute}],[${popupMaterialAttribute}],[${footerAttribute}]`) ||
+              node.matches(`[${popupMaterialAttribute}]`)))) changed = true;
+        } else {
+          attributes.add(mutation.target);
+          if (mutation.attributeName !== "style") semanticAttributes.add(mutation.target);
+        }
+      }
+      const before = stats.layerWrites;
+      const count = records.size + controls.size + popups.size;
+      for (const tree of movedInactive) { retireTree(tree); changed = true; }
+      for (const panel of panels) {
+        if (inactivePanel(panel)) retireTree(panel);
+        else visit(panel);
+        changed = true;
+      }
+      for (const node of added) {
+        let parent = node.parentElement;
+        while (parent && !added.has(parent)) parent = parent.parentElement;
+        if (!parent) visit(node);
+      }
+      changed ||= stats.layerWrites !== before || records.size + controls.size + popups.size !== count;
+      for (const node of attributes) {
+        if (!node.isConnected || inactivePanel(node)) continue;
+        if (node.closest?.(browserSelector) && !node.matches(browserSelector)) continue;
+        // Native hosts and painted surfaces own their animated geometry.
+        if (node.matches(`${browserSelector}, ${headerSelector}`) && records.has(node) && !semanticAttributes.has(node)) continue;
+        if (node === root || node === document.body) {
+          const key = themeKey(node);
+          if (themeInputs.get(node) !== key) {
+            themeInputs.set(node, key);
+            refreshPopupTheme();
+            for (const surface of paintedNodes) if (surface.matches(headerSelector)) registerPaint(surface);
+          }
+        }
+        if (viewers.has(node)) {
+          const record = records.get(node);
+          if (!node.matches(viewerSelector)) {
+            removeMedia(node, record);
+            visit(node);
+            changed = true;
+            pruneNeeded = true;
+            continue;
+          }
+          const key = viewerKey(node);
+          if (record.viewerKey === key) continue;
+          record.viewerKey = key;
+          changed ||= isPreviewOpen() !== previewVisible;
+          continue;
+        } else if (node.closest(viewerSelector) && !node.matches(browserSelector)) continue;
+        if ([...viewers].some(viewer => node.contains(viewer)))
+          changed ||= isPreviewOpen() !== previewVisible;
+        pruneNeeded ||= semanticAttributes.has(node);
+        if (node.matches(pageSelector) && !records.get(node)?.paint) visit(node);
+        if (node.matches(headerSelector) && (!records.get(node)?.paint || semanticAttributes.has(node))) { addHeader(node); changed = true; }
+        if (node.matches(reviewHeaderSelector)) { addReviewHeader(node); continue; }
+        const popup = popups.get(node);
+        if (popup && !node.closest(viewerSelector) && !node.closest(pageSelector) &&
+          isPopupSurface(node)) {
+          const key = popupBackgroundKey(node);
+          const className = node.getAttribute("class");
+          if (key !== popup.backgroundKey || className !== popup.className) {
+            const boundary = popup.boundary;
+            removePopup(node, popup);
+            addPopupSurface(boundary, node);
+            changed = true;
+          }
+          continue;
+        }
+        if (popup) { removePopup(node, popup); visit(node); changed = true; }
+        if (node.matches(topControlSelector)) {
+          const count = popups.size;
+          addNativePopup(node);
+          changed ||= popups.size !== count;
+        }
+        if (node.closest(`[${popupBoundaryAttribute}]`) && !records.has(node) && !scopes.has(node)) continue;
+        if (previewVisible) {
+          continue;
+        }
+        if (footers.has(node) || node.matches(footerSelector)) {
+          const footer = footers.get(node);
+          if (footer) removeFooter(node, footer);
+          if (node.matches(footerSelector)) addFooter(node);
+          if (footer) writeRules();
+        }
+        if (records.has(node)) {
+          records.get(node).box = null;
+          unmark(node, mediaAttribute);
+          add(node);
+          if (!records.has(node)) { changed = true; continue; }
+          mark(node, mediaAttribute, nativeKind(node));
+          if (records.get(node).nativeBoundary) continue;
+        } else {
+          if (node.matches(mediaSelector)) add(node);
+          if (node.matches(controlSelector)) addControl(node);
+          if (!scopes.has(node) && !controls.has(node) && !records.has(node)) continue;
+        }
+        if (scopes.has(node)) {
+          if (scopeKeys.get(node) !== scopeKey(node)) {
+            refreshScope(node);
+            geometryDirty = true;
+            pruneNeeded = true;
+            changed = true;
+          } else changed = invalidateRegion(node.closest(sidebarSelector) ? document.body : node, false) || changed;
+          if (!records.has(node) && !controls.has(node)) continue;
+        }
+        const control = controls.get(node);
+        if (control) { control.box = null; control.surface = null; control.candidate = undefined; }
+        if (control) control.paintDirty = true;
+        changed = true;
+      }
+      changed ||= stats.layerWrites !== before;
+      if (pruneNeeded && [...viewers].some(node => !node.isConnected || !node.matches(viewerSelector)))
+        changed = true;
+      if (changed) {
+        if (pruneNeeded) prune();
+        if (isPreviewOpen() !== previewVisible) {
+          if (raf) cancelAnimationFrame(raf);
+          render();
+        } else schedule();
+      }
+    });
+    const isPreviewOpen = () => [...viewers].some(node =>
+      node.isConnected && node.matches(viewerSelector) && node.checkVisibility({ checkVisibilityCSS: true }));
+    const inViewport = box => box.width > 0 && box.height > 0 && box.right > 0 &&
+      box.bottom > 0 && box.left < innerWidth && box.top < innerHeight;
+    const overlap = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const wallpaperInput = (box, sx, sy) => {
+      const width = innerWidth / sx, height = innerHeight / sy;
+      if (fitMode === "tile") {
+        const key = `${innerWidth}|${innerHeight}`;
+        if (resource.tileInputKey !== key) {
+          if (resource.tileInputUrl) URL.revokeObjectURL(resource.tileInputUrl);
+          const tiled = svgNode("svg", { width: innerWidth, height: innerHeight });
+          const pattern = svgNode("pattern", { id: "wall", patternUnits: "userSpaceOnUse",
+            width: resource.width, height: resource.height });
+          pattern.appendChild(svgNode("image", { href: source, width: resource.width, height: resource.height }));
+          const patterns = svgNode("defs");
+          patterns.appendChild(pattern);
+          tiled.append(patterns, svgNode("rect", { width: innerWidth, height: innerHeight, fill: "url(#wall)" }));
+          resource.tileInputUrl = URL.createObjectURL(new Blob(
+            [new XMLSerializer().serializeToString(tiled)], { type: "image/svg+xml" }));
+          resource.tileInputKey = key;
+        }
+        return { href: resource.tileInputUrl, x: -box.x / sx, y: -box.y / sy,
+          width, height, preserveAspectRatio: "none", result: "wall" };
+      }
+      let x = -box.x / sx, y = -box.y / sy, w = width, h = height;
+      let aspect = fitMode === "fill" ? "xMidYMid slice" : fitMode === "fit" ? "xMidYMid meet" : "none";
+      if (fitMode === "center") {
+        w = resource.width / sx;
+        h = resource.height / sy;
+        x += (width - w) / 2;
+        y += (height - h) / 2;
+      }
+      return { href: resource.imageSource, x, y, width: w, height: h, preserveAspectRatio: aspect, result: "wall" };
+    };
+    const backdropInput = (item, box, sx, sy, index) => {
+      const target = item.node, paint = computed(target), mediaBox = item.box;
+      const x = (mediaBox.x - box.x) / sx, y = (mediaBox.y - box.y) / sy;
+      const width = mediaBox.width / sx, height = mediaBox.height / sy;
+      const input = `media-${index}`, shape = `shape-${index}`;
+      const clipped = `clipped-${index}`, painted = `painted-${index}`;
+      const primitives = [];
+      if (target instanceof HTMLImageElement && target.complete && target.naturalWidth) {
+        const sourceUrl = target.currentSrc || target.src;
+        const mediaRecord = records.get(target);
+        if (mediaRecord.sourceUrl !== sourceUrl || mediaRecord.sourceWidth !== target.naturalWidth ||
+          mediaRecord.sourceHeight !== target.naturalHeight) {
+          mediaRecord.sourceUrl = sourceUrl;
+          mediaRecord.sourceWidth = target.naturalWidth;
+          mediaRecord.sourceHeight = target.naturalHeight;
+          mediaRecord.inputRevision = ++nextSource;
+          mediaRecord.inputSource = sourceUrl;
+          if (sourceUrl.startsWith("data:image/")) {
+            const sourceSvg = svgNode("svg", { width: target.naturalWidth, height: target.naturalHeight });
+            sourceSvg.appendChild(svgNode("image", { href: sourceUrl,
+              width: target.naturalWidth, height: target.naturalHeight, preserveAspectRatio: "none" }));
+            mediaRecord.inputSource = "data:" + "image/svg+xml;charset=utf-8," +
+              encodeURIComponent(new XMLSerializer().serializeToString(sourceSvg));
+          }
+        }
+        let w = width, h = height, left = x, top = y;
+        const mediaScaleX = mediaBox.width / (target.offsetWidth || mediaBox.width);
+        const mediaScaleY = mediaBox.height / (target.offsetHeight || mediaBox.height);
+        const naturalWidth = target.naturalWidth * mediaScaleX / sx;
+        const naturalHeight = target.naturalHeight * mediaScaleY / sy;
+        const fit = paint.objectFit;
+        if (fit !== "fill") {
+          let scale = fit === "cover" ? Math.max(width / naturalWidth, height / naturalHeight)
+            : fit === "none" ? 1 : Math.min(width / naturalWidth, height / naturalHeight);
+          if (fit === "scale-down") scale = Math.min(1, scale);
+          w = naturalWidth * scale;
+          h = naturalHeight * scale;
+          const positions = paint.objectPosition.split(/\s+/);
+          const offset = (value, available) => value?.endsWith("%")
+            ? available * parseFloat(value) / 100 : parseFloat(value) || 0;
+          left += offset(positions[0], width - w);
+          top += offset(positions[1] || positions[0], height - h);
+        }
+        primitives.push(["feImage", { href: mediaRecord.inputSource,
+          x: left, y: top, width: w, height: h, preserveAspectRatio: "none", result: input }]);
+      } else {
+        // Opaque live surfaces use the existing backdrop pixels, never a capture.
+        primitives.push(["feComposite", { in: "SourceGraphic", in2: "SourceGraphic",
+          operator: "in", result: input }]);
+      }
+      const radius = paint.borderTopLeftRadius.split(/\s+/);
+      const length = (value, size, scale) => value?.endsWith("%")
+        ? size * parseFloat(value) / 100 : (parseFloat(value) || 0) / scale;
+      const rx = Math.min(width / 2, length(radius[0], width, sx));
+      const ry = Math.min(height / 2, length(radius[1] || radius[0], height, sy));
+      const clip = `<svg xmlns="${ns}" width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="${rx}" ry="${ry}" fill="white"/></svg>`;
+      primitives.push(
+        ["feImage", { href: `data:image/svg+xml,${encodeURIComponent(clip)}`,
+          x, y, width, height, preserveAspectRatio: "none", result: shape }],
+        ["feComposite", { in: input, in2: shape, operator: "in", result: clipped }],
+      );
+      if (Number(paint.opacity) !== 1) primitives.push(["feColorMatrix", {
+        in: clipped, type: "matrix", values: `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${paint.opacity} 0`, result: painted,
+      }]);
+      return { primitives, input: Number(paint.opacity) === 1 ? clipped : painted, key: [x, y, width, height,
+        records.get(target).inputRevision || 0, paint.objectFit,
+        paint.objectPosition, paint.borderTopLeftRadius, paint.opacity].join("|") };
+    };
+    const restoreBackdrop = (record, box, sx, sy, mediaBoxes) => {
+      if (record.nativeBackdrop === "none" || opacity === 1) return "";
+      const padding = (record.nativeBackdrop.match(/[\d.]+px/g) || [])
+        .reduce((sum, value) => sum + parseFloat(value) * 3, 0);
+      const area = { left: box.left - padding * sx, right: box.right + padding * sx,
+        top: box.top - padding * sy, bottom: box.bottom + padding * sy };
+      const inputs = mediaBoxes.filter(item => overlap(area, item.box))
+        .map((item, index) => backdropInput(item, box, sx, sy, index));
+      const key = [box.x, box.y, box.width, box.height, sx, sy, innerWidth, innerHeight,
+        record.nativeBackdrop, ...inputs.map(input => input.key)].join("|");
+      const id = `${alunixaXImageOverlayId}-backdrop-${record.id}`;
+      if (!record.backdrop) {
+        record.backdrop = svgNode("filter", { id, filterUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" });
+        defs.appendChild(record.backdrop);
+      }
+      if (key !== record.backdropKey) {
+        record.backdropKey = key;
+        const primitives = [svgNode("feImage", wallpaperInput(box, sx, sy))];
+        let compensation = "wall";
+        for (const [index, { primitives: sourcePrimitives, input }] of inputs.entries()) {
+          const next = `compensation-${index}`;
+          primitives.push(...sourcePrimitives.map(([tag, attributes]) => svgNode(tag, attributes)),
+            svgNode("feComposite", { in: compensation, in2: input, operator: "out", result: "wallOutside" }),
+            svgNode("feComposite", { in: input, in2: "wall", operator: "in", result: "mediaInside" }),
+            svgNode("feComposite", { in: "wallOutside", in2: "mediaInside", operator: "arithmetic",
+              k2: 1, k3: 1, result: next }),
+          );
+          compensation = next;
+        }
+        // Premultiplied subtraction also restores alpha. Unpremultiplication
+        // recovers the original backdrop without a divide or a backing layer.
+        primitives.push(
+          svgNode("feComposite", { in: "SourceGraphic", in2: compensation, operator: "arithmetic",
+            k2: 1, k3: -opacity, result: "restored" }),
+          svgNode("feColorMatrix", { in: "restored", type: "matrix",
+            values: "1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0 1" }),
+        );
+        record.backdrop.setAttribute("x", String(-padding));
+        record.backdrop.setAttribute("y", String(-padding));
+        record.backdrop.setAttribute("width", String(box.width / sx + padding * 2));
+        record.backdrop.setAttribute("height", String(box.height / sy + padding * 2));
+        record.backdrop.replaceChildren(...primitives);
+      }
+      return `backdrop-filter:url("#${id}") ${record.nativeBackdrop}!important;`;
+    };
+    const activateTint = (record, node) => {
+      mark(node, controlAttribute, String(record.id));
+      if (node.matches(topControlSelector) || node.closest(topControlSelector) || node.querySelector(topControlSelector))
+        mark(node, topControlAttribute, "");
+      else unmark(node, topControlAttribute);
+    };
+    const createTint = (record, node, box, nativeFilter, mediaBoxes) => {
+      const sx = box.width / (node.offsetWidth || box.width);
+      const sy = box.height / (node.offsetHeight || box.height);
+      const backdropRule = restoreBackdrop(record, box, sx, sy, mediaBoxes);
+      const key = [box.x, box.y, box.width, box.height, innerWidth, innerHeight, sx, sy,
+        nativeFilter, record.nativePosition, record.nativeShadow, record.nativeBackdrop, record.backdropKey].join("|");
+      if (record.key === key) {
+        if (!record.rule && record.cachedRule) {
+          record.rule = record.cachedRule;
+          activateTint(record, node);
+          stats.layerWrites++;
+        }
+        return;
+      }
+      record.key = key;
+      const id = `${alunixaXImageOverlayId}-control-${record.id}`;
+      if (!record.filter) {
+        record.filter = svgNode("filter", { id, filterUnits: "userSpaceOnUse", "color-interpolation-filters": "sRGB" });
+        defs.appendChild(record.filter);
+        record.filter.append(
+          svgNode("feImage", wallpaperInput(box, sx, sy)),
+          svgNode("feColorMatrix", { in: "wall", type: "matrix",
+            values: `1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 ${opacity} 0`, result: "tint" }),
+          svgNode("feComposite", { in: "SourceGraphic", in2: "tint", operator: "out", result: "ordinary" }),
+          svgNode("feComposite", { in: "tint", in2: "SourceAlpha", operator: "in", result: "wallInk" }),
+          svgNode("feComposite", { in: "ordinary", in2: "wallInk", operator: "arithmetic", k2: 1, k3: 1 }),
+        );
+      } else {
+        const input = record.filter.firstElementChild;
+        for (const [name, value] of Object.entries(wallpaperInput(box, sx, sy)))
+          if (input.getAttribute(name) !== String(value)) input.setAttribute(name, String(value));
+      }
+      let padding = 0;
+      for (const shadow of record.nativeShadow.replace(/\([^)]*\)/g, "").split(",")) {
+        if (shadow.includes("inset")) continue;
+        const [dx = 0, dy = 0, blur = 0, spread = 0] = (shadow.match(/-?[\d.]+px/g) || []).map(parseFloat);
+        padding = Math.max(padding, Math.max(Math.abs(dx), Math.abs(dy)) + blur * 2 + Math.abs(spread));
+      }
+      padding += (nativeFilter.match(/-?[\d.]+px/g) || []).reduce((sum, value) => sum + Math.abs(parseFloat(value)) * 3, 0);
+      for (const [name, value] of Object.entries({ x: -padding, y: -padding,
+        width: box.width / sx + padding * 2, height: box.height / sy + padding * 2 }))
+        if (record.filter.getAttribute(name) !== String(value)) record.filter.setAttribute(name, String(value));
+      // Tint the control's own ink, preserving alpha. This composes once over
+      // an already-tinted backdrop; it does not create a media backing region.
+      record.rule = `[${controlAttribute}="${record.id}"]{${record.nativePosition === "static" ? "position:relative!important;" : ""}${backdropRule}filter:${nativeFilter === "none" ? "" : `${nativeFilter} `}url("#${id}")!important;}`;
+      record.cachedRule = record.rule;
+      activateTint(record, node);
+      stats.layerWrites++;
+    };
+    let lastRules = null;
+    let rulesQueued = false;
+    const writeRules = () => {
+      if (rulesQueued || disposed) return;
+      rulesQueued = true;
+      // Commit once per mutation batch, before the browser paints.
+      queueMicrotask(() => { rulesQueued = false; if (!disposed) flushRules(); });
+    };
+    const flushRules = () => {
+      const rules = nativeRules + [...footers.values()].map(record => record.rule).join("\n") +
+        [...paintedNodes].map(node => records.get(node))
+        .map(record => record.wallRule).join("\n") +
+        [...activeControls].map(node => controls.get(node).rule).concat([...popups.values()].map(record => record.rule))
+          .filter(Boolean).join("\n");
+      if (rules !== lastRules) { style.textContent = rules; lastRules = rules; }
+    };
+    const render = () => {
+      raf = 0;
+      if (disposed || document.hidden) return;
+      stats.frames++;
+      previewVisible = isPreviewOpen();
+      if (previewVisible) return;
+      const media = [...visibleMedia].filter(node => node.isConnected && !records.get(node)?.nativeBoundary &&
+        !inactivePanel(node) &&
+        !node.matches(composerSelector) && !node.matches(browserSelector) && !node.matches(reviewHeaderSelector) &&
+        node.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+      const mediaBoxes = new Map();
+      const mediaGroups = new Map();
+      const measureMedia = composer => {
+        if (mediaGroups.has(composer)) return mediaGroups.get(composer);
+        const group = media.filter(target => !composer || composer.contains(target)).map(target => {
+        if (!mediaBoxes.has(target)) {
+          const item = records.get(target);
+          mediaBoxes.set(target, { node: target, box: !geometryDirty && item.box ? item.box : (item.box = bounds(target)) });
+        }
+        return mediaBoxes.get(target);
+        }).filter(item => inViewport(item.box));
+        mediaGroups.set(composer, group);
+        return group;
+      };
+      const candidates = new Set([...visibleControls, ...activeControls]);
+      for (const node of candidates) {
+        const record = controls.get(node);
+        if (!record) continue;
+        const composer = node.closest(composerSelector);
+        let active = !inactivePanel(node) && visibleControls.has(node) && !node.closest(viewerSelector) &&
+          !node.parentElement?.closest(`[${controlAttribute}]`) &&
+          !records.has(node) && !node.querySelector(mediaSelector) &&
+          node.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) &&
+          (composer
+            ? media.some(target => composer.contains(target) && !node.contains(target))
+            : media.length);
+        const current = record.rule;
+        if (active) {
+          if (record.candidate === undefined) {
+            const surface = controlSurface(node);
+            record.surface = surface;
+            const paint = computed(surface);
+            record.candidate = paint.position === "absolute" || paint.position === "fixed" ||
+              paint.zIndex !== "auto";
+          }
+          active = record.candidate;
+        }
+        if (active) {
+          const box = !geometryDirty && record.box ? record.box : (record.box = bounds(node));
+          active = inViewport(box);
+          if (active) {
+            active = measureMedia(composer).some(item =>
+              !node.contains(item.node) && overlap(box, item.box));
+            if (active) {
+              if (record.surface && !record.surface.contains(node)) record.surface = null;
+              const surface = record.surface ||= controlSurface(node);
+              if (surface !== node) {
+                if (addControl(surface, node)) {
+                  visibleControls.add(surface);
+                  candidates.add(surface);
+                }
+                active = false;
+              }
+            }
+            if (active) {
+              let originalStyle = null;
+              if (!current || record.paintDirty) {
+                if (current) unmark(node, controlAttribute);
+                originalStyle = computed(node);
+                if (current) mark(node, controlAttribute, String(record.id));
+                record.paintDirty = false;
+              }
+              const baseFilter = originalStyle?.filter || record.nativeFilter;
+              if (originalStyle) {
+                record.nativePosition = originalStyle.position;
+                record.nativeShadow = originalStyle.boxShadow;
+                record.nativeBackdrop = originalStyle.backdropFilter;
+              }
+              record.nativeFilter = baseFilter;
+              createTint(record, node, box, baseFilter,
+                record.nativeBackdrop === "none" ? [] : measureMedia(composer));
+            }
+          }
+        }
+        if (!active && current) {
+          record.rule = "";
+          unmark(node, controlAttribute);
+          unmark(node, topControlAttribute);
+          stats.layerWrites++;
+        }
+        if (record.rule) activeControls.add(node);
+        else activeControls.delete(node);
+      }
+      writeRules();
+      geometryDirty = false;
+    };
+    function schedule(geometry = false) {
+      geometryDirty ||= geometry === true;
+      if (!disposed && !document.hidden && !raf) raf = requestAnimationFrame(render);
+    }
+    const onControlMotionEnd = event => {
+      const node = event.target?.closest?.(`[${controlAttribute}]`);
+      const control = controls.get(node);
+      if (!control?.rule) return;
+      control.paintDirty = true;
+      control.box = null;
+      schedule();
+    };
+    const onScroll = event => {
+      if (event.target?.closest?.(sidebarSelector)) sidebarScrollUntil = performance.now() + 180;
+      if (previewVisible) return;
+      const target = event.target;
+      if (!target || target === document || target === document.documentElement ||
+        target === document.body || target === document.scrollingElement) {
+        if (activeControls.size) schedule(true);
+        else invalidateRegion(document.body, false);
+        return;
+      }
+      if (target.closest?.(browserSelector)) return;
+      invalidateRegion(target, activeControls.size > 0);
+    };
+    const invalidateRegion = (target, redraw = true) => {
+      let changed = false;
+      for (const node of new Set([...visibleMedia, ...visibleControls, ...activeControls])) {
+        if (!target.contains?.(node)) continue;
+        const record = records.get(node);
+        const control = controls.get(node);
+        if (record) record.box = null;
+        if (control) control.box = null;
+        changed = true;
+      }
+      if (changed && redraw) schedule();
+      return changed;
+    };
+    const onSidebarWheel = event => {
+      if (event.target?.closest?.(sidebarSelector)) sidebarScrollUntil = performance.now() + 180;
+    };
+    const onSidebarHover = event => {
+      if (performance.now() >= sidebarScrollUntil || event.buttons || event.pointerType === "touch") return;
+      if (event.target?.closest?.(sidebarRowSelector)?.closest(sidebarSelector))
+        event.stopImmediatePropagation();
+    };
+    const events = [
+      [document, "visibilitychange", () => {
+        if (document.hidden) {
+          if (raf) cancelAnimationFrame(raf);
+          raf = 0;
+        } else schedule(true);
+      }, false],
+      [document, "scroll", onScroll, true],
+      [document, "wheel", onSidebarWheel, true],
+      [document, "pointerover", onSidebarHover, true],
+      [document, "pointermove", onSidebarHover, true],
+      [document, "mouseover", onSidebarHover, true],
+      [document, "mousemove", onSidebarHover, true],
+      [document, "pointerdown", () => { sidebarScrollUntil = 0; }, true],
+      [window, "resize", () => schedule(true), false],
+      [document, "load", event => {
+        const record = records.get(event.target);
+        if (!record || record.nativeBoundary || event.target.matches(browserSelector)) return;
+        const region = event.target.closest(`${timelineSelector}, ${composerSelector}, ${sidebarSelector}`);
+        if (region) invalidateRegion(region);
+        else schedule(true);
+      }, true],
+      [document, "toggle", schedule, true],
+      [document, "transitionend", onControlMotionEnd, true],
+      [document, "animationend", onControlMotionEnd, true],
+    ];
+    window.__alunixaXImageOverlayCleanup = (keepResource = false) => {
+      if (disposed) return;
+      disposed = true;
+      if (raf) cancelAnimationFrame(raf);
+      mutationObserver.disconnect();
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      for (const [target, event, handler, capture] of events) target.removeEventListener(event, handler, capture);
+      for (const [node, attributes] of [...originalAttributes])
+        for (const name of [...attributes.keys()]) unmark(node, name);
+      overlay.remove();
+      style.remove();
+      svg.remove();
+      image.onload = null;
+      image.onerror = null;
+      for (const collection of [records, scopes, browserPortals, controls, popups, visibleMedia,
+        visibleControls, activeControls, paintedNodes, viewers, scopeKeys, footers, themeInputs]) collection.clear();
+      finishReady(false);
+      if (!keepResource && resource) {
+        if (resource.blobUrl) URL.revokeObjectURL(resource.blobUrl);
+        if (resource.tileInputUrl) URL.revokeObjectURL(resource.tileInputUrl);
+        if (window.__alunixaXImageOverlayResource === resource) window.__alunixaXImageOverlayResource = null;
+        if (window.__alunixaXImageOverlayBlobUrl === resource.blobUrl) window.__alunixaXImageOverlayBlobUrl = "";
+      }
+    };
+    const install = () => {
+      if (disposed) return;
+      resource.ready = true;
+      resource.opacity = opacity;
+      resource.fitMode = fitMode;
+      resource.width ||= image.naturalWidth;
+      resource.height ||= image.naturalHeight;
+      overlay.style.backgroundImage = `url(${JSON.stringify(resource.imageSource)})`;
+      style.textContent = nativeRules;
+      root.append(style, svg);
+      root.insertBefore(overlay, document.body || root.firstChild);
+      visit(root);
+      themeInputs.set(root, themeKey(root));
+      if (document.body) themeInputs.set(document.body, themeKey(document.body));
+      mutationObserver.observe(root, { childList: true, subtree: true, attributes: true,
+        attributeFilter: ["class", "style", "hidden", "open", "inert", "aria-hidden", "src", "srcset", "sizes", "role", "data-testid", "data-browser-sidebar-webview", "data-browser-sidebar-toolbar", "data-thread-scroll-footer", "data-app-shell-focus-area", "data-composer-overlay-floating-ui", "data-app-shell-header-layout", "data-sticky", "data-composer-placement"] });
+      for (const [target, event, handler, capture] of events)
+        target.addEventListener(event, handler, { capture, passive: true });
+      render();
+      finishReady(true);
+      sendCodexPlusDiagnostic("image_overlay_installed", { opacity, fitMode, sourceKind: source.startsWith("data:") ? "data-uri" : "unknown" });
+    };
+    if (resource) install();
+    else {
+      let blobUrl = "";
+      const data = source.match(/^data:([^;,]+);base64,([\s\S]*)$/);
+      if (data) {
+        const decoded = atob(data[2]);
+        const bytes = new Uint8Array(decoded.length);
+        for (let index = 0; index < decoded.length; index++) bytes[index] = decoded.charCodeAt(index);
+        blobUrl = URL.createObjectURL(new Blob([bytes], { type: data[1] }));
+      }
+      resource = { version: 29, source, blobUrl, imageSource: blobUrl || source };
+      window.__alunixaXImageOverlayResource = resource;
+      window.__alunixaXImageOverlayBlobUrl = blobUrl;
+      image.onload = install;
+      image.onerror = () => { if (!disposed) window.__alunixaXImageOverlayCleanup?.(); };
+      image.src = resource.imageSource;
+    }
+  }
+  function installAlunixaXImageOverlay() {
+    const config = window.__ALUNIXA_X_IMAGE_OVERLAY__ || {};
+    const signature = JSON.stringify(config);
+    const previous = window.__alunixaXWallpaperRuntime;
+    if (previous?.signature === signature && (previous.loading || previous.element?.isConnected)) return;
+    previous?.cleanup?.();
+    window.__alunixaXImageOverlayCleanup?.();
+    if (!config.enabled || config.kind === "video") {
+      installAlunixaXMediaOverlay();
+      return;
+    }
+    let stopped = false;
+    let blobUrl = "";
+    const runtime = {
+      signature,
+      loading: true,
+      get element() { return document.getElementById(alunixaXImageOverlayId); },
+      cleanup() {
+        if (stopped) return;
+        stopped = true;
+        runtime.loading = false;
+        window.__alunixaXImageOverlayCleanup?.();
+        window.removeEventListener("pagehide", runtime.cleanup);
+        if (blobUrl) URL.revokeObjectURL(blobUrl);
+        if (window.__alunixaXWallpaperRuntime === runtime) delete window.__alunixaXWallpaperRuntime;
+      },
+    };
+    window.__alunixaXWallpaperRuntime = runtime;
+    window.addEventListener("pagehide", runtime.cleanup, { once: true });
+    const load = async () => {
+      if (config.dataUrl) return config.dataUrl;
+      const result = await window.__codexSessionDeleteBridge?.("/wallpaper/media", {});
+      if (result?.status !== "ok" || !String(result.sourceUrl || "").startsWith("blob:"))
+        throw new Error(result?.message || "壁纸文件无法读取，请重新选择");
+      if (stopped) { URL.revokeObjectURL(result.sourceUrl); return ""; }
+      blobUrl = result.sourceUrl;
+      return blobUrl;
+    };
+    void load().then(async source => {
+      if (stopped) return;
+      const original = window.__ALUNIXA_X_IMAGE_OVERLAY__;
+      window.__ALUNIXA_X_IMAGE_OVERLAY__ = { ...config, dataUrl: source };
+      try {
+        installAlunixaXCompositedImageOverlay();
+      } finally {
+        window.__ALUNIXA_X_IMAGE_OVERLAY__ = original;
+      }
+      const ready = await window.__alunixaXImageOverlayReady;
+      if (stopped) return;
+      runtime.loading = false;
+      if (!ready) throw new Error("壁纸图片无法加载，请重新选择有效的图片");
+      sendAlunixaXDiagnostic("wallpaper_ready", { kind: "image" });
+    }).catch(error => {
+      if (stopped) return;
+      runtime.cleanup();
+      sendAlunixaXDiagnostic("wallpaper_failed", { kind: "image", message: error?.message || "壁纸文件读取失败" });
+    });
   }
   /**
    * 拓展注册中心。
@@ -502,6 +2153,120 @@
     window.__alunixaXExtensionFailures.push({ script_key: scriptKey, message, at: Date.now() });
     if (window.__alunixaXExtensionFailures.length > 100) window.__alunixaXExtensionFailures.shift();
   }
+  const codexThreadServiceTierModes = new Set(["inherit", "standard", "fast"]);
+
+  const codexServiceTierControlModes = new Set(["inherit", "global-standard", "global-fast", "custom"]);
+
+  function isFastServiceTierValue(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    return normalized === "fast" || normalized === "priority";
+  }
+
+  let codexServiceTierState = {
+    status: "loading",
+    serviceTier: null,
+    configServiceTier: null,
+    serviceTierSource: null,
+    message: "正在读取…",
+    fastTierValue: "priority",
+    controlMode: "inherit",
+    defaultMode: "inherit",
+    activeThreadId: "",
+    threadMode: "inherit",
+    effectiveServiceTier: null,
+    effectiveMode: "standard",
+    fastModelName: "",
+    fastSupported: false,
+  };
+
+  function codexServiceTierDefaultModeForControlMode(controlMode, fallback = "inherit") {
+    if (controlMode === "global-fast") return "fast";
+    if (controlMode === "global-standard") return "standard";
+    if (controlMode === "inherit") return "inherit";
+    return normalizeCodexThreadServiceTierMode(fallback);
+  }
+
+  function codexServiceTierMaybeLoadModelCatalog(force = false) {
+    if (codexModelCatalogPromise) return;
+    if (!force && codexModelCatalog.status === "failed") return;
+    if (!force && codexModelCatalogLoadedAt && Date.now() - codexModelCatalogLoadedAt < 10000) return;
+    loadCodexModelCatalog(force).then(() => {
+      refreshCodexServiceTierControls();
+    }).catch(() => {
+      refreshCodexServiceTierControls();
+    });
+  }
+
+  function codexServiceTierFastUnsupportedMessage(modelName = codexServiceTierCurrentModelName()) {
+    const modelText = modelName ? `当前模型 ${modelName} 不支持` : "当前模型未读取";
+    return `Fast 支持 ${codexServiceTierFastModelListLabel()} 或已声明 priority 的模型，${modelText}；可在供应商的模型配置中设置 Fast 支持`;
+  }
+
+  function codexServiceTierEffectiveMode(value) {
+    return isFastServiceTierValue(value) ? "fast" : "standard";
+  }
+
+  function codexServiceTierValueForControlMode(controlMode, threadMode = "inherit", defaultMode = "inherit") {
+    if (controlMode === "global-fast") return codexFastServiceTierValue();
+    if (controlMode === "global-standard") return null;
+    if (controlMode === "custom") return codexServiceTierValueForMode(codexServiceTierEffectiveThreadMode(threadMode, defaultMode));
+    return codexServiceTierInheritedValue();
+  }
+
+  function codexServiceTierFastModelListLabel() {
+    return Array.from(codexServiceTierSupportedFastModels).join(" / ");
+  }
+
+  const codexServiceTierReadTimeoutMs = 5000;
+
+  async function getCodexServiceTierSetting() {
+    try {
+      const read = (async () => {
+        const settingStorage = await codexSettingStorageModule();
+        return await settingStorage.n(codexDefaultServiceTierSetting);
+      })();
+      return await Promise.race([
+        read,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Codex 应用设置读取超时")), codexServiceTierReadTimeoutMs)),
+      ]);
+    } catch (error) {
+      if (typeof codexStateCall === "function") {
+        const fallbackRead = codexStateCall("get-setting", { params: { key: codexDefaultServiceTierSetting.key } });
+        const result = await Promise.race([
+          fallbackRead,
+          new Promise((_, reject) => setTimeout(() => reject(error), codexServiceTierReadTimeoutMs)),
+        ]);
+        return result && Object.prototype.hasOwnProperty.call(result, "value") ? result.value : codexDefaultServiceTierSetting.default;
+      }
+      throw error;
+    }
+  }
+
+  function codexFastServiceTierValue() {
+    return codexServiceTierState.fastTierValue || codexServiceTierFallbackFastValue;
+  }
+
+  function codexServiceTierInheritedValue() {
+    if (codexServiceTierState.serviceTier != null) return codexServiceTierState.serviceTier;
+    return codexServiceTierState.configServiceTier ?? null;
+  }
+
+  function codexServiceTierEffectiveThreadMode(threadMode = "inherit", defaultMode = "inherit") {
+    const normalizedThreadMode = normalizeCodexThreadServiceTierMode(threadMode);
+    if (normalizedThreadMode !== "inherit") return normalizedThreadMode;
+    return normalizeCodexThreadServiceTierMode(defaultMode);
+  }
+
+  function codexServiceTierValueForMode(mode) {
+    if (mode === "fast") return codexFastServiceTierValue();
+    if (mode === "standard") return null;
+    return codexServiceTierInheritedValue();
+  }
+
+  const codexDefaultServiceTierSetting = { key: "default-service-tier", default: null };
+
+  const codexServiceTierFallbackFastValue = "priority";
+
   function installStyle() {
     const existingStyle = document.getElementById(styleId);
     if (existingStyle?.dataset.codexDeleteStyleVersion === codexDeleteStyleVersion) return;
@@ -988,11 +2753,23 @@
         height: calc(100vh / var(--alunixa-x-zoom, 1) - var(--alunixa-x-page-top, 0px) - var(--alunixa-x-page-bottom, 0px));
         border-radius: var(--alunixa-x-page-radius, 0px);
         overflow: hidden;
-        z-index: 2147483644;
+        /*
+         * 功能页是覆盖在 Codex 内容区上的基础层，不能压过原生侧栏/顶部栏
+         * 的 tooltip 和 menu；原生弹出层在页面打开时由下方规则提升。
+         */
+        z-index: 2147482000;
         display: block;
         background: var(--alunixa-x-bg-primary, #fff);
         pointer-events: auto;
         -webkit-app-region: no-drag;
+      }
+      /* 提升定位包装层，避免只改 tooltip/menu 子节点仍被父级堆叠上下文困住。 */
+      html[data-alunixa-x-page-open] [data-radix-popper-content-wrapper]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [role="tooltip"]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [role="menu"]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [class*="ApplicationMenuTopBar"],
+      html[data-alunixa-x-page-open] .app-header-tint {
+        z-index: 2147483645 !important;
       }
       .${alunixaXPageClass} .alunixa-x-modal-content {
         width: auto;
@@ -1714,14 +3491,12 @@
       .codex-delete-confirm-message,
       .alunixa-x-row-description,
       .alunixa-x-about,
-      .alunixa-x-service-tier-thread-label,
       .alunixa-x-backend-label,
       .alunixa-x-form-message,
       .alunixa-x-sponsor-text { color: var(--alunixa-x-text-secondary); }
       .codex-delete-confirm-actions button,
       .alunixa-x-action-button,
-      .alunixa-x-issue-button,
-      .alunixa-x-service-tier-button {
+      .alunixa-x-issue-button {
         min-height: 32px;
         border: 1px solid var(--alunixa-x-border);
         border-radius: var(--border-radius-lg, 8px);
@@ -1738,8 +3513,6 @@
       .alunixa-x-action-button:focus-visible,
       .alunixa-x-issue-button:hover,
       .alunixa-x-issue-button:focus-visible,
-      .alunixa-x-service-tier-button:hover,
-      .alunixa-x-service-tier-button:focus-visible,
       .codex-delete-confirm-actions [data-codex-delete-confirm="true"] {
         border-color: var(--color-border-danger, #dc2626);
         background: var(--color-background-danger-solid, #dc2626);
@@ -1773,11 +3546,6 @@
       .alunixa-x-width-input:focus,
       .alunixa-x-typing-effect-select:focus,
       .alunixa-x-form-field input:focus { border-color: var(--alunixa-x-focus); outline: 2px solid color-mix(in srgb, var(--alunixa-x-focus) 25%, transparent); outline-offset: 0; }
-      .alunixa-x-service-tier-button[data-active="true"] {
-        border-color: var(--color-border-primary, var(--alunixa-x-focus));
-        background: var(--color-background-primary-soft, var(--alunixa-x-bg-selected));
-        color: var(--color-text-primary, var(--alunixa-x-text));
-      }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status,
       .alunixa-x-backend-indicator { box-shadow: none; }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status[data-status="ok"],
@@ -1788,18 +3556,6 @@
       .alunixa-x-backend-indicator[data-status="checking"] { background: var(--alunixa-x-warning); }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status[data-status="degraded"],
       .alunixa-x-backend-indicator[data-status="degraded"] { background: var(--alunixa-x-warning); }
-      .${codexServiceTierBadgeClass} {
-        height: 24px;
-        border-color: var(--alunixa-x-border);
-        border-radius: var(--border-radius-lg, 8px);
-        background: var(--alunixa-x-bg-secondary);
-        color: var(--alunixa-x-text-secondary);
-        font-family: inherit;
-      }
-      .${codexServiceTierBadgeClass}:hover { border-color: var(--alunixa-x-focus); background: var(--alunixa-x-bg-hover); }
-      .${codexServiceTierBadgeClass}[data-tier="fast"] { border-color: var(--color-border-primary, var(--alunixa-x-focus)); background: var(--color-background-primary-soft, var(--alunixa-x-bg-selected)); color: var(--alunixa-x-text); }
-      .${codexServiceTierBadgeClass}[data-tier="failed"] { border-color: var(--color-border-danger, var(--alunixa-x-danger)); background: var(--alunixa-x-danger-bg); color: var(--alunixa-x-danger); }
-      .${codexServiceTierBadgeClass}[data-tier="unsupported"] { border-color: var(--color-border-warning, var(--alunixa-x-border)); background: var(--color-background-warning-soft, var(--alunixa-x-bg-hover)); color: var(--alunixa-x-warning); }
       .alunixa-x-ad-card { border-color: var(--alunixa-x-border-subtle); background: var(--alunixa-x-bg-secondary); }
       .alunixa-x-ad-card:hover,
       .alunixa-x-ad-card:focus-visible { border-color: var(--alunixa-x-border); background: var(--alunixa-x-bg-hover); }
@@ -1822,10 +3578,10 @@
         color: var(--alunixa-x-warning);
       }
       .alunixa-x-ad-empty { border-color: var(--alunixa-x-border); color: var(--alunixa-x-text-tertiary); }
-      .alunixa-x-form-message[data-status="ok"], .alunixa-x-service-tier-status[data-status="ok"], .alunixa-x-backend-label[data-status="ok"] { color: var(--alunixa-x-success); }
-      .alunixa-x-form-message[data-status="failed"], .alunixa-x-service-tier-status[data-status="failed"], .alunixa-x-backend-label[data-status="failed"] { color: var(--alunixa-x-danger); }
+      .alunixa-x-form-message[data-status="ok"], .alunixa-x-backend-label[data-status="ok"] { color: var(--alunixa-x-success); }
+      .alunixa-x-form-message[data-status="failed"], .alunixa-x-backend-label[data-status="failed"] { color: var(--alunixa-x-danger); }
       .alunixa-x-backend-label[data-status="degraded"] { color: var(--alunixa-x-warning); }
-      .alunixa-x-form-message[data-status="loading"], .alunixa-x-service-tier-status[data-status="unsupported"], .alunixa-x-model-compat-warning { color: var(--alunixa-x-warning); }
+      .alunixa-x-form-message[data-status="loading"], .alunixa-x-model-compat-warning { color: var(--alunixa-x-warning); }
       /* Alunixa X 设置主页：对齐原生设置页，保持其它页面与弹窗的布局独立。 */
       .${alunixaXPageClass} .alunixa-x-modal-content[data-alunixa-x-active-tab="home"] {
         background: var(--alunixa-x-settings-page-bg, var(--alunixa-x-bg-primary)) !important;
@@ -1925,15 +3681,9 @@
         flex-wrap: wrap;
         gap: 8px;
       }
-      .alunixa-x-settings .alunixa-x-service-tier-control {
-        flex: 0 1 300px;
-        min-width: 0;
-      }
-      .alunixa-x-settings .alunixa-x-service-tier-status { overflow-wrap: anywhere; }
       .alunixa-x-settings .alunixa-x-backend-status { overflow-wrap: anywhere; text-align: right; }
       .alunixa-x-settings .alunixa-x-action-button,
       .alunixa-x-settings .alunixa-x-issue-button,
-      .alunixa-x-settings .alunixa-x-service-tier-button,
       .alunixa-x-settings .alunixa-x-width-input,
       .alunixa-x-settings .alunixa-x-typing-effect-select {
         box-sizing: border-box;
@@ -2034,16 +3784,9 @@
       .alunixa-x-settings .alunixa-x-action-button:hover,
       .alunixa-x-settings .alunixa-x-action-button:focus-visible,
       .alunixa-x-settings .alunixa-x-issue-button:hover,
-      .alunixa-x-settings .alunixa-x-issue-button:focus-visible,
-      .alunixa-x-settings .alunixa-x-service-tier-button:hover,
-      .alunixa-x-settings .alunixa-x-service-tier-button:focus-visible {
+      .alunixa-x-settings .alunixa-x-issue-button:focus-visible {
         border-color: var(--alunixa-x-border);
         background: var(--alunixa-x-bg-hover);
-        color: var(--alunixa-x-text);
-      }
-      .alunixa-x-settings .alunixa-x-service-tier-button[data-active="true"] {
-        border-color: var(--alunixa-x-switch-on, #3485ff);
-        background: color-mix(in srgb, var(--alunixa-x-switch-on, #3485ff) 16%, var(--alunixa-x-settings-card-bg, var(--alunixa-x-bg-secondary)));
         color: var(--alunixa-x-text);
       }
       .alunixa-x-settings button:focus-visible,
@@ -2061,9 +3804,6 @@
       }
       @container alunixa-x-settings (max-width: 560px) {
         .alunixa-x-settings .alunixa-x-row { gap: 16px; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] { flex-wrap: wrap; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] > :first-child { flex-basis: 100%; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] > .alunixa-x-service-tier-control { flex-basis: 100%; max-width: 100%; }
       }
       /* 拓展与推荐内容使用原生插件页面的导航、标题和轻量列表布局。 */
       .${alunixaXPageClass} .alunixa-x-modal-content:is([data-alunixa-x-active-tab="extensions"], [data-alunixa-x-active-tab="sponsor"]) {
@@ -2378,7 +4118,7 @@
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginAutoExpand:true, projectMove:true, performanceProtection:true, zedRemoteOpen:true, upstreamWorktreeCreate:true, nativeMenuLocalization:true, pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false, answerOutline: false, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
+    return { pluginAutoExpand: true, projectMove: true, performanceProtection: true, zedRemoteOpen: true, upstreamWorktreeCreate: true, nativeMenuLocalization: true, pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, nativeFastUnlock: false, petRealMouseLook: false, activityOverlayRight: false, stepwise: false, answerOutline: false, usageStatusLine: true, capacityAutoRetry: false, capacityAutoRetryMaxAttempts: 15, capacityAutoRetryIntervalSeconds: 0, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
   }
 
   const alunixaXBackendSettingMap = {
@@ -2399,9 +4139,13 @@
     threadScrollRestore: "codexAppThreadScrollRestore",
     nativeMenuPlacement: "codexAppNativeMenuPlacement",
     serviceTierControls: "codexAppServiceTierControls",
+    nativeFastUnlock: "codexAppNativeFastUnlock",
     petRealMouseLook: "codexAppPetRealMouseLook",
+    activityOverlayRight: "codexAppActivityOverlayRight",
     stepwise: "codexAppStepwiseEnabled",
     answerOutline: "codexAppAnswerOutlineEnabled",
+    usageStatusLine: "codexAppUsageStatusLine",
+    capacityAutoRetry: "codexAppCapacityAutoRetry",
     pasteFix: "codexAppPasteFix",
     typingEffect: "codexAppTypingEffect",
     dreamSkinEnabled: "codexAppDreamSkinEnabled",
@@ -2441,9 +4185,15 @@
         threadScrollRestore: false,
         nativeMenuPlacement: false,
         serviceTierControls: false,
+        nativeFastUnlock: false,
         petRealMouseLook: false,
+        activityOverlayRight: false,
         stepwise: false,
         answerOutline: false,
+        usageStatusLine: false,
+        capacityAutoRetry: false,
+        capacityAutoRetryMaxAttempts: 15,
+        capacityAutoRetryIntervalSeconds: 0,
         dreamSkinEnabled: false,
         dreamSkinPaused: false,
         dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {},
@@ -3210,6 +4960,8 @@
         if (key === "stepwise" || key === "answerOutline") {
           Promise.resolve(window.__codexStepwisePanel?.loadSettings?.()).then(() => syncStepwisePanel());
         }
+        // 容量错误自动重试：开关落库后立即启停轮询，不必等下一次心跳。
+        if (key === "capacityAutoRetry") syncCodexPlusCapacityAutoRetry();
       }).catch(() => {
         void loadBackendSettings();
       });
@@ -3233,14 +4985,6 @@
       (window.__codexThreadScrollSyncTimers || []).forEach((timer) => clearTimeout(timer));
       window.__codexThreadScrollSyncTimers = [];
       window.__codexThreadScrollRuntime = null;
-    }
-    if (key === "serviceTierControls") {
-      if (value) {
-        void loadCodexServiceTierState();
-      } else {
-        removeCodexServiceTierBadges();
-        refreshCodexServiceTierControls();
-      }
     }
     if (key === "stepwise") syncStepwisePanel(value);
     renderCodexPlusMenu();
@@ -3303,7 +5047,6 @@
       button.disabled = waitsForBackend || button.dataset.relayUnneeded === "true";
     });
     refreshConversationViewControls();
-    refreshCodexServiceTierControls();
     document.querySelectorAll("[data-alunixa-x-typing-effect]").forEach((select) => {
       select.value = ["rainbow", "fireworks", "stars"].includes(settings.typingEffect) ? settings.typingEffect : "off";
       select.disabled = !alunixaXBackendSettingsLoaded || alunixaXBackendSettings.enhancementsEnabled === false;
@@ -3375,25 +5118,6 @@
   }
 
   let alunixaXBackendSettingsLoaded = false;
-  let codexServiceTierState = {
-    status: "loading",
-    serviceTier: null,
-    configServiceTier: null,
-    serviceTierSource: null,
-    message: "正在读取…",
-    fastTierValue: "priority",
-    controlMode: "inherit",
-    defaultMode: "inherit",
-    activeThreadId: "",
-    threadMode: "inherit",
-    effectiveServiceTier: null,
-    effectiveMode: "standard",
-    fastModelName: "",
-    fastSupported: false,
-  };
-  const codexDefaultServiceTierSetting = { key: "default-service-tier", default: null };
-  const codexServiceTierFallbackFastValue = "priority";
-  const codexServiceTierReadTimeoutMs = 5000;
   const codexServiceTierModulePromises = new Map();
   // namePart -> { at, attempts, error }，见 loadCodexAppModule 里的说明。
   // 挂在 window 上跨重注入保留：否则每次重注入都会清空失败记录，重新全量 fetch asset
@@ -3405,8 +5129,6 @@
   const codexAppModuleRetryCooldownMs = 30000;
   const codexAppModuleMaxAttempts = 8;
   const codexServiceTierSupportedFastModels = new Set(["gpt-5.4", "gpt-5.5"]);
-  const codexThreadServiceTierModes = new Set(["inherit", "standard", "fast"]);
-  const codexServiceTierControlModes = new Set(["inherit", "global-standard", "global-fast", "custom"]);
   // 这里只放确认支持 priority service tier 的官方模型——这个集合同时用于生成
   // 「Fast 仅支持 …」的提示文案，塞进没验证过的模型等于对用户做出错误承诺。
   // 第三方模型（deepseek 等）走下面 codexServiceTierFastSupportedForModel 里的
@@ -3419,6 +5141,8 @@
 
   function codexAppAssetCandidateUrls() {
     return uniqueCodexAppAssetUrls([
+      // Fast 的 import map 让实际加载记录指向 Blob；定位原生类仍需要原资产 URL。
+      window.__alunixaXNativeFastCompiled === "v1" ? window.__alunixaXNativeFastModuleDiagnostics?.url : null,
       ...Array.from(document.scripts || []).map((script) => script.src),
       ...Array.from(document.querySelectorAll("link[href]") || []).map((link) => link.href),
       ...performance.getEntriesByType("resource").map((entry) => entry.name),
@@ -3867,42 +5591,6 @@
     throw new Error(`Codex setting-storage 接口不可用 (${errors.join("; ")})`);
   }
 
-  async function getCodexServiceTierSetting() {
-    try {
-      const read = (async () => {
-        const settingStorage = await codexSettingStorageModule();
-        return await settingStorage.n(codexDefaultServiceTierSetting);
-      })();
-      return await Promise.race([
-        read,
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Codex 应用设置读取超时")), codexServiceTierReadTimeoutMs)),
-      ]);
-    } catch (error) {
-      if (typeof codexStateCall === "function") {
-        const fallbackRead = codexStateCall("get-setting", { params: { key: codexDefaultServiceTierSetting.key } });
-        const result = await Promise.race([
-          fallbackRead,
-          new Promise((_, reject) => setTimeout(() => reject(error), codexServiceTierReadTimeoutMs)),
-        ]);
-        return result && Object.prototype.hasOwnProperty.call(result, "value") ? result.value : codexDefaultServiceTierSetting.default;
-      }
-      throw error;
-    }
-  }
-
-  function isFastServiceTierValue(value) {
-    const normalized = String(value || "").trim().toLowerCase();
-    return normalized === "fast" || normalized === "priority";
-  }
-
-  function codexFastServiceTierValue() {
-    return codexServiceTierState.fastTierValue || codexServiceTierFallbackFastValue;
-  }
-
-  function codexServiceTierFastModelListLabel() {
-    return Array.from(codexServiceTierSupportedFastModels).join(" / ");
-  }
-
   function normalizeCodexServiceTierModelName(model) {
     return String(model || "").trim().toLowerCase();
   }
@@ -3979,22 +5667,6 @@
     return codexServiceTierSupportedFastModels.has(normalized);
   }
 
-  function codexServiceTierFastUnsupportedMessage(modelName = codexServiceTierCurrentModelName()) {
-    const modelText = modelName ? `当前模型 ${modelName} 不支持` : "当前模型未读取";
-    return `Fast 支持 ${codexServiceTierFastModelListLabel()} 或已声明 priority 的模型，${modelText}；可在供应商的模型配置中设置 Fast 支持`;
-  }
-
-  function codexServiceTierMaybeLoadModelCatalog(force = false) {
-    if (codexModelCatalogPromise) return;
-    if (!force && codexModelCatalog.status === "failed") return;
-    if (!force && codexModelCatalogLoadedAt && Date.now() - codexModelCatalogLoadedAt < 10000) return;
-    loadCodexModelCatalog(force).then(() => {
-      refreshCodexServiceTierControls();
-    }).catch(() => {
-      refreshCodexServiceTierControls();
-    });
-  }
-
   // UI 侧「Fast 是否可用」的唯一判据。这里必须复用 codexServiceTierFastSupportedForModel，
   // 不能再自己对照 codexServiceTierSupportedFastModels：那套只认内置名单，中转场景下
   // 模型名带前缀（或仅靠上游元数据声明 priority）时，界面会判「不支持/未读取」，而真正
@@ -4010,41 +5682,6 @@
       modelName: modelName || "",
       supported: !!normalizedModel && codexServiceTierFastSupportedForModel(modelName),
     };
-  }
-
-  function codexServiceTierInheritedValue() {
-    if (codexServiceTierState.serviceTier != null) return codexServiceTierState.serviceTier;
-    return codexServiceTierState.configServiceTier ?? null;
-  }
-
-  function codexServiceTierValueForMode(mode) {
-    if (mode === "fast") return codexFastServiceTierValue();
-    if (mode === "standard") return null;
-    return codexServiceTierInheritedValue();
-  }
-
-  function codexServiceTierDefaultModeForControlMode(controlMode, fallback = "inherit") {
-    if (controlMode === "global-fast") return "fast";
-    if (controlMode === "global-standard") return "standard";
-    if (controlMode === "inherit") return "inherit";
-    return normalizeCodexThreadServiceTierMode(fallback);
-  }
-
-  function codexServiceTierEffectiveThreadMode(threadMode = "inherit", defaultMode = "inherit") {
-    const normalizedThreadMode = normalizeCodexThreadServiceTierMode(threadMode);
-    if (normalizedThreadMode !== "inherit") return normalizedThreadMode;
-    return normalizeCodexThreadServiceTierMode(defaultMode);
-  }
-
-  function codexServiceTierValueForControlMode(controlMode, threadMode = "inherit", defaultMode = "inherit") {
-    if (controlMode === "global-fast") return codexFastServiceTierValue();
-    if (controlMode === "global-standard") return null;
-    if (controlMode === "custom") return codexServiceTierValueForMode(codexServiceTierEffectiveThreadMode(threadMode, defaultMode));
-    return codexServiceTierInheritedValue();
-  }
-
-  function codexServiceTierEffectiveMode(value) {
-    return isFastServiceTierValue(value) ? "fast" : "standard";
   }
   function normalizeCodexThreadServiceTierMode(mode) {
     const normalized = String(mode || "").trim().toLowerCase();
@@ -4600,7 +6237,7 @@
     const profile = codexRemoteSessionActiveProfile();
     if (!profile) return false;
     const relayMode = String(profile.relayMode || "");
-    return relayMode === "pureApi"
+    return relayMode === "pureApi" || relayMode === "aggregate"
       || (relayMode === "official" && !!profile.officialMixApiKey);
   }
 
@@ -4658,6 +6295,7 @@
     return [
       "thread/start",
       "thread/resume",
+      "thread/fork",
       "start-conversation",
       "start-thread-for-host",
       "thread-prewarm-start",
@@ -4696,6 +6334,341 @@
       to: targetProvider,
     });
     return nextParams;
+  }
+
+  function codexManagedSessionConnection() {
+    const profile = codexRemoteSessionActiveProfile();
+    const connection = alunixaXBackendSettings.managedSessionConnection;
+    if (!profile || profile.relayMode !== "aggregate" || !connection
+        || connection.profileId !== profile.id || connection.provider !== "alunixa_x_managed"
+        || !/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}\/v1$/.test(connection.baseUrl || "")) return null;
+    return connection;
+  }
+
+  function applyCodexManagedSessionConnection(method, params, hostId) {
+    if (hostId !== "local" || !["thread/start", "thread/resume", "thread/fork"].includes(method)
+        || !params || typeof params !== "object" || Array.isArray(params)) return params;
+    // 原生继承分支禁止同时传 config；其父会话已经持有连接快照。
+    if (method === "thread/fork" && params.experimentalPredictionMode === true) return params;
+    const connection = codexManagedSessionConnection();
+    if (!connection) return params;
+    const config = { ...(params.config || {}) };
+    if (config.model_providers && typeof config.model_providers === "object") {
+      config.model_providers = { ...config.model_providers };
+      delete config.model_providers.alunixa_x_managed;
+    }
+    // 清掉请求携带的同名传输覆盖，避免扁平字段再次覆盖完整 provider 表。
+    for (const key of Object.keys(config)) {
+      if (key === "model_provider" || key === "model_providers.alunixa_x_managed"
+          || key.startsWith("model_providers.alunixa_x_managed.")) {
+        delete config[key];
+      }
+    }
+    config.model_provider = connection.provider;
+    config["model_providers.alunixa_x_managed"] = {
+      name: "custom",
+      base_url: connection.baseUrl,
+      wire_api: "responses",
+      experimental_bearer_token: "alunixa-x-aggregate",
+      requires_openai_auth: false,
+      supports_websockets: false,
+    };
+    const next = { ...params, modelProvider: connection.provider, config };
+    delete next.model_provider;
+    return next;
+  }
+
+  async function prepareCodexManagedSessionConnection(method, params, hostId, sendRequest) {
+    if (method === "send-cli-request-for-host" && hostId === "local" && params?.method) {
+      if ([params.hostId, params.host_id].some((host) => typeof host === "string" && host !== "local")) {
+        return params;
+      }
+      const nested = await prepareCodexManagedSessionConnection(
+        String(params.method), params.params, hostId,
+        (nestedMethod, nestedParams, options) => sendRequest(method,
+          { ...params, method: nestedMethod, params: nestedParams }, options));
+      return nested === params.params ? params : { ...params, params: nested };
+    }
+    const patched = applyCodexManagedSessionConnection(method, params, hostId);
+    if (patched !== params || hostId !== "local" || method !== "thread/resume" || !params?.threadId) {
+      return patched;
+    }
+    // 退出聚合保护后，旧会话不能继续依赖只存在于会话快照里的内部 provider。
+    let provider = params.modelProvider || params.model_provider || "";
+    if (!provider) {
+      try {
+        const result = await readCodexManagedSessionForCheck(params.threadId, sendRequest);
+        provider = result?.thread?.modelProvider || "";
+      } catch {
+        // 按路径恢复等原生情形允许 read 尚不可用，保留原始 resume 语义。
+        return params;
+      }
+    }
+    if (provider !== "alunixa_x_managed") return params;
+    const target = codexRemoteSessionTargetProvider();
+    if (!target || target === "alunixa_x_managed") throw new Error("请先选择可用的供应商配置");
+    const config = { ...(params.config || {}) };
+    delete config.model_provider;
+    delete config["model_providers.alunixa_x_managed"];
+    const next = { ...params, config, modelProvider: target };
+    delete next.model_provider;
+    return next;
+  }
+
+  function noteCodexManagedSessionStart(method, params, result, hostId) {
+    if (hostId !== "local") return;
+    if (method === "send-cli-request-for-host" && params?.method) {
+      if ([params.hostId, params.host_id].some((host) => typeof host === "string" && host !== "local")) return;
+      return noteCodexManagedSessionStart(String(params.method), params.params, result, hostId);
+    }
+    if (!["thread/start", "thread/fork"].includes(method)) return;
+    const connection = codexManagedSessionConnection();
+    const provider = params?.config?.["model_providers.alunixa_x_managed"];
+    const inherited = method === "thread/fork" && params.experimentalPredictionMode === true
+      && window.__alunixaXManagedSessionStarts?.get(params.threadId);
+    const resultProvider = result?.modelProvider || result?.thread?.modelProvider || "";
+    if (!connection || (provider?.base_url !== connection.baseUrl
+        && inherited?.signature !== `${connection.profileId}|${connection.baseUrl}`)
+        || (resultProvider && resultProvider !== connection.provider) || !result?.thread?.id) return;
+    const starts = window.__alunixaXManagedSessionStarts ||= new Map();
+    starts.set(result.thread.id, {
+      signature: `${connection.profileId}|${connection.baseUrl}`,
+      model: params.model || result.model || "",
+      needsRecovery: false,
+    });
+    if (starts.size > 256) starts.delete(starts.keys().next().value);
+  }
+
+  async function prewarmCodexManagedSession(client, prewarm, params, options) {
+    // 预创建直接走原生队列，不经过 sendRequest；必须在这个入口同样固定连接。
+    if (client.hostId === "local" && window.__codexSessionDeleteBridge
+        && codexRemoteSessionActiveProfile()?.relayMode === "aggregate") {
+      await loadBackendSettingsState(codexAppServerPreparationTimeoutMs);
+    }
+    const nextParams = applyCodexManagedSessionConnection("thread/start",
+      params, client.hostId);
+    const result = await prewarm(nextParams, options);
+    noteCodexManagedSessionStart("thread/start", nextParams, result, client.hostId);
+    return result;
+  }
+
+  function observeCodexManagedSessionConnectionError(value) {
+    if (!codexManagedSessionConnection()) return false;
+    function observe(candidate, depth) {
+      if (!candidate || typeof candidate !== "object" || depth > 4) return false;
+      if ([candidate.hostId, candidate.host_id].some((host) => typeof host === "string" && host !== "local")) return false;
+      const method = candidate.method || candidate.type;
+      const params = candidate.params || candidate;
+      const error = method === "error" ? params.error
+        : method === "turn/completed" ? params.turn?.error : null;
+      const threadId = params.threadId;
+      if (error && typeof threadId === "string" && threadId.length > 0 && threadId.length <= 128
+          && codexManagedSessionConnectionError(error)) {
+        const starts = window.__alunixaXManagedSessionStarts ||= new Map();
+        const known = starts.get(threadId) || {};
+        starts.set(threadId, { ...known, needsRecovery: true });
+        if (starts.size > 256) starts.delete(starts.keys().next().value);
+        return true;
+      }
+      if (method === "turn/completed" && params.turn?.status === "completed") {
+        const starts = window.__alunixaXManagedSessionStarts;
+        const known = starts?.get(threadId);
+        if (known?.needsRecovery) starts.set(threadId, { ...known, needsRecovery: false });
+      }
+      // 原生逐 token 通知直接退出，不递归扫描输出内容。
+      if (method === "error" || method === "turn/completed" || candidate.type === "mcp-notification") return false;
+      for (const key of ["message", "response", "detail", "data", "payload", "notification"]) {
+        if (observe(candidate[key], depth + 1)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return observe(value, 0);
+  }
+
+  const codexManagedSessionReadTimeoutMs = 800;
+  const codexManagedSessionRecoveryTimeoutMs = 5000;
+
+  function codexManagedSessionRecoveryOptions(options, timeoutMs = codexManagedSessionRecoveryTimeoutMs) {
+    // 不继承消息提交的 onOutcomeUnknown、消息 ID 和 trace；它们属于实际 turn/start。
+    return { priority: options?.priority, timeoutMs };
+  }
+
+  async function readCodexManagedSessionForCheck(threadId, sendRequest, options) {
+    let timer;
+    try {
+      return await Promise.race([
+        sendRequest("thread/read", { threadId, includeTurns: false },
+          codexManagedSessionRecoveryOptions(options, codexManagedSessionReadTimeoutMs)),
+        new Promise((resolve) => {
+          timer = setTimeout(() => resolve(null), codexManagedSessionReadTimeoutMs);
+        }),
+      ]);
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function codexManagedSessionConnectionError(error) {
+    const info = error?.codexErrorInfo;
+    if (info && typeof info === "object"
+        && ["responseStreamDisconnected", "responseStreamConnectionFailed", "httpConnectionFailed"]
+          .some((key) => Object.prototype.hasOwnProperty.call(info, key))) return true;
+    const message = [error?.message || (typeof error === "string" ? error : ""),
+      error?.additionalDetails || ""].join(" ").toLowerCase();
+    return /reconnecting|connection (?:failed|closed|reset|refused)|network|proxy|stream disconnected|stream closed|econn|broken pipe|failed to send|error sending request|transport/.test(message);
+  }
+
+  function assertCodexManagedSessionConnection(signature) {
+    const connection = codexManagedSessionConnection();
+    if (!connection || `${connection.profileId}|${connection.baseUrl}` !== signature) {
+      throw new Error("连接配置已变化，请重新发送消息");
+    }
+  }
+
+  async function reloadCodexManagedSessionConnection(threadId, read, turnParams, sendRequest, options, signature) {
+    const recoveryOptions = codexManagedSessionRecoveryOptions(options);
+    // 已加载 resume 不改配置，可用于读取运行时设置；不拉取整段聊天历史。
+    const current = read.thread.status.type === "idle"
+      ? await sendRequest("thread/resume", { threadId, excludeTurns: true }, recoveryOptions) : null;
+    if (current?.thread?.status && current.thread.status.type !== "idle") {
+      throw new Error("请先停止当前回复，再恢复连接");
+    }
+    assertCodexManagedSessionConnection(signature);
+    const params = { threadId, excludeTurns: true, config: {} };
+    for (const key of ["cwd", "approvalPolicy", "approvalsReviewer", "runtimeWorkspaceRoots", "serviceTier"]) {
+      if (current?.[key] !== undefined) params[key] = current[key];
+    }
+    const model = turnParams?.model || current?.model;
+    if (model) params.model = model;
+    const effort = turnParams?.effort ?? current?.reasoningEffort;
+    if (effort) params.config.model_reasoning_effort = effort;
+    if (Object.prototype.hasOwnProperty.call(turnParams || {}, "serviceTier")) {
+      params.serviceTier = turnParams.serviceTier;
+    }
+    if (typeof current?.activePermissionProfile?.id === "string") {
+      params.permissions = current.activePermissionProfile.id;
+    } else if (current?.sandbox) {
+      const modes = { readOnly: "read-only", workspaceWrite: "workspace-write", dangerFullAccess: "danger-full-access" };
+      const mode = modes[current.sandbox.type];
+      if (!mode) throw new Error("当前权限配置不支持安全恢复连接");
+      params.sandbox = mode;
+      if (mode === "workspace-write") {
+        const sandbox = current.sandbox;
+        params.config.sandbox_workspace_write = {
+          writable_roots: sandbox.writableRoots || [],
+          network_access: sandbox.networkAccess === true,
+          exclude_tmpdir_env_var: sandbox.excludeTmpdirEnvVar === true,
+          exclude_slash_tmp: sandbox.excludeSlashTmp === true,
+        };
+      }
+    }
+    const protectedParams = applyCodexManagedSessionConnection("thread/resume", params, "local");
+    // 已加载 resume 忽略连接覆盖，必须先卸载空闲会话再恢复。
+    await sendRequest("thread/unsubscribe", { threadId }, recoveryOptions);
+    assertCodexManagedSessionConnection(signature);
+    const result = await sendRequest("thread/resume", protectedParams, recoveryOptions);
+    if (result?.modelProvider !== "alunixa_x_managed") throw new Error("会话未采用受管连接配置");
+    return result;
+  }
+
+  async function sendCodexManagedSessionTurn(client, sendRequest, method, params, options, modelContextRefresh) {
+    if (client.hostId !== "local") return null;
+    if (method === "send-cli-request-for-host" && params?.method) {
+      if ([params.hostId, params.host_id].some((host) => typeof host === "string" && host !== "local")) {
+        return null;
+      }
+      return await sendCodexManagedSessionTurn(client,
+        (nestedMethod, nestedParams, nestedOptions) => sendRequest(method,
+          { ...params, method: nestedMethod, params: nestedParams }, nestedOptions),
+        String(params.method), params.params, options, modelContextRefresh);
+    }
+    if (method !== "turn/start" || !codexManagedSessionConnection() || !params?.threadId) return null;
+    const connection = codexManagedSessionConnection();
+    const starts = window.__alunixaXManagedSessionStarts ||= new Map();
+    const signature = `${connection?.profileId}|${connection?.baseUrl}`;
+    const known = starts.get(params.threadId);
+    const pending = window.__alunixaXConnectionRecoveryPending;
+    if (pending?.has(params.threadId)) throw new Error("此会话正在检查连接，请稍后重新发送");
+    const rememberSuccessfulTurn = () => {
+      const current = starts.get(params.threadId) || {};
+      starts.set(params.threadId, {
+        ...current,
+        signature,
+        model: params.model || current.model || "",
+        needsRecovery: current !== known && current.needsRecovery === true,
+      });
+      if (starts.size > 256) starts.delete(starts.keys().next().value);
+    };
+    // 已由 Alunixa X 创建/恢复的会话直接发送。正常消息不再额外读取配置或线程状态。
+    if (known?.signature === signature && !known.needsRecovery) {
+      try {
+        const response = await sendRequest(method, params, options);
+        rememberSuccessfulTurn();
+        if (modelContextRefresh !== false && params.model) client.__alunixaXThreadModels?.set(params.threadId, params.model);
+        return { result: response };
+      } catch (error) {
+        // 只把明确的连接类错误标成待检查；当前消息不自动重发。
+        if (codexManagedSessionConnectionError(error)) {
+          starts.set(params.threadId, { ...known, needsRecovery: true });
+        }
+        throw error;
+      }
+    }
+
+    // 首条消息或尚未见过的旧会话直接交给原生发送，避免在没有 rollout
+    // 的新线程上调用 thread/resume。连接错误只标记下一次发送恢复。
+    if (!known) {
+      try {
+        const response = await sendRequest(method, params, options);
+        // turn/start 的确认只代表任务入队，不能证明后续流连接使用了受管供应商。
+        if (modelContextRefresh !== false && params.model) client.__alunixaXThreadModels?.set(params.threadId, params.model);
+        return { result: response };
+      } catch (error) {
+        if (codexManagedSessionConnectionError(error)) {
+          starts.set(params.threadId, {
+            signature,
+            model: params.model || "",
+            needsRecovery: true,
+          });
+        }
+        throw error;
+      }
+    }
+
+    const recoveries = window.__alunixaXConnectionRecoveryPending ||= new Set();
+    recoveries.add(params.threadId);
+    try {
+      // 仅连接签名变化或上一次明确连接失败时检查，且读请求超时后交回原生发送。
+      const read = await readCodexManagedSessionForCheck(params.threadId, sendRequest, options);
+      assertCodexManagedSessionConnection(signature);
+      if (!read?.thread) return null;
+      const status = read.thread.status?.type;
+      if (!["idle", "notLoaded"].includes(status)) return null;
+      // 新建会话在首条 turn 前没有 rollout，不能调用 thread/resume。
+      if (read.thread.path && !(status === "idle" && known.signature === signature
+          && read.thread.modelProvider === connection.provider)) {
+        await reloadCodexManagedSessionConnection(params.threadId, read, params, sendRequest, options, signature);
+      }
+      assertCodexManagedSessionConnection(signature);
+      // 已完成连接准备后就释放锁，消息确认变慢不能占住恢复入口。
+    } finally {
+      recoveries.delete(params.threadId);
+    }
+    try {
+      const response = await sendRequest(method, params, options);
+      rememberSuccessfulTurn();
+      if (modelContextRefresh !== false && params.model) client.__alunixaXThreadModels?.set(params.threadId, params.model);
+      return { result: response };
+    } catch (error) {
+      if (codexManagedSessionConnectionError(error)) {
+        starts.set(params.threadId, { ...(starts.get(params.threadId) || known), needsRecovery: true });
+      }
+      throw error;
+    }
   }
 
   function codexRemoteSessionStartedThreadId(value) {
@@ -4822,6 +6795,7 @@
   }
 
   function observeCodexRemoteSessionNotification(value) {
+    observeCodexManagedSessionConnectionError(value);
     const threadId = codexRemoteSessionStartedThreadId(value);
     return threadId ? scheduleCodexRemoteSessionRecovery(threadId) : false;
   }
@@ -4835,9 +6809,14 @@
       window.removeEventListener("codex-message-from-view", window.__alunixaXRemoteSessionRecoveryViewHandler, true);
     }
     const messageHandler = (event) => {
-      if (event?.source !== window) return false;
       const origin = String(event?.origin || "");
-      if (origin && origin !== "null" && origin !== window.location.origin) return false;
+      // 桌面原生桥通过 MessageEvent 投递，source=null、origin=""。
+      const nativeLocalNotification = event?.source == null && !origin
+        && event?.data?.type === "mcp-notification" && event.data.hostId === "local";
+      if (!nativeLocalNotification) {
+        if (event?.source !== window) return false;
+        if (origin && origin !== "null" && origin !== window.location.origin) return false;
+      }
       return observeCodexRemoteSessionNotification(event?.data);
     };
     const viewHandler = (event) => observeCodexRemoteSessionNotification(event?.detail);
@@ -4882,6 +6861,8 @@
     });
     const unsubscribers = [
       dispatcher.subscribe("thread/started", handler),
+      dispatcher.subscribe("error", (params) => observeCodexManagedSessionConnectionError({ method: "error", params })),
+      dispatcher.subscribe("turn/completed", (params) => observeCodexManagedSessionConnectionError({ method: "turn/completed", params })),
       dispatcher.subscribe("browser-sidebar-browser-use-state", browserUseHandler),
     ];
     window.__alunixaXRemoteSessionRecoveryDispatcher = dispatcher;
@@ -5117,6 +7098,10 @@
       }
       alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
       alunixaXBackendSettingsLoaded = true;
+      globalThis.window?.__alunixaXNativeFastUnlock?.runtime?.update?.({
+        enhancementsEnabled: alunixaXBackendSettings.enhancementsEnabled !== false,
+        codexAppNativeFastUnlock: alunixaXBackendSettings.codexAppNativeFastUnlock === true,
+      });
     } catch (_) {
       return false;
     }
@@ -5124,6 +7109,73 @@
     // service-tier harness 在 70 分片提前返回，尚未初始化 93 分片的录音状态。
     if (!window.__ALUNIXA_X_TEST_SERVICE_TIER__) runScanStep(installCodexPlusDictation);
     return true;
+  }
+  // 原生准备会话时会读取本地配置；该 fetch 没有默认超时，丢失响应会同时
+  // 挂住恢复和发送队列。只约束这一个只读接口，不接管原生恢复/提交生命周期。
+  function installCodexConfigReadDeadline() {
+    if (window.__alunixaXConfigReadDeadline) return;
+    const pending = new Map();
+    const deadlineMs = 15_000;
+    const runtime = { pending, deadlineMs };
+
+    const clear = (requestId) => {
+      const timer = pending.get(requestId);
+      if (timer === undefined) return;
+      pending.delete(requestId);
+      window.clearTimeout(timer);
+    };
+    const outgoing = (event) => {
+      if (event?.__codexForwardedViaBridge !== true) return;
+      const message = event?.detail;
+      if (message?.type === "cancel-fetch") {
+        clear(message.requestId);
+        return;
+      }
+      if (message?.type !== "fetch" || message.method !== "POST"
+          || message.url !== "vscode://codex/mcp-codex-config"
+          || typeof message.requestId !== "string" || !message.requestId
+          || pending.has(message.requestId)) return;
+      const requestId = message.requestId;
+      const timer = window.setTimeout(() => {
+        if (pending.get(requestId) !== timer) return;
+        pending.delete(requestId);
+        // 取消宿主读取，同时让原生 fetch 自己清理 pending、reject 等待者。
+        // 不吞掉配置错误，也不自动重发任何用户消息。
+        try {
+          const cancel = { type: "cancel-fetch", requestId };
+          const bridge = window.electronBridge;
+          if (typeof bridge?.sendMessageFromView === "function") {
+            Promise.resolve(bridge.sendMessageFromView(cancel)).catch(() => {});
+          } else {
+            window.dispatchEvent(new CustomEvent("codex-message-from-view", { detail: cancel }));
+          }
+        } catch {
+          // 宿主取消失败时仍需释放 renderer 的等待；迟到响应由原生按 ID 忽略。
+        }
+        window.dispatchEvent(new MessageEvent("message", {
+          source: window,
+          origin: window.location.origin,
+          data: {
+            type: "fetch-response",
+            requestId,
+            responseType: "error",
+            status: 408,
+            error: "Timed out reading Codex configuration. Please try again.",
+          },
+        }));
+        sendCodexPlusDiagnostic("config_read_deadline_exceeded", { deadlineMs });
+      }, deadlineMs);
+      pending.set(requestId, timer);
+    };
+    const incoming = (event) => {
+      if (event?.source != null && event.source !== window) return;
+      const origin = String(event?.origin || "");
+      if (origin && origin !== "null" && origin !== window.location.origin) return;
+      if (event?.data?.type === "fetch-response") clear(event.data.requestId);
+    };
+    window.addEventListener("codex-message-from-view", outgoing, true);
+    window.addEventListener("message", incoming, true);
+    window.__alunixaXConfigReadDeadline = runtime;
   }
   // Only supply provider capabilities to the installed native presentation component.
   // Never change the account, subscription access, or the native tier setter.
@@ -5389,6 +7441,10 @@
     if (loaded) syncOfficialUsagePolicy();
     if (loaded) runScanStep(syncCodexPlusTypingEffects);
     if (loaded && typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
+    // typeof 守卫：这两个函数会被 session-share-runtime / typing-effects-settings
+    // 之类的用例切片到不带其它分片的沙箱里执行，缺函数时不能直接 ReferenceError。
+    if (loaded && typeof syncCodexPlusCapacityAutoRetry === "function") runScanStep(syncCodexPlusCapacityAutoRetry);
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
     return loaded;
   }
 
@@ -5425,6 +7481,8 @@
         syncOfficialUsagePolicy();
         runScanStep(syncCodexPlusTypingEffects);
         if (typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
+        if (typeof syncCodexPlusCapacityAutoRetry === "function") runScanStep(syncCodexPlusCapacityAutoRetry);
+        globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
         renderCodexPlusMenu();
         if (previousConversationView !== !!alunixaXSettings().conversationView) {
           refreshConversationView();
@@ -5440,6 +7498,7 @@
     const seq = ++alunixaXBackendSettingsSeq;
     alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
     alunixaXBackendSettingsLoaded = true;
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
     refreshCodexPlusBackendToggles();
     refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
     try {
@@ -5448,6 +7507,11 @@
         const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
         alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
         refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
+        globalThis.window?.__alunixaXNativeFastUnlock?.runtime?.update?.({
+          enhancementsEnabled: alunixaXBackendSettings.enhancementsEnabled !== false,
+          codexAppNativeFastUnlock: alunixaXBackendSettings.codexAppNativeFastUnlock === true,
+        });
+        globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
       }
     } finally {
       refreshCodexPlusBackendToggles();
@@ -5455,6 +7519,8 @@
   }
 
   function refreshCodexPlusBackendToggles() {
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
+    globalThis.__ALUNIXA_X_USAGE_STATUSLINE_SYNC__?.();
     document.querySelectorAll(".alunixa-x-toggle[data-codex-backend-setting]").forEach((button) => {
       const key = button.getAttribute("data-codex-backend-setting");
       button.dataset.enabled = String(!!alunixaXBackendSettings[key]);
@@ -5538,7 +7604,6 @@
       sidebarStatus.dataset.status = status;
       sidebarStatus.title = status === "ok" ? "后端已连接" : status === "degraded" ? "后端可达，桥接降级，正在自动修复" : status === "checking" ? "正在检查后端" : "未连接";
     }
-    refreshCodexServiceTierControls();
   }
 
   function withBackendTimeout(request) {
@@ -6067,7 +8132,8 @@
     if (button) {
       const on = Boolean(active) && entry === "home";
       button.dataset.active = String(on);
-      button.setAttribute("aria-current", on ? "page" : "false");
+      if (on) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
     }
     [
       [alunixaXRailNavId, "home"],
@@ -6078,7 +8144,8 @@
       if (!railButton) return;
       const on = Boolean(active) && entry === name;
       railButton.dataset.active = String(on);
-      railButton.setAttribute("aria-current", on ? "page" : "false");
+      if (on) railButton.setAttribute("aria-current", "page");
+      else railButton.removeAttribute("aria-current");
       // 原生 rail 按钮的选中色由 data-selected 驱动（且需无 data-suppress-active-style）。
       if (on) railButton.setAttribute("data-selected", "");
       else railButton.removeAttribute("data-selected");
@@ -6112,6 +8179,7 @@
     if (!overlay?.classList?.contains(alunixaXPageClass)) return;
     const sidebar = document.querySelector("aside.app-shell-left-panel");
     const rect = sidebar?.getBoundingClientRect?.();
+    const main = document.querySelector("main");
     const rail = document.querySelector(alunixaXRailSelector);
     const railRect = rail?.getBoundingClientRect?.();
     // 新版：页面要顶替原生侧边栏——从图标栏右边界起铺满，把宽面板整个盖住，
@@ -6169,6 +8237,30 @@
       0;
     const layoutRadius = zoom === 1 ? radius : radius / zoom;
     overlay.style.setProperty("--alunixa-x-page-radius", `${layoutRadius}px`);
+    if (window.__alunixaXPageLayoutObserver &&
+        (window.__alunixaXPageLayoutTargets?.main !== main ||
+         window.__alunixaXPageLayoutTargets?.sidebar !== sidebar ||
+         window.__alunixaXPageLayoutTargets?.rail !== rail)) {
+      window.__alunixaXPageLayoutObserver.disconnect();
+      for (const target of new Set([main, sidebar, rail])) {
+        if (target) window.__alunixaXPageLayoutObserver.observe(target);
+      }
+      window.__alunixaXPageLayoutTargets = { main, sidebar, rail };
+    }
+  }
+
+  function observeCodexPlusPageLayout(overlay) {
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    const reposition = () => {
+      if (overlay.isConnected) positionCodexPlusPage(overlay);
+    };
+    window.__alunixaXPageLayoutObserver = new ResizeObserver(reposition);
+    window.__alunixaXPageLayoutTargets = {};
+    window.__alunixaXPageResizeHandler = reposition;
+    window.addEventListener("resize", reposition);
+    positionCodexPlusPage(overlay);
+    syncCodexPlusPageBackButton();
   }
 
   function alunixaXHostUsesLightTheme() {
@@ -6422,7 +8514,7 @@
   function openCodexPlusModal(options = {}) {
     const pageMode = options.page === true;
     const initialTab = alunixaXModalTab(options.tab);
-    closeCodexPlusTypingEffectDropdown();
+    closeCodexPlusPage();
     document.querySelectorAll(".alunixa-x-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll(`.${alunixaXPageClass}, [data-alunixa-x-dialog="true"]`).forEach((node) => node.remove());
     const overlay = document.createElement("div");
@@ -6468,11 +8560,15 @@
               <h2 class="alunixa-x-settings-section-title">模型与服务</h2>
               <div class="alunixa-x-settings-card">
                 <div class="alunixa-x-row">
-                  <div><div class="alunixa-x-row-title">Fast 按钮</div><div class="alunixa-x-row-description">显示服务模式切换按钮；Fast 仅支持 ${codexServiceTierFastModelListLabel()}，其他模型按 Standard 发送。</div></div>
+                  <div><div class="alunixa-x-row-title">原生 Fast 强制解锁</div><div class="alunixa-x-row-description">纯 API Key 模式恢复原生 Fast 开关；保存后重新启动 Codex 生效，实际支持与计费由供应商决定。</div></div>
+                  <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="nativeFastUnlock"><span></span></button>
+                </div>
+                <div class="alunixa-x-row">
+                  <div class="alunixa-x-row-title">Fast 按钮</div>
                   <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="serviceTierControls"><span></span></button>
                 </div>
                 <div class="alunixa-x-row" data-codex-service-tier-controls="true">
-                  <div><div class="alunixa-x-row-title">服务模式</div><div class="alunixa-x-row-description">继承优先读取 Codex 应用内设置，其次读取 config.toml 的 service_tier；全局模式覆盖全部 thread；自定义允许按 thread 覆盖。</div></div>
+                  <div class="alunixa-x-row-title">服务模式</div>
                   <div class="alunixa-x-service-tier-control">
                     <div class="alunixa-x-service-tier-status" data-codex-service-tier-status="true" data-status="loading">正在读取…</div>
                     <div class="alunixa-x-service-tier-actions">
@@ -6483,9 +8579,9 @@
                     </div>
                     <div class="alunixa-x-service-tier-actions alunixa-x-service-tier-thread-actions">
                       <span class="alunixa-x-service-tier-thread-label">当前 thread 覆盖</span>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-inherit="true" title="当前 thread 不单独覆盖，继承 Codex 默认设置">继承</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-standard="true" title="仅当前 thread 使用 Standard，并切到自定义模式">Standard</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-fast="true" title="仅当前 thread 使用 Fast，并切到自定义模式">Fast</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-inherit="true">继承</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-standard="true">Standard</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-fast="true">Fast</button>
                     </div>
                   </div>
                 </div>
@@ -6501,6 +8597,14 @@
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">悬浮球 · 回答大纲</div><div class="alunixa-x-row-description">整理回答结构。</div></div>
                   <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="answerOutline"><span></span></button>
+                </div>
+                <div class="alunixa-x-row">
+                  <div><div class="alunixa-x-row-title">容量错误自动重试</div><div class="alunixa-x-row-description">模型容量不足时（横幅文案如 “Selected model is at capacity”），自动点「重试」。Codex 原生只会自动重试 4 次，之后只剩手动按钮；开启后由 Alunixa X 立刻接管（原生倒计时也一并接管，前 4 次同样不等它），直到成功或达到次数上限。间隔 0 秒表示失败后立刻重试（内部最小 1 秒，避免连发）。</div></div>
+                  <div class="alunixa-x-width-control">
+                    <input class="alunixa-x-width-input" data-alunixa-x-capacity-retry-interval="true" min="0" max="${capacityAutoRetryIntervalCeilingSeconds}" step="1" type="number" value="${capacityAutoRetryIntervalSeconds()}" title="重试间隔（秒），0 表示立刻重试" aria-label="重试间隔（秒）">
+                    <input class="alunixa-x-width-input" data-alunixa-x-capacity-retry-max-attempts="true" min="1" max="${capacityAutoRetryMaxAttemptsCeiling}" step="1" type="number" value="${capacityAutoRetryMaxAttempts()}" title="最大自动重试次数" aria-label="最大自动重试次数">
+                    <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="capacityAutoRetry"><span></span></button>
+                  </div>
                 </div>
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">会话删除</div><div class="alunixa-x-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
@@ -6657,9 +8761,34 @@
         widthInput.value = String(width || conversationViewWidth());
         setConversationViewWidth(widthInput.value);
       }
+      // 次数/间隔输入只在 change（失焦/回车）时提交：input 事件逐字符提交会把
+      // 用户输入 "15" 的过程保存成 1。
+      const attemptsInput = target?.closest("[data-alunixa-x-capacity-retry-max-attempts]");
+      if (attemptsInput) {
+        attemptsInput.value = String(setCapacityAutoRetryMaxAttempts(attemptsInput.value));
+      }
+      const intervalInput = target?.closest("[data-alunixa-x-capacity-retry-interval]");
+      if (intervalInput) {
+        intervalInput.value = String(setCapacityAutoRetryIntervalSeconds(intervalInput.value));
+      }
     }, true);
     overlay.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      for (const [attribute, value, thread] of [
+        ["inherit", "inherit", false], ["standard", "global-standard", false],
+        ["fast", "global-fast", false], ["custom", "custom", false],
+        ["thread-inherit", "inherit", true], ["thread-standard", "standard", true],
+        ["thread-fast", "fast", true],
+      ]) {
+        const button = target?.closest(`[data-codex-service-tier-${attribute}]`);
+        if (!button) continue;
+        event.preventDefault();
+        if (!button.disabled) {
+          if (thread) setCodexThreadServiceTierMode(value);
+          else setCodexServiceTierControlMode(value);
+        }
+        return;
+      }
       // 拓展注册的菜单项。放在最前面是因为它的判定完全基于自己的 data 属性，
       // 与下面那些内置分支不会重叠；万一将来重叠，也应当由拓展优先拿到。
       if (handleCodexPlusExtensionMenuClick(target)) return;
@@ -6728,34 +8857,6 @@
       if (issueButton) {
         const issueUrl = "https://github.com/Alunixa-Code/Alunixa-X/issues";
         window.open(issueUrl, "_blank");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-inherit]")) {
-        setCodexServiceTierControlMode("inherit");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-standard]")) {
-        setCodexServiceTierControlMode("global-standard");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-fast]")) {
-        setCodexServiceTierControlMode("global-fast");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-custom]")) {
-        setCodexServiceTierControlMode("custom");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-inherit]")) {
-        setCodexThreadServiceTierMode("inherit");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-standard]")) {
-        setCodexThreadServiceTierMode("standard");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-fast]")) {
-        setCodexThreadServiceTierMode("fast");
         return;
       }
       const userScriptToggle = target?.closest("[data-codex-user-script-key]");
@@ -6833,13 +8934,9 @@
     overlay.addEventListener("error", handleExtensionIconError, true);
     document.body.appendChild(overlay);
     if (pageMode) {
-      positionCodexPlusPage(overlay);
+      observeCodexPlusPageLayout(overlay);
       // 必须在 selectCodexPlusTab 之前建好两栏，否则刷新左面板时找不到容器。
       installCodexPlusPageLayout(overlay, initialTab);
-      if (!window.__alunixaXPageResizeHandler) {
-        window.__alunixaXPageResizeHandler = () => positionCodexPlusPage(document.querySelector(`.${alunixaXPageClass}`));
-        window.addEventListener("resize", window.__alunixaXPageResizeHandler);
-      }
     }
     selectCodexPlusTab(initialTab);
     // 必须在 selectCodexPlusTab 之后：激活态要靠 data-alunixa-x-active-tab
@@ -6848,7 +8945,6 @@
     renderCodexPlusMenu();
     refreshCodexPlusBackendToggles();
     renderBackendStatus();
-    void loadCodexServiceTierState();
     loadUserScripts();
   }
 
@@ -6865,29 +8961,97 @@
   /** 「推荐内容」页面：从弹窗的二级 tab 提出来，成为图标栏上的一级入口。 */
 
   function closeCodexPlusPage() {
+    clearTimeout(window.__alunixaXPageNavigationCloseTimer);
+    window.__alunixaXPageNavigationCloseTimer = null;
     closeCodexPlusTypingEffectDropdown();
+    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    window.__alunixaXPageResizeHandler = null;
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.__alunixaXPageLayoutObserver = null;
+    window.__alunixaXPageLayoutTargets = null;
     document.querySelectorAll(`.${alunixaXPageClass}`).forEach((node) => node.remove());
     setCodexPlusSidebarNavActive(false);
+    restoreCodexPlusPageBackButton();
+  }
+
+  function alunixaXNativeBackButton() {
+    const labels = new Set(["back", "go back", "返回", "后退"]);
+    const selector = selectors.appHeader.split(",").map((header) => `${header.trim()} button`).join(", ");
+    const buttons = Array.from(document.querySelectorAll(selector))
+      .filter((button) => !button.closest(`.${alunixaXPageClass}, [data-alunixa-x-ext]`));
+    // 宿主的前进按钮复用返回箭头并水平翻转；路径识别不依赖界面语言。
+    const backIcon = 'svg:not([class~="-scale-x-100"]) path[d^="M6.96231 2.96214C7.16727 2.7574"]';
+    return buttons.find((button) => button.querySelector(backIcon)) || buttons.find((button) =>
+      labels.has(String(button.getAttribute("aria-label") || button.title || "").trim().toLowerCase())) || null;
+  }
+
+  function restoreCodexPlusPageBackButton() {
+    const state = window.__alunixaXPageBackButtonState;
+    window.__alunixaXPageBackButtonState = null;
+    if (!state) return;
+    for (const [name, value] of state.attributes) {
+      if (value === null) state.button.removeAttribute(name);
+      else state.button.setAttribute(name, value);
+    }
+  }
+
+  function syncCodexPlusPageBackButton() {
+    if (window.__alunixaXPageNavigationCloseTimer != null) return;
+    if (!document.querySelector(`.${alunixaXPageClass}`)) {
+      restoreCodexPlusPageBackButton();
+      return;
+    }
+    const button = alunixaXNativeBackButton();
+    if (!button) return;
+    if (window.__alunixaXPageBackButtonState?.button !== button) {
+      restoreCodexPlusPageBackButton();
+      window.__alunixaXPageBackButtonState = {
+        button,
+        attributes: ["disabled", "aria-disabled", "tabindex", "data-disabled"]
+          .map((name) => [name, button.getAttribute(name)]),
+      };
+    }
+    // 覆盖页自身可返回，即使原生历史尚无上一页也必须能点击。
+    button.removeAttribute("disabled");
+    button.removeAttribute("aria-disabled");
+    button.removeAttribute("data-disabled");
+    if (button.getAttribute("tabindex") === "-1") button.removeAttribute("tabindex");
   }
 
   function closeCodexPlusPageAfterNativeNavigation() {
+    const page = document.querySelector(`.${alunixaXPageClass}`);
+    if (!page) return;
     clearTimeout(window.__alunixaXPageNavigationCloseTimer);
-    window.__alunixaXPageNavigationCloseTimer = setTimeout(() => {
+    // 原生导航前撤销临时属性，避免延迟关闭覆盖导航提交后的返回状态。
+    restoreCodexPlusPageBackButton();
+    const timer = setTimeout(() => {
+      if (window.__alunixaXPageNavigationCloseTimer !== timer) return;
       window.__alunixaXPageNavigationCloseTimer = null;
-      closeCodexPlusPage();
+      if (document.querySelector(`.${alunixaXPageClass}`) === page) closeCodexPlusPage();
     }, 0);
+    window.__alunixaXPageNavigationCloseTimer = timer;
   }
 
   function installCodexPlusPageNavigationCloseHandler() {
+    syncCodexPlusPageBackButton();
     document.removeEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
+    window.removeEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
     window.__alunixaXPageNavigationCloseHandler = (event) => {
       if (!document.querySelector(`.${alunixaXPageClass}`)) return;
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const backButton = alunixaXNativeBackButton();
+      if (backButton && target?.closest("button") === backButton) {
+        // 原生界面仍在覆盖页下方，关闭即可；继续后退会跳过进入前的界面。
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeCodexPlusPage();
+        return;
+      }
       if (!target?.closest(selectors.sidebarThread)) return;
       // Let Codex's own click handler update its route before removing our page.
       closeCodexPlusPageAfterNativeNavigation();
     };
-    document.addEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
+    window.addEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
   }
 
   function installCodexPlusSidebarNavigation() {
@@ -8289,7 +10453,7 @@
     };
   }
 
-  function sendCodexPlusDiagnostic(event, detail) {
+  async function sendCodexPlusDiagnostic(event, detail) {
     const payload = alunixaXDiagnosticPayload(event, detail);
     if (window.__ALUNIXA_X_TEST_SERVICE_TIER__) {
       window.__alunixaXServiceTierTestDiagnostics = window.__alunixaXServiceTierTestDiagnostics || [];
@@ -8297,7 +10461,10 @@
       return;
     }
     if (window.__codexSessionDeleteBridge) {
-      window.__codexSessionDeleteBridge("/diagnostics/log", payload).catch(() => {});
+      try {
+        const response = await window.__codexSessionDeleteBridge("/diagnostics/log", payload);
+        if (response?.status === "ok") return;
+      } catch (_) {}
     }
     const body = JSON.stringify(payload);
     try {
@@ -9395,8 +11562,8 @@
     applyCodexPlusTheme(overlay);
     applyCodexPlusZoom(overlay);
     const state = alunixaXPluginMarketState;
-    overlay.innerHTML = `<div class="alunixa-x-modal-content" role="region" aria-label="CodeX 插件市场" data-alunixa-x-active-tab="${alunixaXPluginMarketTab}">
-      <div class="alunixa-x-modal-header"><div class="alunixa-x-modal-title">CodeX 插件市场</div></div>
+    overlay.innerHTML = `<div class="alunixa-x-modal-content" role="region" aria-label="Codex 插件市场" data-alunixa-x-active-tab="${alunixaXPluginMarketTab}">
+      <div class="alunixa-x-modal-header"><div class="alunixa-x-modal-title">Codex 插件市场</div></div>
       <div class="alunixa-x-modal-body"><div class="alunixa-x-panel alunixa-x-plugin-market-panel" data-codex-plugin-market-panel="true">
         <p class="alunixa-x-plugin-intro">检索插件目录，选中后下载并安装。目录浏览仅获取索引，插件文件按需下载。</p>
         <div class="alunixa-x-plugin-toolbar">
@@ -9544,7 +11711,7 @@
       throw failure;
     }
     if (!result || typeof result !== "object" || result.status === "failed") {
-      const error = new Error(result?.message || "CodeX 插件市场请求失败");
+      const error = new Error(result?.message || "Codex 插件市场请求失败");
       error.timeout = result?.timeout === true || /timeout|timed out|超时/i.test(error.message);
       throw error;
     }
@@ -9562,7 +11729,7 @@
     }
     const entry = { at: now, value: null, promise: null };
     const promise = alunixaXPluginNativeBackend(operation.method, operation.params).then((result) => {
-      if (!Array.isArray(result.marketplaces)) throw new Error("CodeX 插件市场列表格式错误");
+      if (!Array.isArray(result.marketplaces)) throw new Error("Codex 插件市场列表格式错误");
       alunixaXPluginNativeRemember(result);
       entry.value = result;
       entry.at = Date.now();
@@ -9609,7 +11776,7 @@
     } catch (error) {
       // 自定义市场暂时离线时保留原生列表，不能把系统插件清空。
       const fallbackPath = alunixaXIsWindowsPlatform ? "C:\\alunixa-x-plugin-market" : "/alunixa-x-plugin-market";
-      return alunixaXPluginNativeMerge(original, { marketplaceLoadErrors: [{ marketplacePath: fallbackPath, message: error?.message || "CodeX 插件市场暂时不可用" }] }, operation.method);
+      return alunixaXPluginNativeMerge(original, { marketplaceLoadErrors: [{ marketplacePath: fallbackPath, message: error?.message || "Codex 插件市场暂时不可用" }] }, operation.method);
     }
   }
 
@@ -9620,7 +11787,7 @@
   }
 
   async function alunixaXPluginNativeManaged(operation, source) {
-    if (!alunixaXPluginNativeLocal(operation)) throw new Error("CodeX 插件市场目前仅支持本机安装，请切换到本机。");
+    if (!alunixaXPluginNativeLocal(operation)) throw new Error("Codex 插件市场目前仅支持本机安装，请切换到本机。");
     if (operation.method === "read-plugin") {
       const result = await alunixaXPluginNativeBackend(operation.method, operation.params, source);
       const summary = result?.plugin?.summary;
@@ -9912,17 +12079,19 @@
       requestOverride: (message) => codexServiceTierRequestOverride(message),
       diagnostics: () => [...(window.__alunixaXServiceTierTestDiagnostics || [])],
       statusSummary: (state = {}) => {
-        const summaryState = { ...codexServiceTierState, ...state };
-        return serviceTierStatusMessage(
-          summaryState.controlMode,
-          summaryState.threadMode,
-          summaryState.effectiveMode,
-          summaryState.defaultMode,
-          summaryState.effectiveServiceTier,
-          summaryState.serviceTierSource
-        );
+        const current = { ...codexServiceTierState, ...state };
+        return serviceTierStatusMessage(current.controlMode, current.threadMode, current.effectiveMode,
+          current.defaultMode, current.effectiveServiceTier, current.serviceTierSource);
       },
       resolveInheritedServiceTier: () => resolveInheritedServiceTier(),
+      setServiceTierState: (state = {}) => {
+        codexServiceTierState = { ...codexServiceTierState, ...state };
+      },
+      setThreadState: (state = {}) => {
+        localStorage.setItem(codexThreadServiceTierKey, JSON.stringify({
+          version: codexThreadServiceTierVersion, mode: "inherit", defaultMode: "inherit", entries: {}, ...state,
+        }));
+      },
       currentModelName: () => codexServiceTierCurrentModelName(),
       fastAvailability: (modelName = codexServiceTierCurrentModelName()) => codexServiceTierFastAvailability(modelName),
       modelDescriptor: (modelName) => alunixaXModelDescriptor(modelName),
@@ -9955,18 +12124,6 @@
       },
       providerPatchEnabled: () => codexRemoteSessionProviderPatchEnabled(),
       providerNormalizationEnabled: () => codexRemoteSessionProviderNormalizationEnabled(),
-      setServiceTierState: (state = {}) => {
-        codexServiceTierState = { ...codexServiceTierState, ...state };
-      },
-      setThreadState: (state = {}) => {
-        localStorage.setItem(codexThreadServiceTierKey, JSON.stringify({
-          version: codexThreadServiceTierVersion,
-          mode: "inherit",
-          defaultMode: "inherit",
-          entries: {},
-          ...state,
-        }));
-      },
       settingStorageFromModule: codexSettingStorageFromModule,
       stateApiFromModule: codexStateApiFromModule,
       dispatcherFromModule: codexServiceTierDispatcherFromModule,
@@ -10053,7 +12210,9 @@
       const hasUltra = efforts.some((e) => e.reasoningEffort === "ultra");
       if (!hasMax) efforts.push({ reasoningEffort: "max", description: "Maximum reasoning depth for the hardest problems" });
       if (!hasUltra) {
-        const shouldAddUltra = /sol|terra|gpt-5\.6|gpt-5\.5|gpt-5\.4|deepseek/i.test(String(modelName || ""));
+        // 名单里的模型确认支持 ultra。不要再把 deepseek 放进来：它的档位上限是 max，
+        // 补出来的第四档会让「思考等级」列里只勾了 low/high/max 的模型在客户端多显示一档。
+        const shouldAddUltra = /sol|terra|gpt-5\.6|gpt-5\.5|gpt-5\.4/i.test(String(modelName || ""));
         if (shouldAddUltra || efforts.length >= 4) efforts.push({ reasoningEffort: "ultra", description: "Maximum reasoning with automatic task delegation" });
       }
       return efforts;
@@ -10065,8 +12224,9 @@
     const metadata = alunixaXModelMetadata(modelName);
     if (!descriptor || !metadata) return false;
     let changed = false;
-    for (const key of ["displayName", "description", "defaultReasoningEffort"]) {
-      if (typeof metadata[key] === "string" && metadata[key] && descriptor[key] !== metadata[key]) {
+    for (const key of ["displayName", "description", "defaultReasoningEffort", "contextWindow", "maxContextWindow", "context_window", "max_context_window"]) {
+      const valid = typeof metadata[key] === "string" ? !!metadata[key] : Number.isFinite(metadata[key]) && metadata[key] > 0;
+      if (valid && descriptor[key] !== metadata[key]) {
         descriptor[key] = metadata[key];
         changed = true;
       }
@@ -10518,6 +12678,9 @@
   }
 
   function codexThreadModelRequestState(method, params, result) {
+    if (method === "send-cli-request-for-host" && params?.method) {
+      return codexThreadModelRequestState(String(params.method), params.params, result);
+    }
     const requestMethod = String(method || "");
     const threadId = String(
       params?.threadId
@@ -10531,13 +12694,25 @@
   }
 
   async function refreshCodexThreadModelBeforeTurn(client, originalSendRequest, method, params, options) {
+    if (method === "send-cli-request-for-host" && params?.method) {
+      if ([params.hostId, params.host_id].some((host) => typeof host === "string" && host !== "local")) return null;
+      return refreshCodexThreadModelBeforeTurn(client,
+        (nestedMethod, nestedParams, nestedOptions) => originalSendRequest(method,
+          { ...params, method: nestedMethod, params: nestedParams }, nestedOptions),
+        String(params.method), params.params, options);
+    }
     if (String(method || "") !== "turn/start" || !codexPerModelContextEnabled()) return null;
     const { threadId, model } = codexThreadModelRequestState(method, params);
     if (!threadId || !model) return null;
     const previousModel = client.__alunixaXThreadModels?.get(threadId) || "";
     if (!previousModel || previousModel === model) return null;
+    if (client.hostId === "local" && codexManagedSessionConnection()
+        && window.__alunixaXConnectionRecoveryPending?.has(threadId)) {
+      throw new Error("此会话正在检查连接，请稍后重新发送");
+    }
     let resumeParams = { threadId, model };
     resumeParams = applyCodexRemoteSessionProviderOverride("thread/resume", resumeParams);
+    resumeParams = applyCodexManagedSessionConnection("thread/resume", resumeParams, client.hostId);
     try {
       await originalSendRequest("thread/resume", resumeParams, options);
       client.__alunixaXThreadModels.set(threadId, model);
@@ -10580,7 +12755,7 @@
       return false;
     }
     if (client.__alunixaXModelRequestPatch === codexAppServerModelRequestPatchVersion) return true;
-    const originalSendRequest = client.__alunixaXModelOriginalSendRequest || client.sendRequest.bind(client);
+    const originalSendRequest = (client.__alunixaXModelOriginalSendRequest || client.sendRequest).bind(client);
     client.__alunixaXModelOriginalSendRequest = originalSendRequest;
     client.__alunixaXThreadModels = client.__alunixaXThreadModels || new Map();
     client.sendRequest = async function alunixaXModelPatchedSendRequest(method, params, options) {
@@ -10589,9 +12764,12 @@
       if (managed) return await managed;
       const requestMethod = appServerModelRequestMethod(String(method || ""), params);
       let providerRefreshFailed = false;
+      const managedAggregateTurn = requestMethod === "turn/start"
+        && client.hostId === "local" && !!codexManagedSessionConnection();
       if (codexRemoteSessionProviderRequestMethod(requestMethod)
           && codexRemoteSessionProviderPatchEnabled()
-          && window.__codexSessionDeleteBridge) {
+          && window.__codexSessionDeleteBridge
+          && !managedAggregateTurn) {
         const settingsLoaded = await loadBackendSettingsState(codexAppServerPreparationTimeoutMs);
         providerRefreshFailed = !settingsLoaded;
         if (providerRefreshFailed) {
@@ -10605,7 +12783,8 @@
       const providerParams = providerRefreshFailed
         ? params
         : applyCodexRemoteSessionProviderOverride(requestMethod, params);
-      const nextParams = applyCodexServiceTierRequestOnly(requestMethod, providerParams);
+      const nextParams = await prepareCodexManagedSessionConnection(String(method || ""),
+        providerParams, client.hostId, originalSendRequest);
       const modelContextRefresh = await refreshCodexThreadModelBeforeTurn(
         client,
         originalSendRequest,
@@ -10613,8 +12792,12 @@
         nextParams,
         options
       );
+      const managedTurn = await sendCodexManagedSessionTurn(client, originalSendRequest,
+        String(method || ""), nextParams, options, modelContextRefresh);
+      if (managedTurn) return managedTurn.result;
       const result = await originalSendRequest(method, nextParams, options);
-      const threadState = codexThreadModelRequestState(requestMethod, nextParams, result);
+      noteCodexManagedSessionStart(String(method || ""), nextParams, result, client.hostId);
+      const threadState = codexThreadModelRequestState(String(method || ""), nextParams, result);
       if (modelContextRefresh !== false && threadState.threadId && threadState.model
           && ["thread/start", "thread/resume", "turn/start"].includes(threadState.requestMethod)) {
         client.__alunixaXThreadModels.set(threadState.threadId, threadState.model);
@@ -10623,13 +12806,12 @@
       if (!alunixaXModelNames().length) await loadCodexModelCatalog();
       return patchAppServerModelResult(requestMethod, result, modelResponseHostId(params, client));
     };
-    if (typeof client.prewarmThreadStart === "function"
-        && !client.__alunixaXServiceTierOriginalPrewarmThreadStart) {
-      const originalPrewarmThreadStart = client.prewarmThreadStart.bind(client);
+    if (typeof client.prewarmThreadStart === "function") {
+      const originalPrewarmThreadStart = (client.__alunixaXServiceTierOriginalPrewarmThreadStart
+        || client.prewarmThreadStart).bind(client);
       client.__alunixaXServiceTierOriginalPrewarmThreadStart = originalPrewarmThreadStart;
       client.prewarmThreadStart = async function alunixaXServiceTierPrewarmThreadStart(params, options) {
-        const nextParams = applyCodexServiceTierRequestOnly("thread/start", params);
-        return originalPrewarmThreadStart(nextParams, options);
+        return await prewarmCodexManagedSession(client, originalPrewarmThreadStart, params, options);
       };
     }
     client.__alunixaXModelRequestPatch = codexAppServerModelRequestPatchVersion;
@@ -10756,7 +12938,6 @@
     const wanted = alunixaXModelUnlockEnabled()
       || codexPluginMarketplacePatchEnabled()
       || (alunixaXBackendSettingsLoaded && codexRemoteSessionProviderPatchEnabled())
-      || alunixaXSettings().serviceTierControls
       || alunixaXSettings().sessionDelete;
     if (!wanted) return false;
     const klass = window.__alunixaXAppServerClientClass;
@@ -10788,9 +12969,12 @@
       if (managed) return await managed;
       const requestMethod = appServerModelRequestMethod(String(method || ""), params);
       let providerRefreshFailed = false;
+      const managedAggregateTurn = requestMethod === "turn/start"
+        && client.hostId === "local" && !!codexManagedSessionConnection();
       if (codexRemoteSessionProviderRequestMethod(requestMethod)
           && codexRemoteSessionProviderPatchEnabled()
-          && window.__codexSessionDeleteBridge) {
+          && window.__codexSessionDeleteBridge
+          && !managedAggregateTurn) {
         const settingsLoaded = await loadBackendSettingsState(codexAppServerPreparationTimeoutMs);
         providerRefreshFailed = !settingsLoaded;
         if (providerRefreshFailed) {
@@ -10804,7 +12988,8 @@
       const providerParams = providerRefreshFailed
         ? params
         : applyCodexRemoteSessionProviderOverride(requestMethod, params);
-      const nextParams = applyCodexServiceTierRequestOnly(requestMethod, providerParams);
+      const nextParams = await prepareCodexManagedSessionConnection(String(method || ""),
+        providerParams, client.hostId, originalSendRequest.bind(client));
       const modelContextRefresh = await refreshCodexThreadModelBeforeTurn(
         client,
         originalSendRequest.bind(client),
@@ -10812,8 +12997,12 @@
         nextParams,
         options
       );
+      const managedTurn = await sendCodexManagedSessionTurn(client, originalSendRequest.bind(client),
+        String(method || ""), nextParams, options, modelContextRefresh);
+      if (managedTurn) return managedTurn.result;
       const result = await originalSendRequest.call(client, method, nextParams, options);
-      const threadState = codexThreadModelRequestState(requestMethod, nextParams, result);
+      noteCodexManagedSessionStart(String(method || ""), nextParams, result, client.hostId);
+      const threadState = codexThreadModelRequestState(String(method || ""), nextParams, result);
       if (modelContextRefresh !== false && threadState.threadId && threadState.model
           && ["thread/start", "thread/resume", "turn/start"].includes(threadState.requestMethod)) {
         client.__alunixaXThreadModels.set(threadState.threadId, threadState.model);
@@ -10822,13 +13011,12 @@
       if (!alunixaXModelNames().length) await loadCodexModelCatalog();
       return patchAppServerModelResult(requestMethod, result, modelResponseHostId(params, client));
     };
-    if (typeof proto.prewarmThreadStart === "function"
-        && !proto.__alunixaXServiceTierOriginalPrewarmThreadStart) {
-      const originalPrewarmThreadStart = proto.prewarmThreadStart;
+    if (typeof proto.prewarmThreadStart === "function") {
+      const originalPrewarmThreadStart = proto.__alunixaXServiceTierOriginalPrewarmThreadStart
+        || proto.prewarmThreadStart;
       proto.__alunixaXServiceTierOriginalPrewarmThreadStart = originalPrewarmThreadStart;
       proto.prewarmThreadStart = async function alunixaXServiceTierPrewarmThreadStart(params, options) {
-        const nextParams = applyCodexServiceTierRequestOnly("thread/start", params);
-        return originalPrewarmThreadStart.call(this, nextParams, options);
+        return await prewarmCodexManagedSession(this, originalPrewarmThreadStart.bind(this), params, options);
       };
     }
     proto.__alunixaXModelRequestPatch = codexAppServerModelRequestPatchVersion;
@@ -10944,8 +13132,7 @@
     if (alunixaXModelUnlockEnabled()
         || codexPluginMarketplacePatchEnabled()
         || (alunixaXBackendSettingsLoaded && codexRemoteSessionProviderPatchEnabled())
-        || alunixaXSettings().serviceTierControls
-        || alunixaXSettings().sessionDelete) {
+          || alunixaXSettings().sessionDelete) {
       installAppServerModelRequestPatch();
       void installCodexAppServerClientCapture().catch(() => {});
     }
@@ -11010,6 +13197,1042 @@
     const timestamp = Number.parseInt(id.slice(0, 12), 16);
     return Number.isFinite(timestamp) ? timestamp : 0;
   }
+  /**
+   * 模型选择器按供应商分组折叠。
+   *
+   * 背景：按模型聚合（`RelayMode::Aggregate`）后，一份 catalog 里会混进多个成员
+   * 供应商的模型。原生选择器是一维列表，聚合目录只能用 `display_name` 尾部的
+   * `（供应商）` 标注归属，四十多个模型平铺下来的观感就是"供应商名堆在一起"。
+   *
+   * 做法（不改模型数据、不接管点击）：
+   *   1. 找到原生面板（挂在 popper 里、可见的 `[data-model-picker-view]`，宫格视图跳过），
+   *      从行文本尾部的 `（供应商）` 解析归属；解析不到时回退去 `/codex-model-catalog`
+   *      的 `modelMetadata[slug]`（聚合目录发布的 `alunixa_x_group`，或 `description`
+   *      里的 `上游 · 供应商`）取权威归属。已知归属会在会话内累积，目录快照被整体替换
+   *      也不会把默认成员那一组变成空标题。
+   *   2. 在每组第一行前插一个自己的分组标题按钮，点它只折叠/展开这一组；
+   *      行本身的选中逻辑完全交给原生（这里不监听行的点击）。行内原生的
+   *      `xxx（供应商）` 标签隐藏并退出无障碍树，由我们插入的裸模型名顶替。
+   *   3. 行没有被搬动，React 的 child 对账不受影响；折叠用 CSS 类隐藏，
+   *      不增删原生节点，所以不会把原生列表搞崩。
+   *
+   * 只在"确实有多个供应商分组"时接管；单供应商（直连供应商）时完全不动原生列表。
+   * 分组标题带 `data-alunixa-x-ext`，扫描调度器会把它排除在自喂循环之外
+   * （issue #1960）。折叠状态与供应商归属存 localStorage。
+   */
+  registerCodexPlusExtensionSelector('[data-alunixa-x-ext="builtin-model-picker-groups"]');
+  // 重注入时先与上一个实例交接：停掉它的轮询与观察器，但**不**让它清理 DOM 补丁。
+  // 旧实例的清理会先把标题/标签拆掉、再等自己下一轮扫描重建，而它已经被 dispose，
+  // 结果是"标题一闪一闪"。DOM 由下面这个新实例在同一个 list 上重建，幂等。
+  window.__alunixaXModelPickerGroupsRuntime?.dispose?.();
+
+  /** 折叠状态存储键，改结构要换版本号。 */
+  const alunixaXModelPickerGroupsStoreKey = "alunixaX.modelPicker.collapsedGroups.v1";
+  /** 分组标题与工具条节点上的归属标记。 */
+  const alunixaXModelPickerGroupsExtMark = "builtin-model-picker-groups";
+  /** 样式表节点 id。 */
+  const alunixaXModelPickerGroupsStyleId = "alunixa-x-model-picker-groups-style";
+  /** 原生行上由我们添加的类名，卸载时要摘干净。 */
+  const alunixaXModelPickerItemClass = "alunixa-x-model-group-item";
+  /** 行内被我们替换掉的原生标签类名（恢复时要用）。 */
+  const alunixaXModelPickerNativeLabelClass = "alunixa-x-model-group-native-label";
+  /** 我们自己插入的模型标签类名。 */
+  const alunixaXModelPickerOwnLabelClass = "alunixa-x-model-group-own-label";
+  /** 行上的分组标记属性。 */
+  const alunixaXModelPickerGroupAttr = "data-alunixa-x-model-group";
+  /** 分组标题上的分组 id 属性。 */
+  const alunixaXModelPickerGroupIdAttr = "data-alunixa-x-model-group-id";
+  /** 一行最多解析多少字符的供应商名；超长的一律当成模型名不拆。 */
+  const alunixaXModelPickerGroupNameMaxLength = 24;
+  /** 列表 DOM 变化后的合并重扫延迟。 */
+  const alunixaXModelPickerRescanDelayMs = 60;
+  /**
+   * 菜单开着的兜底轮询间隔。
+   *
+   * React 在菜单里做一次重渲染就可能顺手回收我们插的标题节点，而这类删除不会产生
+   * 我们关心的 childList 变更（节点带 data-alunixa-x-ext）。所以只在菜单打开期间
+   * 以这个间隔自检一次标题是否还在，坏了就地重建；菜单关掉立刻停。
+   */
+  const alunixaXModelPickerWatchIntervalMs = 250;
+
+  const alunixaXModelPickerGroupsState = {
+    disposed: false,
+    /** 已打补丁的列表根节点（WeakSet，不缓存 DOM 生命周期）。 */
+    patchedLists: new WeakSet(),
+    /** 上一次打补丁时列表的指纹，用来跳过多余重建。 */
+    signature: "",
+    /** 轮询用的菜单节点；菜单关闭后置空。 */
+    activeList: null,
+    timer: 0,
+    rescanTimer: 0,
+    observer: null,
+    /** 本次菜单打开期间是否已经做过"自动只留当前分组展开"。 */
+    autoCollapsed: false,
+    /** 用户手动点过标题的分组 id。 */
+    touched: new Set(),
+    /** 已折叠的分组 id。 */
+    collapsed: new Set(),
+    /** 会话内累积的"归一化模型名 -> 供应商"。目录快照会被整体替换，这里做加法不丢已知归属。 */
+    providerNames: new Map(),
+    /** 默认成员的分组 id（聚合的"默认供应商"），用于打「默认」标志。 */
+    defaultGroupId: "",
+    /** 目录快照的单飞标记与冷却时间。 */
+    catalogPending: false,
+    catalogRetryAt: 0,
+    stored: false,
+  };
+
+  function alunixaXModelPickerText() {
+    const language = (document.documentElement?.lang || navigator.language || "").toLowerCase();
+    return language.startsWith("zh")
+      ? {
+          defaultBadge: "默认",
+          defaultTitle: "默认供应商：未指定模型时走这一家",
+          expandAll: "全部展开",
+          collapseAll: "全部折叠",
+          groupAria: (name, count, expanded, isDefault) => `${name}${isDefault ? "（默认供应商）" : ""}，${count} 个模型，${expanded ? "已展开" : "已折叠"}`,
+          groupTitle: (name, count) => `${name} · ${count}`,
+        }
+      : {
+          defaultBadge: "Default",
+          defaultTitle: "Default provider: used when no model is pinned",
+          expandAll: "Expand all",
+          collapseAll: "Collapse all",
+          groupAria: (name, count, expanded, isDefault) => `${name}${isDefault ? " (default provider)" : ""}, ${count} models, ${expanded ? "expanded" : "collapsed"}`,
+          groupTitle: (name, count) => `${name} · ${count}`,
+        };
+  }
+
+  function alunixaXModelPickerStore() {
+    if (alunixaXModelPickerGroupsState.stored) return;
+    alunixaXModelPickerGroupsState.stored = true;
+    try {
+      const raw = window.localStorage?.getItem(alunixaXModelPickerGroupsStoreKey);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed?.collapsed)) {
+        parsed.collapsed.filter((id) => typeof id === "string").forEach((id) => alunixaXModelPickerGroupsState.collapsed.add(id));
+      }
+      if (Array.isArray(parsed?.touched)) {
+        parsed.touched.filter((id) => typeof id === "string").forEach((id) => alunixaXModelPickerGroupsState.touched.add(id));
+      }
+      if (typeof parsed?.defaultGroupId === "string") {
+        alunixaXModelPickerGroupsState.defaultGroupId = parsed.defaultGroupId;
+      }
+      if (parsed?.providers && typeof parsed.providers === "object") {
+        for (const [key, value] of Object.entries(parsed.providers)) {
+          if (typeof key === "string" && typeof value === "string" && key && value) {
+            alunixaXModelPickerGroupsState.providerNames.set(key, value);
+          }
+        }
+      }
+    } catch {}
+  }
+
+  function alunixaXModelPickerPersist() {
+    try {
+      const providers = {};
+      alunixaXModelPickerGroupsState.providerNames.forEach((value, key) => {
+        providers[key] = value;
+      });
+      window.localStorage?.setItem(
+        alunixaXModelPickerGroupsStoreKey,
+        JSON.stringify({
+          collapsed: [...alunixaXModelPickerGroupsState.collapsed],
+          touched: [...alunixaXModelPickerGroupsState.touched],
+          providers,
+          defaultGroupId: alunixaXModelPickerGroupsState.defaultGroupId || "",
+        }),
+      );
+    } catch {}
+  }
+
+  /**
+   * 记一条"模型名 -> 供应商"。
+   *
+   * `parsed` 表示这条是从行末尾 `（供应商）` 猜出来的；权威来源（目录侧
+   * `alunixa_x_group` / `description`）可以覆盖它，反过来不行。
+   */
+  function alunixaXModelPickerRememberProvider(displayName, provider, parsed) {
+    const key = alunixaXModelPickerNormalize(displayName);
+    if (!key || !provider) return;
+    const existing = alunixaXModelPickerGroupsState.providerNames.get(key);
+    if (existing && !existing.parsed && parsed) return;
+    if (existing && existing.name === provider && existing.parsed === !!parsed) return;
+    alunixaXModelPickerGroupsState.providerNames.set(key, { name: provider, parsed: !!parsed });
+    alunixaXModelPickerGroupsState.providerDirty = true;
+  }
+
+  /**
+   * 需要时补一次目录快照。
+   *
+   * 默认身份（`alunixa_x_default_group_id` / 条目上的 `alunixa_x_default`）只在
+   * 目录快照里，而这份快照不一定已经被别的分片拉过（用户可能一直没打开过相关页面）。
+   * 拿到后下一次扫描就会补上「默认」标志。单飞 + 冷却，避免菜单开着时反复打后端。
+   */
+  function alunixaXModelPickerEnsureCatalog() {
+    const state = alunixaXModelPickerGroupsState;
+    if (state.defaultGroupId) return;
+    if (state.catalogPending) return;
+    if (Date.now() < state.catalogRetryAt) return;
+    const loaded = !!(codexModelCatalog?.models?.length || codexModelCatalog?.modelMetadata);
+    if (loaded && typeof loadCodexModelCatalog !== "function") return;
+    if (typeof loadCodexModelCatalog !== "function") return;
+    state.catalogPending = true;
+    state.catalogRetryAt = Date.now() + 5000;
+    Promise.resolve()
+      .then(() => loadCodexModelCatalog(false))
+      .catch(() => {})
+      .then(() => {
+        state.catalogPending = false;
+      });
+  }
+
+  /**
+   * 默认成员（聚合里的"默认供应商"）是哪一个分组。
+   *
+   * 三个来源，按可靠性排序：
+   *   1. `/codex-model-catalog` 的 `alunixa_x_default_group_id`（聚合配置里的
+   *      `default_relay_id`，最权威）；
+   *   2. 目录里标了 `alunixa_x_default` 的模型所属分组（老版本后端的兜底）；
+   *   3. 会话内记下来的结果 —— 目录快照会被整体替换，记下来才不会丢标志。
+   */
+  function alunixaXModelPickerDefaultGroupId() {
+    const state = alunixaXModelPickerGroupsState;
+    const direct = codexModelCatalog?.alunixa_x_default_group_id;
+    if (typeof direct === "string" && direct.trim()) {
+      if (state.defaultGroupId !== direct.trim()) {
+        state.defaultGroupId = direct.trim();
+        state.providerDirty = true;
+      }
+      return state.defaultGroupId;
+    }
+    const modelMetadata = codexModelCatalog?.modelMetadata || codexModelCatalog?.model_metadata;
+    if (modelMetadata && typeof modelMetadata === "object") {
+      for (const entry of Object.values(modelMetadata)) {
+        if (!entry || typeof entry !== "object") continue;
+        if (entry.alunixa_x_default !== true) continue;
+        const groupId = typeof entry.alunixa_x_group_id === "string" ? entry.alunixa_x_group_id.trim() : "";
+        if (!groupId) continue;
+        const displayName = entry.displayName || entry.display_name || "";
+        alunixaXModelPickerRememberProvider(displayName, providerNameOf(entry), false);
+        if (state.defaultGroupId !== groupId) {
+          state.defaultGroupId = groupId;
+          state.providerDirty = true;
+        }
+        return groupId;
+      }
+    }
+    return state.defaultGroupId || "";
+  }
+
+  /** 目录条目里的供应商展示名；没有分组键就退回 description 的「上游 · 供应商」。 */
+  function providerNameOf(entry) {
+    const direct = typeof entry.alunixa_x_group === "string" ? entry.alunixa_x_group.trim() : "";
+    if (direct) return direct;
+    const description = typeof entry.description === "string" ? entry.description : "";
+    const separator = description.lastIndexOf(" · ");
+    return separator > 0 ? description.slice(separator + 3).trim() : "";
+  }
+
+  /**
+   * 原生模型选择器的面板根。
+   *
+   * 不绑触发按钮的属性（`data-codex-intelligence-trigger` 只是 composer 上那一个），
+   * 直接找挂在 popper 里、可见的 `[data-model-picker-view]`：菜单一关它就从 DOM 里
+   * 消失，天然就是"开着/关着"的判据。同时排除宫格视图——宫格下折叠没有意义。
+   */
+  function alunixaXModelPickerMenu() {
+    const roots = document.querySelectorAll("[data-model-picker-view]");
+    for (const root of roots) {
+      // 实测列表视图的值是 `simple`；只排除宫格。
+      if (root.getAttribute("data-model-picker-view") === "grid") continue;
+      // 菜单关闭后节点会被摘掉。切到「高级/推理强度」子面板时列表只是被隐藏
+      // （display:none），仍然连着 —— 那种情况不能当成关闭，否则回来时补丁已经
+      // 被拆掉、要等一轮才重建，看上去就是"分组闪一下没了"。
+      if (!root.isConnected) continue;
+      if (!root.querySelector('[class*="_ModelList_"]')) continue;
+      return root;
+    }
+    return null;
+  }
+
+  function alunixaXModelPickerList(menu) {
+    const root = menu?.matches?.("[data-model-picker-view]") ? menu : menu?.querySelector?.("[data-model-picker-view]");
+    if (!root) return null;
+    const list = root.querySelector('[class*="_ModelList_"]');
+    if (!list) return null;
+    if (root.getAttribute("data-model-picker-view") === "grid") return null;
+    return list;
+  }
+
+  /**
+   * 拆 `DeepSeek-V4-Pro（DeepSeek）` 这种"展示名（供应商）"。
+   * 返回 `{ name, provider }`；没有后缀或后缀不像供应商名时 `provider` 为空。
+   */
+  function alunixaXModelPickerSplitLabel(text) {
+    const value = String(text || "").replace(/\s+/g, " ").trim();
+    if (!value) return { name: "", provider: "" };
+    const match = value.match(/^(.*\S)\s*[（(]([^（()）]{1,64})[)）]$/u);
+    if (!match) return { name: value, provider: "" };
+    const name = match[1].trim();
+    const provider = match[2].trim();
+    if (!name || !provider || provider.length > alunixaXModelPickerGroupNameMaxLength) {
+      return { name: value, provider: "" };
+    }
+    // 分组标题也是我们自己插的按钮，文本里可能带 `· 计数`，别把它当成模型名。
+    return { name, provider };
+  }
+
+  /** 严格归一化：只去空白 + 小写，保留 `gpt-` 前缀。 */
+  function alunixaXModelPickerNormalizeStrict(value) {
+    return String(value || "").replace(/\s+/g, "").trim().toLowerCase();
+  }
+
+  /** 归一化：比较时忽略大小写、`gpt-` 前缀和空白。 */
+  function alunixaXModelPickerNormalize(value) {
+    return alunixaXModelPickerNormalizeStrict(value).replace(/^gpt-/u, "");
+  }
+
+  /**
+   * 目录里的键和选择器里的名字不一定逐字相同。
+   *
+   * 目录条目是这个模型的完整身份（`displayName` 为 `GPT-6.1-Sol`，slug 为
+   * `gpt-6.1-sol`），而选择器里的行会去掉 `gpt-` 前缀、空格也有差异（`6.1 Sol`）。
+   * 所以给每个目录条目登记它所有已知写法（去掉前缀的 displayName、slug、去掉
+   * `cpx-<成员>/` 之后的裸 slug），前端才可能把"行"和"目录归属"对上。
+   */
+  function alunixaXModelPickerCatalogAliases(displayName, entry, slug) {
+    const aliases = new Set();
+    const add = (value) => {
+      const key = alunixaXModelPickerNormalize(value);
+      if (key) aliases.add(key);
+      const strict = alunixaXModelPickerNormalizeStrict(value);
+      if (strict && strict !== key) aliases.add(strict);
+    };
+    add(displayName);
+    // `GPT-6.1-Sol` 与 `6.1 Sol` 只差前缀：两种写法都登记。
+    add(String(displayName || "").replace(/^gpt[-\s]*/iu, ""));
+    if (typeof slug === "string" && slug) {
+      add(slug);
+      const bare = slug.includes("/") ? slug.slice(slug.lastIndexOf("/") + 1) : slug;
+      add(bare);
+    }
+    return aliases;
+  }
+
+  /**
+   * 权威归属：聚合目录里每个模型的 `description` 是 `上游 · 供应商`。
+   * 命中后可以拿到聚合成员的真名（而不是从展示名尾部猜出来的供应商名）。
+   */
+  function alunixaXModelPickerCatalogProviderMap() {
+    const modelMetadata = codexModelCatalog?.modelMetadata || codexModelCatalog?.model_metadata;
+    // 会话内已记下的归属先铺一层：目录快照可能被整体替换（重连 / 重新生成），
+    // 只认当前快照会让默认供应商的分组名在某一刻变空。
+    const map = new Map(alunixaXModelPickerGroupsState.providerNames);
+    if (!modelMetadata || typeof modelMetadata !== "object") return map;
+    const slugList = Array.isArray(codexModelCatalog?.models)
+      ? codexModelCatalog.models.filter((slug) => typeof slug === "string" && slug)
+      : [];
+    const entries = Object.entries(modelMetadata);
+    // `models` 是权威切片：优先按它逐个取元数据（键能对上就用真实 slug 做别名）。
+    // 取不到（切片缺失 / 键不一致）时退回遍历全部元数据，保证不漏分组。
+    const seenEntries = new Set();
+    const registerEntry = (entry, slug) => {
+      if (!entry || typeof entry !== "object" || seenEntries.has(entry)) return;
+      seenEntries.add(entry);
+      const displayName = entry.displayName || entry.display_name;
+      if (typeof displayName !== "string" || !displayName) return;
+      const provider = providerNameOf(entry);
+      const groupId = typeof entry.alunixa_x_group_id === "string" ? entry.alunixa_x_group_id.trim() : "";
+      if (!provider || !groupId) return;
+      for (const key of alunixaXModelPickerCatalogAliases(displayName, entry, slug)) {
+        const remembered = map.get(key);
+        // 权威来源可以覆盖行文本猜出来的；已经有权威值就不动。
+        if (!remembered || remembered.parsed) map.set(key, { provider, groupId, parsed: false });
+      }
+      alunixaXModelPickerRememberProvider(displayName, provider, false);
+    };
+    const bySlug = new Map(entries);
+    for (const slug of slugList) registerEntry(bySlug.get(slug), slug);
+    for (const [key, entry] of entries) registerEntry(entry, key);
+    return map;
+  }
+
+  /**
+   * 一行的可分组身份。
+   *
+   * 原生结构（实测 2026-10 Codex 桌面版）：
+   *   [role=menuitemradio] > [data-menu-row-content] > span.flex-1 > span[.truncate] > span
+   * "默认 / 推荐模型集"这类入口是同一个骨架多一个副标题 span，必须排除，
+   * 否则会被当成一个没有供应商的模型。
+   */
+  function alunixaXModelPickerRowIdentity(row) {
+    const content = row.querySelector("[data-menu-row-content]");
+    if (!content) return null;
+    const native = content.querySelector(`.${alunixaXModelPickerNativeLabelClass}`);
+    const own = content.querySelector(`.${alunixaXModelPickerOwnLabelClass}`);
+    const outer = content.querySelector("span.flex-1, span[class*='flex-1']");
+    const inner = outer?.firstElementChild;
+    // 原始标签优先；没打过补丁时就是 inner 里的第一个 span。
+    const labelElement = native || own || inner?.firstElementChild || inner;
+    const text = (labelElement?.textContent || "").replace(/\s+/g, " ").trim();
+    // 副标题判定：只数原生 span，别把自己插进去的标签算成第二个 span。
+    // 早期版本没排除自己，补丁装完后每一行都被判成"双行入口"，于是每次扫描都
+    // 判定分组只剩 0 组、重建一遍 —— 表现出来就是标题一闪一闪。
+    const nativeSpans = inner
+      ? [...inner.children].filter((node) => !node.classList.contains(alunixaXModelPickerOwnLabelClass)
+        && node.getAttribute("data-alunixa-x-ext") !== alunixaXModelPickerGroupsExtMark)
+      : [];
+    // 已经在补丁里的行直接认账，不再重复判定结构。
+    const patched = row.getAttribute("data-alunixa-x-ext") === alunixaXModelPickerGroupsExtMark;
+    return {
+      content,
+      inner,
+      labelElement,
+      text,
+      spanCount: nativeSpans.length,
+      groupable: !!text && (patched || nativeSpans.length <= 1),
+    };
+  }
+
+  function alunixaXModelPickerRowLabel(row) {
+    return alunixaXModelPickerRowIdentity(row)?.text || "";
+  }
+
+  /**
+   * 把行切成 `{ row, label, name, provider, groupId }`。
+   * 已打过补丁的行直接读我们留下的标记，避免反复解析。
+   */
+  function alunixaXModelPickerRows(list) {
+    const providers = alunixaXModelPickerCatalogProviderMap();
+    const rows = [];
+    const items = list.querySelectorAll('[role="menuitemradio"]');
+    items.forEach((row) => {
+      const identity = alunixaXModelPickerRowIdentity(row);
+      if (!identity?.groupable) return;
+      const split = alunixaXModelPickerSplitLabel(identity.text);
+      if (split.provider) alunixaXModelPickerRememberProvider(split.name, split.provider, true);
+      // 分组键：只信"行上有后缀"和"目录里的权威分组 id"这两个来源。
+      // 早期版本拿目录展示名去拟合行文本，别名一多就把模型分到了错的组（同一家被切成
+      // 好几段），所以目录查询只用来补 **分组 id**，不用来决定显示成哪一组。
+      const known = providers.get(alunixaXModelPickerNormalizeStrict(split.name))
+        || providers.get(alunixaXModelPickerNormalize(split.name));
+      const groupId = known?.groupId
+        || (split.provider ? split.provider : alunixaXModelPickerDefaultGroupId());
+      // 显示名按行文本：有后缀就是那一家；裸名（默认成员的模型）用默认供应商的名字。
+      const provider = split.provider || known?.provider || alunixaXModelPickerDefaultProviderName();
+      const authoritativeGroupId = !!known?.groupId || (!split.provider && !!alunixaXModelPickerDefaultGroupId());
+      rows.push({ row, label: identity.text, name: split.name, provider, groupId, authoritativeGroupId });
+    });
+    return rows;
+  }
+
+  /**
+   * 无后缀模型（聚合里的默认成员）该叫什么。
+   *
+   * 默认成员的模型保持裸名发布，所以行上没有供应商；这里从 catalog 里挑一个
+   * 同样没有后缀的模型，读它的分组归属（`alunixa_x_group` 或 `description`
+   * 里的 `上游 · 供应商`）。挑不到就返回空串，调用方用兜底文案。
+   */
+  function alunixaXModelPickerDefaultProviderName() {
+    const modelMetadata = codexModelCatalog?.modelMetadata || codexModelCatalog?.model_metadata;
+    if (!modelMetadata || typeof modelMetadata !== "object") return "";
+    // 取"裸名模型里出现最多的那个分组"：聚合的默认成员可能有几百个模型，
+    // 偶尔混进一两个别的成员的裸名条目也不该把整组改姓。
+    const counts = new Map();
+    for (const entry of Object.values(modelMetadata)) {
+      if (!entry || typeof entry !== "object") continue;
+      const displayName = entry.displayName || entry.display_name;
+      if (typeof displayName !== "string" || !displayName) continue;
+      if (alunixaXModelPickerSplitLabel(displayName).provider) continue;
+      const direct = typeof entry.alunixa_x_group === "string" ? entry.alunixa_x_group.trim() : "";
+      let provider = direct;
+      if (!provider) {
+        const description = typeof entry.description === "string" ? entry.description : "";
+        const separator = description.lastIndexOf(" · ");
+        if (separator > 0) provider = description.slice(separator + 3).trim();
+      }
+      if (!provider) continue;
+      counts.set(provider, (counts.get(provider) || 0) + 1);
+      alunixaXModelPickerRememberProvider(displayName, provider, false);
+    }
+    let best = "";
+    let bestCount = 0;
+    counts.forEach((count, provider) => {
+      if (count > bestCount) {
+        best = provider;
+        bestCount = count;
+      }
+    });
+    return best;
+  }
+
+  /** 权威 groupId 全局合组；无 ID 的旧行只做相邻回退，避免同名误合并。 */
+  function alunixaXModelPickerGroups(rows, defaultProviderName = "") {
+    const groups = [];
+    const identified = new Map();
+    let legacy = null;
+    for (const entry of rows) {
+      const key = entry.provider || "";
+      const id = entry.authoritativeGroupId !== false && typeof entry.groupId === "string" ? entry.groupId.trim() : "";
+      let group;
+      if (id) {
+        legacy = null;
+        group = identified.get(id);
+        if (!group) {
+          group = { key, id, name: entry.provider || defaultProviderName, entries: [] };
+          identified.set(id, group);
+          groups.push(group);
+        }
+      } else {
+        if (!legacy || legacy.key !== key) {
+          legacy = { key, id: `legacy:${groups.length}:${key}`, name: entry.provider || defaultProviderName, entries: [] };
+          groups.push(legacy);
+        }
+        group = legacy;
+      }
+      group.entries.push(entry);
+    }
+    return groups;
+  }
+
+  /**
+   * 分组 id 撞车保护：不同分组名共用同一个 id（或都没有 id）时补上序号，
+   * 否则折叠状态会串组。
+   */
+  function alunixaXModelPickerUniqueGroupIds(groups) {
+    const seen = new Map();
+    const defaultGroupId = alunixaXModelPickerDefaultGroupId();
+    for (const group of groups) {
+      // 默认成员的分组在 id 改写之前先认出来。同一组的行里，有的能查到权威分组 id
+      // （裸名发布、行上没有后缀的模型），有的只有显示名，
+      // 所以按"组内任意一行命中默认分组"判定，而不是只看组首那一行。
+      group.isDefault = !!defaultGroupId
+        && group.entries.some((entry) => entry.groupId === defaultGroupId || entry.provider === defaultGroupId);
+      if (!group.name) {
+        group.id = "__ungrouped__";
+        continue;
+      }
+      const base = group.id || group.name;
+      const count = (seen.get(base) || 0) + 1;
+      seen.set(base, count);
+      group.id = count > 1 ? `${base}#${count}` : base;
+    }
+    return groups;
+  }
+
+  function alunixaXModelPickerFingerprint(groups) {
+    return groups
+      .map((group) => `${group.id}:${group.entries.map((entry) => entry.label).join("|")}`)
+      .join("||");
+  }
+
+  /**
+   * 首次打开时的默认形态：永远**至少有一组是展开的**。
+   *
+   *   - 用户在这之前存过折叠状态（`touched` 非空）：完全尊重，不再自动决策，
+   *     否则每次打开都会把用户特意展开的组又收回去。
+   *   - 当前有选中模型，且能定位到它属于哪个分组：只展开那一组，其余收起——
+   *     用户下次打开选择器，看到的就是自己正在用的供应商。
+   *   - 其他情况（还没有选中模型 / 定位不到）：全部保持展开。信息完整比"整齐"重要，
+   *     看不到模型比看到一长串更糟。
+   */
+  function alunixaXModelPickerAutoCollapse(list, groups) {
+    const state = alunixaXModelPickerGroupsState;
+    if (state.autoCollapsed) return;
+    state.autoCollapsed = true;
+    if (groups.length < 2) return;
+    if (state.touched.size > 0) return;
+    let keep = "";
+    const selected = list.querySelector("[data-model-selected]");
+    if (selected) {
+      const split = alunixaXModelPickerSplitLabel(alunixaXModelPickerRowLabel(selected));
+      const desired = split.provider || "";
+      const found = groups.find((group) => (group.name || "") === desired);
+      if (found) keep = found.id;
+    }
+    // 没有选中模型（或定位不到所属分组）时展开默认供应商：目录里裸名发布的那些
+    // 模型本来就归它，用户最可能找的就是它。
+    if (!keep) keep = groups.find((group) => group.isDefault)?.id || "";
+    if (!keep) return;
+    let changed = false;
+    for (const group of groups) {
+      if (group.id === keep) {
+        if (state.collapsed.delete(group.id)) changed = true;
+      } else if (!state.collapsed.has(group.id)) {
+        // 默认成员那一组（裸名、没有供应商后缀）跟着一起收，避免"默认 7 个 + 当前供应商"
+        // 两段都散着；它有 7 个模型，收起来不影响选型。
+        state.collapsed.add(group.id);
+        changed = true;
+      }
+    }
+    if (changed) alunixaXModelPickerPersist();
+  }
+
+  /**
+   * 「默认」徽标：默认身份可能晚于标题创建才知道（目录快照刷新、切分组），
+   * 所以每次同步都按 isDefault 补齐或摘掉，而不是只在建标题时决定一次。
+   */
+  function alunixaXModelPickerSyncDefaultBadge(header, group, text) {
+    let badge = header.querySelector(".alunixa-x-model-group-default");
+    if (!group.isDefault) {
+      badge?.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "alunixa-x-model-group-default";
+      const count = header.querySelector(".alunixa-x-model-group-count");
+      header.insertBefore(badge, count || null);
+    }
+    if (badge.textContent !== text.defaultBadge) badge.textContent = text.defaultBadge;
+    badge.title = text.defaultTitle;
+  }
+
+  function alunixaXModelPickerGroupExpanded(group) {
+    return !alunixaXModelPickerGroupsState.collapsed.has(group.id);
+  }
+
+  function alunixaXModelPickerSyncGroup(list, group) {
+    const text = alunixaXModelPickerText();
+    const expanded = alunixaXModelPickerGroupExpanded(group);
+    const header = list.querySelector(`[${alunixaXModelPickerGroupIdAttr}="${cssEscapeValue(group.id)}"]`);
+    group.entries.forEach((entry) => {
+      entry.row.setAttribute(alunixaXModelPickerGroupAttr, group.id);
+      entry.row.classList.toggle("alunixa-x-model-group-collapsed", !expanded);
+    });
+    if (header) {
+      header.setAttribute("aria-expanded", expanded ? "true" : "false");
+      header.classList.toggle("alunixa-x-model-group-header-collapsed", !expanded);
+      const label = header.querySelector(".alunixa-x-model-group-title");
+      // 标题只放名字：数量右边有徽标，标题里再来一次就是重复。
+      if (label) label.textContent = group.name;
+      alunixaXModelPickerSyncDefaultBadge(header, group, text);
+      header.setAttribute("aria-label", text.groupAria(group.name, group.entries.length, expanded, group.isDefault));
+    }
+  }
+
+  /** 自己插的标签节点；原生标签留着（隐藏），这样无障碍名称仍然完整。 */
+  function alunixaXModelPickerInstallLabel(entry) {
+    const identity = alunixaXModelPickerRowIdentity(entry.row);
+    const inner = identity?.inner;
+    if (!inner) return;
+    // 行本身带归属标记：补丁装完后第二次扫描能直接认出这一行，不再重新解析结构。
+    entry.row.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+    const isOurs = (node) => node.classList.contains(alunixaXModelPickerOwnLabelClass)
+      || node.classList.contains(alunixaXModelPickerNativeLabelClass);
+    const native = [...inner.children].find((node) => node.classList.contains(alunixaXModelPickerNativeLabelClass))
+      // 第一次进来时装的是原生标签（单个 span）
+      || [...inner.children].find((node) => !isOurs(node));
+    if (native && !native.classList.contains(alunixaXModelPickerNativeLabelClass)) {
+      native.classList.add(alunixaXModelPickerNativeLabelClass);
+      native.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+      // 视觉上由我们自己的标签顶上；隐藏原节点时必须同时退出无障碍树，
+      // 否则读屏会把同一行念两遍。
+      native.setAttribute("aria-hidden", "true");
+    }
+    let own = [...inner.children].find((node) => node.classList.contains(alunixaXModelPickerOwnLabelClass));
+    if (!own) {
+      own = document.createElement("span");
+      own.className = `${alunixaXModelPickerOwnLabelClass} truncate whitespace-nowrap`;
+      own.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+      inner.insertBefore(own, native || null);
+    }
+    if (own.textContent !== entry.name) own.textContent = entry.name;
+    entry.row.classList.add(alunixaXModelPickerItemClass);
+  }
+
+  function alunixaXModelPickerRestoreLabel(row) {
+    const content = row.querySelector("[data-menu-row-content]") || row;
+    content.querySelector(`.${alunixaXModelPickerOwnLabelClass}`)?.remove();
+    const native = content.querySelector(`.${alunixaXModelPickerNativeLabelClass}`);
+    if (native) {
+      native.classList.remove(alunixaXModelPickerNativeLabelClass);
+      native.removeAttribute("data-alunixa-x-ext");
+      native.removeAttribute("aria-hidden");
+    }
+    row.classList.remove(alunixaXModelPickerItemClass, "alunixa-x-model-group-collapsed");
+    row.removeAttribute(alunixaXModelPickerGroupAttr);
+    if (row.getAttribute("data-alunixa-x-ext") === alunixaXModelPickerGroupsExtMark) {
+      row.removeAttribute("data-alunixa-x-ext");
+    }
+  }
+
+  function alunixaXModelPickerToggleGroup(list, group) {
+    const state = alunixaXModelPickerGroupsState;
+    const expanded = alunixaXModelPickerGroupExpanded(group);
+    if (expanded) state.collapsed.add(group.id);
+    else state.collapsed.delete(group.id);
+    state.touched.add(group.id);
+    alunixaXModelPickerPersist();
+    alunixaXModelPickerSyncGroup(list, group);
+    alunixaXModelPickerSyncToolbar(list);
+  }
+
+  function alunixaXModelPickerSetAll(list, groups, collapsed) {
+    const state = alunixaXModelPickerGroupsState;
+    for (const group of groups) {
+      if (collapsed) state.collapsed.add(group.id);
+      else state.collapsed.delete(group.id);
+      state.touched.add(group.id);
+    }
+    alunixaXModelPickerPersist();
+    groups.forEach((group) => alunixaXModelPickerSyncGroup(list, group));
+    alunixaXModelPickerSyncToolbar(list);
+  }
+
+  function alunixaXModelPickerGroupHeader(list, group, groups) {
+    const text = alunixaXModelPickerText();
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "alunixa-x-model-group-header";
+    header.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+    header.setAttribute(alunixaXModelPickerGroupIdAttr, group.id);
+    header.setAttribute("aria-expanded", "true");
+    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    chevron.setAttribute("viewBox", "0 0 12 12");
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.setAttribute("class", "alunixa-x-model-group-chevron");
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", "M4 2.5 8 6 4 9.5");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", "currentColor");
+    path.setAttribute("stroke-width", "1.4");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke-linejoin", "round");
+    chevron.appendChild(path);
+    const title = document.createElement("span");
+    title.className = "alunixa-x-model-group-title";
+    header.append(chevron, title);
+    if (group.isDefault) {
+      const badge = document.createElement("span");
+      badge.className = "alunixa-x-model-group-default";
+      badge.textContent = text.defaultBadge;
+      badge.title = text.defaultTitle;
+      header.appendChild(badge);
+    }
+    const count = document.createElement("span");
+    count.className = "alunixa-x-model-group-count";
+    count.textContent = String(group.entries.length);
+    header.appendChild(count);
+    header.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const current = groups.find((item) => item.id === group.id);
+      if (current) alunixaXModelPickerToggleGroup(list, current);
+    });
+    header.addEventListener("pointerdown", (event) => {
+      // 别让指针事件冒到菜单外，否则菜单会被关掉。
+      event.stopPropagation();
+    });
+    header.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") event.stopPropagation();
+    });
+    // 悬浮提示保留数量：表头文字只有名字，数量用右侧徽标表示。
+    header.title = text.groupTitle(group.name, group.entries.length);
+    return header;
+  }
+
+  function alunixaXModelPickerSyncToolbar(list) {
+    const toolbar = list.querySelector(".alunixa-x-model-group-toolbar");
+    if (!toolbar) return;
+    const groups = [...list.querySelectorAll(`[${alunixaXModelPickerGroupIdAttr}]`)]
+      .map((node) => node.getAttribute(alunixaXModelPickerGroupIdAttr));
+    const anyExpanded = groups.some((id) => !alunixaXModelPickerGroupsState.collapsed.has(id));
+    toolbar.querySelector("button")?.setAttribute("data-all-expanded", anyExpanded ? "true" : "false");
+    const label = toolbar.querySelector(".alunixa-x-model-group-toolbar-label");
+    if (label) label.textContent = anyExpanded ? alunixaXModelPickerText().collapseAll : alunixaXModelPickerText().expandAll;
+  }
+
+  function alunixaXModelPickerToolbar(list, groups) {
+    const text = alunixaXModelPickerText();
+    const toolbar = document.createElement("div");
+    toolbar.className = "alunixa-x-model-group-toolbar";
+    toolbar.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+    const spacer = document.createElement("span");
+    spacer.className = "alunixa-x-model-group-toolbar-title";
+    spacer.textContent = "";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "alunixa-x-model-group-toolbar-button";
+    button.setAttribute("data-all-expanded", "true");
+    const label = document.createElement("span");
+    label.className = "alunixa-x-model-group-toolbar-label";
+    label.textContent = text.collapseAll;
+    button.appendChild(label);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      alunixaXModelPickerSetAll(list, groups, button.getAttribute("data-all-expanded") === "true");
+    });
+    button.addEventListener("pointerdown", (event) => event.stopPropagation());
+    toolbar.append(spacer, button);
+    return toolbar;
+  }
+
+  function alunixaXModelPickerRemoveOwnNodes(list) {
+    list.querySelectorAll(`[data-alunixa-x-ext="${alunixaXModelPickerGroupsExtMark}"]`).forEach((node) => {
+      if (node.closest('[role="menuitemradio"]')) return;
+      node.remove();
+    });
+  }
+
+  function alunixaXModelPickerClear(list) {
+    if (!list) return;
+    alunixaXModelPickerRemoveOwnNodes(list);
+    list.querySelectorAll('[role="menuitemradio"]').forEach((row) => alunixaXModelPickerRestoreLabel(row));
+    list.removeAttribute("data-alunixa-x-model-groups");
+    alunixaXModelPickerGroupsState.signature = "";
+    alunixaXModelPickerGroupsState.patchedLists.delete(list);
+  }
+
+  /**
+   * 分组标题与工具条是否还在原位。
+   *
+   * React 在菜单里做任何一次重渲染都可能顺手回收我们插进去的兄弟节点，
+   * 此时指纹没变、但标题已经没了，只靠指纹判等会留下一个"点了没用"的死状态。
+   */
+  function alunixaXModelPickerHeadersIntact(list, groups) {
+    const toolbar = list.querySelector(".alunixa-x-model-group-toolbar");
+    if (!toolbar) return false;
+    return groups.every((group) => {
+      const header = list.querySelector(`[${alunixaXModelPickerGroupIdAttr}="${cssEscapeValue(group.id)}"]`);
+      const first = group.entries[0]?.row;
+      return !!header && !!first && header.nextElementSibling === first;
+    });
+  }
+
+  /**
+   * 打补丁主流程。返回是否改动了原生列表。
+   */
+  function alunixaXModelPickerPatch(list) {
+    if (alunixaXModelPickerGroupsState.disposed) return false;
+    alunixaXModelPickerStore();
+    const rows = alunixaXModelPickerRows(list);
+    const groups = alunixaXModelPickerUniqueGroupIds(
+      alunixaXModelPickerGroups(rows, alunixaXModelPickerDefaultProviderName()),
+    );
+    // 只有一个供应商时不折叠：直连供应商本来就是一组，插标题只是多一层噪音。
+    if (groups.length < 2) {
+      if (alunixaXModelPickerGroupsState.patchedLists.has(list)) alunixaXModelPickerClear(list);
+      else alunixaXModelPickerRemoveOwnNodes(list);
+      return false;
+    }
+    const signature = alunixaXModelPickerFingerprint(groups);
+    const patched = alunixaXModelPickerGroupsState.patchedLists.has(list);
+    if (
+      patched
+      && signature === alunixaXModelPickerGroupsState.signature
+      && list.isConnected
+      && alunixaXModelPickerHeadersIntact(list, groups)
+    ) {
+      groups.forEach((group) => alunixaXModelPickerSyncGroup(list, group));
+      return false;
+    }
+    alunixaXModelPickerGroupsState.patchedLists.add(list);
+    alunixaXModelPickerGroupsState.signature = signature;
+    list.setAttribute("data-alunixa-x-model-groups", "true");
+    alunixaXModelPickerRemoveOwnNodes(list);
+    groups.forEach((group) => group.entries.forEach((entry) => alunixaXModelPickerInstallLabel(entry)));
+    groups.forEach((group) => {
+      const first = group.entries[0]?.row;
+      if (!first?.parentElement) return;
+      first.parentElement.insertBefore(alunixaXModelPickerGroupHeader(list, group, groups), first);
+    });
+    alunixaXModelPickerAutoCollapse(list, groups);
+    groups.forEach((group) => alunixaXModelPickerSyncGroup(list, group));
+    const anchor = groups[0]?.entries[0]?.row;
+    if (anchor?.parentElement && !list.querySelector(".alunixa-x-model-group-toolbar")) {
+      anchor.parentElement.insertBefore(alunixaXModelPickerToolbar(list, groups), anchor.parentElement.firstChild);
+    }
+    alunixaXModelPickerSyncToolbar(list);
+    if (alunixaXModelPickerGroupsState.providerDirty) {
+      alunixaXModelPickerGroupsState.providerDirty = false;
+      alunixaXModelPickerPersist();
+    }
+    return true;
+  }
+
+  /** CSS.escape 兜底：分组 id 里可能有中文、空格与 `#`。 */
+  function cssEscapeValue(value) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+    return String(value).replace(/["\\]/g, "\\$&");
+  }
+
+  function alunixaXModelPickerInstallStyle() {
+    if (document.getElementById(alunixaXModelPickerGroupsStyleId)) return;
+    const style = document.createElement("style");
+    style.id = alunixaXModelPickerGroupsStyleId;
+    style.setAttribute("data-alunixa-x-ext", alunixaXModelPickerGroupsExtMark);
+    style.textContent = `
+      /* 分组标题贴着原生行的左右内边距，视觉上属于同一列。 */
+      .alunixa-x-model-group-header{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;margin:2px 0 0;padding:4px 8px;border:0;border-radius:8px;background:none;color:var(--color-token-text-secondary,rgba(205,205,215,.8));font:inherit;font-size:11px;line-height:16px;font-weight:600;letter-spacing:.02em;text-align:left;cursor:pointer;user-select:none;appearance:none}
+      .alunixa-x-model-group-header:hover{background:var(--color-token-bg-secondary,rgba(255,255,255,.04));color:var(--color-token-text-primary,#dfdfdf)}
+      .alunixa-x-model-group-header:focus-visible{outline:1px solid color-mix(in srgb,var(--color-token-text-primary,#dfdfdf) 35%,transparent);outline-offset:1px}
+      .alunixa-x-model-group-chevron{flex:0 0 auto;width:12px;height:12px;opacity:.75;transform:rotate(90deg);transition:transform .15s ease}
+      .alunixa-x-model-group-header-collapsed .alunixa-x-model-group-chevron{transform:rotate(0deg)}
+      /* 标题撑满剩余空间，把「默认」徽标与计数挤到右端。不要用 margin-left:auto 推计数：
+         那一行多出徽标时 auto 外边距会被吃掉，数字就跟在徽标后面，与其它行不对齐。 */
+      .alunixa-x-model-group-title{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .alunixa-x-model-group-count{flex:0 0 auto;padding:0 6px;border-radius:999px;background:var(--color-token-bg-secondary,rgba(255,255,255,.06));color:var(--color-token-text-secondary,rgba(205,205,215,.75));font-size:10px;font-weight:500;font-variant-numeric:tabular-nums}
+      /* 「默认」标志：默认成员的模型是裸名发布的，跟"另一家没起名的成员"看名字分不出来。
+         用主题强调色描边小标签，比再加一句解释文字省地方。 */
+      .alunixa-x-model-group-default{flex:0 0 auto;padding:0 5px;border:1px solid color-mix(in srgb,var(--color-token-text-primary,#dfdfdf) 26%,transparent);border-radius:999px;color:var(--color-token-text-primary,#dfdfdf);font-size:10px;line-height:14px;font-weight:500;letter-spacing:.02em}
+      /* 徽标紧贴计数左侧时留一点缝（默认 gap 是 6px，这里收紧一点看起来更像一组）。 */
+      .alunixa-x-model-group-default + .alunixa-x-model-group-count{margin-left:-2px}
+      .alunixa-x-model-group-toolbar{display:flex;align-items:center;gap:8px;box-sizing:border-box;padding:2px 8px 4px}
+      .alunixa-x-model-group-toolbar-button{margin-left:auto;border:0;border-radius:6px;background:none;padding:2px 6px;color:var(--color-token-text-secondary,rgba(205,205,215,.8));font:inherit;font-size:11px;cursor:pointer;appearance:none}
+      .alunixa-x-model-group-toolbar-button:hover{background:var(--color-token-bg-secondary,rgba(255,255,255,.04));color:var(--color-token-text-primary,#dfdfdf)}
+      /* 折叠：只隐藏行，不移动行，React 的 child 对账不受影响。 */
+      [role="menuitemradio"].alunixa-x-model-group-collapsed{display:none!important}
+      .${alunixaXModelPickerNativeLabelClass}{display:none!important}
+      .${alunixaXModelPickerOwnLabelClass}{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    `;
+    document.head?.appendChild(style);
+  }
+
+  function alunixaXModelPickerNeedsRescan(records) {
+    const changed = records.some((record) => {
+      const nodes = [...record.addedNodes, ...record.removedNodes];
+      return nodes.some((node) => node.nodeType === 1 && !node.closest?.(`[data-alunixa-x-ext="${alunixaXModelPickerGroupsExtMark}"]`));
+    });
+    if (!changed) return false;
+    const list = alunixaXModelPickerList(alunixaXModelPickerMenu());
+    if (!list) return false;
+    const rows = alunixaXModelPickerRows(list);
+    const groups = alunixaXModelPickerUniqueGroupIds(
+      alunixaXModelPickerGroups(rows, alunixaXModelPickerDefaultProviderName()),
+    );
+    if (groups.length < 2) return alunixaXModelPickerGroupsState.patchedLists.has(list);
+    return alunixaXModelPickerFingerprint(groups) !== alunixaXModelPickerGroupsState.signature;
+  }
+
+  function alunixaXModelPickerScheduleRescan() {
+    clearTimeout(alunixaXModelPickerGroupsState.rescanTimer);
+    alunixaXModelPickerGroupsState.rescanTimer = setTimeout(() => {
+      alunixaXModelPickerGroupsState.rescanTimer = 0;
+      alunixaXModelPickerScan();
+    }, alunixaXModelPickerRescanDelayMs);
+  }
+
+  function alunixaXModelPickerObserveList(list) {
+    const state = alunixaXModelPickerGroupsState;
+    if (state.activeList === list) return;
+    state.activeList = list;
+    state.observer?.disconnect();
+    state.observer = new MutationObserver((records) => {
+      if (!alunixaXModelPickerNeedsRescan(records)) return;
+      alunixaXModelPickerScheduleRescan();
+    });
+    state.observer.observe(list, { childList: true, subtree: true });
+  }
+
+  /**
+   * 一次扫描：菜单开着就确保分组已打好；关了就清理并停止轮询。
+   *
+   * 为什么还要轮询：React 复用行节点时不会产生 childList 变更，只靠 MutationObserver
+   * 会漏掉"标签变了"这种情况。600ms 一次、且只在菜单开着时跑，开销可以忽略。
+   */
+  function alunixaXModelPickerScan() {
+    const state = alunixaXModelPickerGroupsState;
+    if (state.disposed) return;
+    const menu = alunixaXModelPickerMenu();
+    const list = alunixaXModelPickerList(menu);
+    if (!list) {
+      if (state.activeList) {
+        alunixaXModelPickerClear(state.activeList);
+        state.activeList = null;
+        state.observer?.disconnect();
+        state.observer = null;
+        state.autoCollapsed = false;
+      }
+      return;
+    }
+    alunixaXModelPickerEnsureCatalog();
+    alunixaXModelPickerObserveList(list);
+    // 列表被隐藏（用户在推理强度子面板里）时不动结构，只让轮询继续跑；
+    // 回到列表立即是分组后的样子。
+    if (list.getClientRects().length === 0 && alunixaXModelPickerGroupsState.patchedLists.has(list)) return;
+    alunixaXModelPickerPatch(list);
+  }
+
+  function alunixaXModelPickerSchedule(delay) {
+    const state = alunixaXModelPickerGroupsState;
+    if (state.disposed) return;
+    clearTimeout(state.timer);
+    state.timer = setTimeout(() => {
+      alunixaXModelPickerScan();
+      alunixaXModelPickerSchedule(alunixaXModelPickerWatchIntervalMs);
+    }, delay);
+  }
+
+  alunixaXModelPickerInstallStyle();
+  alunixaXModelPickerSchedule(300);
+  window.__alunixaXModelPickerGroupsRuntime = {
+    version: 1,
+    sync: () => alunixaXModelPickerSchedule(0),
+    scan: () => alunixaXModelPickerScan(),
+    /** 测试与调试用：不打开菜单也能验证分组解析。 */
+    splitLabel: (text) => alunixaXModelPickerSplitLabel(text),
+    /** 测试与调试用：内部状态快照。 */
+    state: () => ({
+      signature: alunixaXModelPickerGroupsState.signature,
+      hasActiveList: !!alunixaXModelPickerGroupsState.activeList,
+      autoCollapsed: alunixaXModelPickerGroupsState.autoCollapsed,
+      collapsed: [...alunixaXModelPickerGroupsState.collapsed],
+      touched: [...alunixaXModelPickerGroupsState.touched],
+      disposed: alunixaXModelPickerGroupsState.disposed,
+    }),
+    /** 测试与调试用：默认身份解析结果（徽标取决于它）。 */
+    defaultGroup: () => ({
+      id: alunixaXModelPickerGroupsState.defaultGroupId,
+      resolved: alunixaXModelPickerDefaultGroupId(),
+      catalogStatus: codexModelCatalog?.status || "",
+      catalogModels: codexModelCatalog?.models?.length || 0,
+      catalogDefaultId: codexModelCatalog?.alunixa_x_default_group_id ?? null,
+      metaEntries: codexModelCatalog?.modelMetadata ? Object.keys(codexModelCatalog.modelMetadata).length : 0,
+      loaderVisible: typeof loadCodexModelCatalog === "function",
+    }),
+    /** 测试与调试用：看某一行被解析成了什么。 */
+    describeRow: (row) => {
+      const identity = alunixaXModelPickerRowIdentity(row);
+      const rows = alunixaXModelPickerRows(row.parentElement || row);
+      const entry = rows.find((item) => item.row === row);
+      return {
+        identity: identity
+          ? { text: identity.text, spanCount: identity.spanCount, groupable: identity.groupable }
+          : null,
+        entry: entry ? { name: entry.name, provider: entry.provider, groupId: entry.groupId } : null,
+        siblings: rows.length,
+      };
+    },
+    groupsFor: (container = document) => {
+      const list = alunixaXModelPickerList(container.querySelector?.('[data-model-picker-view]') ? container : alunixaXModelPickerMenu() || container);
+      if (!list) return [];
+      return alunixaXModelPickerUniqueGroupIds(
+        alunixaXModelPickerGroups(alunixaXModelPickerRows(list), alunixaXModelPickerDefaultProviderName()),
+      ).map((group) => ({ id: group.id, name: group.name, count: group.entries.length, isDefault: !!group.isDefault, entryGroupIds: [...new Set(group.entries.map((entry) => entry.groupId))].slice(0, 2) }));
+    },
+    dispose() {
+      const state = alunixaXModelPickerGroupsState;
+      state.disposed = true;
+      clearTimeout(state.timer);
+      clearTimeout(state.rescanTimer);
+      state.observer?.disconnect();
+      state.observer = null;
+      state.activeList = null;
+      state.timer = 0;
+      state.rescanTimer = 0;
+      // 注意：这里不摘 DOM。注入重跑时新实例会接着用同一个 list 重建补丁，
+      // 先摘后建只会闪一下；真要彻底还原（例如关闭该功能）走 releaseDom()。
+    },
+    releaseDom() {
+      const state = alunixaXModelPickerGroupsState;
+      if (state.activeList) alunixaXModelPickerClear(state.activeList);
+      state.activeList = null;
+      document.getElementById(alunixaXModelPickerGroupsStyleId)?.remove();
+    },
+  };
   function normalizeWorkspacePath(path) {
     const normalized = String(path || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
     return normalized || String(path || "").trim();
@@ -11654,50 +14877,963 @@
   }
 
   function syncActionGroupLayout(row, group) {
-    if (!row || !group) return;
-    if (group.dataset.codexActionLayoutStable === "true") return;
-    const rowRect = row.getBoundingClientRect();
-    const nativeButtons = nativeActionButtonsFromRow(row);
-    const leftmostNative = nativeButtons
-      .map((button) => button.getBoundingClientRect())
-      .filter((rect) => rect.width > 0 && rect.height > 0)
-      .sort((a, b) => a.left - b.left)[0];
-    const gap = 8;
-    const fallbackRight = 28;
-    const right = leftmostNative
-      ? Math.max(fallbackRight, Math.round(rowRect.right - leftmostNative.left + gap))
-      : fallbackRight;
-    const groupWidth = Math.ceil(group.getBoundingClientRect().width || 96);
-    const titleNode = row.querySelector(selectors.threadTitle);
-    const titleRect = titleNode?.getBoundingClientRect();
-    const titleLeft = titleRect?.left || rowRect.left + 40;
-    let effectiveRight = right;
-    group.style.setProperty("--codex-session-actions-right", `${effectiveRight}px`);
-    if (leftmostNative) {
-      const nativeStyle = getComputedStyle(nativeButtons.find((button) => button.getBoundingClientRect().left === leftmostNative.left) || nativeButtons[0]);
-      group.style.setProperty("--codex-session-action-color", nativeStyle.color);
-      group.style.setProperty("--codex-session-action-hover-color", nativeStyle.color);
-      group.style.setProperty("--codex-session-action-hover-background", nativeStyle.backgroundColor);
-      const groupRight = group.getBoundingClientRect().right;
-      const targetRight = leftmostNative.left - 2;
-      if (Number.isFinite(groupRight) && Number.isFinite(targetRight)) {
+    syncActionGroupLayouts([{ row, group }]);
+  }
+
+  function syncActionGroupLayouts(entries, force = false) {
+    // Batch each measurement phase across rows. A per-row write/read cycle
+    // repeatedly lays out the app and delays the first resized background frame.
+    const layouts = entries.filter(({ row, group }) =>
+      row && group && (force || group.dataset.codexActionLayoutStable !== "true"))
+      .map(({ row, group }) => {
+        const rowRect = row.getBoundingClientRect();
+        const nativeButtons = nativeActionButtonsFromRow(row);
+        const native = nativeButtons.map(button => ({ button, rect: button.getBoundingClientRect() }))
+          .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+          .sort((a, b) => a.rect.left - b.rect.left)[0];
+        const nativeStyle = native && getComputedStyle(native.button);
+        const right = native ? Math.max(28, Math.round(rowRect.right - native.rect.left + 8)) : 28;
+        const titleLeft = row.querySelector(selectors.threadTitle)?.getBoundingClientRect().left || rowRect.left + 40;
         const renderScale = row.offsetWidth > 0 ? rowRect.width / row.offsetWidth : 1;
-        effectiveRight = Math.max(0, right + (groupRight - targetRight) / Math.max(0.1, renderScale));
-        group.style.setProperty("--codex-session-actions-right", `${effectiveRight}px`);
+        return { row, group, native, right, effectiveRight: right, titleLeft, renderScale,
+          groupWidth: Math.ceil(group.getBoundingClientRect().width || 96),
+          color: nativeStyle?.color, background: nativeStyle?.backgroundColor };
+      });
+    for (const layout of layouts) {
+      const { group, right, native, color, background } = layout;
+      group.style.setProperty("--codex-session-actions-right", `${right}px`);
+      if (native) {
+        group.style.setProperty("--codex-session-action-color", color);
+        group.style.setProperty("--codex-session-action-hover-color", color);
+        group.style.setProperty("--codex-session-action-hover-background", background);
       }
     }
-    const renderScale = row.offsetWidth > 0 ? rowRect.width / row.offsetWidth : 1;
-    const finalGroupLeft = group.getBoundingClientRect().left;
-    const titleMaxWidth = Math.max(24, (finalGroupLeft - titleLeft - 8) / Math.max(0.1, renderScale));
-    row.style.setProperty("--codex-session-title-mask", `${effectiveRight + groupWidth + 12}px`);
-    row.style.setProperty("--codex-session-title-max-width", `${titleMaxWidth}px`);
-    group.dataset.codexActionLayoutStable = "true";
+    for (const layout of layouts) {
+      if (!layout.native) continue;
+      const groupRight = layout.group.getBoundingClientRect().right;
+      const targetRight = layout.native.rect.left - 2;
+      if (Number.isFinite(groupRight) && Number.isFinite(targetRight)) {
+        layout.effectiveRight = Math.max(0, layout.right +
+          (groupRight - targetRight) / Math.max(0.1, layout.renderScale));
+      }
+    }
+    for (const { group, native, effectiveRight } of layouts) {
+      if (native) group.style.setProperty("--codex-session-actions-right", `${effectiveRight}px`);
+    }
+    for (const layout of layouts) {
+      const finalGroupLeft = layout.group.getBoundingClientRect().left;
+      layout.titleMaxWidth = Math.max(24,
+        (finalGroupLeft - layout.titleLeft - 8) / Math.max(0.1, layout.renderScale));
+    }
+    for (const { row, group, effectiveRight, groupWidth, titleMaxWidth } of layouts) {
+      row.style.setProperty("--codex-session-title-mask", `${effectiveRight + groupWidth + 12}px`);
+      row.style.setProperty("--codex-session-title-max-width", `${titleMaxWidth}px`);
+      group.dataset.codexActionLayoutStable = "true";
+    }
   }
-  function syncActionGroupsLayout() {
-    sessionRows().forEach((row) => {
-      const group = actionGroupFromRow(row);
-      if (group) syncActionGroupLayout(row, group);
+  /**
+   * 模型容量错误自动重试。
+   *
+   * 背景（本功能要解决的问题）：
+   *   Codex 应用把「模型容量不足」的失败轮次渲染成一条带「重试」按钮的横幅，
+   *   文案由服务端下发（例如 Selected model is at capacity. Please try a different
+   *   model.）。应用本身自带自动重试（app-primary 的 yGe + SGe），但有两个门槛：
+   *     1. 需要特性开关 2899820207 打开；
+   *     2. 需要 SGe 选出的 retryDelaySeconds 非空。
+   *   而 SGe 的延迟阶梯是 `vL = [10, 30, 120, 300]`，循环守卫 `i < vL.length`
+   *   让计数最多到 4：第 5 次连续容量失败时返回 null，倒计时和自动重试同时消失，
+   *   只剩一个必须手点的「重试」按钮。用户看到的现象就是「重试很多次之后就不再
+   *   自动重试了」。
+   *
+   *   本分片补上的就是这一段：横幅还在、原生又不再自动重试时，替用户点按钮。
+   *   节奏默认与手动点击一致——上一轮失败后立刻重试（0 秒间隔，内部有 1 秒地板值
+   *   防热循环），间隔和次数上限都可以在 Alunixa X 设置里改。
+   *
+   *   原生那 4 档阶梯（10/30/120/300 秒）不是我们复刻的对象，也不等待：倒计时显示
+   *   「10 秒后重试」时本功能同样在下一秒就把按钮点掉，等于把原生那 4 次也压成 0 秒。
+   *   倒计时只用来在浮标上标注「已接管原生倒计时」。代价是原生定时器到点后可能再触发
+   *   一次它自己的重试：两条路径走的是同一个处理函数（yGe 里的 Fv(...)），进入前都会
+   *   检查 thread 是否 ready、是否已在重试中，所以重复触发最多被 Codex 自己拒一次。
+   *
+   * 选择器策略（刻意不依赖 Codex 的 hash 类名，只依赖语义结构）：
+   *   1. 横幅是 <aside>——Callout 组件的根元素（app-initial 里的 qR），源码已确认
+   *      所有变体都以 <aside> 收尾；
+   *   2. 只有 errorInfo === 'serverOverloaded' 且最后一轮 failed 时才渲染重试按钮
+   *      （app-primary 的 hGe → vGe），所以「aside 里出现重试按钮」本身就等价于
+   *      「模型容量错误」，不需要匹配服务端文案——中转站/聚合模型的文案各不相同，
+   *      按文案匹配一定漏；
+   *   3. 按钮文案来自 localConversation.serverOverloaded.retry（重试 / Retry），
+   *      倒计时变体是 localConversation.serverOverloaded.retryCountdown
+   *      （{seconds} 秒后重试 / Retry in {seconds}s）。
+   */
+  const capacityAutoRetryChipId = "alunixa-x-capacity-auto-retry";
+  const capacityAutoRetryIdlePollMs = 2000;
+  const capacityAutoRetryWaitingPollMs = 1000;
+  const capacityAutoRetryAbsenceTicksBeforeReset = 3;
+  // 默认「上一轮失败后立刻重试」：用户观察到的原生行为就是 0s 就重试。
+  // 但 0 间隔会变成热循环（一轮失败→立刻再点→立刻再失败），所以内部留 1 秒地板值，
+  // 既保持「点了就重试」的手感，又不会把请求打成连发。想要退避就在设置里把间隔调大。
+  const capacityAutoRetryMinIntervalMs = 1000;
+  const capacityAutoRetryCountdownPattern = /(?:\d+\s*(?:秒|s|S)\s*后\s*(?:重试|再试)|Retry\s+in\s+\d+\s*s)/;
+  const capacityAutoRetryLabelPattern = /^(?:重试|再试一次|重新尝试|Retry|Try again)$/;
+  const capacityAutoRetryState = {
+    timer: null,
+    attempts: 0,
+    nextAttemptAt: 0,
+    absenceTicks: 0,
+    nativeCountdown: false,
+    exhausted: false,
+    userPaused: false,
+    note: "",
+  };
+
+  function capacityAutoRetrySettings() {
+    try {
+      return alunixaXSettings() || {};
+    } catch {
+      return {};
+    }
+  }
+
+  function capacityAutoRetryEnabled() {
+    return capacityAutoRetrySettings().capacityAutoRetry === true;
+  }
+
+  function capacityAutoRetryMaxAttempts() {
+    return normalizeCapacityAutoRetryMaxAttempts(capacityAutoRetrySettings().capacityAutoRetryMaxAttempts);
+  }
+
+  function normalizeCapacityAutoRetryMaxAttempts(value) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return capacityAutoRetryDefaultMaxAttempts;
+    return Math.min(capacityAutoRetryMaxAttemptsCeiling, Math.max(1, Math.round(raw)));
+  }
+
+  function normalizeCapacityAutoRetryIntervalSeconds(value) {
+    const raw = Number(value);
+    if (!Number.isFinite(raw)) return capacityAutoRetryDefaultIntervalSeconds;
+    return Math.min(capacityAutoRetryIntervalCeilingSeconds, Math.max(0, Math.round(raw)));
+  }
+
+  function capacityAutoRetryIntervalSeconds() {
+    return normalizeCapacityAutoRetryIntervalSeconds(capacityAutoRetrySettings().capacityAutoRetryIntervalSeconds);
+  }
+
+  function setCapacityAutoRetryMaxAttempts(value) {
+    const next = normalizeCapacityAutoRetryMaxAttempts(value);
+    setCodexPlusSetting("capacityAutoRetryMaxAttempts", next);
+    return next;
+  }
+
+  function setCapacityAutoRetryIntervalSeconds(value) {
+    const next = normalizeCapacityAutoRetryIntervalSeconds(value);
+    setCodexPlusSetting("capacityAutoRetryIntervalSeconds", next);
+    return next;
+  }
+
+  /**
+   * 两次重试之间的等待时间。
+   *
+   * 间隔设 0 表示「立刻重试」，但仍然套 1 秒地板值：按钮在重试请求期间本来就是
+   * disabled，真正的热循环风险来自「点完发现没生效又马上再点」，所以下限必须是
+   * 一个能容纳一次请求往返的值。
+   */
+  function capacityAutoRetryWaitMs() {
+    return Math.max(capacityAutoRetryMinIntervalMs, capacityAutoRetryIntervalSeconds() * 1000);
+  }
+
+  /**
+   * 找一个当前可点的容量错误重试按钮。
+   *
+   * 从后往前找：历史轮次的横幅没有重试按钮（vGe 在没有 retryTurnId 时只渲染文案），
+   * 只有最新那一条才有，但反向遍历同时也避开了「旧横幅先被点到」的可能。
+   */
+  function findCapacityAutoRetryBanner() {
+    const roots = [];
+    const main = document.querySelector("main");
+    if (main) roots.push(main);
+    roots.push(document.body);
+    for (const root of roots) {
+      if (!root) continue;
+      const asides = root.querySelectorAll("aside");
+      for (let index = asides.length - 1; index >= 0; index -= 1) {
+        const aside = asides[index];
+        // 对话框/菜单里的 aside 不是对话横幅，别误点。
+        if (aside.closest?.('[role="dialog"], [role="menu"], [aria-modal="true"]')) continue;
+        const button = Array.from(aside.querySelectorAll("button"))
+          .find((node) => capacityAutoRetryLabelPattern.test((node.textContent || "").trim()));
+        if (button) return { aside, button };
+      }
+    }
+    return null;
+  }
+
+  function capacityAutoRetryNativeCountdownRunning(aside) {
+    return capacityAutoRetryCountdownPattern.test(aside.textContent || "");
+  }
+
+  function capacityAutoRetryChip() {
+    let chip = document.getElementById(capacityAutoRetryChipId);
+    if (chip) return chip;
+    if (!document.body) return null;
+    chip = document.createElement("div");
+    chip.id = capacityAutoRetryChipId;
+    // 归属标记：扫描调度器据此忽略我们自己插入的节点，避免自喂扫描循环（issue #1960）。
+    chip.setAttribute("data-alunixa-x-ext", "capacity-auto-retry");
+    chip.setAttribute("role", "status");
+    chip.style.cssText = [
+      "position:fixed",
+      "z-index:2147483600",
+      "inset-inline-end:24px",
+      "bottom:148px",
+      "display:none",
+      "align-items:center",
+      "gap:8px",
+      "max-width:min(60vw,420px)",
+      "padding:6px 10px",
+      "border:1px solid color-mix(in srgb,currentColor 22%,transparent)",
+      "border-radius:999px",
+      "background:color-mix(in srgb,var(--color-token-bg-primary,#202020) 92%,transparent)",
+      "color:var(--color-token-text-secondary,rgba(210,210,220,.9))",
+      "font:12px/16px ui-sans-serif,system-ui,-apple-system,'PingFang SC',sans-serif",
+      "box-shadow:0 4px 16px rgba(0,0,0,.28)",
+      "user-select:none",
+    ].join(";");
+    const text = document.createElement("span");
+    text.setAttribute("data-alunixa-x-capacity-retry-text", "true");
+    const resume = document.createElement("button");
+    resume.type = "button";
+    resume.setAttribute("data-alunixa-x-capacity-retry-resume", "true");
+    resume.textContent = "继续";
+    resume.style.cssText = "display:none;cursor:pointer;color:inherit;background:transparent;border:0;font:inherit;text-decoration:underline;padding:0";
+    const stop = document.createElement("button");
+    stop.type = "button";
+    stop.setAttribute("data-alunixa-x-capacity-retry-stop", "true");
+    stop.textContent = "停止";
+    stop.style.cssText = "display:none;cursor:pointer;color:inherit;background:transparent;border:0;font:inherit;text-decoration:underline;padding:0";
+    resume.addEventListener("click", () => {
+      capacityAutoRetryState.userPaused = false;
+      capacityAutoRetryState.exhausted = false;
+      capacityAutoRetryState.attempts = 0;
+      capacityAutoRetryState.nextAttemptAt = 0;
+      capacityAutoRetryTick();
     });
+    stop.addEventListener("click", () => {
+      capacityAutoRetryState.userPaused = true;
+      capacityAutoRetryState.nextAttemptAt = 0;
+      capacityAutoRetryRenderChip();
+    });
+    // 用 appendChild 而不是 append(...)：cdp_bridge.rs 的 Node 注入 harness 里
+    // 元素 stub 只实现了 appendChild，用 append 会在那里直接崩。
+    for (const child of [text, resume, stop]) chip.appendChild(child);
+    document.body.appendChild(chip);
+    return chip;
+  }
+
+  /**
+   * 刷新状态浮标。
+   *
+   * `mode` 为空字符串表示本轮已结束——直接隐藏，不留常驻节点。
+   */
+  function capacityAutoRetryRenderChip(mode, detail) {
+    const chip = capacityAutoRetryChip();
+    if (!chip) return;
+    if (!mode) {
+      chip.style.display = "none";
+      return;
+    }
+    const text = chip.querySelector("[data-alunixa-x-capacity-retry-text]");
+    const resume = chip.querySelector("[data-alunixa-x-capacity-retry-resume]");
+    const stop = chip.querySelector("[data-alunixa-x-capacity-retry-stop]");
+    // 取不到子节点说明浮标被 Codex 的重渲染搬走了；这种情况下宁可只更新容器，
+    // 也不要抛错中断整条重试链（注入层任何未捕获异常都会记进 scan 失败列表）。
+    if (!text || !resume || !stop) {
+      chip.style.display = "inline-flex";
+      return;
+    }
+    const max = capacityAutoRetryMaxAttempts();
+    const remaining = capacityAutoRetryState.nextAttemptAt > Date.now()
+      ? Math.max(0, Math.ceil((capacityAutoRetryState.nextAttemptAt - Date.now()) / 1000))
+      : 0;
+    let label = "";
+    if (mode === "paused") {
+      label = `自动重试已暂停（已试 ${capacityAutoRetryState.attempts}/${max} 次）`;
+    } else if (mode === "exhausted") {
+      label = `自动重试已达上限 ${max} 次`;
+    } else if (mode === "waiting") {
+      label = `模型容量不足 · 自动重试第 ${Math.min(capacityAutoRetryState.attempts + 1, max)}/${max} 次${remaining > 0 ? ` · ${remaining} 秒后` : ""}${capacityAutoRetryState.nativeCountdown ? " · 已接管原生倒计时" : ""}`;
+    } else {
+      label = detail || "模型容量不足 · 自动重试中";
+    }
+    text.textContent = label;
+    resume.style.display = mode === "paused" || mode === "exhausted" ? "inline" : "none";
+    stop.style.display = mode === "paused" || mode === "exhausted" ? "none" : "inline";
+    chip.style.display = "inline-flex";
+  }
+
+  function capacityAutoRetrySchedule(delayMs) {
+    clearTimeout(capacityAutoRetryState.timer);
+    capacityAutoRetryState.timer = window.setTimeout(capacityAutoRetryTick, Math.max(200, delayMs));
+  }
+
+  function capacityAutoRetryResetRun() {
+    capacityAutoRetryState.attempts = 0;
+    capacityAutoRetryState.nextAttemptAt = 0;
+    capacityAutoRetryState.exhausted = false;
+    capacityAutoRetryState.userPaused = false;
+  }
+
+  function capacityAutoRetryTick() {
+    capacityAutoRetryState.timer = null;
+    if (!capacityAutoRetryEnabled()) {
+      capacityAutoRetryResetRun();
+      capacityAutoRetryState.absenceTicks = 0;
+      capacityAutoRetryRenderChip("");
+      return;
+    }
+    const banner = findCapacityAutoRetryBanner();
+    if (!banner) {
+      // 横幅消失 = 本轮容量错误结束（重试成功、或用户换了模型/新开了对话）。
+      // 不立刻清零：点击到新横幅渲染之间会有短暂空档，按 tick 数确认后再复位。
+      capacityAutoRetryState.absenceTicks += 1;
+      if (capacityAutoRetryState.absenceTicks >= capacityAutoRetryAbsenceTicksBeforeReset) {
+        capacityAutoRetryResetRun();
+        capacityAutoRetryRenderChip("");
+      }
+      capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs);
+      return;
+    }
+    capacityAutoRetryState.absenceTicks = 0;
+    // 原生倒计时（10/30/120/300 秒）在跑时也照样立刻接管——用户要的是「每次都是 0 秒
+    // 就重试」，不是等原生那套阶梯。这里只把它记下来显示在浮标上，让用户知道
+    // Codex 自己也排了一次重试。代价是原生定时器到点后可能再触发一次它自己的重试：
+    // 两条路径走同一个处理函数、同一道 ready/重试中守卫，最多被 Codex 自己拒一次。
+    capacityAutoRetryState.nativeCountdown = capacityAutoRetryNativeCountdownRunning(banner.aside);
+    if (capacityAutoRetryState.userPaused) {
+      capacityAutoRetryRenderChip("paused");
+      capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs);
+      return;
+    }
+    if (capacityAutoRetryState.exhausted) {
+      capacityAutoRetryRenderChip("exhausted");
+      capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs * 2);
+      return;
+    }
+    if (banner.button.disabled) {
+      // 重试请求在途（yGe 的 isRetrying 会禁用按钮），等它结束。
+      capacityAutoRetryRenderChip("waiting");
+      capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs);
+      return;
+    }
+    const max = capacityAutoRetryMaxAttempts();
+    if (capacityAutoRetryState.attempts >= max) {
+      capacityAutoRetryState.exhausted = true;
+      // showToast 在 80-session-share.js；切片沙箱里可能没有它，缺了就静默跳过。
+      if (typeof showToast === "function") {
+        showToast(`自动重试已达上限 ${max} 次，仍未抢到模型容量；可点浮标上的「继续」再试。`, { type: "warn" });
+      }
+      capacityAutoRetryRenderChip("exhausted");
+      capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs * 2);
+      return;
+    }
+    const now = Date.now();
+    if (now < capacityAutoRetryState.nextAttemptAt) {
+      capacityAutoRetryRenderChip("waiting");
+      capacityAutoRetrySchedule(Math.min(capacityAutoRetryWaitingPollMs, capacityAutoRetryState.nextAttemptAt - now));
+      return;
+    }
+    // 到点了：点按钮。Codex 的按钮是 React onClick，根容器上的委托监听会收到
+    // 冒泡事件，所以原生 click() 与真实点击等价。
+    try {
+      banner.button.click();
+    } catch {
+      // 点击抛错不该打断循环，等下一轮再试。
+    }
+    capacityAutoRetryState.attempts += 1;
+    capacityAutoRetryState.nextAttemptAt = Date.now() + capacityAutoRetryWaitMs();
+    capacityAutoRetryRenderChip("waiting");
+    capacityAutoRetrySchedule(capacityAutoRetryWaitingPollMs);
+  }
+
+  /**
+   * 按当前设置启停自动重试。
+   *
+   * 幂等：开启时确保有一个定时器在跑，关闭时清干净（含浮标），可以随时重复调用。
+   */
+  function syncCodexPlusCapacityAutoRetry() {
+    if (!capacityAutoRetryEnabled()) {
+      clearTimeout(capacityAutoRetryState.timer);
+      capacityAutoRetryState.timer = null;
+      capacityAutoRetryResetRun();
+      capacityAutoRetryState.absenceTicks = 0;
+      capacityAutoRetryRenderChip("");
+      return;
+    }
+    if (capacityAutoRetryState.timer) return;
+    capacityAutoRetrySchedule(capacityAutoRetryIdlePollMs);
+  }
+
+  // 诊断/联调入口：出问题时可在控制台直接看状态或强制走一轮。
+  window.__alunixaXCapacityAutoRetry = {
+    state: capacityAutoRetryState,
+    tick: capacityAutoRetryTick,
+    sync: syncCodexPlusCapacityAutoRetry,
+    find: findCapacityAutoRetryBanner,
+    intervalSeconds: capacityAutoRetryIntervalSeconds,
+    maxAttempts: capacityAutoRetryMaxAttempts,
+  };
+
+  syncCodexPlusCapacityAutoRetry();
+  /**
+   * Codex 启动壳自救。
+   *
+   * 现象（本机实测，2026-10-12）：Codex 的原生启动画面有时会一直停住——DOM 里
+   * 只剩 splash 容器（`div.flex.items-center.justify-center.relative.size-full`），
+   * `#root` 的 innerText 始终为空、`<main>` 始终不出现；而注入层一切正常
+   * （`window.alunixaX` 已挂载、设置浮标在位、零异常），启动器侧
+   * `latest-status.json` 也一直是 `running` / `progress:100`。
+   * 也就是说宿主没有任何信号能发现「页面没渲染出来」，用户只能自己按刷新。
+   * 实测手动 reload 一次即恢复。
+   *
+   * 这里把「手动刷新」这一下自动化，并严格限次：
+   *   - 只认空壳：`#root` 存在、innerText 为空、且没有 `<main>`。正常的启动画面
+   *     渲染几秒内就会长出 `<main>`，所以宽限期足够长即可区分「慢」与「卡死」。
+   *   - 只在主页面做。带 `initialRoute=` 的活动悬浮层与 quick-chat 是独立页面，
+   *     它们本来就没有 `<main>`，刷新只会丢上下文。
+   *   - 每次加载最多刷一次，且与上次刷新间隔不足冷却时间就不再刷；
+   *     写不进 sessionStorage 时宁可不刷，避免退化成刷新循环。
+   */
+  const bootShellRecoveryStorageKey = "alunixaX.bootShellRecoveryAt";
+  const bootShellRecoveryGraceMs = 20000;
+  const bootShellRecoveryCooldownMs = 60000;
+  const bootShellRecoveryPollMs = 1000;
+
+  // 带 initialRoute 的是活动悬浮层 / quick-chat 等独立页面，它们本来就没有
+  // <main>，刷它们只会丢上下文，必须跳过。
+  function bootShellRecoveryAppliesHere() {
+    return !/[?&]initialRoute=/.test(window.location.search);
+  }
+
+  // 页面是否已经「有东西」了：挂上 <main>，或 #root 里渲染出了任何文字。
+  function bootShellRecoverySettled() {
+    if (document.querySelector("main")) return true;
+    const root = document.getElementById("root");
+    if (!root) return false;
+    return root.innerText.trim() !== "";
+  }
+
+  function bootShellRecoveryStuck() {
+    const root = document.getElementById("root");
+    if (!root) return false;
+    if (document.querySelector("main")) return false;
+    return root.innerText.trim() === "";
+  }
+
+  function bootShellRecoveryMayReload() {
+    try {
+      const last = Number(window.sessionStorage.getItem(bootShellRecoveryStorageKey)) || 0;
+      return Date.now() - last >= bootShellRecoveryCooldownMs;
+    } catch {
+      // 记不下时间就无法限次，宁可不刷。
+      return false;
+    }
+  }
+
+  /**
+   * 起一个不常驻的看门定时器：页面正常渲染就收工，空壳超时才限次刷新一次。
+   * 只在模块末尾调一次。
+   */
+  function installBootShellRecovery() {
+    if (!bootShellRecoveryAppliesHere()) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (bootShellRecoverySettled()) {
+        window.clearInterval(timer);
+        return;
+      }
+      if (Date.now() - startedAt < bootShellRecoveryGraceMs) return;
+      window.clearInterval(timer);
+      if (!bootShellRecoveryStuck() || !bootShellRecoveryMayReload()) return;
+      try {
+        window.sessionStorage.setItem(bootShellRecoveryStorageKey, String(Date.now()));
+      } catch {
+        return;
+      }
+      // 记一条诊断，事后能从 alunixa-x.log 确认它真的触发过、卡了多久。
+      if (typeof sendCodexPlusDiagnostic === "function") {
+        sendCodexPlusDiagnostic("boot_shell_recovery_reload", {
+          waitedMs: Date.now() - startedAt,
+        });
+      }
+      window.location.reload();
+    }, bootShellRecoveryPollMs);
+  }
+
+  installBootShellRecovery();
+  /**
+   * 输入框下方用量状态栏：生成速度 / 缓存命中率 / 上下文占用。
+   *
+   * 数据全部来自 Codex 自己写的 rollout 记录（`event_msg.token_count`），中文档口径
+   * 与 Codex 一致：缓存命中 = cached_input_tokens / input_tokens，上下文占用 =
+   * last_token_usage.total_tokens / model_context_window。这里的 model_context_window
+   * 正是 Alunixa X 注入 model_catalog_json 后 Codex 认到的每模型窗口，所以按模型配置
+   * 窗口的功能会直接反映在这一项上。
+   *
+   * 为什么不复用 `/thread-usage-history`：那条路由按会话整读 rollout 并解析全部行，
+   * 真实会话的 rollout 可以到几百 MB，状态栏按秒级轮询扛不住。这里走
+   * `/thread-usage-live`，宿主只读文件尾部。
+   *
+   * 节点挂在输入卡片（[data-composer-surface-variant]）之后、同一父容器内，也就是
+   * 「输入框下方、卡片外」。节点带 data-alunixa-x-ext，扫描调度器会把它排除在
+   * 自喂循环之外（issue #1960）。
+   */
+  registerCodexPlusExtensionSelector('[data-alunixa-x-ext="builtin-usage-statusline"]');
+  window.__alunixaXUsageStatusLineRuntime?.dispose?.();
+
+  const alunixaXUsageStatusLineId = "alunixa-x-usage-statusline";
+  const alunixaXUsageStyleId = "alunixa-x-usage-statusline-style";
+  /** 空闲轮询间隔；最近有 token 事件时切到活跃间隔。 */
+  const alunixaXUsageIdleIntervalMs = 5000;
+  /** 本轮在跑（最近有事件）时的间隔。 */
+  const alunixaXUsageActiveIntervalMs = 1200;
+  /** 已经拿到会话、但还没写出第一条 token 事件时的间隔。 */
+  const alunixaXUsageWarmupIntervalMs = 2500;
+  /** 最近一条 token 事件超过这个时间就认为本轮已经结束，速度值转为淡化显示。 */
+  const alunixaXUsageStaleMs = 120000;
+  /** 连续失败到这个次数后停掉轮询，避免桥接不可用时每秒写诊断日志。 */
+  const alunixaXUsageFailureLimit = 5;
+
+  const alunixaXUsageState = {
+    disposed: false,
+    timer: 0,
+    node: null,
+    parts: null,
+    threadId: "",
+    failures: 0,
+    inFlight: false,
+    lastFingerprint: "",
+    cache: new Map(),
+    observer: null,
+  };
+
+  const alunixaXUsageSvgNs = "http://www.w3.org/2000/svg";
+
+  function alunixaXUsageText() {
+    const language = (document.documentElement?.lang || navigator.language || "").toLowerCase();
+    return language.startsWith("zh")
+      ? { speed: (value) => `${value} tok/s`, cache: (value) => `缓存命中 ${value}`, context: (value) => value, aria: "用量状态栏" }
+      : { speed: (value) => `${value} tok/s`, cache: (value) => `cache hit ${value}`, context: (value) => value, aria: "Usage status line" };
+  }
+
+  function alunixaXUsageInstallStyle() {
+    if (document.getElementById(alunixaXUsageStyleId)) return;
+    const style = document.createElement("style");
+    style.id = alunixaXUsageStyleId;
+    style.dataset.alunixaXExt = "builtin-usage-statusline";
+    style.textContent = `
+      /* 颜色只用一层透明度：主题的 --color-token-text-secondary 本身就是 65% 透明，
+         再叠容器 opacity 会掉到 0.3 出头，实测在 #141414 上几乎看不清。
+         这里以主文字色取 82%，既够亮又略低于输入框文字。 */
+      /* 三项作为一组居中，和 DSH 那条一致；两端对齐会把「上下文占用」甩到最右边，
+         和速度、缓存拉得太开，读起来是两段信息。 */
+      #${alunixaXUsageStatusLineId}{display:flex;align-items:center;justify-content:center;gap:24px;box-sizing:border-box;width:100%;margin:6px 0 0;padding:0 10px;font:inherit;font-size:12px;line-height:17px;color:var(--color-token-text-secondary,rgba(205,205,215,.95));color:color-mix(in srgb,var(--color-token-text-primary,#dfdfdf) 82%,transparent);user-select:none;cursor:default}
+      #${alunixaXUsageStatusLineId}[data-hidden="true"]{display:none}
+      #${alunixaXUsageStatusLineId} .alunixa-x-usage-item{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-variant-numeric:tabular-nums;transition:opacity .2s}
+      #${alunixaXUsageStatusLineId} .alunixa-x-usage-value{font-weight:500}
+      #${alunixaXUsageStatusLineId} .alunixa-x-usage-item svg{flex:0 0 auto;opacity:.8}
+      /* 本轮结束超过阈值只淡化速度：缓存命中与上下文占用仍然是当前值，不该跟着变灰。 */
+      #${alunixaXUsageStatusLineId}[data-stale="true"] .alunixa-x-usage-item[data-usage="speed"]{opacity:.55}
+    `;
+    document.head?.appendChild(style);
+  }
+
+  /** 描边图标，尺寸与颜色都跟随文字，避免在浅色主题下露白。 */
+  function alunixaXUsageIcon(shapes) {
+    const svg = document.createElementNS(alunixaXUsageSvgNs, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "13");
+    svg.setAttribute("height", "13");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.4");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    svg.setAttribute("aria-hidden", "true");
+    const created = shapes.map((shape) => {
+      const node = document.createElementNS(alunixaXUsageSvgNs, shape.tag);
+      Object.entries(shape.attrs).forEach(([key, value]) => node.setAttribute(key, value));
+      svg.appendChild(node);
+      return node;
+    });
+    return { svg, created };
+  }
+
+  /** 上下文用进度环，环长 2πr；r=6 时周长约 37.7。 */
+  const alunixaXUsageRingCircumference = 37.7;
+
+  function alunixaXUsageRingIcon() {
+    const icon = alunixaXUsageIcon([
+      { tag: "circle", attrs: { cx: "8", cy: "8", r: "6", "stroke-opacity": ".3" } },
+      { tag: "circle", attrs: { cx: "8", cy: "8", r: "6", "stroke-dasharray": `0 ${alunixaXUsageRingCircumference}`, transform: "rotate(-90 8 8)" } },
+    ]);
+    return { svg: icon.svg, ring: icon.created[1] };
+  }
+
+  function alunixaXUsageItem(node, key, label, icon) {
+    const item = document.createElement("span");
+    item.className = "alunixa-x-usage-item";
+    item.dataset.usage = key;
+    item.appendChild(icon);
+    const value = document.createElement("span");
+    value.className = "alunixa-x-usage-value";
+    value.textContent = "--";
+    item.appendChild(value);
+    node.appendChild(item);
+    return { item, value, label };
+  }
+
+  /** DOM 只建一次；之后每轮只改文本与环长，避免每秒重建节点触发扫描。 */
+  function alunixaXUsageBuild(node) {
+    node.textContent = "";
+    const ring = alunixaXUsageRingIcon();
+    const parts = {
+      speed: alunixaXUsageItem(node, "speed", "speed", alunixaXUsageIcon([
+        { tag: "path", attrs: { d: "M2 12.5a6 6 0 0 1 12 0" } },
+        { tag: "path", attrs: { d: "M8 12.5 10.8 8.6" } },
+      ]).svg),
+      cache: alunixaXUsageItem(node, "cache", "cache", alunixaXUsageIcon([
+        { tag: "path", attrs: { d: "M8 2.2c2.5 0 4.5.8 4.5 1.8S10.5 5.8 8 5.8 3.5 5 3.5 4 5.5 2.2 8 2.2Z" } },
+        { tag: "path", attrs: { d: "M3.5 4v8c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8V4" } },
+        { tag: "path", attrs: { d: "M3.5 8c0 1 2 1.8 4.5 1.8S12.5 9 12.5 8" } },
+      ]).svg),
+      context: alunixaXUsageItem(node, "context", "context", ring.svg),
+      ring: ring.ring,
+    };
+    alunixaXUsageState.parts = parts;
+    return parts;
+  }
+
+  function alunixaXUsageComposerCard() {
+    const cards = [...document.querySelectorAll("[data-composer-surface-variant]")];
+    let fallback = null;
+    for (const card of cards) {
+      if (!visibleElement(card) || card.closest('[data-alunixa-x-ext]')) continue;
+      fallback = card;
+      // 首页可能同时挂着多个 composer 外壳；带真实输入框的那个才是当前会话。
+      if (card.querySelector('.ProseMirror[contenteditable="true"], textarea:not(:disabled):not([readonly]), [role="textbox"][contenteditable="true"]')) {
+        return card;
+      }
+    }
+    return fallback;
+  }
+
+  /**
+   * 当前会话 id。
+   *
+   * `[data-above-composer-conversation-id]` 是 Codex 自己挂在 composer 上的会话标识，
+   * 比侧边栏选中行更贴近「这个输入框属于哪个会话」。侧边栏只作兜底，而且**只在
+   * placement=thread 时用**：首页/新会话草稿的 composer 是 placement=home，此时侧边栏
+   * 仍选中着上一个 thread，兜底会把上一个会话的读数挂到新会话上。
+   * 新会话草稿的 id 形如 `local:client-new-thread:<uuid>`，还没有 rollout，直接当作无会话。
+   */
+  function alunixaXUsageThreadId(card) {
+    const composerRoot = card?.closest("[data-codex-composer-root]");
+    const fromComposer = composerRoot
+      ?.querySelector("[data-above-composer-conversation-id]")
+      ?.getAttribute("data-above-composer-conversation-id");
+    const inThread = composerRoot?.getAttribute("data-composer-placement") === "thread";
+    const fromSidebar = inThread
+      ? document
+        .querySelector('[data-app-action-sidebar-thread-selected="true"][data-app-action-sidebar-thread-id]')
+        ?.getAttribute("data-app-action-sidebar-thread-id")
+      : null;
+    const id = String(fromComposer || fromSidebar || "").replace(/^local:/, "").trim();
+    if (!id || id === "__proto__" || id === "prototype" || id === "constructor") return "";
+    return /^[A-Za-z0-9_.-]{8,128}$/.test(id) ? id : "";
+  }
+
+  function alunixaXUsageEnsureNode(card) {
+    const host = card?.parentElement;
+    if (!host) return null;
+    let node = alunixaXUsageState.node;
+    if (node?.isConnected && node.previousElementSibling === card) return node;
+    if (!node) {
+      node = document.createElement("div");
+      node.id = alunixaXUsageStatusLineId;
+      node.setAttribute("data-alunixa-x-ext", "builtin-usage-statusline");
+      node.setAttribute("role", "status");
+      alunixaXUsageState.node = node;
+    }
+    card.insertAdjacentElement("afterend", node);
+    return node;
+  }
+
+  function alunixaXUsageHide() {
+    const node = alunixaXUsageState.node;
+    if (node) {
+      // 只切属性、不摘节点：新会话在第一条 token 事件写出前会反复走空数据路径，
+      // 每秒增删一次节点既浪费又会让 Codex 的 MutationObserver 空转。
+      node.dataset.hidden = "true";
+    }
+    alunixaXUsageState.lastFingerprint = "";
+  }
+
+  function alunixaXUsageShow(node) {
+    if (node.dataset.hidden !== "true") return;
+    node.dataset.hidden = "false";
+    alunixaXUsageState.lastFingerprint = "";
+  }
+
+  function alunixaXUsagePercent(numerator, denominator) {
+    if (!(denominator > 0) || !(numerator >= 0)) return null;
+    return Math.min(100, Math.max(0, (numerator / denominator) * 100));
+  }
+
+  /**
+   * 生成速度（token/s）。
+   *
+   * Codex 只在每次模型调用结束时写一条 token_count，事件间隔里同时包含生成和工具
+   * 执行时间，所以这是「吞吐」而不是纯生成速度，会比真实解码速度低。用同一轮内
+   * 相邻事件的累计输出差除以时间差得到区间速度，再取最近几个区间平均，避免单次
+   * 抖动。换轮时 turn_output_tokens 会回落，靠这个切段。
+   */
+  function alunixaXUsageRate(events) {
+    const rates = [];
+    for (let index = 1; index < events.length; index += 1) {
+      const previous = events[index - 1];
+      const current = events[index];
+      const previousOutput = Number(previous.turn_output_tokens) || 0;
+      const currentOutput = Number(current.turn_output_tokens) || 0;
+      if (currentOutput <= previousOutput) continue;
+      const startedAt = Date.parse(previous.t);
+      const endedAt = Date.parse(current.t);
+      const seconds = (endedAt - startedAt) / 1000;
+      // 间隔过短说明是同一批写入，过长说明中间停了很久，都不适合当速度样本。
+      if (!(seconds >= 0.5) || seconds > 120) continue;
+      rates.push((currentOutput - previousOutput) / seconds);
+    }
+    if (!rates.length) return null;
+    const recent = rates.slice(-3);
+    return recent.reduce((total, rate) => total + rate, 0) / recent.length;
+  }
+
+  function alunixaXUsageSnapshot(events) {
+    if (!Array.isArray(events) || !events.length) return null;
+    const latest = events[events.length - 1];
+    const observedAt = Date.parse(latest.t);
+    return {
+      speed: alunixaXUsageRate(events),
+      cache: alunixaXUsagePercent(Number(latest.cached_input_tokens), Number(latest.input_tokens)),
+      context: alunixaXUsagePercent(Number(latest.total_tokens), Number(latest.context_window)),
+      stale: Number.isFinite(observedAt) ? Date.now() - observedAt > alunixaXUsageStaleMs : false,
+      modelContextWindow: Number(latest.context_window) || 0,
+    };
+  }
+
+  /** `snapshot` 为 null 时渲染占位符：会话已确定但还没有第一条 token 事件。 */
+  function alunixaXUsageRender(snapshot) {
+    const node = alunixaXUsageState.node;
+    if (!node?.isConnected) return;
+    const parts = alunixaXUsageState.parts || alunixaXUsageBuild(node);
+    const text = alunixaXUsageText();
+    const format = (value) => (value === null || value === undefined || Number.isNaN(value) ? "--" : value);
+    const speed = snapshot?.speed == null ? "--" : String(Math.max(0, Math.round(snapshot.speed)));
+    const cache = snapshot?.cache == null ? "--" : `${snapshot.cache.toFixed(1)}%`;
+    const context = snapshot?.context == null ? "--" : `${Math.round(snapshot.context)}%`;
+    const stale = snapshot?.stale === true;
+    const contextWindow = snapshot?.modelContextWindow || 0;
+    // 指纹一样就不写 DOM：每秒一次无意义赋值会让 Codex 的 MutationObserver 空转。
+    const fingerprint = [speed, cache, context, stale, contextWindow].join("|");
+    if (fingerprint === alunixaXUsageState.lastFingerprint) return;
+    alunixaXUsageState.lastFingerprint = fingerprint;
+
+    parts.speed.value.textContent = text.speed(speed);
+    parts.cache.value.textContent = text.cache(cache);
+    parts.context.value.textContent = text.context(context);
+    if (parts.ring) {
+      const filled = snapshot?.context == null ? 0 : (snapshot.context / 100) * alunixaXUsageRingCircumference;
+      parts.ring.setAttribute("stroke-dasharray", `${filled.toFixed(2)} ${alunixaXUsageRingCircumference}`);
+    }
+    node.dataset.stale = String(stale);
+    node.setAttribute("title", [
+      `生成速度 ${format(speed)} tok/s`,
+      `缓存命中 ${format(cache)}`,
+      `上下文占用 ${format(context)}`,
+      contextWindow > 0 ? `窗口 ${contextWindow}` : "",
+    ].filter(Boolean).join(" · "));
+    node.setAttribute("aria-label", `${text.aria}：${text.speed(speed)}，${text.cache(cache)}，${context}`);
+  }
+
+  function alunixaXUsageSchedule(delay) {
+    if (alunixaXUsageState.disposed) return;
+    clearTimeout(alunixaXUsageState.timer);
+    alunixaXUsageState.timer = window.setTimeout(alunixaXUsageTick, delay);
+  }
+
+  function alunixaXUsageEnabled() {
+    return !alunixaXUsageState.disposed
+      && alunixaXBackendSettingsLoaded
+      && alunixaXSettings().usageStatusLine === true;
+  }
+
+  /** 挂载与取数分开：切换时先恢复栏位，网络请求只更新数值。 */
+  function alunixaXUsageSyncPlacement() {
+    const card = alunixaXUsageEnabled() ? alunixaXUsageComposerCard() : null;
+    const threadId = alunixaXUsageThreadId(card);
+    if (!card || !threadId) {
+      alunixaXUsageHide();
+      alunixaXUsageState.threadId = "";
+      return null;
+    }
+    const changed = alunixaXUsageState.threadId !== threadId
+      || !alunixaXUsageState.node?.isConnected
+      || alunixaXUsageState.node.previousElementSibling !== card;
+    const node = alunixaXUsageEnsureNode(card);
+    if (!node) return null;
+    if (changed) {
+      alunixaXUsageState.threadId = threadId;
+      alunixaXUsageState.failures = 0;
+      alunixaXUsageState.lastFingerprint = "";
+    }
+    alunixaXUsageShow(node);
+    alunixaXUsageRender(alunixaXUsageSnapshot(alunixaXUsageState.cache.get(threadId)));
+    return { card, threadId, changed };
+  }
+
+  function alunixaXUsageRemember(threadId, events) {
+    if (!events?.length) return;
+    alunixaXUsageState.cache.delete(threadId);
+    alunixaXUsageState.cache.set(threadId, events.slice(-24));
+    if (alunixaXUsageState.cache.size > 32) {
+      alunixaXUsageState.cache.delete(alunixaXUsageState.cache.keys().next().value);
+    }
+  }
+
+  /** 只观察输入框结构和会话标识，忽略状态栏自身的写入，避免自喂循环。 */
+  function alunixaXUsageObserve() {
+    if (!document.body || typeof MutationObserver !== "function") return;
+    const selector = "[data-codex-composer-root], [data-composer-surface-variant], [data-above-composer-conversation-id]";
+    alunixaXUsageState.observer = new MutationObserver((records) => {
+      const relevant = records.some((record) => {
+        if (record.target?.closest?.("[data-alunixa-x-ext]")) return false;
+        if (record.type === "attributes") return true;
+        return [...record.addedNodes, ...record.removedNodes].some((node) =>
+          node.nodeType === 1 && !node.matches?.("[data-alunixa-x-ext]")
+          && (node.matches?.(selector) || node.querySelector?.(selector)));
+      });
+      if (!relevant) return;
+      const placement = alunixaXUsageSyncPlacement();
+      if (placement?.changed) alunixaXUsageSchedule(0);
+    });
+    alunixaXUsageState.observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [
+        "data-above-composer-conversation-id", "data-composer-placement",
+        "data-app-action-sidebar-thread-selected", "data-app-action-sidebar-thread-id",
+      ],
+    });
+  }
+
+  async function alunixaXUsageRefresh(threadId) {
+    if (alunixaXUsageState.inFlight) return null;
+    alunixaXUsageState.inFlight = true;
+    try {
+      const result = await postJson("/thread-usage-live", { session_id: threadId });
+      alunixaXUsageState.failures = 0;
+      if (result?.status !== "ok" || !Array.isArray(result.events)) return null;
+      return result.events;
+    } finally {
+      alunixaXUsageState.inFlight = false;
+    }
+  }
+
+  async function alunixaXUsageTick() {
+    if (alunixaXUsageState.disposed) return;
+    if (!alunixaXUsageEnabled()) {
+      alunixaXUsageHide();
+      alunixaXUsageSchedule(alunixaXUsageIdleIntervalMs);
+      return;
+    }
+    // 页面不可见时不拉数据，但保留轮询，切回来下一拍就会刷新。
+    if (document.hidden) {
+      alunixaXUsageSchedule(alunixaXUsageIdleIntervalMs);
+      return;
+    }
+    const placement = alunixaXUsageSyncPlacement();
+    if (!placement) {
+      alunixaXUsageSchedule(alunixaXUsageIdleIntervalMs);
+      return;
+    }
+    const { threadId } = placement;
+    if (alunixaXUsageState.inFlight) {
+      alunixaXUsageSchedule(alunixaXUsageActiveIntervalMs);
+      return;
+    }
+    let events = null;
+    try {
+      events = await alunixaXUsageRefresh(threadId);
+    } catch (error) {
+      if (alunixaXUsageState.threadId === threadId) alunixaXUsageState.failures += 1;
+      if (alunixaXUsageState.failures === alunixaXUsageFailureLimit) {
+        sendCodexPlusDiagnostic("usage_statusline_bridge_failed", {
+          errorName: error?.name || "",
+          errorMessage: error?.message || String(error),
+        });
+      }
+    }
+    if (alunixaXUsageState.disposed) return;
+    alunixaXUsageRemember(threadId, events);
+    const current = alunixaXUsageSyncPlacement();
+    if (!current || current.threadId !== threadId) {
+      alunixaXUsageSchedule(current ? 0 : alunixaXUsageIdleIntervalMs);
+      return;
+    }
+    const snapshot = alunixaXUsageSnapshot(alunixaXUsageState.cache.get(threadId));
+    if (snapshot) {
+      alunixaXUsageRender(snapshot);
+      // 刚有事件说明本轮在跑，加密轮询；本轮已经结束就拉长间隔。
+      alunixaXUsageSchedule(snapshot.stale ? alunixaXUsageIdleIntervalMs : alunixaXUsageActiveIntervalMs);
+      return;
+    }
+    if (alunixaXUsageState.failures >= alunixaXUsageFailureLimit) {
+      // 桥接连续失败仍保留栏位与最近读数，只降低取数频率。
+      alunixaXUsageSchedule(30000);
+      return;
+    }
+    // 会话已经确定、只是还没写出 token 事件（新会话第一轮）：先显示占位符，
+    // 用较慢的间隔等第一条数据，避免空转。
+    alunixaXUsageRender(null);
+    alunixaXUsageSchedule(alunixaXUsageWarmupIntervalMs);
+  }
+
+  alunixaXUsageInstallStyle();
+  alunixaXUsageObserve();
+  alunixaXUsageSyncPlacement();
+  alunixaXUsageSchedule(600);
+  window.__alunixaXUsageStatusLineRuntime = {
+    version: 2,
+    sync: () => alunixaXUsageSchedule(0),
+    dispose() {
+      alunixaXUsageState.disposed = true;
+      clearTimeout(alunixaXUsageState.timer);
+      alunixaXUsageState.timer = 0;
+      alunixaXUsageState.observer?.disconnect();
+      alunixaXUsageState.cache.clear();
+      // 卸载时把节点整个摘掉：注入会被重跑，留一个隐藏节点等于每次重注入多挂一个。
+      alunixaXUsageState.node?.remove();
+      alunixaXUsageState.node = null;
+      alunixaXUsageState.parts = null;
+      alunixaXUsageState.lastFingerprint = "";
+      globalThis.__ALUNIXA_X_USAGE_STATUSLINE_SYNC__ = undefined;
+    },
+  };
+  globalThis.__ALUNIXA_X_USAGE_STATUSLINE_SYNC__ = () => alunixaXUsageSchedule(0);
+  function syncActionGroupsLayout(force = false) {
+    syncActionGroupLayouts(sessionRows().map(row => ({
+      row, group: actionGroupFromRow(row),
+    })), force);
   }
 
   function removeActionGroups(row) {
@@ -12816,7 +16952,7 @@
    * 不读 DOM；实际挂载发生在 99-tail 之前，那时所有依赖函数都已可用。
    */
   const alunixaXExtensionApiVersion = 1;
-  const alunixaXExtensionAdapterVersion = "1.0.0";
+  const alunixaXExtensionAdapterVersion = "1.1.0";
 
   /** 类名与属性契约。一旦发布不再更名，新增用新名字。 */
   const alunixaXExtensionConstants = {
@@ -12845,6 +16981,9 @@
     "/archived-thread",
     "/export-markdown",
     "/user-scripts/list",
+    // 显式开放：给拓展注入 overlay 等独立 Codex 页面，不暴露任意 CDP 方法。
+    "/cdp/targets",
+    "/cdp/evaluate",
   ]);
 
   /** 单次调用的默认超时，略短于桥接自身的 26s，让拓展先拿到可读的错误。 */
@@ -13121,6 +17260,7 @@
    * 同一套外壳 + 自定义内容，所以单独走一遍，但外壳结构与类名完全对齐。
    */
   function openCodexPlusModalForExtension(id, definition) {
+    closeCodexPlusPage();
     document.querySelectorAll(".alunixa-x-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll(`.${alunixaXPageClass}, [data-alunixa-x-dialog="true"]`).forEach((node) => node.remove());
     const overlay = document.createElement("div");
@@ -13141,13 +17281,10 @@
       </div>
     `;
     document.body.appendChild(overlay);
-    positionCodexPlusPage(overlay);
+    observeCodexPlusPageLayout(overlay);
     // 拓展入口不在内置的三个 id 里，setCodexPlusSidebarNavActive 认不出来，
     // 所以自己点亮该入口，再调一次 sync 让原生选中态被压下去。
     setCodexPlusExtensionNavActive(id);
-    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
-    window.__alunixaXPageResizeHandler = () => positionCodexPlusPage(overlay);
-    window.addEventListener("resize", window.__alunixaXPageResizeHandler);
     // 与内置页面一致：点图标栏上的任何原生按钮就关掉这个覆盖层。
     //
     // 注意必须连拓展自己的入口一起排除：拓展入口 id 是动态生成的，不在那三个内置
@@ -13208,6 +17345,8 @@
 
   /** 关闭当前拓展页面并执行其 onCleanup。 */
   function closeCodexPlusPage() {
+    clearTimeout(window.__alunixaXPageNavigationCloseTimer);
+    window.__alunixaXPageNavigationCloseTimer = null;
     const cleanup = window.__alunixaXExtensionPageCleanup;
     window.__alunixaXExtensionPageCleanup = null;
     if (typeof cleanup === "function") {
@@ -13216,8 +17355,13 @@
       } catch {}
     }
     window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    window.__alunixaXPageResizeHandler = null;
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.__alunixaXPageLayoutObserver = null;
+    window.__alunixaXPageLayoutTargets = null;
     document.querySelectorAll(`.${alunixaXPageClass}`).forEach((node) => node.remove());
     setCodexPlusSidebarNavActive(false);
+    restoreCodexPlusPageBackButton();
   }
 
   /** 拓展入口的 DOM 标记：用它反查注册表项，dispose 后据此清理。 */
@@ -13775,6 +17919,40 @@
     return button;
   }
 
+  /**
+   * 空闲态的麦克风图标。
+   *
+   * 之前空闲态是一个带边框的「语音输入」文字按钮，在 composer 底栏里比原生图标按钮宽
+   * 一倍多，把「完全访问」和模型选择器挤得很开。改成和原生同规格的图标按钮，文字降级
+   * 成 aria-label / title。录音、转写这些状态仍然保留文字——那些状态要传达信息，
+   * 光靠图标说不清。
+   */
+  function alunixaXDictationMicIcon() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "16"); svg.setAttribute("height", "16");
+    svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.4"); svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round"); svg.setAttribute("aria-hidden", "true");
+    ["M8 2.4a2.2 2.2 0 0 1 2.2 2.2v3.4a2.2 2.2 0 0 1-4.4 0V4.6A2.2 2.2 0 0 1 8 2.4Z",
+      "M3.9 7.3a4.1 4.1 0 0 0 8.2 0", "M8 11.4v1.7", "M5.9 13.4h4.2"].forEach((d) => {
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+
+  function alunixaXDictationMicButton(disabled) {
+    const button = alunixaXDictationControl("start", "", disabled);
+    button.className = "alunixa-x-dictation-mic";
+    button.setAttribute("aria-label", "语音输入");
+    button.setAttribute("title", "语音输入");
+    button.append(alunixaXDictationMicIcon());
+    return button;
+  }
+
   function renderCodexPlusDictation() {
     const state = alunixaXDictation;
     document.querySelectorAll('[data-alunixa-x-ext="builtin-dictation"][data-dictation-controls]').forEach((root) => {
@@ -13788,7 +17966,7 @@
         return;
       }
       root.dataset.renderKey = key; root.replaceChildren();
-      if (!active) { root.append(alunixaXDictationControl("start", "语音输入", state.phase !== "idle")); return; }
+      if (!active) { root.append(alunixaXDictationMicButton(state.phase !== "idle")); return; }
       const status = document.createElement("span"); status.setAttribute("role", "status");
       if (state.phase === "recording") status.setAttribute("aria-live", "off");
       status.textContent = state.phase === "requesting" ? "正在请求麦克风…"
@@ -13844,6 +18022,18 @@
     return root;
   }
 
+  function alunixaXDictationFooterScore(footer, editor) {
+    let score = footer.contains(editor) ? 4 : 0;
+    const send = alunixaXDictationSendButton(editor);
+    if (send && footer.contains(send)) score += 2;
+    return score;
+  }
+
+  function alunixaXDictationFooterControls(footer) {
+    const node = footer.querySelector('[data-dictation-controls]');
+    return node && node.closest(".composer-footer, [data-composer-footer-responsive]") === footer ? node : null;
+  }
+
   function installCodexPlusDictation() {
     if (!alunixaXDictationEnabled()) {
       if (alunixaXDictation.phase !== "idle" || alunixaXDictation.pendingSend) cancelCodexPlusDictation();
@@ -13856,20 +18046,44 @@
       style.textContent = `.alunixa-x-dictation-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-inline:6px;font-size:12px;max-width:100%}
         .alunixa-x-dictation-controls button{border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:8px;padding:5px 8px;background:transparent;color:inherit;cursor:pointer;white-space:nowrap}
         .alunixa-x-dictation-controls button:disabled{opacity:.5;cursor:default}.alunixa-x-dictation-controls button:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+        /* 颜色取主文字色而不是继承 footer 的弱化文字：图标按钮没有边框和标签，
+           再叠一层弱化会被误读成禁用态。 */
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--color-token-text-primary,currentColor);opacity:.9;cursor:pointer}
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic:hover{background:color-mix(in srgb,currentColor 12%,transparent);opacity:1}
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic:disabled{opacity:.4;cursor:default;background:transparent}
         #alunixa-x-dictation-recovery{position:fixed;bottom:24px;right:24px;z-index:2147483000;padding:12px;border-radius:12px;background:var(--background,#252525);color:var(--foreground,#eee);box-shadow:0 4px 24px #0006;max-width:480px}
         #alunixa-x-dictation-recovery textarea{width:100%;min-height:80px;color:inherit;background:transparent}`;
       document.head.append(style);
     }
+    // 同一输入框可能同时命中多个 footer（例如新版首页的顶部上下文栏和底部
+    // 控制行都带 data-composer-footer-responsive），一个输入框只挂一个入口，
+    // 否则会出现两个「语音输入」。优先挂在包含输入框的 footer 上，其次是
+    // 包含发送按钮的；同分时取文档中更靠后的（更内层）候选项。
+    const candidates = [];
     document.querySelectorAll(".composer-footer, [data-composer-footer-responsive]").forEach((footer) => {
       if (!visibleElement(footer) || isExtensionUiNode(footer)) return;
       const scope = alunixaXDictationScope(footer);
       const editor = scope && alunixaXDictationEditor(scope);
       if (!editor) return;
-      let controls = footer.querySelector('[data-dictation-controls]');
-      if (!controls) { controls = createCodexPlusDictationControls(); footer.append(controls); }
-      const target = editor.dataset.alunixaXDictationTarget || editor.closest('[data-alunixa-x-dictation-root]')?.dataset.alunixaXDictationRoot || "";
-      if (controls.dataset.dictationTarget !== target) { controls.dataset.dictationTarget = target; delete controls.dataset.renderKey; }
+      candidates.push({ footer, editor, score: alunixaXDictationFooterScore(footer, editor) });
     });
+    const hosts = new Map();
+    for (const item of candidates) {
+      const current = hosts.get(item.editor);
+      if (!current || item.score >= current.score) hosts.set(item.editor, item);
+    }
+    const hostFooters = new Set([...hosts.values()].map((item) => item.footer));
+    document.querySelectorAll('[data-alunixa-x-ext="builtin-dictation"][data-dictation-controls]').forEach((node) => {
+      if (node.dataset.floating === "true") return;
+      const owner = node.closest(".composer-footer, [data-composer-footer-responsive]");
+      if (owner && !hostFooters.has(owner)) node.remove();
+    });
+    for (const item of hosts.values()) {
+      let controls = alunixaXDictationFooterControls(item.footer);
+      if (!controls) { controls = createCodexPlusDictationControls(); item.footer.append(controls); }
+      const target = item.editor.dataset.alunixaXDictationTarget || item.editor.closest('[data-alunixa-x-dictation-root]')?.dataset.alunixaXDictationRoot || "";
+      if (controls.dataset.dictationTarget !== target) { controls.dataset.dictationTarget = target; delete controls.dataset.renderKey; }
+    }
     renderCodexPlusDictation();
   }
 
@@ -14508,7 +18722,6 @@
     installThreadScrollUserIntentCapture();
     installThreadScrollRouteHooks();
     scheduleThreadScrollSync(true);
-    refreshCodexServiceTierControls();
   }
 
   function officialUsagePolicy() {
@@ -15013,6 +19226,23 @@
     return iconButtons.at(-1) || null;
   }
 
+  function nativeSessionRenameCapability(dialog, initialTitle) {
+    if (!(dialog instanceof HTMLElement)) return null;
+    const buttons = [...dialog.querySelectorAll("button")].filter((button) => visibleElement(button) && !button.disabled);
+    const suggestion = buttons.find((button) => {
+      const text = normalizedElementText(button);
+      if (!text || text === initialTitle || /^(取消|保存|Cancel|Save)$/i.test(text)) return false;
+      const semantics = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("data-testid") || ""}`;
+      return button.classList.contains("text-info")
+        || /(?:title|name)[-_ ]suggestion|(?:use|apply|accept).*(?:suggested|suggestion)|使用.*建议|采用.*建议/i.test(semantics);
+    }) || null;
+    const generate = buttons.find((button) => /生成.*(?:名称|标题)|(?:generate|suggest).*(?:title|name)/i.test(
+      `${normalizedElementText(button)} ${button.getAttribute("aria-label") || ""}`)) || null;
+    const pending = dialog.matches('[aria-busy="true"], [data-state="loading"]')
+      || !!dialog.querySelector('[aria-busy="true"], [role="progressbar"], [data-state="loading"]');
+    return suggestion || generate || pending ? { suggestion, generate, pending } : null;
+  }
+
   async function activateSessionAutoRenameMenuItem(event) {
     if (event?.type === "keydown" && !["Enter", " "].includes(event.key)) return;
     const item = event?.currentTarget;
@@ -15067,24 +19297,22 @@
     }
     const titleInput = dialog.querySelector('input[aria-label="聊天标题"], input[aria-label="Chat title"]');
     const initialTitle = titleInput?.value || "";
+    // 新版可能只有手动输入框。先确认原生能力，不能空等 20 秒后关掉用户窗口。
+    const capability = await waitForSessionElement(() => nativeSessionRenameCapability(visibleSessionRenameDialog(), initialTitle), 800);
+    if (!capability) {
+      showToast("当前 Codex 未提供自动命名，可在此窗口手动重命名", null);
+      return;
+    }
+    if (!capability.suggestion && capability.generate) capability.generate.click();
     showToast("正在使用 Codex 生成会话名称…", null);
 
     const suggestionButton = await waitForSessionElement(() => {
       const currentDialog = visibleSessionRenameDialog();
       if (!currentDialog) return null;
-      return [...currentDialog.querySelectorAll("button")]
-        .filter(visibleElement)
-        .find((button) => {
-          const text = normalizedElementText(button);
-          return button.classList.contains("text-info")
-            && !!text
-            && text !== initialTitle
-            && !/^(取消|保存|Cancel|Save)$/i.test(text);
-        }) || null;
+      return nativeSessionRenameCapability(currentDialog, initialTitle)?.suggestion || null;
     }, sessionAutoRenameTimeoutMs);
     if (!(suggestionButton instanceof HTMLElement)) {
-      closeSessionRenameDialog(visibleSessionRenameDialog());
-      showToast("Codex 未能生成新名称，请稍后重试", null);
+      showToast("Codex 未能生成新名称，可在此窗口手动重命名", null);
       return;
     }
 
@@ -15097,8 +19325,7 @@
     const saveButton = [...activeDialog?.querySelectorAll?.("button") || []]
       .find((button) => /^(保存|Save)$/i.test(normalizedElementText(button)));
     if (!renamedInput || !(saveButton instanceof HTMLElement) || saveButton.disabled) {
-      closeSessionRenameDialog(activeDialog);
-      showToast("Codex 未能应用新名称，请稍后重试", null);
+      showToast("Codex 未能应用新名称，可在此窗口手动重命名", null);
       return;
     }
     saveButton.click();
@@ -15225,9 +19452,13 @@
   }
 
   function scan() {
+    if (document.hidden) {
+      window.__codexSessionDeleteScanPending = true;
+      return;
+    }
     void installDictationSupportPatch();
     runScanStep(scanLightweight);
-    requestAnimationFrame(() => runScanStep(scanDeferred));
+    scheduleDeferredScan();
   }
   // 完整上游引擎的词法宿主：不替换页面全局 API；挂件关闭时释放所有副作用。
   const alunixaXWhaleFullStoragePrefix = "alunixaX.whale.full.v1.";
@@ -15826,6 +20057,14 @@
     dispose() { alunixaXWhaleStop(); alunixaXWhaleState.disposed = true; },
     get state() { return alunixaXWhaleState.runtime?.state || null; },
   };
+  window.__alunixaXScanScheduleCleanup?.();
+  clearTimeout(window.__codexSessionDeleteScanTimer);
+  cancelAnimationFrame(window.__codexSessionDeleteDeferredRaf);
+  window.__codexSessionDeleteScanTimer = null;
+  window.__codexSessionDeleteDeferredRaf = 0;
+  window.__codexSessionDeleteScanPending = false;
+  window.__codexSessionDeleteDeferredPending = false;
+
   /**
    * 这个节点是不是 Alunixa X 自己（或拓展）的 UI。
    *
@@ -15835,7 +20074,7 @@
    */
   function isExtensionUiNode(node) {
     if (!node?.closest) return false;
-    if (node.closest(`.codex-delete-toast, .codex-delete-confirm-overlay, .alunixa-x-modal-overlay, .${alunixaXPageClass}, #${alunixaXSidebarNavId}, #${alunixaXRailNavId}, #${alunixaXRailExtensionsId}, #${alunixaXRailSponsorId}, #${alunixaXRailNavId} > button, #${alunixaXRailExtensionsId} > button, #${alunixaXRailSponsorId} > button, .${codexServiceTierBadgeClass}, .${sessionShareButtonClass}, .${sessionCopyMenuItemClass}, #alunixa-x-menu`)) {
+    if (node.closest(`[data-alunixa-x-ext], .codex-delete-toast, .codex-delete-confirm-overlay, .alunixa-x-modal-overlay, .${alunixaXPageClass}, #${alunixaXSidebarNavId}, #${alunixaXRailNavId}, #${alunixaXRailExtensionsId}, #${alunixaXRailSponsorId}, #${alunixaXRailNavId} > button, #${alunixaXRailExtensionsId} > button, #${alunixaXRailSponsorId} > button, .${codexServiceTierBadgeClass}, .${sessionShareButtonClass}, .codex-zed-remote-button, .codex-zed-remote-toast, .${sessionCopyMenuItemClass}, #alunixa-x-menu, #${capacityAutoRetryChipId}`)) {
       return true;
     }
     return isCodexPlusExtensionNode(node);
@@ -15866,8 +20105,7 @@
     if (node.nodeType !== 1) return false;
     if (isExtensionUiNode(node)) return false;
     const relevantSelector = scanRelevantSelector();
-    return !!node.matches?.(relevantSelector) ||
-      !!node.closest?.(relevantSelector) ||
+    return !!node.closest?.(relevantSelector) ||
       nodeOrAncestorLooksLikeCodexUserBubble(node);
   }
 
@@ -15903,19 +20141,58 @@
   }
 
   function runScheduledScan() {
-    window.__codexSessionDeleteScanPending = false;
     clearTimeout(window.__codexSessionDeleteScanTimer);
     window.__codexSessionDeleteScanTimer = null;
+    if (document.hidden) {
+      window.__codexSessionDeleteScanPending = true;
+      return;
+    }
+    window.__codexSessionDeleteScanPending = false;
     scan();
+  }
+
+  function scheduleDeferredScan() {
+    window.__codexSessionDeleteDeferredPending = true;
+    if (document.hidden || window.__codexSessionDeleteDeferredRaf) return;
+    window.__codexSessionDeleteDeferredRaf = requestAnimationFrame(() => {
+      window.__codexSessionDeleteDeferredRaf = 0;
+      if (document.hidden) return;
+      window.__codexSessionDeleteDeferredPending = false;
+      runScanStep(scanDeferred);
+    });
   }
 
   function scheduleScan(mutations) {
     window.__codexSessionDeleteLastMutations = mutations;
-    if (!shouldScheduleScan(mutations)) return;
     if (window.__codexSessionDeleteScanPending) return;
+    if (!shouldScheduleScan(mutations)) return;
     window.__codexSessionDeleteScanPending = true;
+    if (document.hidden) return;
     window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, 200);
   }
+
+  const onScanVisibilityChange = () => {
+    if (document.hidden) {
+      clearTimeout(window.__codexSessionDeleteScanTimer);
+      window.__codexSessionDeleteScanTimer = null;
+      cancelAnimationFrame(window.__codexSessionDeleteDeferredRaf);
+      window.__codexSessionDeleteDeferredRaf = 0;
+      return;
+    }
+    // Hidden mutations describe one current DOM, not a history to replay.
+    if (window.__codexSessionDeleteScanPending) {
+      clearTimeout(window.__codexSessionDeleteScanTimer);
+      window.__codexSessionDeleteScanTimer = setTimeout(runScheduledScan, 0);
+    } else if (window.__codexSessionDeleteDeferredPending) scheduleDeferredScan();
+  };
+  document.addEventListener("visibilitychange", onScanVisibilityChange);
+  window.__alunixaXScanScheduleCleanup = () => {
+    document.removeEventListener("visibilitychange", onScanVisibilityChange);
+    clearTimeout(window.__codexSessionDeleteScanTimer);
+    cancelAnimationFrame(window.__codexSessionDeleteDeferredRaf);
+    window.__codexSessionDeleteScanPending = false;
+    window.__codexSessionDeleteDeferredPending = false;
+  };
 
   /**
    * 侧边栏入口的启动补扫。
@@ -15954,6 +20231,72 @@
   syncOfficialUsagePolicy();
   scheduleSidebarNavStartupRetry();
   window.removeEventListener("resize", window.__alunixaXResizeHandler);
+  // Optional right-side layout for Codex's native message navigation rail.
+  // The native page recreates the rail and preview card during navigation, so
+  // this uses stable data attributes instead of retaining DOM node references.
+  (() => {
+    const styleId = "alunixa-x-avatar-overlay-layout-style";
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__?.();
+    const enabledAttribute = "data-alunixa-x-activity-overlay-right";
+
+    function installStyle() {
+      const existing = document.getElementById(styleId);
+      if (existing) return;
+      const style = document.createElement("style");
+      style.id = styleId;
+      style.dataset.alunixaXExt = "builtin-avatar-overlay-layout";
+      style.textContent = `
+        /* The native rail is mounted inside an absolute nav with left-3. */
+        html[${enabledAttribute}="true"] nav:has([data-thread-user-message-navigation-rail-list]) {
+          left: auto !important;
+          right: max(12px, env(safe-area-inset-right, 0px)) !important;
+        }
+
+        /* Native marker lines grow from their left edge. Once the rail is on
+           the right, the same level indicator must grow toward the left. */
+        html[${enabledAttribute}="true"] [data-thread-user-message-navigation-rail-list] [data-thread-user-message-navigation-item-id] > span > span > span {
+          transform-origin: 100% 50% !important;
+        }
+
+        /* Floating preview cards are positioned by Radix beside the old left
+           rail. Use the individual translate property so Floating UI's own
+           transform stays intact while the card moves to the opposite side. */
+        html[${enabledAttribute}="true"] [data-radix-popper-content-wrapper]:has([data-thread-user-message-navigation-tooltip-preview]) {
+          translate: calc(-100% - 8px) 0 !important;
+        }
+      `;
+      document.head?.appendChild(style);
+    }
+
+    function sync() {
+      const root = document.documentElement;
+      if (!root) return;
+      installStyle();
+      const enabled = typeof alunixaXSettings === "function"
+        && alunixaXSettings().activityOverlayRight === true;
+      root.toggleAttribute(enabledAttribute, enabled);
+      root.setAttribute(enabledAttribute, String(enabled));
+    }
+
+    installStyle();
+    sync();
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__ = sync;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      sync();
+      if (++attempts >= 60) window.clearInterval(timer);
+    }, 250);
+    const cleanup = () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", cleanup);
+      if (globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__ === sync)
+        delete globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__;
+      if (globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__ === cleanup)
+        delete globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__;
+    };
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__ = cleanup;
+    window.addEventListener("pagehide", cleanup, { once: true });
+  })();
   // AX feature adapters retained alongside the modern upstream renderer.
   function installAlunixaXFastStartup() {
     const config = window.__ALUNIXA_X_FAST_STARTUP__;
@@ -18961,6 +23304,7 @@ html:not(.light):not([data-theme="light"]) .codex-project-move-item-path,
     }
   }
 
+  installCodexConfigReadDeadline();
   runScanStep(scheduleAlunixaXImageOverlay);
   if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
     runScanStep(installAlunixaXForceChineseLocale);
@@ -18978,11 +23322,7 @@ html:not(.light):not([data-theme="light"]) .codex-project-move-item-path,
   window.__alunixaXResizeHandler = () => {
     cancelAnimationFrame(alunixaXResizeRafId);
     alunixaXResizeRafId = requestAnimationFrame(() => {
-      sessionRows().forEach((row) => {
-        const group = actionGroupFromRow(row);
-        if (group) delete group.dataset.codexActionLayoutStable;
-      });
-      syncActionGroupsLayout();
+      syncActionGroupsLayout(true);
       runScanStep(refreshConversationView);
     });
   };

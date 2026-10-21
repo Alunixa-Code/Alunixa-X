@@ -3,7 +3,7 @@
   // this uses stable data attributes instead of retaining DOM node references.
   (() => {
     const styleId = "alunixa-x-avatar-overlay-layout-style";
-    const root = document.documentElement;
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__?.();
     const enabledAttribute = "data-alunixa-x-activity-overlay-right";
 
     function installStyle() {
@@ -36,6 +36,8 @@
     }
 
     function sync() {
+      const root = document.documentElement;
+      if (!root) return;
       installStyle();
       const enabled = typeof alunixaXSettings === "function"
         && alunixaXSettings().activityOverlayRight === true;
@@ -49,6 +51,16 @@
     let attempts = 0;
     const timer = window.setInterval(() => {
       sync();
-      if (++attempts >= 60 && alunixaXBackendSettingsLoaded) window.clearInterval(timer);
+      if (++attempts >= 60) window.clearInterval(timer);
     }, 250);
+    const cleanup = () => {
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", cleanup);
+      if (globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__ === sync)
+        delete globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__;
+      if (globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__ === cleanup)
+        delete globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__;
+    };
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_CLEANUP__ = cleanup;
+    window.addEventListener("pagehide", cleanup, { once: true });
   })();

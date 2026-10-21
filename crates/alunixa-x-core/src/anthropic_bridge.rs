@@ -136,7 +136,7 @@ pub fn anthropic_messages_url(base_url: &str) -> String {
 /// 2. 把历史里带签名的思考块（存在 `reasoning.encrypted_content`）原样放回助手消息；
 /// 3. 提示缓存断点与 Claude Code 身份伪装（按选项）。
 pub fn responses_to_anthropic_messages(
-    body: Value,
+    mut body: Value,
     options: &AnthropicRequestOptions,
 ) -> anyhow::Result<Value> {
     let effort = body
@@ -144,6 +144,10 @@ pub fn responses_to_anthropic_messages(
         .and_then(Value::as_str)
         .map(str::to_string);
     let thinking_groups = signed_thinking_groups_from_responses_input(body.get("input"));
+    if let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) {
+        items.retain(|item| item["type"] != "reasoning"
+            || item["encrypted_content"].as_str().is_none_or(|value| decode_thinking_blocks(value).is_empty()));
+    }
     let chat = crate::protocol_proxy::responses_to_chat_completions(body)?;
     let mut result = chat_completions_to_anthropic_messages(chat, options)?;
 
@@ -597,7 +601,7 @@ fn inject_message_breakpoint(message: &mut Value) -> bool {
 }
 
 /// 伪装 Claude Code：系统提示首行必须是官方身份串（幂等）。
-fn prepend_claude_code_identity(result: &mut Value) {
+pub(crate) fn prepend_claude_code_identity(result: &mut Value) {
     let identity = json!({ "type": "text", "text": CLAUDE_CODE_SYSTEM_IDENTITY });
     let mut blocks: Vec<Value> = vec![identity];
     match result.get("system") {

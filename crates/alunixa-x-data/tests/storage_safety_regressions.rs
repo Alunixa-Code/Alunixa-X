@@ -1,5 +1,5 @@
 use alunixa_x_core::models::{DeleteStatus, SessionRef};
-use alunixa_x_data::{BackupStore, SQLiteStorageAdapter, delete_local_from_paths};
+use alunixa_x_data::{BackupStore, SQLiteStorageAdapter, delete_local_from_paths_with_home as delete_local_from_paths};
 use rusqlite::Connection;
 use serde_json::json;
 use std::{fs, path::Path};
@@ -56,7 +56,7 @@ fn safety_top_level_backup_failure_does_not_remove_session_index_or_sidebar() {
         [db.clone()],
         BackupStore::new(temp.path().join("backups")).with_file_byte_limit(1),
         &session(),
-        Some(&home),
+        &home,
     );
     assert_eq!(result.status, DeleteStatus::Failed, "{}", result.message);
     assert!(result.undo_token.is_none());
@@ -86,7 +86,7 @@ fn safety_multi_database_partial_delete_keeps_failure_and_all_undo_information()
             vec![a.clone(), b.clone()]
         };
         let store = BackupStore::new(temp.path().join("backups")).with_file_byte_limit(8);
-        let result = delete_local_from_paths(paths.clone(), store.clone(), &session(), Some(&home));
+        let result = delete_local_from_paths(paths.clone(), store.clone(), &session(), &home);
         assert_eq!(
             result.status,
             DeleteStatus::Failed,
@@ -239,7 +239,7 @@ fn safety_unsupported_schema_is_a_hard_failure_without_index_cleanup() {
         [db],
         BackupStore::new(temp.path().join("backups")),
         &session(),
-        Some(&home),
+        &home,
     );
     assert_eq!(result.status, DeleteStatus::Failed);
     assert!(result.message.contains("Unsupported"));
@@ -269,7 +269,7 @@ fn safety_failed_database_transaction_keeps_its_backup_alongside_successful_back
         [a.clone(), b.clone()],
         store.clone(),
         &session(),
-        Some(&home),
+        &home,
     );
     assert_eq!(result.status, DeleteStatus::Failed);
     assert!(result.message.contains("fixture transaction blocked"));
@@ -343,7 +343,7 @@ fn safety_grouped_undo_validates_every_manifest_before_restoring_any_rows() {
         [a.clone(), b.clone()],
         store.clone(),
         &session(),
-        Some(&home),
+        &home,
     );
     assert_eq!(result.status, DeleteStatus::LocalDeleted);
     let token = result.undo_token.unwrap();

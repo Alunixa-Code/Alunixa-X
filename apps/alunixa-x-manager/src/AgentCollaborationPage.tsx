@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ArrowRightLeft, Check, Copy, Loader2, Play, RefreshCw, Save, Square } from "lucide-react";
 import { PageHeader } from "./ManagementPages";
 import "./AgentCollaborationPage.css";
+import { getLocale, t, tf } from "@/i18n";
 
 type Agent = { id: string; name: string; executable: string; enabled: boolean; model: string; reuseSavedAuth: boolean };
 type CollaborationConfig = { enabled: boolean; defaultAgentId: string; agents: Agent[] };
@@ -51,7 +52,7 @@ const defaultConfig = (): CollaborationConfig => ({
   ],
 });
 const statusLabels: Record<TaskStatus, string> = {
-  queued: "排队中", running: "执行中", completed: "已完成", failed: "失败", cancelled: "已取消", interrupted: "已中断",
+  queued: t("排队中"), running: t("执行中"), completed: t("已完成"), failed: t("失败"), cancelled: t("已取消"), interrupted: t("已中断"),
 };
 const unfinished = (task: TaskRecord) => task.status === "queued" || task.status === "running";
 const absolutePath = (value: string) => /^(?:\/|[a-zA-Z]:[\\/]|\\\\)/.test(value.trim());
@@ -65,7 +66,7 @@ const copyConfig = (config: CollaborationConfig): CollaborationConfig => ({
   agents: config.agents.map((agent) => ({ ...agent, model: agent.model || "", reuseSavedAuth: agent.reuseSavedAuth === true })),
 });
 const formatTime = (value: number) => Number.isFinite(value) && value > 0
-  ? new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+  ? new Date(value).toLocaleString(getLocale(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
   : "—";
 
 export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: string } = {}) {
@@ -198,9 +199,9 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
   const editAgent = (id: string, patch: Partial<Agent>) => editConfig({ ...draft, agents: draft.agents.map((agent) => agent.id === id ? { ...agent, ...patch } : agent) });
   const saveConfig = () => {
     const invalid = draft.agents.find((agent) => agent.executable.trim() && !absolutePath(agent.executable));
-    if (invalid) { setActionError(`请填写 ${invalid.name} 可执行文件的绝对路径。`); return; }
+    if (invalid) { setActionError(tf("请填写 {0} 可执行文件的绝对路径。", [invalid.name])); return; }
     void mutate("save_config", { ...draft, agents: draft.agents.map((agent) => ({ ...agent, executable: agent.executable.trim(), model: agent.model.trim() })) }, () => {
-      setNotice("子 Agent 设置已保存。");
+      setNotice(t("子 Agent 设置已保存。"));
       setMcpConfig(null);
       setCopied("");
     });
@@ -216,41 +217,41 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
   const targetUnavailable = snapshot?.availability?.find((item) => item.id === targetId)?.available === false;
   const targetBusy = tasks.some((task) => task.agentId === targetId && unfinished(task));
   const targetCwd = continuation?.cwd ?? cwd;
-  const formDisabledReason = !snapshot ? "正在读取协作配置。"
-    : !snapshot.config.enabled ? "请先启用外部子 Agent 并保存设置。"
-    : !targetAgent ? "请先启用至少一个 CLI 并保存配置。"
-    : targetUnavailable ? "目标 CLI 的可执行文件不可用，请检查路径并保存。"
-    : targetBusy ? "此 Agent 已有排队或执行中的任务，请等待结束后再提交。"
-    : continuation && (continuation.status !== "completed" || !continuation.sessionId) ? "该任务目前无法续聊，请创建新任务。"
+  const formDisabledReason = !snapshot ? t("正在读取协作配置。")
+    : !snapshot.config.enabled ? t("请先启用外部子 Agent 并保存设置。")
+    : !targetAgent ? t("请先启用至少一个 CLI 并保存配置。")
+    : targetUnavailable ? t("目标 CLI 的可执行文件不可用，请检查路径并保存。")
+    : targetBusy ? t("此 Agent 已有排队或执行中的任务，请等待结束后再提交。")
+    : continuation && (continuation.status !== "completed" || !continuation.sessionId) ? t("该任务目前无法续聊，请创建新任务。")
     : "";
   const agentName = (id: string) => snapshot?.config.agents.find((agent) => agent.id === id)?.name ?? id;
   const runtimeRefreshing = busy === "connect_codex" || busy === "refresh_codex";
   const runtimeSucceeded = runtimeReady(runtime);
   const connectCodex = () => {
-    if (dirtyRef.current) { setActionError("请先保存子 Agent 设置，再接入 Codex。"); return; }
+    if (dirtyRef.current) { setActionError(t("请先保存子 Agent 设置，再接入 Codex。")); return; }
     void mutate("connect_codex", {}, (next) => {
       if (next.integration?.status === "connected") {
         setNotice(runtimeReady(next.runtime)
-          ? "已接入配置，Codex 工具已刷新。刷新后的工具从下一轮消息起可用。"
-          : "已接入配置；运行中的 Codex 工具是否已刷新，请查看下方运行状态。");
+          ? t("已接入配置，Codex 工具已刷新。刷新后的工具从下一轮消息起可用。")
+          : t("已接入配置；运行中的 Codex 工具是否已刷新，请查看下方运行状态。"));
       } else {
-        setActionError(next.integration?.message || "尚未完成 Codex 接入，请检查配置后重试。");
+        setActionError(next.integration?.message || t("尚未完成 Codex 接入，请检查配置后重试。"));
       }
     });
   };
   const refreshCodex = () => {
-    if (dirtyRef.current) { setActionError("请先保存子 Agent 设置，再刷新 Codex 工具。"); return; }
+    if (dirtyRef.current) { setActionError(t("请先保存子 Agent 设置，再刷新 Codex 工具。")); return; }
     void mutate("refresh_codex", {}, (next) => {
-      if (runtimeReady(next.runtime)) setNotice("Codex 工具已刷新。刷新后的工具从下一轮消息起可用。");
-      else if (!next.runtime) setActionError("未取得 Codex 工具刷新结果，请重试或手动重新加载 MCP。");
+      if (runtimeReady(next.runtime)) setNotice(t("Codex 工具已刷新。刷新后的工具从下一轮消息起可用。"));
+      else if (!next.runtime) setActionError(t("未取得 Codex 工具刷新结果，请重试或手动重新加载 MCP。"));
     });
   };
 
   const submitTask = (event: FormEvent) => {
     event.preventDefault();
     if (busyRef.current || formDisabledReason) return;
-    if (!absolutePath(targetCwd)) { setActionError("请填写工作目录的绝对路径。"); return; }
-    if (!prompt.trim()) { setActionError("请填写要交给 Agent 的任务。"); return; }
+    if (!absolutePath(targetCwd)) { setActionError(t("请填写工作目录的绝对路径。")); return; }
+    if (!prompt.trim()) { setActionError(t("请填写要交给 Agent 的任务。")); return; }
     const previousIds = new Set(tasks.map((task) => task.id));
     void mutate("submit", {
       agentId: targetId,
@@ -263,7 +264,7 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
       setPrompt("");
       setContinueTaskId("");
       setCwd(targetCwd);
-      setNotice("任务已提交，可在下方查看执行状态。");
+      setNotice(t("任务已提交，可在下方查看执行状态。"));
     });
   };
   const continueTask = (task: TaskRecord) => {
@@ -300,43 +301,43 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
       await navigator.clipboard.writeText(value);
       if (mounted.current && lifecycle.current === epoch) { setCopied(label); setMcpError(""); }
     } catch (error) {
-      if (mounted.current && lifecycle.current === epoch) setMcpError(`复制失败：${errorText(error)}`);
+      if (mounted.current && lifecycle.current === epoch) setMcpError(tf("复制失败：{0}", [errorText(error)]));
     }
   };
 
   return <div className="mg-page agent-collaboration-page">
-    <PageHeader icon={<ArrowRightLeft size={20} strokeWidth={1.5} />} title="子 Agent 设置" actions={
+    <PageHeader icon={<ArrowRightLeft size={20} strokeWidth={1.5} />} title={t("子 Agent 设置")} actions={
       <button className="mg-button" type="button" onClick={() => void refresh()} disabled={refreshing || Boolean(busy)}>
-        <RefreshCw size={15} className={refreshing ? "agent-collaboration-spin" : ""} />{refreshing ? "刷新中…" : "刷新"}
+        <RefreshCw size={15} className={refreshing ? "agent-collaboration-spin" : ""} />{refreshing ? t("刷新中…") : t("刷新")}
       </button>
     } />
     <div className="agent-collaboration-content" aria-busy={!snapshot && refreshing}>
       <div className="agent-collaboration-intro">
-        <p>在 Codex 对话里调用外部子 Agent，结果由 Codex 在原对话中汇总。</p>
-        <div className="agent-collaboration-examples" aria-label="在 Codex 对话中的用法"><span>“让 DeepSeek 实现这个功能”</span><span>“让 Claude Code 审核这次改动”</span><span>“交给默认子 Agent 调查这个报错”</span></div>
-        <p className="agent-collaboration-hint">在这里选好默认子 Agent，保存设置并接入 Codex，然后回到对话中分派任务。</p>
+        <p>{t("在 Codex 对话里调用外部子 Agent，结果由 Codex 在原对话中汇总。")}</p>
+        <div className="agent-collaboration-examples" aria-label={t("在 Codex 对话中的用法")}><span>{t("“让 DeepSeek 实现这个功能”")}</span><span>{t("“让 Claude Code 审核这次改动”")}</span><span>{t("“交给默认子 Agent 调查这个报错”")}</span></div>
+        <p className="agent-collaboration-hint">{t("在这里选好默认子 Agent，保存设置并接入 Codex，然后回到对话中分派任务。")}</p>
       </div>
 
-      {readError && <p className="agent-collaboration-error" role="alert">读取协作状态失败：{readError}</p>}
-      {actionError && <p className="agent-collaboration-error" role="alert">操作失败：{actionError}</p>}
+      {readError && <p className="agent-collaboration-error" role="alert">{t("读取协作状态失败：")}{readError}</p>}
+      {actionError && <p className="agent-collaboration-error" role="alert">{t("操作失败：")}{actionError}</p>}
       {notice && <p className="agent-collaboration-notice" role="status">{notice}</p>}
-      {!snapshot && refreshing && <p className="agent-collaboration-loading" role="status"><Loader2 size={15} className="agent-collaboration-spin" />正在读取协作配置…</p>}
+      {!snapshot && refreshing && <p className="agent-collaboration-loading" role="status"><Loader2 size={15} className="agent-collaboration-spin" />{t("正在读取协作配置…")}</p>}
 
       <section className="agent-collaboration-section" aria-labelledby="agent-collaboration-config-title">
         <div className="agent-collaboration-section-head">
-          <div><h2 id="agent-collaboration-config-title">子 Agent 配置</h2><p>选择可调用的 CLI 与默认模型。CLI 路径留空时自动查找已安装的程序。</p></div>
+          <div><h2 id="agent-collaboration-config-title">{t("子 Agent 配置")}</h2><p>{t("选择可调用的 CLI 与默认模型。CLI 路径留空时自动查找已安装的程序。")}</p></div>
           <button type="button" className="mg-button mg-primary" disabled={!snapshot || !dirty || Boolean(busy)} onClick={saveConfig}>
-            {busy === "save_config" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Save size={15} />}{busy === "save_config" ? "保存中…" : "保存配置"}
+            {busy === "save_config" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Save size={15} />}{busy === "save_config" ? t("保存中…") : t("保存配置")}
           </button>
         </div>
         <label className="agent-collaboration-enable">
           <input type="checkbox" checked={draft.enabled} disabled={!snapshot || busy === "save_config"} onChange={(event) => editConfig({ ...draft, enabled: event.target.checked })} />
-          <span><strong>启用外部子 Agent</strong><small>默认关闭，保存后生效。</small></span>
-          <span className="mg-badge">{snapshot?.config.enabled ? "已启用" : "未启用"}</span>
+          <span><strong>{t("启用外部子 Agent")}</strong><small>{t("默认关闭，保存后生效。")}</small></span>
+          <span className="mg-badge">{snapshot?.config.enabled ? t("已启用") : t("未启用")}</span>
         </label>
         <div className="agent-collaboration-default">
-          <label className="mg-field" htmlFor="agent-collaboration-default"><span>默认子 Agent</span><select id="agent-collaboration-default" value={draft.defaultAgentId} disabled={!snapshot || busy === "save_config"} onChange={(event) => editConfig({ ...draft, defaultAgentId: event.target.value })}>{draft.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{agent.enabled ? "" : "（未启用）"}</option>)}</select></label>
-          <p className="agent-collaboration-hint">说“交给默认子 Agent”时使用此选择；直接说“让 DeepSeek”或“让 Claude Code”时使用指定的子 Agent。{draft.enabled && !draft.agents.some((agent) => agent.id === draft.defaultAgentId && agent.enabled) && " 所选默认子 Agent 尚未启用，默认分派不可用；仍可点名调用其他已启用的子 Agent。"}</p>
+          <label className="mg-field" htmlFor="agent-collaboration-default"><span>{t("默认子 Agent")}</span><select id="agent-collaboration-default" value={draft.defaultAgentId} disabled={!snapshot || busy === "save_config"} onChange={(event) => editConfig({ ...draft, defaultAgentId: event.target.value })}>{draft.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{agent.enabled ? "" : t("（未启用）")}</option>)}</select></label>
+          <p className="agent-collaboration-hint">{t("说“交给默认子 Agent”时使用此选择；直接说“让 DeepSeek”或“让 Claude Code”时使用指定的子 Agent。")}{draft.enabled && !draft.agents.some((agent) => agent.id === draft.defaultAgentId && agent.enabled) && t(" 所选默认子 Agent 尚未启用，默认分派不可用；仍可点名调用其他已启用的子 Agent。")}</p>
         </div>
         <div className="agent-collaboration-agents">
           {draft.agents.map((agent) => {
@@ -346,87 +347,87 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
             const available = availability?.available;
             return <div className="agent-collaboration-agent" key={agent.id}>
               <label className="agent-collaboration-agent-title"><input type="checkbox" checked={agent.enabled} disabled={!snapshot || busy === "save_config"} onChange={(event) => editAgent(agent.id, { enabled: event.target.checked })} /><strong>{agent.name}</strong></label>
-              <label className="mg-field" htmlFor={`agent-collaboration-path-${agent.id}`}><span>可执行文件路径（可选）</span><input id={`agent-collaboration-path-${agent.id}`} value={agent.executable} disabled={!snapshot || busy === "save_config"} placeholder={availability?.path || "留空自动查找已安装的 CLI"} spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(event) => editAgent(agent.id, { executable: event.target.value })} /></label>
-              <label className="mg-field" htmlFor={`agent-collaboration-model-${agent.id}`}><span>{agent.id === "deepseek" ? "模型路由（可选）" : "模型（可选）"}</span><input id={`agent-collaboration-model-${agent.id}`} value={agent.model} disabled={!snapshot || busy === "save_config"} placeholder={agent.id === "deepseek" ? "deepseek-account/deepseek-flash" : "留空沿用该 CLI 默认模型"} spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-describedby={agent.id === "deepseek" ? "agent-collaboration-deepseek-model-hint" : undefined} onChange={(event) => editAgent(agent.id, { model: event.target.value })} />{agent.id === "deepseek" && <small id="agent-collaboration-deepseek-model-hint">使用 provider/model 格式。账户登录用 deepseek-account，API 密钥用 deepseek-official；留空沿用 headless 默认模型。</small>}</label>
-              <small className="agent-collaboration-agent-state" data-unavailable={available === false}>{!savedPath ? "路径尚未保存" : available === true ? "已找到 CLI 文件" : available === false ? "未找到 CLI 文件" : agent.executable.trim() ? "已配置，执行任务时验证" : "留空自动查找已安装的 CLI"}{availability?.path && <code>{availability.path}</code>}</small>
+              <label className="mg-field" htmlFor={`agent-collaboration-path-${agent.id}`}><span>{t("可执行文件路径（可选）")}</span><input id={`agent-collaboration-path-${agent.id}`} value={agent.executable} disabled={!snapshot || busy === "save_config"} placeholder={availability?.path || t("留空自动查找已安装的 CLI")} spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(event) => editAgent(agent.id, { executable: event.target.value })} /></label>
+              <label className="mg-field" htmlFor={`agent-collaboration-model-${agent.id}`}><span>{agent.id === "deepseek" ? t("模型路由（可选）") : t("模型（可选）")}</span><input id={`agent-collaboration-model-${agent.id}`} value={agent.model} disabled={!snapshot || busy === "save_config"} placeholder={agent.id === "deepseek" ? "deepseek-account/deepseek-flash" : t("留空沿用该 CLI 默认模型")} spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-describedby={agent.id === "deepseek" ? "agent-collaboration-deepseek-model-hint" : undefined} onChange={(event) => editAgent(agent.id, { model: event.target.value })} />{agent.id === "deepseek" && <small id="agent-collaboration-deepseek-model-hint">{t("使用 provider/model 格式。账户登录用 deepseek-account，API 密钥用 deepseek-official；留空沿用 headless 默认模型。")}</small>}</label>
+              <small className="agent-collaboration-agent-state" data-unavailable={available === false}>{!savedPath ? t("路径尚未保存") : available === true ? t("已找到 CLI 文件") : available === false ? t("未找到 CLI 文件") : agent.executable.trim() ? t("已配置，执行任务时验证") : t("留空自动查找已安装的 CLI")}{availability?.path && <code>{availability.path}</code>}</small>
               {agent.id === "deepseek" && <>
-                <label className="agent-collaboration-auth"><input type="checkbox" checked={agent.reuseSavedAuth} disabled={!snapshot || busy === "save_config"} aria-describedby="agent-collaboration-deepseek-auth-hint" onChange={(event) => editAgent(agent.id, { reuseSavedAuth: event.target.checked })} /><span>复用 DSH 已保存的登录与密钥</span></label>
-                <small id="agent-collaboration-deepseek-auth-hint" className="agent-collaboration-agent-note">默认关闭。开启后由 dsh 自行读取已保存的认证，Alunixa X 不读取或保存登录与密钥；不会自动选择桌面当前使用的模型。</small>
+                <label className="agent-collaboration-auth"><input type="checkbox" checked={agent.reuseSavedAuth} disabled={!snapshot || busy === "save_config"} aria-describedby="agent-collaboration-deepseek-auth-hint" onChange={(event) => editAgent(agent.id, { reuseSavedAuth: event.target.checked })} /><span>{t("复用 DSH 已保存的登录与密钥")}</span></label>
+                <small id="agent-collaboration-deepseek-auth-hint" className="agent-collaboration-agent-note">{t("默认关闭。开启后由 dsh 自行读取已保存的认证，Alunixa X 不读取或保存登录与密钥；不会自动选择桌面当前使用的模型。")}</small>
               </>}
             </div>;
           })}
         </div>
-        <p className="agent-collaboration-hint">路径检测只确认 CLI 文件存在，登录状态在执行任务时验证。{dirty && " 有未保存的修改；子 Agent 使用已保存的配置。"}</p>
+        <p className="agent-collaboration-hint">{t("路径检测只确认 CLI 文件存在，登录状态在执行任务时验证。")}{dirty && t(" 有未保存的修改；子 Agent 使用已保存的配置。")}</p>
       </section>
 
       <section className="agent-collaboration-section agent-collaboration-integration" aria-labelledby="agent-collaboration-mcp-title">
-        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-mcp-title">在 Codex 对话中使用</h2><p>接入会登记子 Agent 工具，并尝试在本机 Codex 中刷新。已登记配置可单独刷新工具。</p></div><div className="agent-collaboration-integration-actions">
-          <button type="button" className="mg-button" disabled={!snapshot || Boolean(busy) || dirty} onClick={refreshCodex}>{busy === "refresh_codex" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <RefreshCw size={15} />}{busy === "refresh_codex" ? "刷新中…" : "刷新 Codex 工具"}</button>
-          <button type="button" className="mg-button mg-primary" disabled={!snapshot || Boolean(busy) || dirty} onClick={connectCodex}>{busy === "connect_codex" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <ArrowRightLeft size={15} />}{busy === "connect_codex" ? "接入并刷新中…" : "一键接入并刷新"}</button>
+        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-mcp-title">{t("在 Codex 对话中使用")}</h2><p>{t("接入会登记子 Agent 工具，并尝试在本机 Codex 中刷新。已登记配置可单独刷新工具。")}</p></div><div className="agent-collaboration-integration-actions">
+          <button type="button" className="mg-button" disabled={!snapshot || Boolean(busy) || dirty} onClick={refreshCodex}>{busy === "refresh_codex" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <RefreshCw size={15} />}{busy === "refresh_codex" ? t("刷新中…") : t("刷新 Codex 工具")}</button>
+          <button type="button" className="mg-button mg-primary" disabled={!snapshot || Boolean(busy) || dirty} onClick={connectCodex}>{busy === "connect_codex" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <ArrowRightLeft size={15} />}{busy === "connect_codex" ? t("接入并刷新中…") : t("一键接入并刷新")}</button>
         </div></div>
-        <div className="agent-collaboration-integration-state" data-status={snapshot?.integration?.status ?? "not_connected"} role="status"><strong>{!snapshot ? "正在读取接入状态…" : snapshot.integration?.status === "connected" ? "已接入配置" : snapshot.integration?.status === "conflict" ? "接入配置有冲突" : snapshot.integration?.status === "not_connected" ? "尚未接入 Codex" : "尚未检测到接入配置"}</strong><span>{snapshot?.integration?.message || "保存子 Agent 设置后，点击“一键接入并刷新”。"}</span></div>
-        {(snapshot?.integration?.home || snapshot?.integration?.configPath) && <p className="agent-collaboration-hint">{snapshot?.integration?.home ? "Codex 配置目录：" : "Codex 配置文件："}<code>{snapshot?.integration?.home || snapshot?.integration?.configPath}</code></p>}
+        <div className="agent-collaboration-integration-state" data-status={snapshot?.integration?.status ?? "not_connected"} role="status"><strong>{!snapshot ? t("正在读取接入状态…") : snapshot.integration?.status === "connected" ? t("已接入配置") : snapshot.integration?.status === "conflict" ? t("接入配置有冲突") : snapshot.integration?.status === "not_connected" ? t("尚未接入 Codex") : t("尚未检测到接入配置")}</strong><span>{snapshot?.integration?.message || t("保存子 Agent 设置后，点击“一键接入并刷新”。")}</span></div>
+        {(snapshot?.integration?.home || snapshot?.integration?.configPath) && <p className="agent-collaboration-hint">{snapshot?.integration?.home ? t("Codex 配置目录：") : t("Codex 配置文件：")}<code>{snapshot?.integration?.home || snapshot?.integration?.configPath}</code></p>}
         <div className="agent-collaboration-runtime-state" data-status={runtimeRefreshing ? "refreshing" : runtimeSucceeded ? "ready" : runtime?.status === "ready" ? "partial" : runtime?.status ?? "unchecked"} role="status" aria-busy={runtimeRefreshing}>
-          <small>运行中的 Codex · 最近一次工具刷新</small>
-          <strong>{runtimeRefreshing ? "正在刷新 Codex 工具…" : runtimeSucceeded ? "Codex 工具已刷新" : runtime?.status === "unavailable" ? "暂未连接到 Codex 运行时" : runtime?.status === "error" ? "工具刷新失败" : runtime?.toolsReady ? "子 Agent 工具已就绪，列表待确认" : runtime ? "工具刷新尚未完成" : "尚未检查运行中的 Codex 工具"}</strong>
-          <span>{runtimeRefreshing ? "正在重新加载本机 MCP 配置、检查子 Agent 工具并刷新列表缓存。" : runtime?.message || "点击“刷新 Codex 工具”，检查子 Agent 工具是否已在本机 Codex 中加载。"}</span>
-          {runtime && !runtimeRefreshing && <div className="agent-collaboration-runtime-steps"><span data-complete={runtime.reloadSucceeded === true}>{runtime.reloadSucceeded ? "MCP 已重载" : "MCP 重载未确认"}</span><span data-complete={runtime.toolsReady === true}>{runtime.toolsReady ? `已找到子 Agent 工具${runtime.toolCount > 0 ? `（${runtime.toolCount} 个）` : ""}` : "子 Agent 工具未确认"}</span><span data-complete={runtime.cacheRefreshed === true}>{runtime.cacheRefreshed ? "工具列表缓存已刷新" : "工具列表刷新待确认"}</span></div>}
-          {runtime?.status === "unavailable" && !runtimeRefreshing && <span>请用 Alunixa X 启动或接管 Codex 后重试，也可在 Codex 中手动重新加载 MCP。</span>}
+          <small>{t("运行中的 Codex · 最近一次工具刷新")}</small>
+          <strong>{runtimeRefreshing ? t("正在刷新 Codex 工具…") : runtimeSucceeded ? t("Codex 工具已刷新") : runtime?.status === "unavailable" ? t("暂未连接到 Codex 运行时") : runtime?.status === "error" ? t("工具刷新失败") : runtime?.toolsReady ? t("子 Agent 工具已就绪，列表待确认") : runtime ? t("工具刷新尚未完成") : t("尚未检查运行中的 Codex 工具")}</strong>
+          <span>{runtimeRefreshing ? t("正在重新加载本机 MCP 配置、检查子 Agent 工具并刷新列表缓存。") : runtime?.message || t("点击“刷新 Codex 工具”，检查子 Agent 工具是否已在本机 Codex 中加载。")}</span>
+          {runtime && !runtimeRefreshing && <div className="agent-collaboration-runtime-steps"><span data-complete={runtime.reloadSucceeded === true}>{runtime.reloadSucceeded ? t("MCP 已重载") : t("MCP 重载未确认")}</span><span data-complete={runtime.toolsReady === true}>{runtime.toolsReady ? tf("已找到子 Agent 工具{0}", [runtime.toolCount > 0 ? tf("（{0} 个）", [runtime.toolCount]) : ""]) : t("子 Agent 工具未确认")}</span><span data-complete={runtime.cacheRefreshed === true}>{runtime.cacheRefreshed ? t("工具列表缓存已刷新") : t("工具列表刷新待确认")}</span></div>}
+          {runtime?.status === "unavailable" && !runtimeRefreshing && <span>{t("请用 Alunixa X 启动或接管 Codex 后重试，也可在 Codex 中手动重新加载 MCP。")}</span>}
         </div>
-        <p className="agent-collaboration-hint">Codex 的 MCP 工具列表可能缓存约 5 分钟，刷新会重新加载配置并更新列表缓存。</p>
-        <p className="agent-collaboration-hint">刷新后的工具从下一轮消息起可用，当前正在进行的回合不会中途增加工具。也可手动重新加载 MCP 或开启新对话。{dirty && " 请先保存设置，再接入或刷新。"}</p>
-        <details className="agent-collaboration-manual"><summary>手动接入与配置导出</summary><div className="agent-collaboration-manual-body">
-          <p className="agent-collaboration-hint">也可以复制配置，合并到对应客户端的 MCP 设置后重新连接。</p>
-          <button type="button" className="mg-button" disabled={mcpLoading || !snapshot || Boolean(busy)} onClick={() => void loadMcpConfig()}>{mcpLoading ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Copy size={15} />}{mcpLoading ? "读取中…" : mcpConfig ? "重新生成配置" : "生成手动配置"}</button>
+        <p className="agent-collaboration-hint">{t("Codex 的 MCP 工具列表可能缓存约 5 分钟，刷新会重新加载配置并更新列表缓存。")}</p>
+        <p className="agent-collaboration-hint">{t("刷新后的工具从下一轮消息起可用，当前正在进行的回合不会中途增加工具。也可手动重新加载 MCP 或开启新对话。")}{dirty && t(" 请先保存设置，再接入或刷新。")}</p>
+        <details className="agent-collaboration-manual"><summary>{t("手动接入与配置导出")}</summary><div className="agent-collaboration-manual-body">
+          <p className="agent-collaboration-hint">{t("也可以复制配置，合并到对应客户端的 MCP 设置后重新连接。")}</p>
+          <button type="button" className="mg-button" disabled={mcpLoading || !snapshot || Boolean(busy)} onClick={() => void loadMcpConfig()}>{mcpLoading ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Copy size={15} />}{mcpLoading ? t("读取中…") : mcpConfig ? t("重新生成配置") : t("生成手动配置")}</button>
           {mcpError && <p className="agent-collaboration-error" role="alert">{mcpError}</p>}
-          {copied && <p className="agent-collaboration-notice" role="status">{copied}已复制。</p>}
+          {copied && <p className="agent-collaboration-notice" role="status">{copied}{t("已复制。")}</p>}
           {mcpConfig && <div className="agent-collaboration-mcp-configs">
-            {[{ label: "Codex 配置", value: mcpConfig.codexToml }, { label: "Claude 配置", value: mcpConfig.claudeJson }].map((item) => <div className="agent-collaboration-mcp-code" key={item.label}><div><h3>{item.label}</h3><button type="button" className="mg-button" onClick={() => void copyText(item.value, item.label)}>{copied === item.label ? <Check size={14} /> : <Copy size={14} />}复制</button></div><pre tabIndex={0} aria-label={item.label}>{item.value}</pre></div>)}
-            <details className="agent-collaboration-mcp-command"><summary>其他 MCP 客户端的启动参数</summary><pre tabIndex={0}>{JSON.stringify({ command: mcpConfig.command, args: mcpConfig.args }, null, 2)}</pre></details>
+            {[{ label: t("Codex 配置"), value: mcpConfig.codexToml }, { label: t("Claude 配置"), value: mcpConfig.claudeJson }].map((item) => <div className="agent-collaboration-mcp-code" key={item.label}><div><h3>{item.label}</h3><button type="button" className="mg-button" onClick={() => void copyText(item.value, item.label)}>{copied === item.label ? <Check size={14} /> : <Copy size={14} />}{t("复制")}</button></div><pre tabIndex={0} aria-label={item.label}>{item.value}</pre></div>)}
+            <details className="agent-collaboration-mcp-command"><summary>{t("其他 MCP 客户端的启动参数")}</summary><pre tabIndex={0}>{JSON.stringify({ command: mcpConfig.command, args: mcpConfig.args }, null, 2)}</pre></details>
           </div>}
         </div></details>
       </section>
 
-      <details className="agent-collaboration-debug"><summary>调试与任务记录 <span className="agent-collaboration-count">{tasks.length}</span>{hasUnfinishedTasks && <span className="agent-collaboration-status" data-status="running">有任务执行中</span>}</summary><div className="agent-collaboration-debug-body">
-      <p className="agent-collaboration-hint">日常任务直接在 Codex 对话中交给子 Agent。这里用于检查执行情况，或单独发送调试任务。</p>
+      <details className="agent-collaboration-debug"><summary>{t("调试与任务记录")} <span className="agent-collaboration-count">{tasks.length}</span>{hasUnfinishedTasks && <span className="agent-collaboration-status" data-status="running">{t("有任务执行中")}</span>}</summary><div className="agent-collaboration-debug-body">
+      <p className="agent-collaboration-hint">{t("日常任务直接在 Codex 对话中交给子 Agent。这里用于检查执行情况，或单独发送调试任务。")}</p>
       <section className="agent-collaboration-section" aria-labelledby="agent-collaboration-create-title">
-        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-create-title">{continuation ? "继续调试对话" : "发送调试任务"}</h2><p>任务可以访问所选工作目录，请先完成目标 CLI 的登录。</p></div></div>
-        {continuation && <div className="agent-collaboration-continuation"><div><strong>续聊 {agentName(continuation.agentId)} 的任务</strong><span>{continuation.prompt}</span><small>任务 {continuation.id} · 沿用原会话与工作目录</small></div><button type="button" className="mg-button" disabled={busy === "submit"} onClick={() => { setContinueTaskId(""); setPrompt(""); }}>返回新任务</button></div>}
+        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-create-title">{continuation ? t("继续调试对话") : t("发送调试任务")}</h2><p>{t("任务可以访问所选工作目录，请先完成目标 CLI 的登录。")}</p></div></div>
+        {continuation && <div className="agent-collaboration-continuation"><div><strong>{t("续聊")} {agentName(continuation.agentId)} {t("的任务")}</strong><span>{continuation.prompt}</span><small>{t("任务")} {continuation.id} {t("· 沿用原会话与工作目录")}</small></div><button type="button" className="mg-button" disabled={busy === "submit"} onClick={() => { setContinueTaskId(""); setPrompt(""); }}>{t("返回新任务")}</button></div>}
         <form className="agent-collaboration-form" onSubmit={submitTask}>
           <div className="agent-collaboration-form-row">
-            <label className="mg-field" htmlFor="agent-collaboration-target"><span>执行 Agent</span><select id="agent-collaboration-target" value={targetId} disabled={Boolean(continuation) || busy === "submit" || !enabledAgents.length} onChange={(event) => setAgentId(event.target.value)}>
-              {continuation ? <option value={continuation.agentId}>{agentName(continuation.agentId)}</option> : enabledAgents.length ? enabledAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>) : <option value="">请先启用一个 CLI</option>}
+            <label className="mg-field" htmlFor="agent-collaboration-target"><span>{t("执行 Agent")}</span><select id="agent-collaboration-target" value={targetId} disabled={Boolean(continuation) || busy === "submit" || !enabledAgents.length} onChange={(event) => setAgentId(event.target.value)}>
+              {continuation ? <option value={continuation.agentId}>{agentName(continuation.agentId)}</option> : enabledAgents.length ? enabledAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>) : <option value="">{t("请先启用一个 CLI")}</option>}
             </select></label>
-            <label className="mg-field" htmlFor="agent-collaboration-cwd"><span>工作目录</span><input id="agent-collaboration-cwd" value={targetCwd} disabled={Boolean(continuation) || busy === "submit"} placeholder="/absolute/path/to/project" spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(event) => setCwd(event.target.value)} /></label>
+            <label className="mg-field" htmlFor="agent-collaboration-cwd"><span>{t("工作目录")}</span><input id="agent-collaboration-cwd" value={targetCwd} disabled={Boolean(continuation) || busy === "submit"} placeholder="/absolute/path/to/project" spellCheck={false} autoCapitalize="off" autoCorrect="off" onChange={(event) => setCwd(event.target.value)} /></label>
           </div>
-          <label className="mg-field" htmlFor="agent-collaboration-prompt"><span>{continuation ? "追加任务或问题" : "任务内容"}</span><textarea id="agent-collaboration-prompt" ref={promptRef} rows={4} value={prompt} disabled={busy === "submit"} placeholder={continuation ? "基于刚才的结果，继续…" : "描述目标、需要检查的文件，以及希望返回的结果…"} onChange={(event) => setPrompt(event.target.value)} /></label>
-          <div className="agent-collaboration-form-footer"><p className="agent-collaboration-hint" id="agent-collaboration-submit-hint">{formDisabledReason || "新任务会创建 CLI 会话。已有任务可在结果区选择“继续该任务”。"}</p><button type="submit" className="mg-button mg-primary" aria-describedby="agent-collaboration-submit-hint" disabled={Boolean(busy) || Boolean(formDisabledReason) || !prompt.trim() || !targetCwd.trim()}>{busy === "submit" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Play size={15} />}{busy === "submit" ? "提交中…" : continuation ? "发送并续聊" : "提交任务"}</button></div>
+          <label className="mg-field" htmlFor="agent-collaboration-prompt"><span>{continuation ? t("追加任务或问题") : t("任务内容")}</span><textarea id="agent-collaboration-prompt" ref={promptRef} rows={4} value={prompt} disabled={busy === "submit"} placeholder={continuation ? t("基于刚才的结果，继续…") : t("描述目标、需要检查的文件，以及希望返回的结果…")} onChange={(event) => setPrompt(event.target.value)} /></label>
+          <div className="agent-collaboration-form-footer"><p className="agent-collaboration-hint" id="agent-collaboration-submit-hint">{formDisabledReason || t("新任务会创建 CLI 会话。已有任务可在结果区选择“继续该任务”。")}</p><button type="submit" className="mg-button mg-primary" aria-describedby="agent-collaboration-submit-hint" disabled={Boolean(busy) || Boolean(formDisabledReason) || !prompt.trim() || !targetCwd.trim()}>{busy === "submit" ? <Loader2 size={15} className="agent-collaboration-spin" /> : <Play size={15} />}{busy === "submit" ? t("提交中…") : continuation ? t("发送并续聊") : t("提交任务")}</button></div>
         </form>
       </section>
 
       <section className="agent-collaboration-section" aria-labelledby="agent-collaboration-tasks-title">
-        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-tasks-title">任务与结果 <span className="agent-collaboration-count">{tasks.length}</span></h2><p role="status">{hasUnfinishedTasks ? "任务执行期间每 2 秒更新状态。" : "每 10 秒检查新任务，可接收其他客户端派发的任务。"}</p></div></div>
-        {!tasks.length ? <div className="agent-collaboration-empty">还没有子 Agent 任务。接入后，在 Codex 对话中分派第一个任务。</div> : <div className="agent-collaboration-task-workspace">
-          <ul className="agent-collaboration-task-list" aria-label="协作任务">
-            {tasks.map((task) => <li key={task.id}><button type="button" className="agent-collaboration-task-select" aria-pressed={task.id === selectedId} onClick={() => setSelectedId(task.id)}><span className="agent-collaboration-task-title"><strong>{agentName(task.agentId)}</strong><span className="agent-collaboration-status" data-status={task.status}>{statusLabels[task.status] ?? task.status}</span></span><span className="agent-collaboration-task-prompt">{task.prompt}</span><small>{formatTime(task.createdAtMs)}{task.parentTaskId ? " · 续聊" : ""}</small></button></li>)}
+        <div className="agent-collaboration-section-head"><div><h2 id="agent-collaboration-tasks-title">{t("任务与结果")} <span className="agent-collaboration-count">{tasks.length}</span></h2><p role="status">{hasUnfinishedTasks ? t("任务执行期间每 2 秒更新状态。") : t("每 10 秒检查新任务，可接收其他客户端派发的任务。")}</p></div></div>
+        {!tasks.length ? <div className="agent-collaboration-empty">{t("还没有子 Agent 任务。接入后，在 Codex 对话中分派第一个任务。")}</div> : <div className="agent-collaboration-task-workspace">
+          <ul className="agent-collaboration-task-list" aria-label={t("协作任务")}>
+            {tasks.map((task) => <li key={task.id}><button type="button" className="agent-collaboration-task-select" aria-pressed={task.id === selectedId} onClick={() => setSelectedId(task.id)}><span className="agent-collaboration-task-title"><strong>{agentName(task.agentId)}</strong><span className="agent-collaboration-status" data-status={task.status}>{statusLabels[task.status] ?? task.status}</span></span><span className="agent-collaboration-task-prompt">{task.prompt}</span><small>{formatTime(task.createdAtMs)}{task.parentTaskId ? t(" · 续聊") : ""}</small></button></li>)}
           </ul>
           {selected && <div className="agent-collaboration-task-detail" key={selected.id}>
-            <div className="agent-collaboration-detail-head"><div><h3>{agentName(selected.agentId)}</h3><span className="agent-collaboration-status" data-status={selected.status} role="status">{selected.cancelRequested && unfinished(selected) ? "正在取消…" : statusLabels[selected.status] ?? selected.status}</span></div><div className="agent-collaboration-detail-actions">
-              {unfinished(selected) ? <button type="button" className="mg-button" disabled={Boolean(busy) || selected.cancelRequested} onClick={() => void mutate("cancel", { id: selected.id }, () => setNotice("已请求取消任务，状态将在任务停止后更新。"))}><Square size={13} />{busy === "cancel" || selected.cancelRequested ? "正在取消…" : "取消任务"}</button> : selected.status === "completed" && Boolean(selected.sessionId) && <button type="button" className="mg-button" disabled={Boolean(busy)} onClick={() => continueTask(selected)}>继续该任务</button>}
+            <div className="agent-collaboration-detail-head"><div><h3>{agentName(selected.agentId)}</h3><span className="agent-collaboration-status" data-status={selected.status} role="status">{selected.cancelRequested && unfinished(selected) ? t("正在取消…") : statusLabels[selected.status] ?? selected.status}</span></div><div className="agent-collaboration-detail-actions">
+              {unfinished(selected) ? <button type="button" className="mg-button" disabled={Boolean(busy) || selected.cancelRequested} onClick={() => void mutate("cancel", { id: selected.id }, () => setNotice(t("已请求取消任务，状态将在任务停止后更新。")))}><Square size={13} />{busy === "cancel" || selected.cancelRequested ? t("正在取消…") : t("取消任务")}</button> : selected.status === "completed" && Boolean(selected.sessionId) && <button type="button" className="mg-button" disabled={Boolean(busy)} onClick={() => continueTask(selected)}>{t("继续该任务")}</button>}
             </div></div>
-            <dl className="agent-collaboration-task-meta"><dt>工作目录</dt><dd>{selected.cwd}</dd><dt>任务 ID</dt><dd>{selected.id}</dd><dt>更新时间</dt><dd>{formatTime(selected.updatedAtMs)}</dd>{selected.sessionId && <><dt>会话 ID</dt><dd>{selected.sessionId}</dd></>}{selected.parentTaskId && <><dt>接续任务</dt><dd>{selected.parentTaskId}</dd></>}</dl>
-            <div className="agent-collaboration-output"><h4>任务内容</h4><pre tabIndex={0}>{selected.prompt}</pre></div>
-            {selected.progress && <div className="agent-collaboration-output"><h4>执行进度</h4><pre tabIndex={0} aria-label="执行进度">{selected.progress}</pre></div>}
-            {selected.answer && <div className="agent-collaboration-output"><h4>结果</h4><pre tabIndex={0} aria-label="任务结果">{selected.answer}</pre></div>}
-            {selected.error && <div className="agent-collaboration-output agent-collaboration-output-error"><h4>错误信息</h4><pre tabIndex={0} aria-label="任务错误">{selected.error}</pre></div>}
-            {!selected.progress && !selected.answer && !selected.error && <p className="agent-collaboration-hint">{unfinished(selected) ? "等待 CLI 返回输出…" : "该任务没有返回文本输出。"}</p>}
-            {!unfinished(selected) && (selected.status !== "completed" || !selected.sessionId) && <p className="agent-collaboration-hint">只有已完成且有会话 ID 的任务可以续聊。可创建新任务继续处理。</p>}
+            <dl className="agent-collaboration-task-meta"><dt>{t("工作目录")}</dt><dd>{selected.cwd}</dd><dt>{t("任务 ID")}</dt><dd>{selected.id}</dd><dt>{t("更新时间")}</dt><dd>{formatTime(selected.updatedAtMs)}</dd>{selected.sessionId && <><dt>{t("会话 ID")}</dt><dd>{selected.sessionId}</dd></>}{selected.parentTaskId && <><dt>{t("接续任务")}</dt><dd>{selected.parentTaskId}</dd></>}</dl>
+            <div className="agent-collaboration-output"><h4>{t("任务内容")}</h4><pre tabIndex={0}>{selected.prompt}</pre></div>
+            {selected.progress && <div className="agent-collaboration-output"><h4>{t("执行进度")}</h4><pre tabIndex={0} aria-label={t("执行进度")}>{selected.progress}</pre></div>}
+            {selected.answer && <div className="agent-collaboration-output"><h4>{t("结果")}</h4><pre tabIndex={0} aria-label={t("任务结果")}>{selected.answer}</pre></div>}
+            {selected.error && <div className="agent-collaboration-output agent-collaboration-output-error"><h4>{t("错误信息")}</h4><pre tabIndex={0} aria-label={t("任务错误")}>{selected.error}</pre></div>}
+            {!selected.progress && !selected.answer && !selected.error && <p className="agent-collaboration-hint">{unfinished(selected) ? t("等待 CLI 返回输出…") : t("该任务没有返回文本输出。")}</p>}
+            {!unfinished(selected) && (selected.status !== "completed" || !selected.sessionId) && <p className="agent-collaboration-hint">{t("只有已完成且有会话 ID 的任务可以续聊。可创建新任务继续处理。")}</p>}
           </div>}
         </div>}
       </section>
 
       </div></details>
-      <p className="agent-collaboration-hint agent-collaboration-footnote">外部 CLI 子 Agent，不接管已经打开的桌面会话。</p>
+      <p className="agent-collaboration-hint agent-collaboration-footnote">{t("外部 CLI 子 Agent，不接管已经打开的桌面会话。")}</p>
     </div>
   </div>;
 }

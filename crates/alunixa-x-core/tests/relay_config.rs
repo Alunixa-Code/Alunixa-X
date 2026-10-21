@@ -57,14 +57,6 @@ fn model_catalog_pointer(contents: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn assert_managed_catalog_pointer(home: &std::path::Path, config: &str, filename: &str) {
-    let pointer = model_catalog_pointer(config).expect("必须生成 model_catalog_json 指针");
-    let path = std::path::Path::new(&pointer);
-    assert!(path.is_absolute(), "受管 catalog 必须使用绝对路径：{pointer}");
-    assert_eq!(path, home.join("model-catalogs").join(filename));
-    assert!(path.is_file(), "catalog 文件必须已写入：{pointer}");
-}
-
 /// 回归（issue #2147）：通用配置里混进「只有 `enabled_tools`、没有 `command`/`url`」
 /// 的残缺 MCP 条目时，合并后必须把它丢掉——codex 对缺传输方式的条目不是跳过，
 /// 而是拒载**整份** config.toml（`invalid transport`），用户表现是「编辑通用配置后
@@ -5054,30 +5046,10 @@ experimental_bearer_token = "sk-new"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
 
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\relay_config.rs\ours
-    assert!(
-        config.contains(r#"model_catalog_json = "model-catalogs/relay-routes.json""#),
-        "custom Responses provider with model routes must write a catalog: {config}"
-    );
+    assert_managed_catalog_pointer(temp.path(), &config, "relay-routes.json");
     let catalog =
         std::fs::read_to_string(temp.path().join("model-catalogs").join("relay-routes.json"))
             .unwrap();
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\relay_config.rs\base
-    assert!(
-        config.contains(r#"model_catalog_json = "model-catalogs/relay-routes.json""#),
-        "custom Responses provider with model routes must write a catalog: {config}"
-    );
-    let catalog = std::fs::read_to_string(
-        temp.path().join("model-catalogs").join("relay-routes.json"),
-    )
-    .unwrap();
-=======
-    assert_managed_catalog_pointer(temp.path(), &config, "relay-routes.json");
-    let catalog = std::fs::read_to_string(
-        temp.path().join("model-catalogs").join("relay-routes.json"),
-    )
-    .unwrap();
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\relay_config.rs\theirs
     assert!(catalog.contains(r#""slug": "gpt-5.6-sol""#), "{catalog}");
 }
 
@@ -6827,6 +6799,14 @@ base_url = "https://relay.example.test/v1"
     // 窗口仍按生成器管辖：未显式配置时取供应商元数据的 1M（而非粘贴残留值）
     assert_eq!(model["context_window"], 1_048_576);
     assert_eq!(model["max_context_window"], 1_048_576);
+}
+
+fn assert_managed_catalog_pointer(home: &std::path::Path, config: &str, filename: &str) {
+    let pointer = model_catalog_pointer(config).expect("必须生成 model_catalog_json 指针");
+    let path = std::path::Path::new(&pointer);
+    assert!(path.is_absolute(), "受管 catalog 必须使用绝对路径：{pointer}");
+    assert_eq!(path, home.join("model-catalogs").join(filename));
+    assert!(path.is_file(), "catalog 文件必须已写入：{pointer}");
 }
 
 /// Kimi 官方 Responses 接口不认 `tool_search` 工具（整单 400）：即使没配窗口也要落

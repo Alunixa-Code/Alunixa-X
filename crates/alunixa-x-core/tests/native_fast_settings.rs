@@ -12,10 +12,7 @@ fn native_fast_unlock_requires_explicit_opt_in() {
     let legacy: BackendSettings =
         serde_json::from_value(json!({ "codexAppServiceTierControls": true })).unwrap();
     assert!(!legacy.codex_app_native_fast_unlock);
-    assert!(serde_json::to_value(legacy)
-        .unwrap()
-        .get("codexAppServiceTierControls")
-        .is_none());
+    assert_eq!(serde_json::to_value(legacy).unwrap()["codexAppServiceTierControls"], true);
 
     let imported: BackendSettings = serde_json::from_value(json!({
         "codexAppNativeFastUnlock": true,
@@ -23,14 +20,11 @@ fn native_fast_unlock_requires_explicit_opt_in() {
     }))
     .unwrap();
     assert!(imported.codex_app_native_fast_unlock);
-    assert!(serde_json::to_value(imported)
-        .unwrap()
-        .get("codexAppServiceTierControls")
-        .is_none());
+    assert_eq!(serde_json::to_value(imported).unwrap()["codexAppServiceTierControls"], false);
 }
 
 #[test]
-fn native_fast_unlock_persists_while_retired_fast_updates_are_ignored() {
+fn native_fast_unlock_and_retained_controls_persist_independently() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("settings.json");
     let store = SettingsStore::new(path.clone());
@@ -43,7 +37,7 @@ fn native_fast_unlock_persists_while_retired_fast_updates_are_ignored() {
     assert!(!settings.codex_app_native_fast_unlock);
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved.get("codexAppServiceTierControls").is_none());
+    assert_eq!(saved["codexAppServiceTierControls"], true);
     assert_eq!(saved["customField"], 1);
 
     let settings = store
@@ -63,11 +57,11 @@ fn native_fast_unlock_persists_while_retired_fast_updates_are_ignored() {
     assert!(!store.load().unwrap().codex_app_native_fast_unlock);
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved.get("codexAppServiceTierControls").is_none());
+    assert_eq!(saved["codexAppServiceTierControls"], false);
 }
 
 #[test]
-fn saving_legacy_settings_discards_retired_fast_without_enabling_native_fast() {
+fn saving_retained_service_tier_does_not_enable_native_fast() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("settings.json");
     let legacy = json!({ "codexAppServiceTierControls": true, "customField": 1 });
@@ -79,7 +73,7 @@ fn saving_legacy_settings_discards_retired_fast_without_enabling_native_fast() {
 
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    assert!(saved.get("codexAppServiceTierControls").is_none());
+    assert_eq!(saved["codexAppServiceTierControls"], true);
     assert_eq!(saved["codexAppNativeFastUnlock"], false);
     assert_eq!(saved["customField"], 1);
 }

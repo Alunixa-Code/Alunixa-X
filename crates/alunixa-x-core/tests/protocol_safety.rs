@@ -340,7 +340,9 @@ fn synthetic_compaction_requires_wire_completion_and_complete_events() {
 fn namespace_projection_merges_children_and_uses_current_definition() {
     let child = |name: &str, description: &str| json!({"type":"function","name":name,"description":description,"parameters":{"type":"object"}});
     let request = json!({"model":"fixture","tools":[{"type":"namespace","name":"repo","tools":[child("search","current")]}],"input":[
+        {"type":"tool_search_call","call_id":"old","name":"tool_search","arguments":"{}"},
         {"type":"tool_search_output","call_id":"old","tools":[{"type":"namespace","name":"repo","tools":[child("search","old")]}]},
+        {"type":"tool_search_call","call_id":"new","name":"tool_search","arguments":"{}"},
         {"type":"tool_search_output","call_id":"new","tools":[{"type":"namespace","name":"repo","tools":[child("search","recent"),child("new_tool","new")]}]}]});
     let sent = responses_to_chat_completions(request.clone()).unwrap();
     let tools = sent["tools"].as_array().unwrap();

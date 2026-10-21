@@ -15,7 +15,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -900,33 +900,8 @@ process.exit(0);
 fn injection_script_installs_image_and_video_overlays_from_data_or_blob() {
     let script = assets::injection_script(57321);
 
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
     assert!(script.contains("const source = config.dataUrl || config.sourceUrl || \"\""));
     assert!(script.contains("backgroundImage: `url(\"${url.replace(/\"/g, \"%22\")}\")`"));
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
-    assert!(script.contains("const source = config.dataUrl || \"\""));
-    assert!(script.contains("backgroundImage: `url(\"${source.replace(/\"/g, \"%22\")}\")`"));
-=======
-    assert!(script.contains("typeof config.dataUrl === \"string\""));
-    assert!(script.contains("overlay.id = alunixaXImageOverlayId"));
-    let overlay_script = script
-        .split("function installCodexPlusImageOverlay()")
-        .nth(1)
-        .and_then(|body| body.split("function scheduleCodexPlusImageOverlay()").next())
-        .expect("image overlay entry point should be embedded");
-    assert!(overlay_script.contains("data-alunixa-x-image-native"));
-    assert!(overlay_script.contains("root.insertBefore(overlay, document.body"));
-    assert!(!overlay_script.contains("maskImage"));
-    assert!(!overlay_script.contains("ScrollTimeline"));
-    assert!(!overlay_script.contains("cloneNode"));
-    assert!(script.contains("URL.createObjectURL(new Blob([bytes], { type: data[1] }))"));
-    assert!(script.contains("image.src = resource.imageSource"));
-    assert!(!script.contains("JSON.stringify(source)"));
-    assert!(overlay_script.contains("zIndex: String(wallpaperLayer)"));
-    assert!(script.contains("pointerEvents: \"none\""));
-    assert!(!script.contains("alunixaXImageOverlayTransparentTargetSelector"));
-    assert!(!script.contains("function installCodexPlusImageOverlayForeground"));
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
     assert!(script.contains(
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
     ));
@@ -2970,98 +2945,6 @@ fn injection_script_exposes_sidebar_thread_id_badge_control() {
 }
 
 #[test]
-fn injection_script_exposes_capacity_auto_retry_control() {
-    let script = assets::injection_script(57321);
-
-    // 开关接线：默认值 → 后端映射 → 中文标签 → 菜单 DOM → 设置面板输入框。
-    assert!(script.contains("capacityAutoRetry: false"));
-    assert!(script.contains("capacityAutoRetry: \"codexAppCapacityAutoRetry\""));
-    assert!(script.contains("容量错误自动重试"));
-    assert!(script.contains("data-alunixa-x-setting=\"capacityAutoRetry\""));
-    assert!(script.contains("data-alunixa-x-capacity-retry-max-attempts=\"true\""));
-    assert!(script.contains("data-alunixa-x-capacity-retry-interval=\"true\""));
-
-    // 运行逻辑：横幅识别只看语义结构（aside + 重试按钮），不绑 Codex 的 hash 类名。
-    assert!(script.contains("function findCapacityAutoRetryBanner"));
-    assert!(script.contains("function capacityAutoRetryTick"));
-    assert!(script.contains("function syncCodexPlusCapacityAutoRetry"));
-    assert!(script.contains("querySelectorAll(\"aside\")"));
-    assert!(script.contains("capacityAutoRetryLabelPattern"));
-    // 原生倒计时在跑时让路，避免和 Codex 自己的自动重试撞车。
-    assert!(script.contains("capacityAutoRetryCountdownPattern"));
-    assert!(script.contains("capacityAutoRetryNativeCountdownRunning"));
-    // 0 秒间隔必须合法（用户要求"失败就立刻重试"），但有 1 秒地板值防热循环。
-    assert!(script.contains("capacityAutoRetryMinIntervalMs = 1000"));
-    assert!(script.contains("capacityAutoRetryDefaultIntervalSeconds = 0"));
-    // 插进 DOM 的浮标必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
-    assert!(script.contains("data-alunixa-x-ext\", \"capacity-auto-retry\""));
-    assert!(script.contains("syncCodexPlusCapacityAutoRetry);"));
-}
-
-#[test]
-fn injection_script_uses_an_icon_for_idle_dictation() {
-    let script = assets::injection_script(57321);
-
-    // 空闲态是图标按钮：文字按钮在 composer 底栏比原生图标宽一倍多。
-    assert!(script.contains("function alunixaXDictationMicButton"));
-    assert!(script.contains("function alunixaXDictationMicIcon"));
-    assert!(script.contains("alunixaXDictationMicButton(state.phase !== \"idle\")"));
-    // 不再有「空闲态渲染文字按钮」这条路径。
-    assert!(!script.contains("alunixaXDictationControl(\"start\", \"语音输入\""));
-    // 无障碍名称不能丢：图标按钮只能靠 aria-label / title 表达用途。
-    assert!(script.contains("button.setAttribute(\"aria-label\", \"语音输入\")"));
-    assert!(script.contains("button.setAttribute(\"title\", \"语音输入\")"));
-    // 录音/转写这些状态仍然带文字，图标说不清。
-    assert!(script.contains("alunixaXDictationControl(\"insert\", \"停止并插入\")"));
-}
-
-#[test]
-fn injection_script_exposes_the_usage_status_line() {
-    let script = assets::injection_script(57321);
-
-    // 开关接线：默认值 → 后端映射。
-    assert!(script.contains("usageStatusLine: true"));
-    assert!(script.contains("usageStatusLine: \"codexAppUsageStatusLine\""));
-    assert!(script.contains("usageStatusLine: false"));
-
-    // 数据源走尾部快照路由，不能退回按秒整读历史的 /thread-usage-history。
-    assert!(script.contains("postJson(\"/thread-usage-live\""));
-    assert!(script.contains("data-above-composer-conversation-id"));
-    assert!(script.contains("data-composer-surface-variant"));
-    // 插进 DOM 的节点必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
-    assert!(script.contains("data-alunixa-x-ext\", \"builtin-usage-statusline\""));
-    assert!(script.contains("registerCodexPlusExtensionSelector"));
-    // 设置面板里的开关要能立刻生效，不用等下一拍轮询。
-    assert!(script.contains("__ALUNIXA_X_USAGE_STATUSLINE_SYNC__"));
-}
-
-#[test]
-fn injection_script_recovers_a_stalled_codex_boot_shell() {
-    let script = assets::injection_script(57321);
-
-    // 空壳判定依据：有 #root、长不出 <main>、且里头一个字都没有。
-    assert!(script.contains("function bootShellRecoveryStuck"));
-    assert!(script.contains("function bootShellRecoverySettled"));
-    assert!(script.contains("document.querySelector(\"main\")"));
-    assert!(script.contains("root.innerText.trim() === \"\""));
-
-    // 只刷主页面：活动悬浮层 / quick-chat 带 initialRoute，本来就没有 <main>。
-    assert!(script.contains("function bootShellRecoveryAppliesHere"));
-    assert!(script.contains("/[?&]initialRoute=/"));
-    // 宽限要足够长，才能把「启动慢」和「真卡死」分开。
-    assert!(script.contains("bootShellRecoveryGraceMs = 20000"));
-    // 限次靠 sessionStorage + 冷却：写不进去就宁可不刷，避免刷新循环。
-    assert!(script.contains("bootShellRecoveryCooldownMs = 60000"));
-    assert!(script.contains("window.sessionStorage.getItem(bootShellRecoveryStorageKey)"));
-    assert!(script.contains("window.sessionStorage.setItem(bootShellRecoveryStorageKey"));
-    // 触发过要能从 alunixa-x.log 复盘。
-    assert!(script.contains("boot_shell_recovery_reload"));
-    assert!(script.contains("window.location.reload();"));
-    // 模块末尾必须真的装上，否则整段是死代码。
-    assert!(script.contains("installBootShellRecovery();"));
-}
-
-#[test]
 fn injection_script_keeps_session_action_buttons_in_pr_style() {
     let script = assets::injection_script(57321);
 
@@ -3604,24 +3487,42 @@ if (existingContainerDefault.model !== hostModel) process.exit(10);
 }
 
 #[test]
-fn injection_script_retires_legacy_fast_controls_and_preserves_native_unlock() {
+fn injection_script_exposes_fast_service_tier_control() {
     let script = assets::injection_script(57321);
-    for retired in [
-        "data-alunixa-x-setting=\"serviceTierControls\"",
-        "data-codex-service-tier-global-fast",
-        "toggleCodexServiceTierFromBadge",
-        "setCodexThreadServiceTierMode",
-        "applyCodexServiceTierRequestOnly",
-    ] {
-        assert!(!script.contains(retired), "retired legacy Fast behavior: {retired}");
-    }
-    assert!(script.contains("data-alunixa-x-setting=\"nativeFastUnlock\""));
-    assert!(script.contains("__alunixaXNativeFastUnlock"));
-    assert!(script.contains("codexAppNativeFastUnlock"));
-    assert!(script.contains("serviceTiers"));
+
+    assert!(script.contains("default-service-tier"));
+    assert!(script.contains("setting-storage-"));
+    assert!(script.contains("codexAppAssetUrl"));
+    assert!(script.contains("codexThreadServiceTierOverrides"));
+    assert!(script.contains("setCodexThreadServiceTierMode"));
+    assert!(script.contains("codexServiceTierRequestOverride"));
+    assert!(script.contains("codexServiceTierSupportedFastModels"));
+    assert!(script.contains("\"gpt-5.4\""));
+    assert!(script.contains("\"gpt-5.5\""));
+    assert!(script.contains("\"gpt-5.6-sol\""));
+    assert!(script.contains("\"gpt-5.6-terra\""));
+    assert!(script.contains("\"gpt-5.6-luna\""));
+    assert!(script.contains("codexServiceTierFastSupportedForModel"));
+    assert!(script.contains("codexServiceTierModelForRequest"));
+    assert!(script.contains("codexServiceTierMaybeLoadModelCatalog"));
+    assert!(script.contains("fastBlocked"));
+    assert!(script.contains("data-tier=\"unsupported\""));
+    assert!(script.contains("nextParams.service_tier = override.serviceTier"));
+    assert!(script.contains("serviceTierControls: false"));
+    assert!(script.contains("data-alunixa-x-setting=\"serviceTierControls\""));
+    assert!(script.contains("data-codex-service-tier-controls"));
+    assert!(script.contains("removeCodexServiceTierBadges"));
+    assert!(script.contains("installCodexServiceTierDispatcherPatch"));
+    assert!(script.contains("codexServiceTierDispatcherPatchable"));
+    assert!(script.contains("dispatcher is a non-writable RPC stub"));
+    assert!(script.contains("Object.isExtensible(dispatcher)"));
+    assert!(script.contains("applyCodexServiceTierRequestOnly"));
+    assert!(script.contains("alunixaXServiceTierPrewarmThreadStart"));
+    assert!(script.contains("Object.isExtensible(client)"));
     assert!(script.contains("locateCodexAppServerClientBreakpoint"));
+    assert!(script.contains("installCodexAppServerClientCapture"));
+    assert!(script.contains("__alunixaXAppServerClientCapture"));
     assert!(script.contains("installCodexAppServerClientPrototypePatch"));
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
     assert!(script.contains("__alunixaXAppServerClientClass"));
     assert!(script.contains("app_server_client_prototype_patch_installed"));
     assert!(script.contains("服务模式"));
@@ -3696,72 +3597,6 @@ fn injection_script_retires_legacy_fast_controls_and_preserves_native_unlock() {
     assert!(script.contains("dispatcher export unavailable"));
     assert!(!script.contains("data-codex-max-reasoning-control"));
     assert!(!script.contains("codexAppMaxReasoningOverride"));
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
-    assert!(script.contains("__alunixaXAppServerClientClass"));
-    assert!(script.contains("app_server_client_prototype_patch_installed"));
-    assert!(script.contains("服务模式"));
-    assert!(script.contains("data-codex-service-tier-status"));
-    assert!(script.contains("data-codex-service-tier-inherit"));
-    assert!(script.contains("data-codex-service-tier-standard"));
-    assert!(script.contains("data-codex-service-tier-fast"));
-    assert!(script.contains("data-codex-service-tier-custom"));
-    assert!(script.contains("data-codex-service-tier-thread-inherit"));
-    assert!(script.contains("data-codex-service-tier-thread-standard"));
-    assert!(script.contains("data-codex-service-tier-thread-fast"));
-    assert!(script.contains("global-standard"));
-    assert!(script.contains("global-fast"));
-    assert!(script.contains("defaultMode"));
-    assert!(script.contains("codexServiceTierEffectiveThreadMode"));
-    assert!(script.contains("codexServiceTierDefaultModeForControlMode"));
-    assert!(script.contains("normalizeCodexServiceTierControlMode(state.mode) !== \"custom\""));
-    assert!(script.contains("state.draft = null"));
-    assert!(script.contains("后端未连接，无法切换服务模式"));
-    assert!(script.contains("未连接"));
-    assert!(script.contains("thread/start"));
-    assert!(script.contains("thread/resume"));
-    assert!(script.contains("turn/start"));
-    assert!(script.contains("send-cli-request-for-host"));
-    assert!(script.contains("start-conversation"));
-    assert!(script.contains("applyCodexServiceTierRequestOverride(\"thread/start\", message)"));
-    assert!(script.contains("codex-service-tier-badge"));
-    assert!(script.contains("installCodexServiceTierBadge"));
-    assert!(script.contains("toggleCodexServiceTierFromBadge"));
-    assert!(script.contains("wireCodexServiceTierBadge"));
-    assert!(script.contains("codexServiceTierBadgePlacement"));
-    assert!(script.contains("codexServiceTierBadgeFooterGroup"));
-    assert!(script.contains("codexServiceTierFindComposerEl"));
-    assert!(script.contains("codexServiceTierVisibleComposerFooters"));
-    assert!(script.contains("codexServiceTierBestComposerFooter"));
-    assert!(script.contains("codexServiceTierComposerCandidates"));
-    assert!(script.contains("codexServiceTierComposerScore"));
-    assert!(script.contains("data-codex-service-tier-badge"));
-    assert!(script.contains("codexServiceTierBadgeWired"));
-    assert!(script.contains("setAttribute(\"role\", \"button\")"));
-    assert!(script.contains("setAttribute(\"tabindex\", \"0\")"));
-    assert!(script.contains("继承 Codex 默认设置"));
-    assert!(script.contains("继承 config.toml"));
-    assert!(script.contains("serviceTierInheritSourceLabel"));
-    assert!(script.contains("resolveInheritedServiceTier"));
-    assert!(script.contains("getConfigTomlServiceTier"));
-    assert!(script.contains("catalog.service_tier"));
-    assert!(script.contains("service_tier=\\\"priority\\\""));
-    assert!(script.contains("Fast 仅支持"));
-    assert!(script.contains("当前 thread"));
-    assert!(script.contains("standard"));
-    assert!(script.contains("fast"));
-    assert!(script.contains("[\"setting-storage-\", \"app-initial-\"]"));
-    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
-    assert!(script.contains("[\"vscode-api-\", \"app-initial-\"]"));
-    assert!(script.contains("codexSettingStorageFromModule"));
-    assert!(script.contains("codexStateApiFromModule"));
-    assert!(script.contains("message.type === \"fetch\""));
-    assert!(script.contains("vscode://codex/"));
-    assert!(script.contains("./(?:assets/)?"));
-    assert!(script.contains("dispatcher export unavailable"));
-    assert!(!script.contains("data-codex-max-reasoning-control"));
-    assert!(!script.contains("codexAppMaxReasoningOverride"));
-=======
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
 }
 
 #[test]
@@ -3830,6 +3665,2976 @@ fn injection_script_refreshes_sidebar_after_undo_without_stale_asset_exports() {
 }
 
 #[test]
+fn injection_script_applies_fast_service_tier_contract() {
+    let cases = run_service_tier_contract_harness();
+
+    assert_eq!(cases["supportedFast"]["serviceTier"], "priority");
+    assert_eq!(cases["supportedFast"]["service_tier"], "priority");
+
+    assert_eq!(
+        cases["unsupportedModel"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["unsupportedModel"]["service_tier"],
+        serde_json::Value::Null
+    );
+
+    assert_eq!(cases["turnWithoutModel"]["serviceTier"], "priority");
+    assert_eq!(cases["turnWithoutModelDiagnosticModel"], "gpt-5.4");
+
+    assert_eq!(
+        cases["customInheritUnsupported"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["customInheritUnsupported"]["service_tier"],
+        serde_json::Value::Null
+    );
+
+    assert_eq!(cases["inheritUnsetStatus"], "继承 Codex 默认设置：默认");
+    assert_eq!(cases["inheritFastStatus"], "继承 Codex 默认设置：fast");
+    assert_eq!(
+        cases["inheritStandardStatus"],
+        "继承 Codex 默认设置：standard"
+    );
+    assert_eq!(
+        cases["inheritConfigTomlFastStatus"],
+        "继承 config.toml：fast"
+    );
+    assert_eq!(cases["resolvedConfigTomlTier"]["configServiceTier"], "fast");
+    assert_eq!(
+        cases["resolvedConfigTomlTier"]["serviceTierSource"],
+        "config-toml"
+    );
+    assert_eq!(
+        cases["resolvedUnsetTier"]["configServiceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["resolvedUnsetTier"]["serviceTierSource"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["inheritedConfigFastBlocked"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["inheritedConfigFastBlocked"]["service_tier"],
+        serde_json::Value::Null
+    );
+
+    assert_eq!(cases["startConversation"]["serviceTier"], "priority");
+    assert_eq!(
+        cases["explicitProjectStartConversation"]["workspaceKind"],
+        "project"
+    );
+    assert_eq!(
+        cases["explicitProjectStartConversation"]["projectAssignment"]["projectId"],
+        "C:/projects/explicit"
+    );
+    assert_eq!(
+        cases["projectlessStartConversation"]["workspaceKind"],
+        "projectless"
+    );
+    assert_eq!(
+        cases["projectlessStartConversation"]["projectlessOutputDirectory"],
+        "C:/projectless/outputs"
+    );
+    assert!(
+        cases["projectlessStartConversation"]
+            .get("projectAssignment")
+            .is_none()
+    );
+    assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
+    assert_eq!(
+        cases["fetchSendCliRequest"]["params"]["serviceTier"],
+        "priority"
+    );
+    assert_eq!(
+        cases["fetchSendCliRequest"]["params"]["service_tier"],
+        "priority"
+    );
+    assert_eq!(cases["solFastAvailability"]["supported"], true);
+    assert_eq!(cases["solDescriptor"]["defaultReasoningEffort"], "low");
+    assert_eq!(
+        cases["solDescriptor"]["supportedReasoningEfforts"][4]["reasoningEffort"],
+        "max"
+    );
+    assert_eq!(
+        cases["solDescriptor"]["supportedReasoningEfforts"][5]["reasoningEffort"],
+        "ultra"
+    );
+    assert_eq!(cases["dispatcherFromSingleton"], true);
+    assert_eq!(cases["dispatcherFromCurrentSingleton"], true);
+    assert_eq!(cases["dispatcherFromClass"], true);
+    assert_eq!(cases["legacySettingStorage"], true);
+    assert_eq!(cases["currentSettingStorage"], true);
+    assert_eq!(cases["capabilitySettingStorage"], true);
+    assert_eq!(cases["legacyStateApi"], true);
+    assert_eq!(cases["currentStateApi"], true);
+    assert_eq!(cases["appServerParamsUnchanged"], true);
+    assert_eq!(cases["appServerProjectlessParamsUnchanged"], true);
+    assert_eq!(cases["appServerSentCount"], 7);
+    assert_eq!(cases["serviceTierClientPatched"], true);
+    assert_eq!(cases["serviceTierClientSendTier"], "priority");
+    assert_eq!(cases["serviceTierClientPrewarmTier"], "priority");
+    assert_eq!(cases["frozenClientPatchSkipped"], true);
+    assert_eq!(cases["captureLine"], 1);
+    assert_eq!(cases["captureColumn"], 24);
+    assert_eq!(cases["captureMissIsNull"], true);
+    assert_eq!(cases["prototypePatched"], true);
+    assert_eq!(cases["prototypeSendTier"], "priority");
+    assert_eq!(cases["prototypePrewarmTier"], "priority");
+    assert_eq!(cases["prototypeStateHasClass"], true);
+    assert_eq!(
+        cases["providerFromMissing"]["modelProvider"],
+        "vendor_alpha"
+    );
+    assert_eq!(cases["providerFromOpenAi"]["modelProvider"], "vendor_alpha");
+    assert_eq!(cases["providerFromOtherUnchanged"], true);
+    assert_eq!(cases["nonThreadProviderUnchanged"], true);
+    assert_eq!(
+        cases["providerWithServiceTierControlsDisabled"]["modelProvider"],
+        "vendor_alpha"
+    );
+    assert_eq!(cases["appServerProviderOverride"], "vendor_alpha");
+    assert_eq!(cases["directThreadStartedId"], "thread-mobile-direct");
+    assert_eq!(cases["nestedThreadStartedId"], "thread-mobile-nested");
+    assert_eq!(
+        cases["browserUseRouteThreadId"],
+        "thread-mobile-browser-route"
+    );
+    assert_eq!(cases["inactiveBrowserUseUnscheduled"], true);
+    assert_eq!(cases["remoteRecoveryScheduled"], true);
+    assert_eq!(cases["remoteRecoveryThreadId"], "thread-mobile-notify");
+    assert_eq!(cases["remoteRecoveryCallCountAfterSuccess"], 1);
+    assert_eq!(cases["remoteRecoveryDispatcherInstalled"], true);
+    assert_eq!(
+        cases["remoteRecoveryDispatcherThreadId"],
+        "thread-mobile-dispatcher"
+    );
+    assert_eq!(
+        cases["remoteRecoveryBrowserUseDispatcherThreadId"],
+        "thread-mobile-browser-dispatcher"
+    );
+    assert_eq!(
+        cases["remoteRecoveryOutboundRouteThreadId"],
+        "thread-mobile-browser-outbound"
+    );
+    assert_eq!(cases["remoteRecoveryListenerInstalled"], true);
+    assert_eq!(
+        cases["remoteRecoveryViewEventThreadId"],
+        "thread-mobile-view-event"
+    );
+    assert_eq!(cases["remoteRecoveryRetried"], true);
+    assert_eq!(cases["remoteRecoveryRetryAttempts"], json!([0, 1]));
+    assert_eq!(cases["openAiSessionProviderUnchanged"], true);
+    assert_eq!(cases["openAiRecoveryUnscheduled"], true);
+    assert_eq!(cases["openAiPatchRemainsInstalled"], true);
+    assert_eq!(cases["openAiNormalizationDisabled"], true);
+    assert_eq!(cases["refreshedCustomProviderOverride"], "refreshed_vendor");
+    assert_eq!(cases["refreshedOpenAiProvider"], "openai");
+    assert_eq!(cases["refreshedPureApiResumeProvider"], "custom");
+    assert_eq!(cases["refreshedPureApiResumeModel"], "gpt-5.6-terra");
+    assert_eq!(cases["failedRefreshProviderUnchanged"], "openai");
+    assert_eq!(cases["missingActiveProviderUnchanged"], true);
+    assert_eq!(cases["missingActiveRecoveryUnscheduled"], true);
+    assert_eq!(cases["pureApiThreadStartProvider"], "custom");
+    assert_eq!(cases["pureApiThreadResumeProvider"], "custom");
+    assert_eq!(cases["pureApiNativeResumeProvider"], "custom");
+    assert_eq!(cases["pureApiExplicitResumePreserved"], true);
+    assert_eq!(cases["officialResumePreserved"], true);
+    assert_eq!(cases["pureApiTurnStartProvider"], "custom");
+    assert_eq!(cases["pureApiTurnWithoutProviderUnchanged"], true);
+    assert_eq!(cases["pureApiOtherProviderUnchanged"], true);
+    assert_eq!(cases["pureApiRecoveryUnscheduled"], true);
+    assert_eq!(cases["pureOfficialProviderUnchanged"], true);
+    assert_eq!(
+        cases["modelSwitchCallOrder"],
+        json!([
+            "thread/start:model-old",
+            "turn/start:model-old",
+            "thread/resume:model-new",
+            "turn/start:model-new",
+            "turn/start:"
+        ])
+    );
+    assert_eq!(cases["modelSwitchResumeProvider"], "sub2api");
+    assert_eq!(cases["failedModelSwitchResumeAttempts"], 2);
+    assert_eq!(cases["failedModelSwitchTurnAttempts"], 2);
+    assert_eq!(cases["delayedResumeWaited"], true);
+    assert_eq!(
+        cases["hungSettingsForwarded"],
+        json!(["instance", "prototype"])
+    );
+    assert_eq!(
+        cases["lateSettingsIgnored"],
+        json!(["stale_vendor", "stale_vendor"])
+    );
+    assert_eq!(cases["turnCompletedBeforeCatalogRead"], true);
+    assert_eq!(cases["hungCatalogListReturned"], true);
+    assert_eq!(cases["lateCatalogIgnored"], "failed");
+    assert_eq!(
+        cases["pureApiFilteredModels"],
+        json!(["gpt-5.6-sol", "relay-model"])
+    );
+    assert_eq!(
+        cases["pureApiFilteredNames"],
+        json!(["gpt-5.6-sol", "relay-model"])
+    );
+    assert_eq!(
+        cases["pureApiFilteredSet"],
+        json!(["gpt-5.6-sol", "relay-model"])
+    );
+    assert_eq!(
+        cases["pureApiStatsigFiltered"],
+        json!(["gpt-5.6-sol", "relay-model"])
+    );
+    assert_eq!(
+        cases["unfilteredModelScenarios"],
+        json!([true, true, true, true, true])
+    );
+    assert_eq!(cases["pureApiDefaultModel"], "relay-model");
+    assert_eq!(cases["pureApiStatsigDefault"], "relay-model");
+    assert_eq!(cases["modelsRestoredAfterModeChange"], true);
+    assert_eq!(cases["modelsRestoredAfterReinjection"], true);
+    assert_eq!(cases["modelsRestoredAfterCatalogFailure"], true);
+    assert_eq!(cases["remoteModelsPreservedForSharedCache"], true);
+    assert_eq!(cases["remotePrototypeModelsPreserved"], true);
+    assert_eq!(cases["unknownHostModelsPreserved"], true);
+    assert_eq!(cases["remoteJsonAndMessageModelsPreserved"], true);
+    assert_eq!(cases["sessionDeleteOnlyRegistersNativeClient"], true);
+    assert_eq!(cases["globalStatsigWithoutHostPreserved"], true);
+}
+
+fn run_service_tier_contract_harness() -> serde_json::Value {
+    let temp = tempfile::tempdir().expect("temp dir should be created");
+    let script_path = temp.path().join("renderer-inject.js");
+    let harness_path = temp.path().join("service-tier-harness.cjs");
+    std::fs::write(&script_path, assets::injection_script(57321))
+        .expect("injection script should be written");
+    let mut harness = std::fs::File::create(&harness_path).expect("harness should be created");
+    write!(
+        harness,
+        r#"
+const scriptPath = {script_path};
+const store = new Map();
+store.set("alunixaXSettings", JSON.stringify({{ serviceTierControls: true }}));
+function node() {{
+  return {{
+    appendChild() {{}},
+    prepend() {{}},
+    remove() {{}},
+    setAttribute() {{}},
+    removeAttribute() {{}},
+    addEventListener() {{}},
+    querySelector() {{ return null; }},
+    querySelectorAll() {{ return []; }},
+    closest() {{ return null; }},
+    classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }},
+    dataset: {{}},
+    style: {{}},
+    children: [],
+    isConnected: true,
+    textContent: "",
+    innerHTML: "",
+  }};
+}}
+globalThis.window = globalThis;
+window.__ALUNIXA_X_TEST_SERVICE_TIER__ = true;
+const windowListeners = new Map();
+window.addEventListener = (type, listener) => windowListeners.set(type, listener);
+window.removeEventListener = (type, listener) => {{
+  if (windowListeners.get(type) === listener) windowListeners.delete(type);
+}};
+globalThis.document = {{
+  scripts: [],
+  documentElement: node(),
+  body: node(),
+  createElement: () => node(),
+  getElementById: () => null,
+  querySelector: () => null,
+  querySelectorAll: () => [],
+  addEventListener() {{}},
+  removeEventListener() {{}},
+}};
+globalThis.localStorage = {{
+  getItem: (key) => store.has(key) ? store.get(key) : null,
+  setItem: (key, value) => store.set(key, String(value)),
+  removeItem: (key) => store.delete(key),
+}};
+globalThis.location = {{ href: "https://codex.test/thread/thread-12345678", pathname: "/thread/thread-12345678", search: "", hash: "" }};
+window.location = globalThis.location;
+globalThis.navigator = {{ userAgent: "node-test" }};
+globalThis.performance = {{ getEntriesByType: () => [] }};
+require(scriptPath);
+const api = window.__alunixaXServiceTierTest;
+api.setServiceTierState({{ status: "ok", serviceTier: "priority", fastTierValue: "priority" }});
+api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4", "gpt-5.5"] }});
+const inheritUnsetStatus = api.statusSummary({{
+  controlMode: "inherit",
+  threadMode: "inherit",
+  defaultMode: "inherit",
+  effectiveMode: "standard",
+  effectiveServiceTier: null,
+}});
+const inheritFastStatus = api.statusSummary({{
+  controlMode: "inherit",
+  threadMode: "inherit",
+  defaultMode: "inherit",
+  effectiveMode: "fast",
+  effectiveServiceTier: "priority",
+}});
+const inheritStandardStatus = api.statusSummary({{
+  controlMode: "inherit",
+  threadMode: "inherit",
+  defaultMode: "inherit",
+  effectiveMode: "standard",
+  effectiveServiceTier: "standard",
+}});
+const inheritConfigTomlFastStatus = api.statusSummary({{
+  controlMode: "inherit",
+  threadMode: "inherit",
+  defaultMode: "inherit",
+  effectiveMode: "fast",
+  effectiveServiceTier: "fast",
+  serviceTierSource: "config-toml",
+}});
+
+api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
+const supportedFast = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  model: "gpt-5.4",
+  service_tier: null,
+}}, "conv-should-not-be-model");
+
+const unsupportedModel = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  model: "gpt-4.1",
+  service_tier: "priority",
+}}, "conv-should-not-be-model");
+
+const turnWithoutModel = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  service_tier: null,
+}}, "conversation-should-not-be-model");
+const turnWithoutModelDiagnosticModel = api.diagnostics().at(-1)?.detail?.model;
+
+api.setModelCatalog({{ status: "ok", model: "gpt-4.1", default_model: "gpt-4.1", models: ["gpt-4.1"] }});
+api.setThreadState({{ mode: "custom", defaultMode: "inherit", entries: {{}}, draft: {{ mode: "inherit", at: Date.now() }} }});
+api.setServiceTierState({{ serviceTier: "priority" }});
+const customInheritUnsupported = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  service_tier: "priority",
+}}, "");
+
+api.setModelCatalog({{ status: "ok", model: "gpt-5.5", default_model: "gpt-5.5", models: ["gpt-5.5"] }});
+api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
+const startConversation = api.requestOverride({{
+  type: "start-conversation",
+  threadId: "thread-12345678",
+  model: "gpt-5.5",
+}});
+const explicitProjectStartConversation = api.requestOverride({{
+  type: "start-conversation",
+  threadId: "thread-explicit-project",
+  model: "gpt-5.5",
+  cwd: "C:/projects/explicit",
+  workspaceRoots: ["C:/projects/explicit"],
+  workspaceKind: "project",
+  projectAssignment: {{ projectKind: "local", projectId: "C:/projects/explicit" }},
+}});
+const projectlessStartConversation = api.requestOverride({{
+  type: "start-conversation",
+  threadId: "thread-projectless",
+  model: "gpt-5.5",
+  cwd: "C:/projectless/work",
+  workspaceRoots: ["C:/projectless/work"],
+  workspaceKind: "projectless",
+  projectlessOutputDirectory: "C:/projectless/outputs",
+}});
+const fetchStartConversationEnvelope = api.requestOverride({{
+  type: "fetch",
+  url: "vscode://codex/start-conversation",
+  body: JSON.stringify({{
+    threadId: "thread-12345678",
+    model: "gpt-5.5",
+    serviceTier: null,
+  }}),
+}});
+const fetchStartConversation = JSON.parse(fetchStartConversationEnvelope.body);
+const fetchSendCliRequestEnvelope = api.requestOverride({{
+  type: "fetch",
+  url: "vscode://codex/send-cli-request-for-host",
+  body: {{
+    hostId: "local",
+    method: "thread/start",
+    params: {{
+      threadId: "thread-12345678",
+      model: "gpt-5.5",
+      service_tier: null,
+    }},
+  }},
+}});
+const fetchSendCliRequest = fetchSendCliRequestEnvelope.body;
+
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  models: ["gpt-5.6-sol"],
+  modelMetadata: {{
+    "gpt-5.6-sol": {{
+      displayName: "GPT-5.6-Sol",
+      description: "Latest frontier agentic coding model.",
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({{ reasoningEffort }})),
+      additionalSpeedTiers: ["fast"],
+      serviceTiers: [{{ id: "priority", name: "Fast" }}],
+    }},
+  }},
+}});
+const solFastAvailability = api.fastAvailability("gpt-5.6-sol");
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  models: ["gpt-5.6-sol"],
+  modelMetadata: {{
+    "gpt-5.6-sol": {{
+      displayName: "GPT-5.6-Sol",
+      description: "Latest frontier agentic coding model.",
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({{ reasoningEffort }})),
+    }},
+  }},
+}});
+const solDescriptor = api.modelDescriptor("gpt-5.6-sol");
+const singletonDispatcher = {{ dispatchMessage() {{}}, subscribe() {{}} }};
+const dispatcherFromSingleton = api.dispatcherFromModule({{ current: singletonDispatcher }}) === singletonDispatcher;
+const currentSingletonDispatcher = {{ dispatchMessage() {{}}, subscribe() {{}} }};
+const dispatcherFromCurrentSingleton = api.dispatcherFromModule({{
+  decoy: singletonDispatcher,
+  idt: currentSingletonDispatcher,
+}}) === currentSingletonDispatcher;
+class DispatcherClass {{
+  static instance = new DispatcherClass();
+  static getInstance() {{ return this.instance; }}
+  dispatchMessage() {{}}
+}}
+const dispatcherFromClass = api.dispatcherFromModule({{ current: DispatcherClass }}) === DispatcherClass.instance;
+const legacyGetSetting = async () => "legacy-get";
+const legacySetSetting = async () => "legacy-set";
+const legacySettingStorageValue = api.settingStorageFromModule({{
+  n: legacyGetSetting,
+  s: legacySetSetting,
+}}, "setting-storage-");
+const legacySettingStorage = legacySettingStorageValue.n === legacyGetSetting
+  && legacySettingStorageValue.s === legacySetSetting;
+const wrongCurrentGetSetting = async () => "wrong-current-get";
+const wrongCurrentSetSetting = async () => "wrong-current-set";
+const currentGetSetting = async (setting) => {{
+  const marker = "get-setting";
+  const params = {{ key: setting.key }};
+  return marker && params && "current-get";
+}};
+const currentSetSetting = async (setting, value) => {{
+  const marker = "set-setting";
+  const params = {{ key: setting.key, value }};
+  return marker && params && "current-set";
+}};
+const currentSettingStorageValue = api.settingStorageFromModule({{
+  n: wrongCurrentGetSetting,
+  s: wrongCurrentSetSetting,
+  jut: currentGetSetting,
+  Put: currentSetSetting,
+}}, "app-initial-");
+const currentSettingStorage = currentSettingStorageValue.n === currentGetSetting
+  && currentSettingStorageValue.s === currentSetSetting;
+const capabilitySettingStorageValue = api.settingStorageFromModule({{
+  randomGetter: currentGetSetting,
+  randomSetter: currentSetSetting,
+}}, "app-initial-");
+const capabilitySettingStorage = capabilitySettingStorageValue.n === currentGetSetting
+  && capabilitySettingStorageValue.s === currentSetSetting;
+const legacyStateCall = async () => "legacy-state";
+const currentStateCall = async () => "current-state";
+const legacyStateApi = api.stateApiFromModule({{
+  n: legacyStateCall,
+  qut: currentStateCall,
+}}, "vscode-api-") === legacyStateCall;
+const currentStateApi = api.stateApiFromModule({{
+  n: legacyStateCall,
+  qut: currentStateCall,
+}}, "app-initial-") === currentStateCall;
+const nativeAppServerParams = {{
+  cwd: "C:/native/work",
+  workspaceRoots: ["C:/native/work"],
+  workspaceKind: "project",
+  projectAssignment: {{ projectKind: "local", projectId: "C:/native/work" }},
+}};
+const nativeProjectlessAppServerParams = {{
+  cwd: "C:/native/projectless-work",
+  workspaceRoots: ["C:/native/projectless-work"],
+  workspaceKind: "projectless",
+  projectlessOutputDirectory: "C:/native/projectless-outputs",
+}};
+const appServerCalls = [];
+const appServerClient = {{
+  async sendRequest(method, params, options) {{
+    appServerCalls.push({{ method, params, options }});
+    return {{ ok: true }};
+  }},
+}};
+api.patchAppServerClient(appServerClient);
+localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: false }}));
+
+appServerClient.sendRequest("start-conversation", nativeAppServerParams, {{ signal: "native" }}).then(async () => {{
+await appServerClient.sendRequest(
+  "thread/start",
+  nativeProjectlessAppServerParams,
+  {{ signal: "native-projectless" }}
+);
+api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
+api.setBackendSettings({{ codexAppServiceTierControls: true }});
+localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: true }}));
+const serviceTierClientCalls = [];
+const serviceTierClient = {{
+  async sendRequest(method, params) {{ serviceTierClientCalls.push({{ method, params }}); return {{ ok: true }}; }},
+  async prewarmThreadStart(params) {{ serviceTierClientCalls.push({{ method: "prewarm", params }}); return {{ ok: true }}; }},
+}};
+const serviceTierClientPatched = api.patchAppServerClient(serviceTierClient);
+await serviceTierClient.sendRequest("turn/start", {{ threadId: "thread-service-tier", model: "gpt-5.4" }});
+await serviceTierClient.prewarmThreadStart({{ threadId: "thread-service-tier", model: "gpt-5.4" }});
+const serviceTierClientSendTier = serviceTierClientCalls[0]?.params?.serviceTier;
+const serviceTierClientPrewarmTier = serviceTierClientCalls[1]?.params?.serviceTier;
+const frozenClient = Object.preventExtensions({{ async sendRequest() {{ return {{ ok: true }}; }} }});
+const frozenClientPatchSkipped = api.patchAppServerClient(frozenClient) === false;
+const captureSample = "x" + String.fromCharCode(10) + "async sendRequest(e,t,n){{if(this.dispatchMessage==null)throw Error(`AppServerRequestClient is missing a message dispatcher`);}}";
+const captureLocation = api.locateAppServerClientBreakpoint(captureSample);
+const captureLine = captureLocation ? captureLocation.lineNumber : -1;
+const captureColumn = captureLocation ? captureLocation.columnNumber : -1;
+const captureMissIsNull = api.locateAppServerClientBreakpoint("no marker here") === null;
+window.__alunixaXAppServerClientClass = class CodexPlusTestClient {{
+  async sendRequest(method, params) {{ return {{ method, params }}; }}
+  async prewarmThreadStart(params) {{ return {{ prewarm: params }}; }}
+}};
+const prototypePatched = api.installAppServerClientPrototypePatch();
+const protoClient = new window.__alunixaXAppServerClientClass();
+const protoTurn = await protoClient.sendRequest("turn/start", {{ threadId: "thread-prototype", model: "gpt-5.4" }});
+const protoPrewarm = await protoClient.prewarmThreadStart({{ threadId: "thread-prototype", model: "gpt-5.4" }});
+const prototypeSendTier = protoTurn && protoTurn.params ? protoTurn.params.serviceTier : null;
+const prototypePrewarmTier = protoPrewarm && protoPrewarm.prewarm ? protoPrewarm.prewarm.serviceTier : null;
+const prototypeState = api.appServerClientPrototypeState();
+api.setThreadState({{ mode: "inherit", defaultMode: "inherit", entries: {{}} }});
+api.setBackendSettings({{ codexAppServiceTierControls: false }});
+api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4"], service_tier: "fast" }});
+const resolvedConfigTomlTier = await api.resolveInheritedServiceTier();
+api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4"] }});
+const resolvedUnsetTier = await api.resolveInheritedServiceTier();
+api.setModelCatalog({{ status: "ok", model: "gpt-4.1", default_model: "gpt-4.1", models: ["gpt-4.1"] }});
+api.setThreadState({{ mode: "inherit", defaultMode: "inherit", entries: {{}} }});
+api.setServiceTierState({{ status: "ok", serviceTier: null, configServiceTier: "fast", serviceTierSource: "config-toml" }});
+const inheritedConfigFastBlocked = api.applyServiceTierOverride("turn/start", {{
+  threadId: "thread-12345678",
+  model: "gpt-4.1",
+  service_tier: null,
+}}, "");
+const appServerParamsUnchanged = appServerCalls[0]?.params === nativeAppServerParams
+  && appServerCalls[0]?.params?.workspaceKind === "project"
+  && appServerCalls[0]?.params?.cwd === "C:/native/work"
+  && appServerCalls[0]?.params?.projectAssignment?.projectId === "C:/native/work";
+const appServerProjectlessParamsUnchanged = appServerCalls[1]?.params === nativeProjectlessAppServerParams
+  && appServerCalls[1]?.params?.workspaceKind === "projectless"
+  && appServerCalls[1]?.params?.cwd === "C:/native/projectless-work"
+  && appServerCalls[1]?.params?.projectlessOutputDirectory === "C:/native/projectless-outputs"
+  && !Object.hasOwn(appServerCalls[1]?.params || {{}}, "projectAssignment");
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "custom-relay",
+  activeRelaySessionProvider: "custom",
+  activeRelayCodexProvider: "vendor_alpha",
+  relayProfiles: [{{ id: "custom-relay", relayMode: "official", officialMixApiKey: true }}],
+}});
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  model_provider: "relay-ms0ihvx9",
+  codex_model_provider: "vendor_alpha",
+  models: ["gpt-5.6-sol"],
+}});
+localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: false }}));
+const providerFromMissing = api.applyProviderOverride("thread/start", {{ cwd: "C:/mobile" }});
+const providerFromOpenAi = api.applyProviderOverride("thread/start", {{ cwd: "C:/mobile", modelProvider: "openai" }});
+const explicitOtherProvider = {{ cwd: "C:/mobile", modelProvider: "other" }};
+const providerFromOther = api.applyProviderOverride("thread/start", explicitOtherProvider);
+const nonThreadParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
+const nonThreadProviderUnchanged = api.applyProviderOverride("turn/start", nonThreadParams) === nonThreadParams;
+const providerWithServiceTierControlsDisabled = api.requestOverride({{
+  type: "start-conversation",
+  cwd: "C:/mobile",
+  modelProvider: "openai",
+}});
+await appServerClient.sendRequest("thread/start", {{ cwd: "C:/mobile", modelProvider: "openai" }}, {{ signal: "mobile" }});
+const appServerProviderOverride = appServerCalls[2]?.params?.modelProvider;
+const directThreadStartedId = api.remoteSessionStartedThreadId({{
+  method: "thread/started",
+  params: {{ thread: {{ id: "thread-mobile-direct" }} }},
+}});
+const nestedThreadStartedId = api.remoteSessionStartedThreadId({{
+  type: "mcp-response",
+  message: {{ method: "thread/started", params: {{ thread: {{ id: "thread-mobile-nested" }} }} }},
+}});
+const browserUseRouteThreadId = api.remoteSessionStartedThreadId({{
+  type: "browser-use-session-route-capture",
+  conversationId: "thread-mobile-browser-route",
+}});
+const inactiveBrowserUseUnscheduled = api.observeRemoteSessionNotification({{
+  type: "browser-sidebar-browser-use-state",
+  conversationId: "thread-mobile-browser-inactive",
+  isActive: false,
+}}) === false;
+const remoteRecoveryCalls = [];
+const remoteRecoveryDispatcherHandlers = new Map();
+const remoteRecoveryDispatcher = {{
+  subscribe(type, callback) {{
+    remoteRecoveryDispatcherHandlers.set(type, callback);
+    return () => remoteRecoveryDispatcherHandlers.delete(type);
+  }},
+}};
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryCalls.push({{ payload, attempt }});
+  return {{ status: "synced", message: "Remote Control session catalog recovery complete" }};
+}};
+const remoteRecoveryScheduled = api.observeRemoteSessionNotification({{
+  response: {{ method: "thread/started", params: {{ thread: {{ id: "thread-mobile-notify" }} }} }},
+}});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryCallCountAfterSuccess = remoteRecoveryCalls.length;
+const remoteRecoveryDispatcherCalls = [];
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryDispatcherCalls.push({{ payload, attempt }});
+  return {{ status: "synced", message: "Remote Control session catalog recovery complete" }};
+}};
+const remoteRecoveryDispatcherInstalled = api.installRemoteSessionDispatcherSubscription(remoteRecoveryDispatcher);
+remoteRecoveryDispatcherHandlers.get("thread/started")?.({{ id: "thread-mobile-dispatcher" }});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryDispatcherThreadId = remoteRecoveryDispatcherCalls[0]?.payload?.thread_id || "";
+const remoteRecoveryBrowserUseDispatcherCalls = [];
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryBrowserUseDispatcherCalls.push({{ payload, attempt }});
+  return {{ status: "synced", message: "Remote Control session catalog recovery complete" }};
+}};
+remoteRecoveryDispatcherHandlers.get("browser-sidebar-browser-use-state")?.({{
+  conversationId: "thread-mobile-browser-dispatcher",
+  isActive: true,
+}});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryBrowserUseDispatcherThreadId = remoteRecoveryBrowserUseDispatcherCalls[0]?.payload?.thread_id || "";
+const remoteRecoveryOutboundRouteCalls = [];
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryOutboundRouteCalls.push({{ payload, attempt }});
+  return {{ status: "synced", message: "Remote Control session catalog recovery complete" }};
+}};
+const outboundDispatcherMessages = [];
+const outboundDispatcher = {{
+  __codexServiceTierOriginalDispatchMessage(type, payload) {{
+    outboundDispatcherMessages.push({{ type, payload }});
+    return true;
+  }},
+}};
+api.dispatchMessage(outboundDispatcher, "browser-use-session-route-capture", {{
+  conversationId: "thread-mobile-browser-outbound",
+}});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryOutboundRouteThreadId = remoteRecoveryOutboundRouteCalls[0]?.payload?.thread_id || "";
+const remoteRecoveryViewEventCalls = [];
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryViewEventCalls.push({{ payload, attempt }});
+  return {{ status: "synced", message: "Remote Control session catalog recovery complete" }};
+}};
+const remoteRecoveryListenerInstalled = api.installRemoteSessionRecoveryListener();
+windowListeners.get("codex-message-from-view")?.({{
+  detail: {{
+    type: "browser-use-session-route-capture",
+    conversationId: "thread-mobile-view-event",
+  }},
+}});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryViewEventThreadId = remoteRecoveryViewEventCalls[0]?.payload?.thread_id || "";
+const remoteRecoveryRetryCalls = [];
+window.__ALUNIXA_X_TEST_REMOTE_RECOVERY__ = (payload, attempt) => {{
+  remoteRecoveryRetryCalls.push({{ payload, attempt }});
+  if (attempt === 0) {{
+    return {{ status: "synced", message: "Remote Control session recovery already up to date" }};
+  }}
+  return {{ status: "synced", message: "Remote Control session recovery complete" }};
+}};
+const remoteRecoveryRetried = api.observeRemoteSessionNotification({{
+  response: {{ method: "thread/started", params: {{ thread: {{ id: "thread-mobile-retry" }} }} }},
+}});
+await new Promise((resolve) => setTimeout(resolve, 500));
+const remoteRecoveryRetryAttempts = remoteRecoveryRetryCalls.map((call) => call.attempt);
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "openai-relay",
+  activeRelaySessionProvider: "openai",
+  activeRelayCodexProvider: "openai",
+  relayProfiles: [{{ id: "openai-relay", relayMode: "official", officialMixApiKey: true }}],
+}});
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  codex_model_provider: "stale_custom_provider",
+  models: ["gpt-5.6-sol"],
+}});
+const openAiSessionParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
+const openAiSessionProviderUnchanged = api.applyProviderOverride("thread/start", openAiSessionParams) === openAiSessionParams;
+const openAiRecoveryUnscheduled = api.observeRemoteSessionNotification({{
+  method: "thread/started",
+  params: {{ thread: {{ id: "thread-mobile-openai" }} }},
+}}) === false;
+const openAiPatchRemainsInstalled = api.providerPatchEnabled();
+const openAiNormalizationDisabled = !api.providerNormalizationEnabled();
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "stale-openai-relay",
+  activeRelaySessionProvider: "openai",
+  activeRelayCodexProvider: "openai",
+  relayProfiles: [{{ id: "stale-openai-relay", relayMode: "official", officialMixApiKey: true }}],
+}});
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  codex_model_provider: "openai",
+  models: ["gpt-5.6-sol"],
+}});
+window.__codexSessionDeleteBridge = async (path) => {{
+  if (path === "/settings/get") return {{
+    launchMode: "patch",
+    enhancementsEnabled: true,
+    providerSyncEnabled: true,
+    relayProfilesEnabled: true,
+    activeRelayId: "refreshed-custom-relay",
+    activeRelaySessionProvider: "custom",
+    activeRelayCodexProvider: "refreshed_vendor",
+    relayProfiles: [{{ id: "refreshed-custom-relay", relayMode: "official", officialMixApiKey: true }}],
+  }};
+  if (path === "/codex-model-catalog") return {{
+    status: "ok",
+    model: "gpt-5.6-sol",
+    default_model: "gpt-5.6-sol",
+    codex_model_provider: "refreshed_vendor",
+    models: ["gpt-5.6-sol"],
+  }};
+  return {{ status: "failed" }};
+}};
+await appServerClient.sendRequest("thread/start", {{ cwd: "C:/mobile", modelProvider: "openai" }}, {{ signal: "provider-switch" }});
+const refreshedCustomProviderOverride = appServerCalls.at(-1)?.params?.modelProvider || "";
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "stale-custom-relay",
+  activeRelaySessionProvider: "custom",
+  activeRelayCodexProvider: "stale_custom_provider",
+  relayProfiles: [{{ id: "stale-custom-relay", relayMode: "official", officialMixApiKey: true }}],
+}});
+api.setModelCatalog({{
+  status: "ok",
+  model: "gpt-5.6-sol",
+  default_model: "gpt-5.6-sol",
+  codex_model_provider: "stale_custom_provider",
+  models: ["gpt-5.6-sol"],
+}});
+window.__codexSessionDeleteBridge = async (path) => {{
+  if (path === "/settings/get") return {{
+    launchMode: "patch",
+    enhancementsEnabled: true,
+    providerSyncEnabled: true,
+    relayProfilesEnabled: true,
+    activeRelayId: "refreshed-openai-relay",
+    activeRelaySessionProvider: "openai",
+    activeRelayCodexProvider: "openai",
+    relayProfiles: [{{ id: "refreshed-openai-relay", relayMode: "official", officialMixApiKey: true }}],
+  }};
+  if (path === "/codex-model-catalog") return {{
+    status: "ok",
+    model: "gpt-5.6-sol",
+    default_model: "gpt-5.6-sol",
+    codex_model_provider: "stale_custom_provider",
+    models: ["gpt-5.6-sol"],
+  }};
+  return {{ status: "failed" }};
+}};
+await appServerClient.sendRequest("thread/start", {{ cwd: "C:/mobile", modelProvider: "openai" }}, {{ signal: "openai-switch" }});
+const refreshedOpenAiProvider = appServerCalls.at(-1)?.params?.modelProvider || "";
+window.__codexSessionDeleteBridge = async (path) => {{
+  if (path === "/settings/get") return {{
+    launchMode: "patch",
+    enhancementsEnabled: true,
+    providerSyncEnabled: true,
+    relayProfilesEnabled: true,
+    activeRelayId: "refreshed-pure-api",
+    activeRelaySessionProvider: "custom",
+    activeRelayCodexProvider: "custom",
+    relayProfiles: [{{ id: "refreshed-pure-api", relayMode: "pureApi", officialMixApiKey: false }}],
+  }};
+  return {{ status: "failed" }};
+}};
+await appServerClient.sendRequest("thread/resume", {{
+  threadId: "thread-mobile-pure-api-refresh",
+  modelProvider: "openai",
+  model: "gpt-5.6-terra",
+}}, {{ signal: "pure-api-switch" }});
+const refreshedPureApiResumeProvider = appServerCalls.at(-1)?.params?.modelProvider || "";
+const refreshedPureApiResumeModel = appServerCalls.at(-1)?.params?.model || "";
+delete window.__codexSessionDeleteBridge;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "stale-custom-relay",
+  activeRelaySessionProvider: "custom",
+  activeRelayCodexProvider: "stale_custom_provider",
+  relayProfiles: [{{ id: "stale-custom-relay", relayMode: "official", officialMixApiKey: true }}],
+}});
+window.__codexSessionDeleteBridge = async (path) => {{
+  if (path === "/settings/get") throw new Error("settings unavailable");
+  return {{ status: "failed" }};
+}};
+await appServerClient.sendRequest("thread/start", {{ cwd: "C:/mobile", modelProvider: "openai" }}, {{ signal: "provider-refresh-failed" }});
+const failedRefreshProviderUnchanged = appServerCalls.at(-1)?.params?.modelProvider || "";
+delete window.__codexSessionDeleteBridge;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "missing",
+  relayProfiles: [{{ id: "eligible", relayMode: "official", officialMixApiKey: true }}],
+}});
+const missingActiveParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
+const missingActiveProviderUnchanged = api.applyProviderOverride("thread/start", missingActiveParams) === missingActiveParams;
+const missingActiveRecoveryUnscheduled = api.observeRemoteSessionNotification({{
+  method: "thread/started",
+  params: {{ thread: {{ id: "thread-mobile-missing-active" }} }},
+}}) === false;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "pure-api",
+  relayProfiles: [{{ id: "pure-api", relayMode: "pureApi", officialMixApiKey: true }}],
+}});
+const pureApiParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
+const pureApiThreadStartProvider = api.applyProviderOverride("thread/start", pureApiParams)?.modelProvider;
+const pureApiThreadResumeParams = {{
+  threadId: "thread-mobile-pure-api",
+  model_provider: "openai",
+}};
+const pureApiThreadResumeProvider = api.applyProviderOverride("thread/resume", pureApiThreadResumeParams)?.modelProvider;
+const pureApiNativeResumeParams = {{ threadId: "thread-mobile-native-resume" }};
+const pureApiNativeResumeProvider = api.applyProviderOverride("thread/resume", pureApiNativeResumeParams)?.modelProvider;
+const explicitResume = {{ threadId: "thread-other-provider", modelProvider: "other", model: "gpt-custom", reasoningEffort: "high" }};
+const pureApiExplicitResumePreserved = api.applyProviderOverride("thread/resume", explicitResume) === explicitResume;
+const pureApiTurnStartProvider = api.applyProviderOverride("turn/start", {{
+  threadId: "thread-mobile-pure-api",
+  modelProvider: "openai",
+}})?.modelProvider;
+const pureApiTurnWithoutProvider = {{ threadId: "thread-mobile-pure-api", model: "gpt-5.6-luna" }};
+const pureApiTurnWithoutProviderUnchanged = api.applyProviderOverride("turn/start", pureApiTurnWithoutProvider) === pureApiTurnWithoutProvider;
+const pureApiOtherProvider = {{ threadId: "thread-mobile-pure-api", modelProvider: "other" }};
+const pureApiOtherProviderUnchanged = api.applyProviderOverride("turn/start", pureApiOtherProvider) === pureApiOtherProvider;
+const pureApiRecoveryUnscheduled = api.observeRemoteSessionNotification({{
+  method: "thread/started",
+  params: {{ thread: {{ id: "thread-mobile-pure-api" }} }},
+}}) === false;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "official",
+  relayProfiles: [{{ id: "official", relayMode: "official", officialMixApiKey: false }}],
+}});
+const pureOfficialParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
+const pureOfficialProviderUnchanged = api.applyProviderOverride("thread/start", pureOfficialParams) === pureOfficialParams;
+const officialResume = {{ threadId: "thread-official", modelProvider: "openai" }};
+const officialResumePreserved = api.applyProviderOverride("thread/resume", officialResume) === officialResume;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  activeRelayId: "per-model-context",
+  activeRelayCodexProvider: "sub2api",
+  relayProfiles: [{{
+    id: "per-model-context",
+    relayMode: "pureApi",
+    officialMixApiKey: true,
+    configContents: "model_provider = \"sub2api\"",
+    modelWindows: JSON.stringify({{ "model-old": "200000", "model-new": "1000000" }}),
+    modelAutoCompact: "{{}}",
+    modelMetadata: "{{}}",
+  }}],
+}});
+const modelSwitchCalls = [];
+const modelSwitchClient = {{
+  async sendRequest(method, params, options) {{
+    modelSwitchCalls.push({{ method, params, options }});
+    return {{ ok: true }};
+  }},
+}};
+api.patchAppServerClient(modelSwitchClient);
+await modelSwitchClient.sendRequest("thread/start", {{
+  threadId: "thread-model-context",
+  model: "model-old",
+}});
+await modelSwitchClient.sendRequest("turn/start", {{
+  threadId: "thread-model-context",
+  model: "model-old",
+  input: [],
+}});
+await modelSwitchClient.sendRequest("turn/start", {{
+  threadId: "thread-model-context",
+  model: "model-new",
+  input: [],
+}});
+await modelSwitchClient.sendRequest("turn/start", {{
+  threadId: "thread-model-context",
+  input: [],
+}});
+const modelSwitchCallOrder = modelSwitchCalls.map((call) => `${{call.method}}:${{call.params?.model || ""}}`);
+const modelSwitchResumeProvider = modelSwitchCalls.find((call) => call.method === "thread/resume")?.params?.modelProvider || "";
+
+const failedModelSwitchCalls = [];
+const failedModelSwitchClient = {{
+  async sendRequest(method, params) {{
+    failedModelSwitchCalls.push({{ method, params }});
+    if (method === "thread/resume") throw new Error("synthetic resume failure");
+    return {{ ok: true }};
+  }},
+}};
+api.patchAppServerClient(failedModelSwitchClient);
+await failedModelSwitchClient.sendRequest("thread/start", {{
+  threadId: "thread-model-context-failure",
+  model: "model-old",
+}});
+await failedModelSwitchClient.sendRequest("turn/start", {{
+  threadId: "thread-model-context-failure",
+  model: "model-new",
+  input: [],
+}});
+await failedModelSwitchClient.sendRequest("turn/start", {{
+  threadId: "thread-model-context-failure",
+  model: "model-new",
+  input: [],
+}});
+const failedModelSwitchResumeAttempts = failedModelSwitchCalls.filter((call) => call.method === "thread/resume").length;
+const failedModelSwitchTurnAttempts = failedModelSwitchCalls.filter((call) => call.method === "turn/start").length;
+
+let finishDelayedResume;
+const delayedResumeCalls = [];
+const delayedResumeClient = {{
+  async sendRequest(method) {{
+    delayedResumeCalls.push(method);
+    return method === "thread/resume" ? new Promise((resolve) => {{ finishDelayedResume = resolve; }}) : {{ ok: true }};
+  }},
+}};
+api.patchAppServerClient(delayedResumeClient);
+await delayedResumeClient.sendRequest("thread/start", {{ threadId: "delayed-resume", model: "model-old" }});
+const delayedResumeTurn = delayedResumeClient.sendRequest("turn/start", {{ threadId: "delayed-resume", model: "model-new" }});
+await new Promise(setImmediate);
+const delayedResumeWaited = delayedResumeCalls.at(-1) === "thread/resume" && !delayedResumeCalls.includes("turn/start");
+finishDelayedResume({{ ok: true }});
+await delayedResumeTurn;
+
+async function expectNativeRequestCompletes(promise) {{
+  let timeoutId;
+  try {{
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {{ timeoutId = setTimeout(() => reject(new Error("native request remained blocked")), 5000); }}),
+    ]);
+  }} finally {{ clearTimeout(timeoutId); }}
+}}
+const hungSettingsForwarded = [];
+const lateSettingsIgnored = [];
+for (const kind of ["instance", "prototype"]) {{
+  api.setBackendSettings({{
+    relayProfilesEnabled: true,
+    activeRelayId: "hung-settings",
+    activeRelayCodexProvider: "stale_vendor",
+    relayProfiles: [{{ id: "hung-settings", relayMode: "pureApi", officialMixApiKey: true, configContents: 'model_provider = "stale_vendor"' }}],
+  }});
+  let resolveSettings;
+  window.__codexSessionDeleteBridge = (path) => path === "/settings/get"
+    ? new Promise((resolve) => {{ resolveSettings = resolve; }})
+    : Promise.resolve({{ status: "ok" }});
+  const nativeParams = {{ threadId: `hung-settings-${{kind}}`, model: "gpt-5.4", modelProvider: "openai" }};
+  const nativeOptions = {{ marker: kind }};
+  class HungSettingsClient {{
+    async sendRequest(method, params, options) {{
+      if (method !== "turn/start" || params.modelProvider !== "openai" || options !== nativeOptions) {{
+        throw new Error("failed settings read changed native request");
+      }}
+      hungSettingsForwarded.push(kind);
+      return {{ nativeComplete: true }};
+    }}
+  }}
+  const client = new HungSettingsClient();
+  if (kind === "instance") {{
+    api.patchAppServerClient(client);
+  }} else {{
+    delete window.__alunixaXAppServerClientPrototypePatchInstalled;
+    window.__alunixaXAppServerClientClass = HungSettingsClient;
+    api.installAppServerClientPrototypePatch();
+  }}
+  await expectNativeRequestCompletes(client.sendRequest("turn/start", nativeParams, nativeOptions));
+  resolveSettings({{
+    enhancementsEnabled: true,
+    activeRelayCodexProvider: "late_vendor",
+    relayProfiles: [{{ id: "hung-settings", relayMode: "pureApi", officialMixApiKey: true, configContents: 'model_provider = "late_vendor"' }}],
+  }});
+  await new Promise(setImmediate);
+  lateSettingsIgnored.push(api.applyProviderOverride("thread/start", {{ modelProvider: "openai" }})?.modelProvider);
+}}
+
+api.setBackendSettings({{ relayProfilesEnabled: false, codexAppModelWhitelistUnlock: true }});
+api.setModelCatalog({{ model: "", default_model: "", models: [] }});
+let resolveCatalog;
+let catalogReadFinished = false;
+window.__codexSessionDeleteBridge = (path) => path === "/codex-model-catalog"
+  ? new Promise((resolve) => {{ resolveCatalog = resolve; }})
+  : Promise.resolve({{ status: "ok" }});
+const catalogRead = api.loadModelCatalog(true).then((result) => {{ catalogReadFinished = true; return result; }});
+const catalogClient = {{
+  async sendRequest(method) {{ return method === "list-models-for-host" ? {{ data: [] }} : {{ nativeComplete: true }}; }},
+}};
+api.patchAppServerClient(catalogClient);
+const catalogTurn = await expectNativeRequestCompletes(catalogClient.sendRequest("turn/start", {{ threadId: "hung-catalog", model: "gpt-5.4" }}));
+const turnCompletedBeforeCatalogRead = catalogTurn.nativeComplete === true && !catalogReadFinished;
+const catalogList = await expectNativeRequestCompletes(catalogClient.sendRequest("list-models-for-host", {{}}));
+const hungCatalogListReturned = Array.isArray(catalogList.data) && catalogReadFinished;
+await catalogRead;
+resolveCatalog({{ status: "ok", model: "late-model", models: ["late-model"] }});
+await new Promise(setImmediate);
+const lateCatalogIgnored = (await api.loadModelCatalog())?.status;
+api.setBackendSettings({{
+  relayProfilesEnabled: true,
+  codexAppModelWhitelistUnlock: true,
+  activeRelayId: "filter-profile",
+  relayProfiles: [{{ id: "filter-profile", relayMode: "pureApi" }}],
+}});
+const supplierCatalog = {{ status: "ok", model_provider: "filter-profile", model: "relay-model", default_model: "relay-model", models: ["relay-model", "gpt-5.6-sol"] }};
+api.setModelCatalog(supplierCatalog);
+const pureApiContainer = {{
+  models: [{{ model: "gpt-unavailable" }}, {{ model: "gpt-5.6-sol" }}],
+  availableModels: ["gpt-unavailable", "gpt-5.6-sol"],
+  available_models: new Set(["gpt-unavailable", "gpt-5.6-sol"]),
+  defaultModel: {{ model: "gpt-unavailable" }},
+  default_model: "gpt-unavailable",
+}};
+api.patchModelContainer(pureApiContainer);
+const pureApiFilteredModels = pureApiContainer.models.map((item) => item.model);
+const pureApiFilteredNames = [...pureApiContainer.availableModels];
+const pureApiFilteredSet = [...pureApiContainer.available_models];
+const pureApiDefaultModel = pureApiContainer.defaultModel.model;
+const statsigContainer = {{ value: {{ available_models: ["gpt-unavailable", "gpt-5.6-sol"], default_model: "gpt-unavailable" }} }};
+const pureApiStatsigFiltered = api.patchStatsigModelDynamicConfig(statsigContainer).value.available_models;
+const pureApiStatsigDefault = statsigContainer.value.default_model;
+api.setBackendSettings({{ relayProfiles: [{{ id: "filter-profile", relayMode: "official" }}] }});
+api.patchModelContainer(pureApiContainer);
+api.patchStatsigModelDynamicConfig(statsigContainer);
+const modelsRestoredAfterModeChange = pureApiContainer.models.some((item) => item.model === "gpt-unavailable")
+  && pureApiContainer.availableModels.includes("gpt-unavailable") && pureApiContainer.available_models.has("gpt-unavailable")
+  && pureApiContainer.defaultModel.model === "gpt-unavailable" && pureApiContainer.default_model === "gpt-unavailable"
+  && statsigContainer.value.available_models.includes("gpt-unavailable") && statsigContainer.value.default_model === "gpt-unavailable";
+api.setBackendSettings({{ relayProfiles: [{{ id: "filter-profile", relayMode: "pureApi" }}] }});
+api.patchModelContainer(pureApiContainer);
+api.setModelCatalog({{ status: "failed", model: "", default_model: "", models: [] }});
+api.patchModelContainer(pureApiContainer);
+const modelsRestoredAfterCatalogFailure = pureApiContainer.models.some((item) => item.model === "gpt-unavailable")
+  && pureApiContainer.defaultModel.model === "gpt-unavailable";
+api.setModelCatalog(supplierCatalog);
+const unfilteredModelScenarios = [];
+for (const scenario of ["official", "mixed", "failed", "not-configured", "stale-profile"]) {{
+  api.setBackendSettings({{ relayProfiles: [{{ id: "filter-profile", relayMode: scenario === "official" || scenario === "mixed" ? "official" : "pureApi", officialMixApiKey: scenario === "mixed" }}] }});
+  api.setModelCatalog({{ ...supplierCatalog, status: scenario === "failed" ? "failed" : scenario === "not-configured" ? "not_configured" : "ok", model_provider: scenario === "stale-profile" ? "previous-profile" : "filter-profile" }});
+  const nativeModels = [{{ model: "gpt-unavailable" }}];
+  api.patchModelArray(nativeModels);
+  unfilteredModelScenarios.push(nativeModels.some((item) => item.model === "gpt-unavailable"));
+}}
+api.setBackendSettings({{ relayProfiles: [{{ id: "filter-profile", relayMode: "pureApi" }}] }});
+api.setModelCatalog(supplierCatalog);
+api.patchModelContainer(pureApiContainer);
+delete require.cache[require.resolve(scriptPath)];
+require(scriptPath);
+const reinjectedApi = window.__alunixaXServiceTierTest;
+reinjectedApi.setBackendSettings({{ relayProfilesEnabled: true, codexAppModelWhitelistUnlock: true, activeRelayId: "filter-profile", relayProfiles: [{{ id: "filter-profile", relayMode: "official" }}] }});
+reinjectedApi.setModelCatalog(supplierCatalog);
+reinjectedApi.patchModelContainer(pureApiContainer);
+const modelsRestoredAfterReinjection = pureApiContainer.models.some((item) => item.model === "gpt-unavailable")
+  && pureApiContainer.available_models.has("gpt-unavailable") && pureApiContainer.defaultModel.model === "gpt-unavailable";
+reinjectedApi.setBackendSettings({{ relayProfiles: [{{ id: "filter-profile", relayMode: "pureApi" }}] }});
+const sharedHostModels = [{{ model: "gpt-5.6-sol" }}, {{ model: "remote-qwen" }}];
+class ScopedModelClient {{
+  constructor(hostId) {{ this.hostId = hostId; }}
+  async sendRequest() {{ return {{ data: sharedHostModels }}; }}
+}}
+const localModelClient = new ScopedModelClient("local");
+const remoteModelClient = new ScopedModelClient("ssh:test");
+reinjectedApi.patchAppServerClient(localModelClient);
+reinjectedApi.patchAppServerClient(remoteModelClient);
+await localModelClient.sendRequest("model/list", {{}});
+const localRemovedRemote = !sharedHostModels.some((item) => item.model === "remote-qwen");
+await remoteModelClient.sendRequest("model/list", {{}});
+const remoteModelsPreservedForSharedCache = localRemovedRemote && sharedHostModels.some((item) => item.model === "remote-qwen");
+window.__alunixaXAppServerClientClass = class ScopedProtoModelClient {{
+  constructor(hostId) {{ this.hostId = hostId; }}
+  async sendRequest() {{ return {{ data: sharedHostModels }}; }}
+}};
+delete window.__alunixaXAppServerClientPrototypePatchInstalled;
+reinjectedApi.installAppServerClientPrototypePatch();
+await new window.__alunixaXAppServerClientClass("local").sendRequest("list-models-for-host", {{ hostId: "local" }});
+await new window.__alunixaXAppServerClientClass("ssh:test").sendRequest("list-models-for-host", {{ hostId: "local" }});
+const remotePrototypeModelsPreserved = sharedHostModels.some((item) => item.model === "remote-qwen");
+await localModelClient.sendRequest("model/list", {{}});
+const unknownModelClient = new ScopedModelClient(undefined);
+reinjectedApi.patchAppServerClient(unknownModelClient);
+await unknownModelClient.sendRequest("model/list", {{}});
+const unknownHostModelsPreserved = sharedHostModels.some((item) => item.model === "remote-qwen");
+const remoteJson = {{ hostId: "ssh:test", models: [{{ model: "remote-qwen" }}] }};
+await reinjectedApi.patchModelJsonResponse(remoteJson);
+reinjectedApi.recordModelListRequest("remote-model-list", "ssh:test");
+const remoteMessage = {{ type: "mcp-response", hostId: "ssh:test", message: {{ id: "remote-model-list", result: {{ models: [{{ model: "remote-qwen" }}] }} }} }};
+reinjectedApi.patchMcpModelResponseData(remoteMessage);
+const remoteJsonAndMessageModelsPreserved = remoteJson.models.some((item) => item.model === "remote-qwen")
+  && remoteMessage.message.result.models.some((item) => item.model === "remote-qwen");
+const globalStatsigWithoutHost = {{ value: {{ available_models: ["remote-qwen"], default_model: "remote-qwen" }} }};
+reinjectedApi.patchStatsigModelDynamicConfig(globalStatsigWithoutHost, "");
+const globalStatsigWithoutHostPreserved = globalStatsigWithoutHost.value.available_models.includes("remote-qwen")
+  && globalStatsigWithoutHost.value.default_model === "remote-qwen";
+reinjectedApi.setBackendSettings({{ relayProfilesEnabled: false, codexAppModelWhitelistUnlock: false, codexAppServiceTierControls: false, codexAppSessionDelete: true }});
+window.__alunixaXAppServerClientClass = class DeleteOnlyNativeClient {{
+  constructor(hostId) {{ this.hostId = hostId; this.dispatchMessage = () => {{}}; }}
+  async sendRequest() {{
+    if (!this.dispatchMessage) throw new Error("AppServerRequestClient is missing a message dispatcher");
+    return {{ ok: true }};
+  }}
+}};
+delete window.__alunixaXAppServerClientPrototypePatchInstalled;
+const deleteOnlyInstalled = reinjectedApi.installAppServerClientPrototypePatch();
+const deleteOnlyClient = new window.__alunixaXAppServerClientClass("ssh:delete-only");
+await deleteOnlyClient.sendRequest("ping", {{}});
+const sessionDeleteOnlyRegistersNativeClient = deleteOnlyInstalled
+  && window.__alunixaXNativeHostClients.get("ssh:delete-only")?.ref?.deref() === deleteOnlyClient;
+process.stdout.write(JSON.stringify({{
+  supportedFast,
+  unsupportedModel,
+  turnWithoutModel,
+  turnWithoutModelDiagnosticModel,
+  customInheritUnsupported,
+  inheritUnsetStatus,
+  inheritFastStatus,
+  inheritStandardStatus,
+  inheritConfigTomlFastStatus,
+  resolvedConfigTomlTier,
+  resolvedUnsetTier,
+  inheritedConfigFastBlocked,
+  startConversation,
+  explicitProjectStartConversation,
+  projectlessStartConversation,
+  fetchStartConversation,
+  fetchSendCliRequest,
+  solFastAvailability,
+  solDescriptor,
+  dispatcherFromSingleton,
+  dispatcherFromCurrentSingleton,
+  dispatcherFromClass,
+  legacySettingStorage,
+  currentSettingStorage,
+  capabilitySettingStorage,
+  legacyStateApi,
+  currentStateApi,
+  appServerParamsUnchanged,
+  appServerProjectlessParamsUnchanged,
+  appServerSentCount: appServerCalls.length,
+  serviceTierClientPatched,
+  serviceTierClientSendTier,
+  serviceTierClientPrewarmTier,
+  frozenClientPatchSkipped,
+  captureLine,
+  captureColumn,
+  captureMissIsNull,
+  prototypePatched,
+  prototypeSendTier,
+  prototypePrewarmTier,
+  prototypeStateHasClass: prototypeState.hasClass,
+  prototypeStateInstalled: prototypeState.installed !== null,
+  providerFromMissing,
+  providerFromOpenAi,
+  providerFromOtherUnchanged: providerFromOther === explicitOtherProvider,
+  nonThreadProviderUnchanged,
+  providerWithServiceTierControlsDisabled,
+  appServerProviderOverride,
+  directThreadStartedId,
+  nestedThreadStartedId,
+  browserUseRouteThreadId,
+  inactiveBrowserUseUnscheduled,
+  remoteRecoveryScheduled,
+  remoteRecoveryThreadId: remoteRecoveryCalls[0]?.payload?.thread_id || "",
+  remoteRecoveryCallCountAfterSuccess,
+  remoteRecoveryDispatcherInstalled,
+  remoteRecoveryDispatcherThreadId,
+  remoteRecoveryBrowserUseDispatcherThreadId,
+  remoteRecoveryOutboundRouteThreadId,
+  remoteRecoveryListenerInstalled,
+  remoteRecoveryViewEventThreadId,
+  remoteRecoveryRetried,
+  remoteRecoveryRetryAttempts,
+  openAiSessionProviderUnchanged,
+  openAiRecoveryUnscheduled,
+  openAiPatchRemainsInstalled,
+  openAiNormalizationDisabled,
+  refreshedCustomProviderOverride,
+  refreshedOpenAiProvider,
+  refreshedPureApiResumeProvider,
+  refreshedPureApiResumeModel,
+  failedRefreshProviderUnchanged,
+  missingActiveProviderUnchanged,
+  missingActiveRecoveryUnscheduled,
+  pureApiThreadStartProvider,
+  pureApiThreadResumeProvider,
+  pureApiNativeResumeProvider,
+  pureApiExplicitResumePreserved,
+  officialResumePreserved,
+  pureApiTurnStartProvider,
+  pureApiTurnWithoutProviderUnchanged,
+  pureApiOtherProviderUnchanged,
+  pureApiRecoveryUnscheduled,
+  pureOfficialProviderUnchanged,
+  modelSwitchCallOrder,
+  modelSwitchResumeProvider,
+  failedModelSwitchResumeAttempts,
+  failedModelSwitchTurnAttempts,
+  delayedResumeWaited,
+  hungSettingsForwarded,
+  lateSettingsIgnored,
+  turnCompletedBeforeCatalogRead,
+  hungCatalogListReturned,
+  lateCatalogIgnored,
+  pureApiFilteredModels,
+  pureApiFilteredNames,
+  pureApiFilteredSet,
+  pureApiStatsigFiltered,
+  unfilteredModelScenarios,
+  pureApiDefaultModel,
+  pureApiStatsigDefault,
+  modelsRestoredAfterModeChange,
+  modelsRestoredAfterReinjection,
+  modelsRestoredAfterCatalogFailure,
+  remoteModelsPreservedForSharedCache,
+  remotePrototypeModelsPreserved,
+  unknownHostModelsPreserved,
+  remoteJsonAndMessageModelsPreserved,
+  sessionDeleteOnlyRegistersNativeClient,
+  globalStatsigWithoutHostPreserved,
+}}), () => process.exit(0));
+}}).catch((error) => {{
+  console.error(error);
+  process.exit(1);
+}});
+"#,
+        script_path = serde_json::to_string(&script_path.to_string_lossy().to_string())
+            .expect("script path should serialize")
+    )
+    .expect("harness should be written");
+    drop(harness);
+
+    let output = Command::new("node")
+        .arg(&harness_path)
+        .output()
+        .expect("node should run service-tier harness");
+    assert!(
+        output.status.success(),
+        "node harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).expect("harness stdout should be JSON")
+}
+
+#[test]
+fn injection_script_leaves_new_threads_to_the_codex_app() {
+    let script = assets::injection_script(57321);
+
+    assert!(!script.contains("installCodexProjectlessNewTaskButtons"));
+    assert!(!script.contains("loadCodexAppModule(\"projectless-thread-\")"));
+    assert!(!script.contains("projectless_thread_start_overridden"));
+    assert!(!script.contains("projectless_app_server_start_overridden"));
+    assert!(!script.contains("projectless_main_window_home_route_cleared"));
+    assert!(!script.contains("hotkey-window-projectless-default-enabled"));
+    assert!(script.contains("installCodexServiceTierDispatcherPatch"));
+    assert!(script.contains("installAppServerModelRequestPatch"));
+    assert!(script.contains("originalSendRequest(method, nextParams, options)"));
+}
+
+#[test]
+fn injection_script_restores_thread_scroll_positions() {
+    let script = assets::injection_script(57321);
+
+    assert!(script.contains("threadScrollRestore"));
+    assert!(script.contains("codexThreadScroll"));
+    assert!(script.contains("installThreadScrollRouteHooks"));
+    assert!(script.contains("scheduleThreadScrollSync"));
+    assert!(script.contains("localStorage.removeItem(codexThreadScrollKey)"));
+}
+
+#[test]
+fn manager_ui_exposes_pure_api_relay_mode_button() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("core crate should live under crates/alunixa-x-core");
+    let source = std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src/App.tsx")).unwrap();
+    let commands =
+        std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src-tauri/src/lib.rs")).unwrap();
+
+    assert!(source.contains("官方混入 API Key"));
+    assert!(!source.contains("关闭官方低额度提示"));
+    assert!(source.contains("hideOfficialUsageAlert"));
+    assert!(source.contains("纯 API"));
+    assert!(source.contains("apply_pure_api_injection"));
+    assert!(commands.contains("commands::apply_pure_api_injection"));
+}
+
+#[test]
+fn manager_ui_restores_plugin_auto_expand_with_persisted_controls() {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("core crate should live under crates/alunixa-x-core");
+    let source = std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src/App.tsx")).unwrap();
+
+    assert!(source.contains("setEnhanceFlag(\"codexAppPluginAutoExpand\",value)"));
+    assert!(source.contains("插件列表全量展示"));
+}
+
+#[test]
+fn cdp_target_deserializes_websocket_field() {
+    let target: CdpTarget = serde_json::from_value(json!({
+        "id": "page-1",
+        "type": "page",
+        "title": "Codex",
+        "url": "https://codex.test",
+        "webSocketDebuggerUrl": "ws://debug",
+    }))
+    .expect("target should deserialize");
+
+    assert_eq!(target.target_type, "page");
+    assert_eq!(
+        target.web_socket_debugger_url.as_deref(),
+        Some("ws://debug")
+    );
+}
+
+#[test]
+fn runtime_evaluate_params_sets_expected_flags() {
+    let params = bridge::runtime_evaluate_params("1 + 1");
+
+    assert_eq!(params["expression"], "1 + 1");
+    assert_eq!(params["awaitPromise"], false);
+    assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
+}
+
+#[test]
+fn runtime_evaluate_params_can_await_promise_for_bridge_health_checks() {
+    let params = bridge::runtime_evaluate_params_with_await_promise("Promise.resolve(true)", true);
+
+    assert_eq!(params["expression"], "Promise.resolve(true)");
+    assert_eq!(params["awaitPromise"], true);
+    assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
+}
+
+#[test]
+fn bridge_health_check_script_uses_persisted_real_probe_result() {
+    let script = bridge::bridge_health_check_script();
+
+    assert!(script.contains("__codexSessionDeleteBridge"));
+    assert!(script.contains("__alunixaXBridgeHealth"));
+    assert!(script.contains("lastSuccessAt"));
+    assert!(script.contains("lastInjectionAt"));
+    assert!(script.contains("lastAttemptAt"));
+    assert!(!script.contains("/backend/status"));
+}
+
+#[test]
+fn bridge_health_check_script_rejects_stale_bridge_after_failed_requests() {
+    let script = serde_json::to_string(bridge::bridge_health_check_script())
+        .expect("health script should serialize");
+    let harness = format!(
+        r#"
+const vm = require("node:vm");
+const source = {script};
+const bridge = () => Promise.resolve({{ status: "failed" }});
+const run = (health, hasBridge = true) => vm.runInNewContext(source, {{
+  window: {{ __codexSessionDeleteBridge: hasBridge ? bridge : null, __alunixaXBridgeHealth: health }},
+}});
+const now = Date.now();
+if (run({{ lastInjectionAt: 0, lastSuccessAt: 1 }}) !== false) process.exit(1);
+if (run({{ lastInjectionAt: 0, lastSuccessAt: now }}) !== true) process.exit(2);
+if (run({{ lastInjectionAt: now, lastSuccessAt: 0 }}) !== true) process.exit(3);
+if (run({{ lastInjectionAt: now - 6000, lastSuccessAt: 0 }}) !== false) process.exit(4);
+if (run({{ lastInjectionAt: 1, lastSuccessAt: now - 16000 }}) !== false) process.exit(5);
+if (run({{ lastInjectionAt: 0, lastSuccessAt: 0, lastAttemptAt: now }}) !== true) process.exit(7);
+if (run({{ lastInjectionAt: 1, lastSuccessAt: now - 16000, lastAttemptAt: now - 16000 }}) !== false) process.exit(8);
+if (run({{ lastInjectionAt: now, lastSuccessAt: now }}, false) !== false) process.exit(6);
+"#,
+        script = script
+    );
+    let output = Command::new("node")
+        .arg("-e")
+        .arg(harness)
+        .output()
+        .expect("node should run bridge health harness");
+    assert!(
+        output.status.success(),
+        "bridge health harness failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn bridge_result_expressions_json_escape_inputs() {
+    let resolve = bridge::resolve_bridge_expression("request\"1", &json!({"status": "ok"}))
+        .expect("resolve expression should build");
+    let reject = bridge::reject_bridge_expression("request\"1", "bad \"value\"")
+        .expect("reject expression should build");
+
+    assert_eq!(
+        resolve,
+        r#"window.__codexSessionDeleteResolve("request\"1", {"status":"ok"})"#
+    );
+    assert_eq!(
+        reject,
+        r#"window.__codexSessionDeleteReject("request\"1", "bad \"value\"")"#
+    );
+}
+
+#[test]
+fn pick_page_target_prefers_codex_title_or_url() {
+    let targets = vec![
+        target(
+            "first",
+            "page",
+            "Other",
+            "https://example.test",
+            Some("ws://first"),
+        ),
+        target(
+            "second",
+            "page",
+            "Codex",
+            "https://example.test",
+            Some("ws://second"),
+        ),
+        target(
+            "third",
+            "page",
+            "Other",
+            "https://codex.test",
+            Some("ws://third"),
+        ),
+    ];
+
+    let picked = pick_page_target(&targets).expect("target should be selected");
+
+    assert_eq!(picked.id, "second");
+}
+
+#[test]
+fn pick_page_target_leniently_falls_back_to_first_injectable_page() {
+    let targets = vec![
+        target(
+            "browser",
+            "browser",
+            "Codex",
+            "https://codex.test",
+            Some("ws://browser"),
+        ),
+        target(
+            "first",
+            "page",
+            "Other",
+            "https://example.test",
+            Some("ws://first"),
+        ),
+        target(
+            "second",
+            "page",
+            "Other 2",
+            "https://example.test/2",
+            Some("ws://second"),
+        ),
+    ];
+
+    let picked = pick_page_target(&targets).expect("target should be selected");
+
+    assert_eq!(picked.id, "first");
+}
+
+#[test]
+fn pick_page_target_rejects_non_pages_and_pages_without_websocket() {
+    let targets = vec![
+        target(
+            "browser",
+            "browser",
+            "Codex",
+            "https://codex.test",
+            Some("ws://browser"),
+        ),
+        target("page-no-ws", "page", "Codex", "https://codex.test", None),
+    ];
+
+    let error = pick_page_target(&targets).expect_err("no injectable page should be selected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable page target found")
+    );
+}
+
+#[test]
+fn pick_injectable_codex_page_target_rejects_non_codex_pages() {
+    let targets = vec![
+        target(
+            "browser",
+            "browser",
+            "Codex",
+            "https://codex.test",
+            Some("ws://browser"),
+        ),
+        target(
+            "other-page",
+            "page",
+            "Other App",
+            "https://example.test",
+            Some("ws://other"),
+        ),
+    ];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("non-Codex page must not be selected for injection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[test]
+fn pick_injectable_codex_page_target_ignores_embedded_browser_page_named_codex() {
+    let targets = vec![
+        target(
+            "browser-pr",
+            "page",
+            "Fix Alunixa X menu anchoring · Pull Request",
+            "https://github.com/Alunixa-Code/Alunixa-X/pull/1743",
+            Some("ws://browser-pr"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("Codex app page should win over embedded browser content");
+
+    assert_eq!(picked.id, "main");
+}
+
+#[test]
+fn pick_injectable_codex_page_target_ignores_standalone_manager() {
+    let targets = vec![
+        target(
+            "manager",
+            "page",
+            "Alunixa X 管理工具",
+            "http://127.0.0.1:1420/",
+            Some("ws://manager"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("native Codex app page should win over the standalone manager");
+
+    assert_eq!(picked.id, "main");
+}
+
+#[test]
+fn pick_injectable_codex_page_target_rejects_embedded_browser_only_page() {
+    let targets = vec![target(
+        "browser-pr",
+        "page",
+        "Fix Alunixa X menu anchoring · Pull Request",
+        "https://github.com/Alunixa-Code/Alunixa-X/pull/1743",
+        Some("ws://browser-pr"),
+    )];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("embedded browser content must not be selected for injection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[test]
+fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_page() {
+    let targets = vec![target(
+        "chatgpt",
+        "page",
+        "ChatGPT",
+        "https://chatgpt.com/",
+        Some("ws://chatgpt"),
+    )];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("ChatGPT desktop page should be selected");
+
+    assert_eq!(picked.id, "chatgpt");
+}
+
+#[test]
+fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_error_page() {
+    let targets = vec![target(
+        "chatgpt-error",
+        "page",
+        "ChatGPT",
+        "data:text/html;charset=utf-8,%3Ctitle%3EChatGPT%3C/title%3E",
+        Some("ws://chatgpt-error"),
+    )];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("ChatGPT desktop error page should be selected");
+
+    assert_eq!(picked.id, "chatgpt-error");
+}
+
+#[test]
+fn pick_injectable_codex_page_target_prefers_app_main_over_incidental_codex_page() {
+    let targets = vec![
+        target(
+            "help",
+            "page",
+            "Using Codex with your ChatGPT plan",
+            "https://help.openai.com/en/articles/using-codex",
+            Some("ws://help"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let picked = pick_injectable_codex_page_target(&targets)
+        .expect("the exact app main renderer should win regardless of target order");
+
+    assert_eq!(picked.id, "main");
+}
+
+#[test]
+fn avatar_overlay_target_detection_is_narrow() {
+    let overlay = target(
+        "avatar",
+        "page",
+        "ChatGPT Avatar Overlay",
+        "app://-/index.html?initialRoute=%2Favatar-overlay",
+        Some("ws://avatar"),
+    );
+    let main = target(
+        "main",
+        "page",
+        "ChatGPT",
+        "https://chatgpt.com/",
+        Some("ws://main"),
+    );
+
+    assert!(is_avatar_overlay_page_target(&overlay));
+    assert!(!is_primary_codex_page_target(&overlay));
+    assert!(!is_avatar_overlay_page_target(&main));
+    assert!(is_primary_codex_page_target(&main));
+    assert!(!is_avatar_overlay_page_target(&target(
+        "external",
+        "page",
+        "avatar-overlay",
+        "https://example.test/avatar-overlay",
+        Some("ws://external"),
+    )));
+}
+
+#[test]
+fn primary_target_selection_skips_v1_and_v2_overlay_candidates() {
+    let targets = vec![
+        target(
+            "v1-overlay",
+            "page",
+            "Codex",
+            "app://-/index.html?initialRoute=%2Favatar-overlay",
+            Some("ws://v1"),
+        ),
+        target(
+            "v2-overlay",
+            "page",
+            "Codex",
+            "app://-/index.html?initialRoute=/avatar-overlay",
+            Some("ws://v2"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let selected = pick_injectable_codex_page_target(&targets).unwrap();
+
+    assert_eq!(selected.id, "main");
+}
+
+#[test]
+fn quick_chat_target_detection_is_narrow() {
+    for url in [
+        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat",
+        "app://-/index.html?initialRoute=/chatgpt/quick-chat",
+        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
+        "app://-/index.html?initialRoute=/chatgpt/quick-chat-prewarm",
+        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat%2Fconversation-123",
+        "app://-/index.html?initialRoute=/chatgpt/quick-chat/conversation-123",
+    ] {
+        let quick_chat = target("quick-chat", "page", "Codex", url, Some("ws://quick-chat"));
+
+        assert!(is_quick_chat_page_target(&quick_chat));
+        assert!(!is_primary_codex_page_target(&quick_chat));
+    }
+
+    assert!(!is_quick_chat_page_target(&target(
+        "external",
+        "page",
+        "Codex",
+        "https://example.test/chatgpt/quick-chat-prewarm",
+        Some("ws://external"),
+    )));
+    assert!(!is_quick_chat_page_target(&target(
+        "other-param",
+        "page",
+        "Codex",
+        "app://-/index.html?next=initialRoute%3D%252Fchatgpt%252Fquick-chat-prewarm",
+        Some("ws://other-param"),
+    )));
+    assert!(!is_quick_chat_page_target(&target(
+        "similar-route",
+        "page",
+        "Codex",
+        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chatty",
+        Some("ws://similar-route"),
+    )));
+}
+
+#[test]
+fn primary_target_selection_skips_quick_chat_candidate() {
+    let targets = vec![
+        target(
+            "quick-chat",
+            "page",
+            "Codex",
+            "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat%2Fconversation-123",
+            Some("ws://quick-chat"),
+        ),
+        target(
+            "quick-chat-prewarm",
+            "page",
+            "Codex",
+            "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
+            Some("ws://quick-chat-prewarm"),
+        ),
+        target(
+            "main",
+            "page",
+            "Codex",
+            "app://-/index.html",
+            Some("ws://main"),
+        ),
+    ];
+
+    let selected = pick_injectable_codex_page_target(&targets).unwrap();
+
+    assert_eq!(selected.id, "main");
+}
+
+#[test]
+fn quick_chat_only_target_is_not_injectable_as_codex_main_page() {
+    let targets = vec![target(
+        "quick-chat",
+        "page",
+        "Codex",
+        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
+        Some("ws://quick-chat"),
+    )];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("Quick Chat helper renderer must not be selected for injection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[test]
+fn pick_injectable_codex_page_target_requires_websocket() {
+    let targets = vec![target("codex", "page", "Codex", "https://codex.test", None)];
+
+    let error = pick_injectable_codex_page_target(&targets)
+        .expect_err("Codex page without websocket must not be selected for injection");
+
+    assert!(
+        error
+            .to_string()
+            .contains("No injectable Codex page target found")
+    );
+}
+
+#[tokio::test]
+async fn list_targets_can_query_ipv6_loopback_cdp_endpoint() {
+    let listener = TcpListener::bind("[::1]:0")
+        .await
+        .expect("IPv6 loopback listener should bind");
+    let port = listener.local_addr().unwrap().port();
+    let body = serde_json::to_vec(&json!([
+        {
+            "id": "page-1",
+            "type": "page",
+            "title": "Codex",
+            "url": "app://-/index.html",
+            "webSocketDebuggerUrl": format!("ws://[::1]:{port}/devtools/page/page-1"),
+        }
+    ]))
+    .unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("request should arrive");
+        let mut request = [0_u8; 1024];
+        let _ = stream.readable().await;
+        let _ = stream.try_read(&mut request);
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        stream
+            .try_write(response.as_bytes())
+            .expect("response headers should write");
+        stream.try_write(&body).expect("response body should write");
+    });
+
+    let targets = list_targets(port)
+        .await
+        .expect("CDP target query should fall back to IPv6 loopback");
+
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].id, "page-1");
+    server.await.expect("server task should complete");
+}
+
+#[tokio::test]
+async fn install_bridge_routes_binding_while_waiting_for_command_response() {
+    let temp = tempfile::tempdir().unwrap();
+    let log_path = temp.path().join("alunixa-x.log");
+    alunixa_x_core::diagnostic_log::set_diagnostic_log_path_for_tests(Some(log_path.clone()));
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=4 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        let evaluate = recv_json(&mut socket).await;
+        assert_eq!(evaluate["id"], 5);
+        assert_eq!(evaluate["method"], "Runtime.evaluate");
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "request-1",
+                        "path": "delete",
+                        "payload": { "target": "session" },
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        send_json(&mut socket, json!({ "id": 5, "result": {} })).await;
+
+        let response = recv_json(&mut socket).await;
+        assert_eq!(response["method"], "Runtime.evaluate");
+        assert!(response["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("__codexSessionDeleteResolve"));
+        send_json(&mut socket, json!({ "id": response["id"], "result": {} })).await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handled = Arc::new(AtomicBool::new(false));
+    let handler = {
+        let handled = Arc::clone(&handled);
+        Arc::new(move |path: String, payload: serde_json::Value| {
+            let handled = Arc::clone(&handled);
+            Box::pin(async move {
+                assert_eq!(path, "delete");
+                assert_eq!(payload["target"], "session");
+                handled.store(true, Ordering::SeqCst);
+                Ok(json!({ "status": "ok" }))
+            })
+                as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+        })
+    };
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge should not hang while processing interleaved binding call")
+    .expect("bridge should keep processing interleaved binding call");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+    assert!(handled.load(Ordering::SeqCst));
+    let contents = std::fs::read_to_string(&log_path).unwrap();
+    assert!(contents.contains("bridge.resolve_start"));
+    assert!(contents.contains("bridge.resolve_ok"));
+    alunixa_x_core::diagnostic_log::set_diagnostic_log_path_for_tests(None);
+}
+
+#[tokio::test]
+async fn install_bridge_immediately_evaluates_new_document_scripts() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        let add_main = recv_json(&mut socket).await;
+        assert_eq!(add_main["method"], "Page.addScriptToEvaluateOnNewDocument");
+        assert_eq!(add_main["params"]["source"], "window.mainInjected = true;");
+        send_json(&mut socket, json!({ "id": add_main["id"], "result": {} })).await;
+
+        let eval_main = recv_json(&mut socket).await;
+        assert_eq!(eval_main["method"], "Runtime.evaluate");
+        assert_eq!(
+            eval_main["params"]["expression"],
+            "window.mainInjected = true;"
+        );
+        send_json(&mut socket, json!({ "id": eval_main["id"], "result": {} })).await;
+
+        let add_user = recv_json(&mut socket).await;
+        assert_eq!(add_user["method"], "Page.addScriptToEvaluateOnNewDocument");
+        assert_eq!(add_user["params"]["source"], "window.userInjected = true;");
+        send_json(&mut socket, json!({ "id": add_user["id"], "result": {} })).await;
+
+        let eval_user = recv_json(&mut socket).await;
+        assert_eq!(eval_user["method"], "Runtime.evaluate");
+        assert_eq!(
+            eval_user["params"]["expression"],
+            "window.userInjected = true;"
+        );
+        send_json(&mut socket, json!({ "id": eval_user["id"], "result": {} })).await;
+
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(
+            &url,
+            BRIDGE_BINDING_NAME,
+            noop_handler(),
+            &[
+                "window.mainInjected = true;".to_string(),
+                "window.userInjected = true;".to_string(),
+            ],
+        ),
+    )
+    .await
+    .expect("bridge should not hang while evaluating new document scripts")
+    .expect("bridge should evaluate new document scripts immediately");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        let add_script = recv_json(&mut socket).await;
+        assert_eq!(
+            add_script["method"],
+            "Page.addScriptToEvaluateOnNewDocument"
+        );
+        send_json(&mut socket, json!({ "id": add_script["id"], "result": {} })).await;
+
+        let eval_script = recv_json(&mut socket).await;
+        assert_eq!(eval_script["method"], "Runtime.evaluate");
+        send_json(
+            &mut socket,
+            json!({ "id": eval_script["id"], "result": {} }),
+        )
+        .await;
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "after-return",
+                        "path": "status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+
+        let resolve = recv_json(&mut socket).await;
+        assert!(resolve["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("after-return"));
+        send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handled = Arc::new(AtomicBool::new(false));
+    let handler = {
+        let handled = Arc::clone(&handled);
+        Arc::new(move |_path: String, _payload: serde_json::Value| {
+            let handled = Arc::clone(&handled);
+            Box::pin(async move {
+                handled.store(true, Ordering::SeqCst);
+                Ok(json!({ "status": "ok" }))
+            })
+                as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+        })
+    };
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(
+            &url,
+            BRIDGE_BINDING_NAME,
+            handler,
+            &["window.ready = true;".to_string()],
+        ),
+    )
+    .await
+    .expect("bridge install should return after setup")
+    .expect("bridge install should succeed");
+
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+    assert!(handled.load(Ordering::SeqCst));
+}
+
+#[tokio::test]
+async fn install_bridge_command_error_mentions_method_and_id() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        let command = recv_json(&mut socket).await;
+        assert_eq!(command["method"], "Runtime.enable");
+        send_json(
+            &mut socket,
+            json!({
+                "id": command["id"],
+                "error": { "code": -32000, "message": "Runtime disabled" },
+            }),
+        )
+        .await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handler = noop_handler();
+    let error = tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge should not hang on CDP error response")
+    .expect_err("CDP error response should fail install");
+    let message = error.to_string();
+
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+    assert!(message.contains("Runtime.enable"), "{message}");
+    assert!(message.contains("id 1"), "{message}");
+    assert!(message.contains("Runtime disabled"), "{message}");
+}
+
+#[tokio::test]
+async fn install_bridge_rejects_bad_payload_with_id_and_continues_after_unparseable_payload() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": { "payload": "{\"id\":\"bad-1\",\"payload\":{}" },
+            }),
+        )
+        .await;
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": { "payload": "not json" },
+            }),
+        )
+        .await;
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "ok-1",
+                        "path": "delete",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+
+        let reject = recv_json(&mut socket).await;
+        assert!(reject["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("__codexSessionDeleteReject"));
+        assert!(reject["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("bad-1"));
+        send_json(&mut socket, json!({ "id": reject["id"], "result": {} })).await;
+
+        let resolve = recv_json(&mut socket).await;
+        assert!(resolve["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("__codexSessionDeleteResolve"));
+        assert!(resolve["params"]["expression"]
+            .as_str()
+            .expect("expression should be string")
+            .contains("ok-1"));
+        send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[]),
+    )
+    .await
+    .expect("bridge should not hang after bad payload")
+    .expect("bad payloads should not terminate the bridge loop");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn install_bridge_queues_consecutive_bindings_without_recursive_dispatch() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        for request_id in ["first", "second", "third"] {
+            send_json(
+                &mut socket,
+                json!({
+                    "method": "Runtime.bindingCalled",
+                    "params": {
+                        "payload": serde_json::to_string(&json!({
+                            "id": request_id,
+                            "path": "delete",
+                            "payload": { "request": request_id },
+                        })).unwrap(),
+                    },
+                }),
+            )
+            .await;
+        }
+
+        let first = recv_json(&mut socket).await;
+        assert_eq!(first["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&first, "first");
+        let second = recv_json(&mut socket).await;
+        assert_eq!(second["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&second, "second");
+        assert_ne!(second["id"], first["id"]);
+
+        let third = recv_json(&mut socket).await;
+        assert_eq!(third["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&third, "third");
+        assert_ne!(third["id"], first["id"]);
+        assert_ne!(third["id"], second["id"]);
+
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handler = Arc::new(|_path: String, payload: serde_json::Value| {
+        Box::pin(async move { Ok(json!({ "status": "ok", "request": payload["request"] })) })
+            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge should not hang while draining queued binding calls")
+    .expect("bridge should process queued binding calls");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn install_bridge_does_not_wait_for_resolve_runtime_evaluate_ack() {
+    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
+        for expected_id in 1..=5 {
+            let command = recv_json(&mut socket).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
+        }
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "first",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        let first_resolve = recv_json(&mut socket).await;
+        assert_eq!(first_resolve["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&first_resolve, "first");
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "second",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        let second_resolve =
+            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut socket))
+                .await
+                .expect(
+                    "second resolve should be sent without waiting for first Runtime.evaluate ack",
+                );
+        assert_eq!(second_resolve["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&second_resolve, "second");
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handler = Arc::new(|_path: String, _payload: serde_json::Value| {
+        Box::pin(async { Ok(json!({ "status": "ok" })) })
+            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge install should not wait for resolve ack")
+    .expect("bridge install should survive missing resolve ack");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
+    let generate_started = Arc::new(Notify::new());
+    let release_generate = Arc::new(Notify::new());
+    let server_generate_started = Arc::clone(&generate_started);
+    let server_release_generate = Arc::clone(&release_generate);
+    let (url, request_rx) = spawn_cdp_server(move |mut socket| async move {
+        acknowledge_bridge_install(&mut socket).await;
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "generate",
+                        "path": "/stepwise/generate",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            server_generate_started.notified(),
+        )
+        .await
+        .expect("generate handler should start before the status probe");
+
+        send_json(
+            &mut socket,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "status",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+
+        let status_resolve =
+            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut socket))
+                .await
+                .expect("status should resolve while generate remains pending");
+        assert_eq!(status_resolve["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&status_resolve, "status");
+
+        server_release_generate.notify_one();
+        let generate_resolve = recv_json(&mut socket).await;
+        assert_eq!(generate_resolve["method"], "Runtime.evaluate");
+        assert_expression_contains_request(&generate_resolve, "generate");
+        close_socket(&mut socket).await;
+    })
+    .await;
+
+    let handler_generate_started = Arc::clone(&generate_started);
+    let handler_release_generate = Arc::clone(&release_generate);
+    let handler = Arc::new(move |path: String, _payload: serde_json::Value| {
+        let generate_started = Arc::clone(&handler_generate_started);
+        let release_generate = Arc::clone(&handler_release_generate);
+        Box::pin(async move {
+            if path == "/stepwise/generate" {
+                generate_started.notify_one();
+                release_generate.notified().await;
+            }
+            Ok(json!({ "status": "ok", "path": path }))
+        }) as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    });
+
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+    )
+    .await
+    .expect("bridge install should return while generate is pending")
+    .expect("bridge install should start the concurrent message pump");
+    request_rx
+        .await
+        .expect("server task should finish without panicking");
+}
+
+#[tokio::test]
+async fn superseded_bridge_session_stops_answering_binding_calls() {
+    let (url, stale_rx, fresh_rx) = spawn_two_session_cdp_server().await;
+
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect("first bridge install should succeed");
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect("second bridge install should succeed");
+
+    let stale_resolved = stale_rx
+        .await
+        .expect("stale server task should finish without panicking");
+    assert!(
+        !stale_resolved,
+        "superseded session must not resolve bridge requests"
+    );
+    fresh_rx
+        .await
+        .expect("fresh server task should finish without panicking");
+}
+
+/// 被顶替的旧会话不能依赖"socket 再收到消息"来发现 generation 过期：
+/// bridge 失效场景下旧 socket 不会再有任何消息（binding 事件只投递给最新会话），
+/// 旧会话必须靠 generation 轮询在一个间隔内主动关闭，否则会带着
+/// Runtime.enable 订阅与脚本注册无限期滞留（issue #2169 的会话堆积来源）。
+#[tokio::test]
+async fn superseded_bridge_session_closes_socket_without_incoming_messages() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let url = websocket_url(address);
+    let (stale_closed_tx, stale_closed_rx) = oneshot::channel();
+    let (fresh_alive_tx, fresh_alive_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (stale_stream, _) = listener
+            .accept()
+            .await
+            .expect("stale client should connect");
+        let mut stale = accept_async(stale_stream)
+            .await
+            .expect("stale websocket should upgrade");
+        acknowledge_bridge_install(&mut stale).await;
+
+        let (fresh_stream, _) = listener
+            .accept()
+            .await
+            .expect("fresh client should connect");
+        let mut fresh = accept_async(fresh_stream)
+            .await
+            .expect("fresh websocket should upgrade");
+        acknowledge_bridge_install(&mut fresh).await;
+
+        // 旧会话会先移除自己注册的 new-document 脚本，再由 generation 轮询关闭 socket。
+        let stale_cleanup = tokio::time::timeout(
+            bridge::BRIDGE_GENERATION_POLL_INTERVAL + Duration::from_millis(1500),
+            async {
+                let mut removed = false;
+                loop {
+                    match recv_text_message(&mut stale).await {
+                        Some(text) => {
+                            let message: serde_json::Value = serde_json::from_str(&text)
+                                .expect("bridge cleanup message should be JSON");
+                            if message["method"] == "Page.removeScriptToEvaluateOnNewDocument" {
+                                removed = true;
+                            }
+                        }
+                        None => break removed,
+                    }
+                }
+            },
+        )
+        .await
+        .unwrap_or(false);
+        let _ = stale_closed_tx.send(stale_cleanup);
+
+        // 新会话不受影响，仍应正常应答 binding 调用。
+        send_json(
+            &mut fresh,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "fresh",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        let fresh_resolved =
+            tokio::time::timeout(Duration::from_secs(2), recv_text_message(&mut fresh))
+                .await
+                .is_ok_and(|message| {
+                    message.is_some_and(|text| text.contains("__codexSessionDeleteResolve"))
+                });
+        let _ = fresh_alive_tx.send(fresh_resolved);
+    });
+
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect("first bridge install should succeed");
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect("second bridge install should succeed");
+
+    assert!(
+        stale_closed_rx
+            .await
+            .expect("stale server task should finish without panicking"),
+        "superseded session must close its socket without any incoming message"
+    );
+    assert!(
+        fresh_alive_rx
+            .await
+            .expect("fresh server task should finish without panicking"),
+        "fresh session must keep resolving bridge requests"
+    );
+}
+
+#[tokio::test]
+async fn failed_bridge_reinstall_keeps_existing_session_current() {
+    let (url, active_rx, failed_rx) = spawn_failed_reinstall_cdp_server().await;
+
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect("first bridge install should succeed");
+    let error = install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+        .await
+        .expect_err("second bridge install should fail");
+    assert!(error.to_string().contains("Runtime.addBinding"));
+
+    assert!(
+        active_rx
+            .await
+            .expect("active server task should finish without panicking"),
+        "failed reinstall must not supersede the existing bridge session"
+    );
+    failed_rx
+        .await
+        .expect("failed reinstall server task should finish without panicking");
+}
+
+type TestSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
+async fn spawn_two_session_cdp_server() -> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>)
+{
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let (stale_tx, stale_rx) = oneshot::channel();
+    let (fresh_tx, fresh_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (stale_stream, _) = listener
+            .accept()
+            .await
+            .expect("stale client should connect");
+        let mut stale = accept_async(stale_stream)
+            .await
+            .expect("stale websocket should upgrade");
+        acknowledge_bridge_install(&mut stale).await;
+
+        let (fresh_stream, _) = listener
+            .accept()
+            .await
+            .expect("fresh client should connect");
+        let mut fresh = accept_async(fresh_stream)
+            .await
+            .expect("fresh websocket should upgrade");
+        acknowledge_bridge_install(&mut fresh).await;
+
+        send_json(
+            &mut stale,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "stale",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+
+        let stale_resolved =
+            tokio::time::timeout(Duration::from_millis(500), recv_text_message(&mut stale))
+                .await
+                .is_ok_and(|message| message.is_some_and(|text| text.contains("Runtime.evaluate")));
+        let _ = stale_tx.send(stale_resolved);
+        close_socket(&mut fresh).await;
+        let _ = fresh_tx.send(());
+    });
+
+    (websocket_url(address), stale_rx, fresh_rx)
+}
+
+async fn spawn_failed_reinstall_cdp_server()
+-> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let (active_tx, active_rx) = oneshot::channel();
+    let (failed_tx, failed_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (active_stream, _) = listener
+            .accept()
+            .await
+            .expect("active client should connect");
+        let mut active = accept_async(active_stream)
+            .await
+            .expect("active websocket should upgrade");
+        acknowledge_bridge_install(&mut active).await;
+
+        let (failed_stream, _) = listener
+            .accept()
+            .await
+            .expect("failed client should connect");
+        let mut failed = accept_async(failed_stream)
+            .await
+            .expect("failed websocket should upgrade");
+        for expected_id in 1..=2 {
+            let command = recv_json(&mut failed).await;
+            assert_eq!(command["id"], expected_id);
+            send_json(&mut failed, json!({ "id": expected_id, "result": {} })).await;
+        }
+        let add_binding = recv_json(&mut failed).await;
+        assert_eq!(add_binding["id"], 3);
+        assert_eq!(add_binding["method"], "Runtime.addBinding");
+        send_json(
+            &mut failed,
+            json!({
+                "id": 3,
+                "error": { "code": -32000, "message": "binding install failed" }
+            }),
+        )
+        .await;
+        close_socket(&mut failed).await;
+        let _ = failed_tx.send(());
+
+        send_json(
+            &mut active,
+            json!({
+                "method": "Runtime.bindingCalled",
+                "params": {
+                    "payload": serde_json::to_string(&json!({
+                        "id": "active",
+                        "path": "/backend/status",
+                        "payload": {},
+                    })).unwrap(),
+                },
+            }),
+        )
+        .await;
+        let active_resolved =
+            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut active))
+                .await
+                .is_ok_and(|message| {
+                    message["method"] == "Runtime.evaluate"
+                        && message["params"]["expression"]
+                            .as_str()
+                            .is_some_and(|expression| expression.contains("active"))
+                });
+        let _ = active_tx.send(active_resolved);
+        close_socket(&mut active).await;
+    });
+
+    (websocket_url(address), active_rx, failed_rx)
+}
+
+async fn acknowledge_bridge_install(socket: &mut TestSocket) {
+    for expected_id in 1..=5 {
+        let command = recv_json(socket).await;
+        assert_eq!(command["id"], expected_id);
+        let result = if expected_id == 4 {
+            json!({ "identifier": "bridge-script-test" })
+        } else {
+            json!({})
+        };
+        send_json(socket, json!({ "id": expected_id, "result": result })).await;
+    }
+}
+
+async fn recv_text_message(socket: &mut TestSocket) -> Option<String> {
+    match socket.next().await {
+        Some(Ok(Message::Text(text))) => Some(text.to_string()),
+        _ => None,
+    }
+}
+
+async fn spawn_cdp_server<F, Fut>(handler: F) -> (String, oneshot::Receiver<()>)
+where
+    F: FnOnce(TestSocket) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let address = listener.local_addr().expect("listener should have address");
+    let (done_tx, done_rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("client should connect");
+        let socket = accept_async(stream)
+            .await
+            .expect("websocket should upgrade");
+        handler(socket).await;
+        let _ = done_tx.send(());
+    });
+
+    (websocket_url(address), done_rx)
+}
+
+fn websocket_url(address: SocketAddr) -> String {
+    format!("ws://{address}")
+}
+
+async fn recv_json(socket: &mut TestSocket) -> serde_json::Value {
+    let message = socket
+        .next()
+        .await
+        .expect("client should send message")
+        .expect("message should be readable");
+    let Message::Text(text) = message else {
+        panic!("expected text websocket message");
+    };
+    serde_json::from_str(&text).expect("message should be JSON")
+}
+
+async fn send_json(socket: &mut TestSocket, value: serde_json::Value) {
+    socket
+        .send(Message::Text(value.to_string().into()))
+        .await
+        .expect("message should send");
+}
+
+fn assert_expression_contains_request(command: &serde_json::Value, request_id: &str) {
+    let expression = command["params"]["expression"]
+        .as_str()
+        .expect("expression should be string");
+    assert!(
+        expression.contains("__codexSessionDeleteResolve"),
+        "{expression}"
+    );
+    assert!(expression.contains(request_id), "{expression}");
+}
+
+async fn close_socket(socket: &mut TestSocket) {
+    socket.close(None).await.expect("websocket should close");
+    let _ = tokio::time::timeout(Duration::from_millis(200), socket.next()).await;
+}
+
+fn noop_handler() -> bridge::BridgeHandler {
+    Arc::new(|_, _| {
+        Box::pin(async { Ok(json!({ "status": "ok" })) })
+            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
+    })
+}
+
+#[test]
+fn app_server_client_capture_condition_targets_class_handle() {
+    assert_eq!(
+        bridge::app_server_client_capture_condition(),
+        "!window.__alunixaXAppServerClientClass"
+    );
+}
+
+#[test]
+fn parse_app_server_client_capture_location_reads_renderer_report() {
+    let report = json!({
+        "urlRegex": "app://-/assets/app-initial-abc123.js",
+        "lineNumber": 1796_u64,
+        "columnNumber": 87512_u64,
+    });
+    let (url_regex, line, column) = bridge::parse_app_server_client_capture_location(
+        &serde_json::Value::String(report.to_string()),
+    )
+    .expect("renderer report should parse");
+    assert_eq!(url_regex, "app://-/assets/app-initial-abc123.js");
+    assert_eq!(line, 1796);
+    assert_eq!(column, 87512);
+    assert!(bridge::parse_app_server_client_capture_location(&json!("null")).is_none());
+    assert!(bridge::parse_app_server_client_capture_location(&json!("{}")).is_none());
+    assert!(bridge::parse_app_server_client_capture_location(&json!("")).is_none());
+}
+
+#[test]
+fn injection_script_restores_remote_and_worktree_adapters_without_obsolete_dropdowns() {
+    let script = assets::injection_script(57321);
+    for removed in [
+        "installUpstreamBranchDropdownAdapter",
+        "annotateBranchMenuWorktreeUsage",
+        "data-codex-branch-worktree-path",
+    ] {
+        assert!(!script.contains(removed), "retired entrypoint: {removed}");
+    }
+    assert!(script.contains("/upstream-worktree/create"));
+    assert!(script.contains("/zed-remote/open"));
+    assert!(script.contains("installUpstreamWorktreeNativeAdapter"));
+}
+
+#[test]
+fn injection_script_preserves_native_menu_placement_without_language_rewrites() {
+    let script = assets::injection_script(57321);
+    assert!(script.contains("nativeMenuPlacement"));
+    assert!(!script.contains("codexMenuLocalizationMap"));
+    assert!(!script.contains("function localizeCodexMenus"));
+    assert!(!script.contains("localizeCodexMenus();"));
+}
+
+use std::sync::OnceLock;
+
+#[test]
+fn injection_script_exposes_capacity_auto_retry_control() {
+    let script = assets::injection_script(57321);
+
+    // 开关接线：默认值 → 后端映射 → 中文标签 → 菜单 DOM → 设置面板输入框。
+    assert!(script.contains("capacityAutoRetry: false"));
+    assert!(script.contains("capacityAutoRetry: \"codexAppCapacityAutoRetry\""));
+    assert!(script.contains("容量错误自动重试"));
+    assert!(script.contains("data-alunixa-x-setting=\"capacityAutoRetry\""));
+    assert!(script.contains("data-alunixa-x-capacity-retry-max-attempts=\"true\""));
+    assert!(script.contains("data-alunixa-x-capacity-retry-interval=\"true\""));
+
+    // 运行逻辑：横幅识别只看语义结构（aside + 重试按钮），不绑 Codex 的 hash 类名。
+    assert!(script.contains("function findCapacityAutoRetryBanner"));
+    assert!(script.contains("function capacityAutoRetryTick"));
+    assert!(script.contains("function syncCodexPlusCapacityAutoRetry"));
+    assert!(script.contains("querySelectorAll(\"aside\")"));
+    assert!(script.contains("capacityAutoRetryLabelPattern"));
+    // 原生倒计时在跑时让路，避免和 Codex 自己的自动重试撞车。
+    assert!(script.contains("capacityAutoRetryCountdownPattern"));
+    assert!(script.contains("capacityAutoRetryNativeCountdownRunning"));
+    // 0 秒间隔必须合法（用户要求"失败就立刻重试"），但有 1 秒地板值防热循环。
+    assert!(script.contains("capacityAutoRetryMinIntervalMs = 1000"));
+    assert!(script.contains("capacityAutoRetryDefaultIntervalSeconds = 0"));
+    // 插进 DOM 的浮标必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
+    assert!(script.contains("data-alunixa-x-ext\", \"capacity-auto-retry\""));
+    assert!(script.contains("syncCodexPlusCapacityAutoRetry);"));
+}
+
+#[test]
+fn injection_script_uses_an_icon_for_idle_dictation() {
+    let script = assets::injection_script(57321);
+
+    // 空闲态是图标按钮：文字按钮在 composer 底栏比原生图标宽一倍多。
+    assert!(script.contains("function alunixaXDictationMicButton"));
+    assert!(script.contains("function alunixaXDictationMicIcon"));
+    assert!(script.contains("alunixaXDictationMicButton(state.phase !== \"idle\")"));
+    // 不再有「空闲态渲染文字按钮」这条路径。
+    assert!(!script.contains("alunixaXDictationControl(\"start\", \"语音输入\""));
+    // 无障碍名称不能丢：图标按钮只能靠 aria-label / title 表达用途。
+    assert!(script.contains("button.setAttribute(\"aria-label\", \"语音输入\")"));
+    assert!(script.contains("button.setAttribute(\"title\", \"语音输入\")"));
+    // 录音/转写这些状态仍然带文字，图标说不清。
+    assert!(script.contains("alunixaXDictationControl(\"insert\", \"停止并插入\")"));
+}
+
+#[test]
+fn injection_script_exposes_the_usage_status_line() {
+    let script = assets::injection_script(57321);
+
+    // 开关接线：默认值 → 后端映射。
+    assert!(script.contains("usageStatusLine: true"));
+    assert!(script.contains("usageStatusLine: \"codexAppUsageStatusLine\""));
+    assert!(script.contains("usageStatusLine: false"));
+
+    // 数据源走尾部快照路由，不能退回按秒整读历史的 /thread-usage-history。
+    assert!(script.contains("postJson(\"/thread-usage-live\""));
+    assert!(script.contains("data-above-composer-conversation-id"));
+    assert!(script.contains("data-composer-surface-variant"));
+    // 插进 DOM 的节点必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
+    assert!(script.contains("data-alunixa-x-ext\", \"builtin-usage-statusline\""));
+    assert!(script.contains("registerCodexPlusExtensionSelector"));
+    // 设置面板里的开关要能立刻生效，不用等下一拍轮询。
+    assert!(script.contains("__ALUNIXA_X_USAGE_STATUSLINE_SYNC__"));
+}
+
+#[test]
+fn injection_script_recovers_a_stalled_codex_boot_shell() {
+    let script = assets::injection_script(57321);
+
+    // 空壳判定依据：有 #root、长不出 <main>、且里头一个字都没有。
+    assert!(script.contains("function bootShellRecoveryStuck"));
+    assert!(script.contains("function bootShellRecoverySettled"));
+    assert!(script.contains("document.querySelector(\"main\")"));
+    assert!(script.contains("root.innerText.trim() === \"\""));
+
+    // 只刷主页面：活动悬浮层 / quick-chat 带 initialRoute，本来就没有 <main>。
+    assert!(script.contains("function bootShellRecoveryAppliesHere"));
+    assert!(script.contains("/[?&]initialRoute=/"));
+    // 宽限要足够长，才能把「启动慢」和「真卡死」分开。
+    assert!(script.contains("bootShellRecoveryGraceMs = 20000"));
+    // 限次靠 sessionStorage + 冷却：写不进去就宁可不刷，避免刷新循环。
+    assert!(script.contains("bootShellRecoveryCooldownMs = 60000"));
+    assert!(script.contains("window.sessionStorage.getItem(bootShellRecoveryStorageKey)"));
+    assert!(script.contains("window.sessionStorage.setItem(bootShellRecoveryStorageKey"));
+    // 触发过要能从 alunixa-x.log 复盘。
+    assert!(script.contains("boot_shell_recovery_reload"));
+    assert!(script.contains("window.location.reload();"));
+    // 模块末尾必须真的装上，否则整段是死代码。
+    assert!(script.contains("installBootShellRecovery();"));
+}
+
+#[test]
+fn injection_script_retains_legacy_fast_controls_and_keeps_native_unlock_independent() {
+    let script = assets::injection_script(57321);
+    for retired in [
+        "data-alunixa-x-setting=\"serviceTierControls\"",
+        "data-codex-service-tier-fast",
+        "toggleCodexServiceTierFromBadge",
+        "setCodexThreadServiceTierMode",
+        "applyCodexServiceTierRequestOnly",
+    ] {
+        assert!(script.contains(retired), "retained Fast contract: {retired}");
+    }
+    assert!(script.contains("data-alunixa-x-setting=\"nativeFastUnlock\""));
+    assert!(script.contains("__alunixaXNativeFastUnlock"));
+    assert!(script.contains("codexAppNativeFastUnlock"));
+    assert!(script.contains("serviceTiers"));
+    assert!(script.contains("locateCodexAppServerClientBreakpoint"));
+    assert!(script.contains("installCodexAppServerClientPrototypePatch"));
+}
+
+#[test]
 fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
     let cases = run_native_tier_and_provider_contract_harness();
 
@@ -3857,24 +6662,10 @@ fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
         cases["projectlessStartConversation"]["projectlessOutputDirectory"],
         "C:/projectless/outputs"
     );
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
-    assert!(
-        cases["projectlessStartConversation"]
-            .get("projectAssignment")
-            .is_none()
-    );
-    assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
-    assert!(cases["projectlessStartConversation"]
-        .get("projectAssignment")
-        .is_none());
-    assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
-=======
     assert!(cases["projectlessStartConversation"]
         .get("projectAssignment")
         .is_none());
     assert_eq!(cases["fetchStartConversation"]["serviceTier"], serde_json::Value::Null);
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
     assert_eq!(
         cases["fetchSendCliRequest"]["params"]["serviceTier"],
         serde_json::Value::Null
@@ -3993,14 +6784,8 @@ fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
     assert_eq!(cases["failedModelSwitchResumeAttempts"], 2);
     assert_eq!(cases["failedModelSwitchTurnAttempts"], 2);
     assert_eq!(cases["delayedResumeWaited"], true);
-    assert_eq!(
-        cases["hungSettingsForwarded"],
-        json!(["instance", "prototype"])
-    );
-    assert_eq!(
-        cases["lateSettingsIgnored"],
-        json!(["stale_vendor", "stale_vendor"])
-    );
+    assert_eq!(cases["hungSettingsForwarded"], json!(["instance", "prototype"]));
+    assert_eq!(cases["lateSettingsIgnored"], json!(["stale_vendor", "stale_vendor"]));
     assert_eq!(cases["turnCompletedBeforeCatalogRead"], true);
     assert_eq!(cases["hungCatalogListReturned"], true);
     assert_eq!(cases["lateCatalogIgnored"], "failed");
@@ -4101,6 +6886,7 @@ globalThis.navigator = {{ userAgent: "node-test" }};
 globalThis.performance = {{ getEntriesByType: () => [] }};
 require(scriptPath);
 const api = window.__alunixaXServiceTierTest;
+api.setBackendSettings({{ enhancementsEnabled: true, codexAppServiceTierControls: false }});
 api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4", "gpt-5.5"] }});
 const withoutNativeTier = api.applyServiceTierOverride("turn/start", {{
   threadId: "thread-12345678",
@@ -5042,1469 +7828,12 @@ process.stdout.write(JSON.stringify({{
 }
 
 #[test]
-fn injection_script_leaves_new_threads_to_the_codex_app() {
-    let script = assets::injection_script(57321);
-
-    assert!(!script.contains("installCodexProjectlessNewTaskButtons"));
-    assert!(!script.contains("loadCodexAppModule(\"projectless-thread-\")"));
-    assert!(!script.contains("projectless_thread_start_overridden"));
-    assert!(!script.contains("projectless_app_server_start_overridden"));
-    assert!(!script.contains("projectless_main_window_home_route_cleared"));
-    assert!(!script.contains("hotkey-window-projectless-default-enabled"));
-    assert!(script.contains("installCodexServiceTierDispatcherPatch"));
-    assert!(script.contains("installAppServerModelRequestPatch"));
-    assert!(script.contains("originalSendRequest(method, nextParams, options)"));
-}
-
-#[test]
-fn injection_script_restores_thread_scroll_positions() {
-    let script = assets::injection_script(57321);
-
-    assert!(script.contains("threadScrollRestore"));
-    assert!(script.contains("codexThreadScroll"));
-    assert!(script.contains("installThreadScrollRouteHooks"));
-    assert!(script.contains("scheduleThreadScrollSync"));
-    assert!(script.contains("localStorage.removeItem(codexThreadScrollKey)"));
-}
-
-#[test]
-fn manager_ui_exposes_pure_api_relay_mode_button() {
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("core crate should live under crates/alunixa-x-core");
-    let source = std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src/App.tsx")).unwrap();
-    let commands =
-        std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src-tauri/src/lib.rs")).unwrap();
-
-    assert!(source.contains("官方混入 API Key"));
-    assert!(!source.contains("关闭官方低额度提示"));
-    assert!(source.contains("hideOfficialUsageAlert"));
-    assert!(source.contains("纯 API"));
-    assert!(source.contains("apply_pure_api_injection"));
-    assert!(commands.contains("commands::apply_pure_api_injection"));
-}
-
-#[test]
-fn manager_ui_restores_plugin_auto_expand_with_persisted_controls() {
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("core crate should live under crates/alunixa-x-core");
-    let source = std::fs::read_to_string(repo.join("apps/alunixa-x-manager/src/App.tsx")).unwrap();
-
-    assert!(source.contains("setEnhanceFlag(\"codexAppPluginAutoExpand\",value)"));
-    assert!(source.contains("插件列表全量展示"));
-}
-
-#[test]
-fn cdp_target_deserializes_websocket_field() {
-    let target: CdpTarget = serde_json::from_value(json!({
-        "id": "page-1",
-        "type": "page",
-        "title": "Codex",
-        "url": "https://codex.test",
-        "webSocketDebuggerUrl": "ws://debug",
-    }))
-    .expect("target should deserialize");
-
-    assert_eq!(target.target_type, "page");
-    assert_eq!(
-        target.web_socket_debugger_url.as_deref(),
-        Some("ws://debug")
-    );
-}
-
-#[test]
-fn runtime_evaluate_params_sets_expected_flags() {
-    let params = bridge::runtime_evaluate_params("1 + 1");
-
-    assert_eq!(params["expression"], "1 + 1");
-    assert_eq!(params["awaitPromise"], false);
-    assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
-}
-
-#[test]
 fn runtime_evaluate_params_return_by_value_sets_flag() {
     let params = bridge::runtime_evaluate_params_return_by_value("({hello:\"world\"})");
 
     assert_eq!(params["returnByValue"], true);
     assert_eq!(params["awaitPromise"], false);
     assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
-}
-
-#[test]
-fn runtime_evaluate_params_can_await_promise_for_bridge_health_checks() {
-    let params = bridge::runtime_evaluate_params_with_await_promise("Promise.resolve(true)", true);
-
-    assert_eq!(params["expression"], "Promise.resolve(true)");
-    assert_eq!(params["awaitPromise"], true);
-    assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
-}
-
-#[test]
-fn bridge_health_check_script_uses_persisted_real_probe_result() {
-    let script = bridge::bridge_health_check_script();
-
-    assert!(script.contains("__codexSessionDeleteBridge"));
-    assert!(script.contains("__alunixaXBridgeHealth"));
-    assert!(script.contains("lastSuccessAt"));
-    assert!(script.contains("lastInjectionAt"));
-    assert!(script.contains("lastAttemptAt"));
-    assert!(!script.contains("/backend/status"));
-}
-
-#[test]
-fn bridge_health_check_script_rejects_stale_bridge_after_failed_requests() {
-    let script = serde_json::to_string(bridge::bridge_health_check_script())
-        .expect("health script should serialize");
-    let harness = format!(
-        r#"
-const vm = require("node:vm");
-const source = {script};
-const bridge = () => Promise.resolve({{ status: "failed" }});
-const run = (health, hasBridge = true) => vm.runInNewContext(source, {{
-  window: {{ __codexSessionDeleteBridge: hasBridge ? bridge : null, __alunixaXBridgeHealth: health }},
-}});
-const now = Date.now();
-if (run({{ lastInjectionAt: 0, lastSuccessAt: 1 }}) !== false) process.exit(1);
-if (run({{ lastInjectionAt: 0, lastSuccessAt: now }}) !== true) process.exit(2);
-if (run({{ lastInjectionAt: now, lastSuccessAt: 0 }}) !== true) process.exit(3);
-if (run({{ lastInjectionAt: now - 6000, lastSuccessAt: 0 }}) !== false) process.exit(4);
-if (run({{ lastInjectionAt: 1, lastSuccessAt: now - 16000 }}) !== false) process.exit(5);
-if (run({{ lastInjectionAt: 0, lastSuccessAt: 0, lastAttemptAt: now }}) !== true) process.exit(7);
-if (run({{ lastInjectionAt: 1, lastSuccessAt: now - 16000, lastAttemptAt: now - 16000 }}) !== false) process.exit(8);
-if (run({{ lastInjectionAt: now, lastSuccessAt: now }}, false) !== false) process.exit(6);
-"#,
-        script = script
-    );
-    let output = Command::new("node")
-        .arg("-e")
-        .arg(harness)
-        .output()
-        .expect("node should run bridge health harness");
-    assert!(
-        output.status.success(),
-        "bridge health harness failed\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
-
-#[test]
-fn bridge_result_expressions_json_escape_inputs() {
-    let resolve = bridge::resolve_bridge_expression("request\"1", &json!({"status": "ok"}))
-        .expect("resolve expression should build");
-    let reject = bridge::reject_bridge_expression("request\"1", "bad \"value\"")
-        .expect("reject expression should build");
-
-    assert_eq!(
-        resolve,
-        r#"window.__codexSessionDeleteResolve("request\"1", {"status":"ok"})"#
-    );
-    assert_eq!(
-        reject,
-        r#"window.__codexSessionDeleteReject("request\"1", "bad \"value\"")"#
-    );
-}
-
-#[test]
-fn pick_page_target_prefers_codex_title_or_url() {
-    let targets = vec![
-        target(
-            "first",
-            "page",
-            "Other",
-            "https://example.test",
-            Some("ws://first"),
-        ),
-        target(
-            "second",
-            "page",
-            "Codex",
-            "https://example.test",
-            Some("ws://second"),
-        ),
-        target(
-            "third",
-            "page",
-            "Other",
-            "https://codex.test",
-            Some("ws://third"),
-        ),
-    ];
-
-    let picked = pick_page_target(&targets).expect("target should be selected");
-
-    assert_eq!(picked.id, "second");
-}
-
-#[test]
-fn pick_page_target_leniently_falls_back_to_first_injectable_page() {
-    let targets = vec![
-        target(
-            "browser",
-            "browser",
-            "Codex",
-            "https://codex.test",
-            Some("ws://browser"),
-        ),
-        target(
-            "first",
-            "page",
-            "Other",
-            "https://example.test",
-            Some("ws://first"),
-        ),
-        target(
-            "second",
-            "page",
-            "Other 2",
-            "https://example.test/2",
-            Some("ws://second"),
-        ),
-    ];
-
-    let picked = pick_page_target(&targets).expect("target should be selected");
-
-    assert_eq!(picked.id, "first");
-}
-
-#[test]
-fn pick_page_target_rejects_non_pages_and_pages_without_websocket() {
-    let targets = vec![
-        target(
-            "browser",
-            "browser",
-            "Codex",
-            "https://codex.test",
-            Some("ws://browser"),
-        ),
-        target("page-no-ws", "page", "Codex", "https://codex.test", None),
-    ];
-
-    let error = pick_page_target(&targets).expect_err("no injectable page should be selected");
-
-    assert!(
-        error
-            .to_string()
-            .contains("No injectable page target found")
-    );
-}
-
-#[test]
-fn pick_injectable_codex_page_target_rejects_non_codex_pages() {
-    let targets = vec![
-        target(
-            "browser",
-            "browser",
-            "Codex",
-            "https://codex.test",
-            Some("ws://browser"),
-        ),
-        target(
-            "other-page",
-            "page",
-            "Other App",
-            "https://example.test",
-            Some("ws://other"),
-        ),
-    ];
-
-    let error = pick_injectable_codex_page_target(&targets)
-        .expect_err("non-Codex page must not be selected for injection");
-
-    assert!(
-        error
-            .to_string()
-            .contains("No injectable Codex page target found")
-    );
-}
-
-#[test]
-fn pick_injectable_codex_page_target_ignores_embedded_browser_page_named_codex() {
-    let targets = vec![
-        target(
-            "browser-pr",
-            "page",
-            "Fix Alunixa X menu anchoring · Pull Request",
-            "https://github.com/Alunixa-Code/Alunixa-X/pull/1743",
-            Some("ws://browser-pr"),
-        ),
-        target(
-            "main",
-            "page",
-            "Codex",
-            "app://-/index.html",
-            Some("ws://main"),
-        ),
-    ];
-
-    let picked = pick_injectable_codex_page_target(&targets)
-        .expect("Codex app page should win over embedded browser content");
-
-    assert_eq!(picked.id, "main");
-}
-
-#[test]
-fn pick_injectable_codex_page_target_ignores_standalone_manager() {
-    let targets = vec![
-        target(
-            "manager",
-            "page",
-            "Alunixa X 管理工具",
-            "http://127.0.0.1:1420/",
-            Some("ws://manager"),
-        ),
-        target(
-            "main",
-            "page",
-            "Codex",
-            "app://-/index.html",
-            Some("ws://main"),
-        ),
-    ];
-
-    let picked = pick_injectable_codex_page_target(&targets)
-        .expect("native Codex app page should win over the standalone manager");
-
-    assert_eq!(picked.id, "main");
-}
-
-#[test]
-fn pick_injectable_codex_page_target_rejects_embedded_browser_only_page() {
-    let targets = vec![target(
-        "browser-pr",
-        "page",
-        "Fix Alunixa X menu anchoring · Pull Request",
-        "https://github.com/Alunixa-Code/Alunixa-X/pull/1743",
-        Some("ws://browser-pr"),
-    )];
-
-    let error = pick_injectable_codex_page_target(&targets)
-        .expect_err("embedded browser content must not be selected for injection");
-
-    assert!(
-        error
-            .to_string()
-            .contains("No injectable Codex page target found")
-    );
-}
-
-#[test]
-fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_page() {
-    let targets = vec![target(
-        "chatgpt",
-        "page",
-        "ChatGPT",
-        "https://chatgpt.com/",
-        Some("ws://chatgpt"),
-    )];
-
-    let picked = pick_injectable_codex_page_target(&targets)
-        .expect("ChatGPT desktop page should be selected");
-
-    assert_eq!(picked.id, "chatgpt");
-}
-
-#[test]
-fn pick_injectable_codex_page_target_accepts_chatgpt_desktop_error_page() {
-    let targets = vec![target(
-        "chatgpt-error",
-        "page",
-        "ChatGPT",
-        "data:text/html;charset=utf-8,%3Ctitle%3EChatGPT%3C/title%3E",
-        Some("ws://chatgpt-error"),
-    )];
-
-    let picked = pick_injectable_codex_page_target(&targets)
-        .expect("ChatGPT desktop error page should be selected");
-
-    assert_eq!(picked.id, "chatgpt-error");
-}
-
-#[test]
-fn pick_injectable_codex_page_target_prefers_app_main_over_incidental_codex_page() {
-    let targets = vec![
-        target(
-            "help",
-            "page",
-            "Using Codex with your ChatGPT plan",
-            "https://help.openai.com/en/articles/using-codex",
-            Some("ws://help"),
-        ),
-        target(
-            "main",
-            "page",
-            "Codex",
-            "app://-/index.html",
-            Some("ws://main"),
-        ),
-    ];
-
-    let picked = pick_injectable_codex_page_target(&targets)
-        .expect("the exact app main renderer should win regardless of target order");
-
-    assert_eq!(picked.id, "main");
-}
-
-#[test]
-fn avatar_overlay_target_detection_is_narrow() {
-    let overlay = target(
-        "avatar",
-        "page",
-        "ChatGPT Avatar Overlay",
-        "app://-/index.html?initialRoute=%2Favatar-overlay",
-        Some("ws://avatar"),
-    );
-    let main = target(
-        "main",
-        "page",
-        "ChatGPT",
-        "https://chatgpt.com/",
-        Some("ws://main"),
-    );
-
-    assert!(is_avatar_overlay_page_target(&overlay));
-    assert!(!is_primary_codex_page_target(&overlay));
-    assert!(!is_avatar_overlay_page_target(&main));
-    assert!(is_primary_codex_page_target(&main));
-    assert!(!is_avatar_overlay_page_target(&target(
-        "external",
-        "page",
-        "avatar-overlay",
-        "https://example.test/avatar-overlay",
-        Some("ws://external"),
-    )));
-}
-
-#[test]
-fn primary_target_selection_skips_v1_and_v2_overlay_candidates() {
-    let targets = vec![
-        target(
-            "v1-overlay",
-            "page",
-            "Codex",
-            "app://-/index.html?initialRoute=%2Favatar-overlay",
-            Some("ws://v1"),
-        ),
-        target(
-            "v2-overlay",
-            "page",
-            "Codex",
-            "app://-/index.html?initialRoute=/avatar-overlay",
-            Some("ws://v2"),
-        ),
-        target(
-            "main",
-            "page",
-            "Codex",
-            "app://-/index.html",
-            Some("ws://main"),
-        ),
-    ];
-
-    let selected = pick_injectable_codex_page_target(&targets).unwrap();
-
-    assert_eq!(selected.id, "main");
-}
-
-#[test]
-fn quick_chat_target_detection_is_narrow() {
-    for url in [
-        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat",
-        "app://-/index.html?initialRoute=/chatgpt/quick-chat",
-        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
-        "app://-/index.html?initialRoute=/chatgpt/quick-chat-prewarm",
-        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat%2Fconversation-123",
-        "app://-/index.html?initialRoute=/chatgpt/quick-chat/conversation-123",
-    ] {
-        let quick_chat = target("quick-chat", "page", "Codex", url, Some("ws://quick-chat"));
-
-        assert!(is_quick_chat_page_target(&quick_chat));
-        assert!(!is_primary_codex_page_target(&quick_chat));
-    }
-
-    assert!(!is_quick_chat_page_target(&target(
-        "external",
-        "page",
-        "Codex",
-        "https://example.test/chatgpt/quick-chat-prewarm",
-        Some("ws://external"),
-    )));
-    assert!(!is_quick_chat_page_target(&target(
-        "other-param",
-        "page",
-        "Codex",
-        "app://-/index.html?next=initialRoute%3D%252Fchatgpt%252Fquick-chat-prewarm",
-        Some("ws://other-param"),
-    )));
-    assert!(!is_quick_chat_page_target(&target(
-        "similar-route",
-        "page",
-        "Codex",
-        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chatty",
-        Some("ws://similar-route"),
-    )));
-}
-
-#[test]
-fn primary_target_selection_skips_quick_chat_candidate() {
-    let targets = vec![
-        target(
-            "quick-chat",
-            "page",
-            "Codex",
-            "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat%2Fconversation-123",
-            Some("ws://quick-chat"),
-        ),
-        target(
-            "quick-chat-prewarm",
-            "page",
-            "Codex",
-            "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
-            Some("ws://quick-chat-prewarm"),
-        ),
-        target(
-            "main",
-            "page",
-            "Codex",
-            "app://-/index.html",
-            Some("ws://main"),
-        ),
-    ];
-
-    let selected = pick_injectable_codex_page_target(&targets).unwrap();
-
-    assert_eq!(selected.id, "main");
-}
-
-#[test]
-fn quick_chat_only_target_is_not_injectable_as_codex_main_page() {
-    let targets = vec![target(
-        "quick-chat",
-        "page",
-        "Codex",
-        "app://-/index.html?initialRoute=%2Fchatgpt%2Fquick-chat-prewarm",
-        Some("ws://quick-chat"),
-    )];
-
-    let error = pick_injectable_codex_page_target(&targets)
-        .expect_err("Quick Chat helper renderer must not be selected for injection");
-
-    assert!(
-        error
-            .to_string()
-            .contains("No injectable Codex page target found")
-    );
-}
-
-#[test]
-fn pick_injectable_codex_page_target_requires_websocket() {
-    let targets = vec![target("codex", "page", "Codex", "https://codex.test", None)];
-
-    let error = pick_injectable_codex_page_target(&targets)
-        .expect_err("Codex page without websocket must not be selected for injection");
-
-    assert!(
-        error
-            .to_string()
-            .contains("No injectable Codex page target found")
-    );
-}
-
-#[tokio::test]
-async fn list_targets_can_query_ipv6_loopback_cdp_endpoint() {
-    let listener = TcpListener::bind("[::1]:0")
-        .await
-        .expect("IPv6 loopback listener should bind");
-    let port = listener.local_addr().unwrap().port();
-    let body = serde_json::to_vec(&json!([
-        {
-            "id": "page-1",
-            "type": "page",
-            "title": "Codex",
-            "url": "app://-/index.html",
-            "webSocketDebuggerUrl": format!("ws://[::1]:{port}/devtools/page/page-1"),
-        }
-    ]))
-    .unwrap();
-    let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("request should arrive");
-        let mut request = [0_u8; 1024];
-        let _ = stream.readable().await;
-        let _ = stream.try_read(&mut request);
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        stream
-            .try_write(response.as_bytes())
-            .expect("response headers should write");
-        stream.try_write(&body).expect("response body should write");
-    });
-
-    let targets = list_targets(port)
-        .await
-        .expect("CDP target query should fall back to IPv6 loopback");
-
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].id, "page-1");
-    server.await.expect("server task should complete");
-}
-
-#[tokio::test]
-async fn install_bridge_routes_binding_while_waiting_for_command_response() {
-    let temp = tempfile::tempdir().unwrap();
-    let log_path = temp.path().join("alunixa-x.log");
-    alunixa_x_core::diagnostic_log::set_diagnostic_log_path_for_tests(Some(log_path.clone()));
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=4 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        let evaluate = recv_json(&mut socket).await;
-        assert_eq!(evaluate["id"], 5);
-        assert_eq!(evaluate["method"], "Runtime.evaluate");
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "request-1",
-                        "path": "delete",
-                        "payload": { "target": "session" },
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        send_json(&mut socket, json!({ "id": 5, "result": {} })).await;
-
-        let response = recv_json(&mut socket).await;
-        assert_eq!(response["method"], "Runtime.evaluate");
-        assert!(
-            response["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("__codexSessionDeleteResolve")
-        );
-        send_json(&mut socket, json!({ "id": response["id"], "result": {} })).await;
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handled = Arc::new(AtomicBool::new(false));
-    let handler = {
-        let handled = Arc::clone(&handled);
-        Arc::new(move |path: String, payload: serde_json::Value| {
-            let handled = Arc::clone(&handled);
-            Box::pin(async move {
-                assert_eq!(path, "delete");
-                assert_eq!(payload["target"], "session");
-                handled.store(true, Ordering::SeqCst);
-                Ok(json!({ "status": "ok" }))
-            })
-                as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-        })
-    };
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
-    )
-    .await
-    .expect("bridge should not hang while processing interleaved binding call")
-    .expect("bridge should keep processing interleaved binding call");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-    assert!(handled.load(Ordering::SeqCst));
-    let contents = std::fs::read_to_string(&log_path).unwrap();
-    assert!(contents.contains("bridge.resolve_start"));
-    assert!(contents.contains("bridge.resolve_ok"));
-    alunixa_x_core::diagnostic_log::set_diagnostic_log_path_for_tests(None);
-}
-
-#[tokio::test]
-async fn install_bridge_immediately_evaluates_new_document_scripts() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=5 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        let add_main = recv_json(&mut socket).await;
-        assert_eq!(add_main["method"], "Page.addScriptToEvaluateOnNewDocument");
-        assert_eq!(add_main["params"]["source"], "window.mainInjected = true;");
-        send_json(&mut socket, json!({ "id": add_main["id"], "result": {} })).await;
-
-        let eval_main = recv_json(&mut socket).await;
-        assert_eq!(eval_main["method"], "Runtime.evaluate");
-        assert_eq!(
-            eval_main["params"]["expression"],
-            "window.mainInjected = true;"
-        );
-        send_json(&mut socket, json!({ "id": eval_main["id"], "result": {} })).await;
-
-        let add_user = recv_json(&mut socket).await;
-        assert_eq!(add_user["method"], "Page.addScriptToEvaluateOnNewDocument");
-        assert_eq!(add_user["params"]["source"], "window.userInjected = true;");
-        send_json(&mut socket, json!({ "id": add_user["id"], "result": {} })).await;
-
-        let eval_user = recv_json(&mut socket).await;
-        assert_eq!(eval_user["method"], "Runtime.evaluate");
-        assert_eq!(
-            eval_user["params"]["expression"],
-            "window.userInjected = true;"
-        );
-        send_json(&mut socket, json!({ "id": eval_user["id"], "result": {} })).await;
-
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(
-            &url,
-            BRIDGE_BINDING_NAME,
-            noop_handler(),
-            &[
-                "window.mainInjected = true;".to_string(),
-                "window.userInjected = true;".to_string(),
-            ],
-        ),
-    )
-    .await
-    .expect("bridge should not hang while evaluating new document scripts")
-    .expect("bridge should evaluate new document scripts immediately");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-}
-
-#[tokio::test]
-async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=5 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        let add_script = recv_json(&mut socket).await;
-        assert_eq!(
-            add_script["method"],
-            "Page.addScriptToEvaluateOnNewDocument"
-        );
-        send_json(&mut socket, json!({ "id": add_script["id"], "result": {} })).await;
-
-        let eval_script = recv_json(&mut socket).await;
-        assert_eq!(eval_script["method"], "Runtime.evaluate");
-        send_json(
-            &mut socket,
-            json!({ "id": eval_script["id"], "result": {} }),
-        )
-        .await;
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "after-return",
-                        "path": "status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-
-        let resolve = recv_json(&mut socket).await;
-        assert!(
-            resolve["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("after-return")
-        );
-        send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handled = Arc::new(AtomicBool::new(false));
-    let handler = {
-        let handled = Arc::clone(&handled);
-        Arc::new(move |_path: String, _payload: serde_json::Value| {
-            let handled = Arc::clone(&handled);
-            Box::pin(async move {
-                handled.store(true, Ordering::SeqCst);
-                Ok(json!({ "status": "ok" }))
-            })
-                as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-        })
-    };
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(
-            &url,
-            BRIDGE_BINDING_NAME,
-            handler,
-            &["window.ready = true;".to_string()],
-        ),
-    )
-    .await
-    .expect("bridge install should return after setup")
-    .expect("bridge install should succeed");
-
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-    assert!(handled.load(Ordering::SeqCst));
-}
-
-#[tokio::test]
-async fn install_bridge_command_error_mentions_method_and_id() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        let command = recv_json(&mut socket).await;
-        assert_eq!(command["method"], "Runtime.enable");
-        send_json(
-            &mut socket,
-            json!({
-                "id": command["id"],
-                "error": { "code": -32000, "message": "Runtime disabled" },
-            }),
-        )
-        .await;
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handler = noop_handler();
-    let error = tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
-    )
-    .await
-    .expect("bridge should not hang on CDP error response")
-    .expect_err("CDP error response should fail install");
-    let message = error.to_string();
-
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-    assert!(message.contains("Runtime.enable"), "{message}");
-    assert!(message.contains("id 1"), "{message}");
-    assert!(message.contains("Runtime disabled"), "{message}");
-}
-
-#[tokio::test]
-async fn install_bridge_rejects_bad_payload_with_id_and_continues_after_unparseable_payload() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=5 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": { "payload": "{\"id\":\"bad-1\",\"payload\":{}" },
-            }),
-        )
-        .await;
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": { "payload": "not json" },
-            }),
-        )
-        .await;
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "ok-1",
-                        "path": "delete",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-
-        let reject = recv_json(&mut socket).await;
-        assert!(
-            reject["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("__codexSessionDeleteReject")
-        );
-        assert!(
-            reject["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("bad-1")
-        );
-        send_json(&mut socket, json!({ "id": reject["id"], "result": {} })).await;
-
-        let resolve = recv_json(&mut socket).await;
-        assert!(
-            resolve["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("__codexSessionDeleteResolve")
-        );
-        assert!(
-            resolve["params"]["expression"]
-                .as_str()
-                .expect("expression should be string")
-                .contains("ok-1")
-        );
-        send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[]),
-    )
-    .await
-    .expect("bridge should not hang after bad payload")
-    .expect("bad payloads should not terminate the bridge loop");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-}
-
-#[tokio::test]
-async fn install_bridge_queues_consecutive_bindings_without_recursive_dispatch() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=5 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        for request_id in ["first", "second", "third"] {
-            send_json(
-                &mut socket,
-                json!({
-                    "method": "Runtime.bindingCalled",
-                    "params": {
-                        "payload": serde_json::to_string(&json!({
-                            "id": request_id,
-                            "path": "delete",
-                            "payload": { "request": request_id },
-                        })).unwrap(),
-                    },
-                }),
-            )
-            .await;
-        }
-
-        let first = recv_json(&mut socket).await;
-        assert_eq!(first["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&first, "first");
-        let second = recv_json(&mut socket).await;
-        assert_eq!(second["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&second, "second");
-        assert_ne!(second["id"], first["id"]);
-
-        let third = recv_json(&mut socket).await;
-        assert_eq!(third["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&third, "third");
-        assert_ne!(third["id"], first["id"]);
-        assert_ne!(third["id"], second["id"]);
-
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handler = Arc::new(|_path: String, payload: serde_json::Value| {
-        Box::pin(async move { Ok(json!({ "status": "ok", "request": payload["request"] })) })
-            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-    });
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
-    )
-    .await
-    .expect("bridge should not hang while draining queued binding calls")
-    .expect("bridge should process queued binding calls");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-}
-
-#[tokio::test]
-async fn install_bridge_does_not_wait_for_resolve_runtime_evaluate_ack() {
-    let (url, request_rx) = spawn_cdp_server(|mut socket| async move {
-        for expected_id in 1..=5 {
-            let command = recv_json(&mut socket).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut socket, json!({ "id": expected_id, "result": {} })).await;
-        }
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "first",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        let first_resolve = recv_json(&mut socket).await;
-        assert_eq!(first_resolve["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&first_resolve, "first");
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "second",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        let second_resolve =
-            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut socket))
-                .await
-                .expect(
-                    "second resolve should be sent without waiting for first Runtime.evaluate ack",
-                );
-        assert_eq!(second_resolve["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&second_resolve, "second");
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handler = Arc::new(|_path: String, _payload: serde_json::Value| {
-        Box::pin(async { Ok(json!({ "status": "ok" })) })
-            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-    });
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
-    )
-    .await
-    .expect("bridge install should not wait for resolve ack")
-    .expect("bridge install should survive missing resolve ack");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-}
-
-#[tokio::test]
-async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
-    let generate_started = Arc::new(Notify::new());
-    let release_generate = Arc::new(Notify::new());
-    let server_generate_started = Arc::clone(&generate_started);
-    let server_release_generate = Arc::clone(&release_generate);
-    let (url, request_rx) = spawn_cdp_server(move |mut socket| async move {
-        acknowledge_bridge_install(&mut socket).await;
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "generate",
-                        "path": "/stepwise/generate",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        tokio::time::timeout(
-            Duration::from_millis(500),
-            server_generate_started.notified(),
-        )
-        .await
-        .expect("generate handler should start before the status probe");
-
-        send_json(
-            &mut socket,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "status",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-
-        let status_resolve =
-            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut socket))
-                .await
-                .expect("status should resolve while generate remains pending");
-        assert_eq!(status_resolve["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&status_resolve, "status");
-
-        server_release_generate.notify_one();
-        let generate_resolve = recv_json(&mut socket).await;
-        assert_eq!(generate_resolve["method"], "Runtime.evaluate");
-        assert_expression_contains_request(&generate_resolve, "generate");
-        close_socket(&mut socket).await;
-    })
-    .await;
-
-    let handler_generate_started = Arc::clone(&generate_started);
-    let handler_release_generate = Arc::clone(&release_generate);
-    let handler = Arc::new(move |path: String, _payload: serde_json::Value| {
-        let generate_started = Arc::clone(&handler_generate_started);
-        let release_generate = Arc::clone(&handler_release_generate);
-        Box::pin(async move {
-            if path == "/stepwise/generate" {
-                generate_started.notify_one();
-                release_generate.notified().await;
-            }
-            Ok(json!({ "status": "ok", "path": path }))
-        }) as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-    });
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
-    )
-    .await
-    .expect("bridge install should return while generate is pending")
-    .expect("bridge install should start the concurrent message pump");
-    request_rx
-        .await
-        .expect("server task should finish without panicking");
-}
-
-#[tokio::test]
-async fn superseded_bridge_session_stops_answering_binding_calls() {
-    let (url, stale_rx, fresh_rx) = spawn_two_session_cdp_server().await;
-
-    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect("first bridge install should succeed");
-    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect("second bridge install should succeed");
-
-    let stale_resolved = stale_rx
-        .await
-        .expect("stale server task should finish without panicking");
-    assert!(
-        !stale_resolved,
-        "superseded session must not resolve bridge requests"
-    );
-    fresh_rx
-        .await
-        .expect("fresh server task should finish without panicking");
-}
-
-/// 被顶替的旧会话不能依赖"socket 再收到消息"来发现 generation 过期：
-/// bridge 失效场景下旧 socket 不会再有任何消息（binding 事件只投递给最新会话），
-/// 旧会话必须靠 generation 轮询在一个间隔内主动关闭，否则会带着
-/// Runtime.enable 订阅与脚本注册无限期滞留（issue #2169 的会话堆积来源）。
-#[tokio::test]
-async fn superseded_bridge_session_closes_socket_without_incoming_messages() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test listener should bind");
-    let address = listener.local_addr().expect("listener should have address");
-    let url = websocket_url(address);
-    let (stale_closed_tx, stale_closed_rx) = oneshot::channel();
-    let (fresh_alive_tx, fresh_alive_rx) = oneshot::channel();
-
-    tokio::spawn(async move {
-        let (stale_stream, _) = listener
-            .accept()
-            .await
-            .expect("stale client should connect");
-        let mut stale = accept_async(stale_stream)
-            .await
-            .expect("stale websocket should upgrade");
-        acknowledge_bridge_install(&mut stale).await;
-
-        let (fresh_stream, _) = listener
-            .accept()
-            .await
-            .expect("fresh client should connect");
-        let mut fresh = accept_async(fresh_stream)
-            .await
-            .expect("fresh websocket should upgrade");
-        acknowledge_bridge_install(&mut fresh).await;
-
-        // 旧会话会先移除自己注册的 new-document 脚本，再由 generation 轮询关闭 socket。
-        let stale_cleanup = tokio::time::timeout(
-            bridge::BRIDGE_GENERATION_POLL_INTERVAL + Duration::from_millis(1500),
-            async {
-                let mut removed = false;
-                loop {
-                    match recv_text_message(&mut stale).await {
-                        Some(text) => {
-                            let message: serde_json::Value = serde_json::from_str(&text)
-                                .expect("bridge cleanup message should be JSON");
-                            if message["method"] == "Page.removeScriptToEvaluateOnNewDocument" {
-                                removed = true;
-                            }
-                        }
-                        None => break removed,
-                    }
-                }
-            },
-        )
-        .await
-        .unwrap_or(false);
-        let _ = stale_closed_tx.send(stale_cleanup);
-
-        // 新会话不受影响，仍应正常应答 binding 调用。
-        send_json(
-            &mut fresh,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "fresh",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        let fresh_resolved =
-            tokio::time::timeout(Duration::from_secs(2), recv_text_message(&mut fresh))
-                .await
-                .is_ok_and(|message| {
-                    message.is_some_and(|text| text.contains("__codexSessionDeleteResolve"))
-                });
-        let _ = fresh_alive_tx.send(fresh_resolved);
-    });
-
-    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect("first bridge install should succeed");
-    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect("second bridge install should succeed");
-
-    assert!(
-        stale_closed_rx
-            .await
-            .expect("stale server task should finish without panicking"),
-        "superseded session must close its socket without any incoming message"
-    );
-    assert!(
-        fresh_alive_rx
-            .await
-            .expect("fresh server task should finish without panicking"),
-        "fresh session must keep resolving bridge requests"
-    );
-}
-
-#[tokio::test]
-async fn failed_bridge_reinstall_keeps_existing_session_current() {
-    let (url, active_rx, failed_rx) = spawn_failed_reinstall_cdp_server().await;
-
-    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect("first bridge install should succeed");
-    let error = install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
-        .await
-        .expect_err("second bridge install should fail");
-    assert!(error.to_string().contains("Runtime.addBinding"));
-
-    assert!(
-        active_rx
-            .await
-            .expect("active server task should finish without panicking"),
-        "failed reinstall must not supersede the existing bridge session"
-    );
-    failed_rx
-        .await
-        .expect("failed reinstall server task should finish without panicking");
-}
-
-type TestSocket = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
-
-async fn spawn_two_session_cdp_server() -> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>)
-{
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test listener should bind");
-    let address = listener.local_addr().expect("listener should have address");
-    let (stale_tx, stale_rx) = oneshot::channel();
-    let (fresh_tx, fresh_rx) = oneshot::channel();
-
-    tokio::spawn(async move {
-        let (stale_stream, _) = listener
-            .accept()
-            .await
-            .expect("stale client should connect");
-        let mut stale = accept_async(stale_stream)
-            .await
-            .expect("stale websocket should upgrade");
-        acknowledge_bridge_install(&mut stale).await;
-
-        let (fresh_stream, _) = listener
-            .accept()
-            .await
-            .expect("fresh client should connect");
-        let mut fresh = accept_async(fresh_stream)
-            .await
-            .expect("fresh websocket should upgrade");
-        acknowledge_bridge_install(&mut fresh).await;
-
-        send_json(
-            &mut stale,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "stale",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-
-        let stale_resolved =
-            tokio::time::timeout(Duration::from_millis(500), recv_text_message(&mut stale))
-                .await
-                .is_ok_and(|message| message.is_some_and(|text| text.contains("Runtime.evaluate")));
-        let _ = stale_tx.send(stale_resolved);
-        close_socket(&mut fresh).await;
-        let _ = fresh_tx.send(());
-    });
-
-    (websocket_url(address), stale_rx, fresh_rx)
-}
-
-async fn spawn_failed_reinstall_cdp_server()
--> (String, oneshot::Receiver<bool>, oneshot::Receiver<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test listener should bind");
-    let address = listener.local_addr().expect("listener should have address");
-    let (active_tx, active_rx) = oneshot::channel();
-    let (failed_tx, failed_rx) = oneshot::channel();
-
-    tokio::spawn(async move {
-        let (active_stream, _) = listener
-            .accept()
-            .await
-            .expect("active client should connect");
-        let mut active = accept_async(active_stream)
-            .await
-            .expect("active websocket should upgrade");
-        acknowledge_bridge_install(&mut active).await;
-
-        let (failed_stream, _) = listener
-            .accept()
-            .await
-            .expect("failed client should connect");
-        let mut failed = accept_async(failed_stream)
-            .await
-            .expect("failed websocket should upgrade");
-        for expected_id in 1..=2 {
-            let command = recv_json(&mut failed).await;
-            assert_eq!(command["id"], expected_id);
-            send_json(&mut failed, json!({ "id": expected_id, "result": {} })).await;
-        }
-        let add_binding = recv_json(&mut failed).await;
-        assert_eq!(add_binding["id"], 3);
-        assert_eq!(add_binding["method"], "Runtime.addBinding");
-        send_json(
-            &mut failed,
-            json!({
-                "id": 3,
-                "error": { "code": -32000, "message": "binding install failed" }
-            }),
-        )
-        .await;
-        close_socket(&mut failed).await;
-        let _ = failed_tx.send(());
-
-        send_json(
-            &mut active,
-            json!({
-                "method": "Runtime.bindingCalled",
-                "params": {
-                    "payload": serde_json::to_string(&json!({
-                        "id": "active",
-                        "path": "/backend/status",
-                        "payload": {},
-                    })).unwrap(),
-                },
-            }),
-        )
-        .await;
-        let active_resolved =
-            tokio::time::timeout(Duration::from_millis(500), recv_json(&mut active))
-                .await
-                .is_ok_and(|message| {
-                    message["method"] == "Runtime.evaluate"
-                        && message["params"]["expression"]
-                            .as_str()
-                            .is_some_and(|expression| expression.contains("active"))
-                });
-        let _ = active_tx.send(active_resolved);
-        close_socket(&mut active).await;
-    });
-
-    (websocket_url(address), active_rx, failed_rx)
-}
-
-async fn acknowledge_bridge_install(socket: &mut TestSocket) {
-    for expected_id in 1..=5 {
-        let command = recv_json(socket).await;
-        assert_eq!(command["id"], expected_id);
-        let result = if expected_id == 4 {
-            json!({ "identifier": "bridge-script-test" })
-        } else {
-            json!({})
-        };
-        send_json(socket, json!({ "id": expected_id, "result": result })).await;
-    }
-}
-
-async fn recv_text_message(socket: &mut TestSocket) -> Option<String> {
-    match socket.next().await {
-        Some(Ok(Message::Text(text))) => Some(text.to_string()),
-        _ => None,
-    }
 }
 
 #[tokio::test]
@@ -6587,68 +7916,6 @@ async fn extension_cdp_evaluate_returns_objects_and_arrays_by_value() {
     assert_eq!(array["results"][0]["value"], json!([1, "two"]));
 }
 
-async fn spawn_cdp_server<F, Fut>(handler: F) -> (String, oneshot::Receiver<()>)
-where
-    F: FnOnce(TestSocket) -> Fut + Send + 'static,
-    Fut: Future<Output = ()> + Send + 'static,
-{
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test listener should bind");
-    let address = listener.local_addr().expect("listener should have address");
-    let (done_tx, done_rx) = oneshot::channel();
-
-    tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("client should connect");
-        let socket = accept_async(stream)
-            .await
-            .expect("websocket should upgrade");
-        handler(socket).await;
-        let _ = done_tx.send(());
-    });
-
-    (websocket_url(address), done_rx)
-}
-
-fn websocket_url(address: SocketAddr) -> String {
-    format!("ws://{address}")
-}
-
-async fn recv_json(socket: &mut TestSocket) -> serde_json::Value {
-    let message = socket
-        .next()
-        .await
-        .expect("client should send message")
-        .expect("message should be readable");
-    let Message::Text(text) = message else {
-        panic!("expected text websocket message");
-    };
-    serde_json::from_str(&text).expect("message should be JSON")
-}
-
-async fn send_json(socket: &mut TestSocket, value: serde_json::Value) {
-    socket
-        .send(Message::Text(value.to_string().into()))
-        .await
-        .expect("message should send");
-}
-
-fn assert_expression_contains_request(command: &serde_json::Value, request_id: &str) {
-    let expression = command["params"]["expression"]
-        .as_str()
-        .expect("expression should be string");
-    assert!(
-        expression.contains("__codexSessionDeleteResolve"),
-        "{expression}"
-    );
-    assert!(expression.contains(request_id), "{expression}");
-}
-
-async fn close_socket(socket: &mut TestSocket) {
-    socket.close(None).await.expect("websocket should close");
-    let _ = tokio::time::timeout(Duration::from_millis(200), socket.next()).await;
-}
-
 async fn install_test_bridge(
     websocket_url: &str,
     binding_name: &str,
@@ -6664,62 +7931,4 @@ async fn install_test_bridge(
         dir
     });
     bridge::install_bridge(websocket_url, binding_name, handler, new_document_scripts).await
-}
-
-fn noop_handler() -> bridge::BridgeHandler {
-    Arc::new(|_, _| {
-        Box::pin(async { Ok(json!({ "status": "ok" })) })
-            as Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>
-    })
-}
-
-#[test]
-fn app_server_client_capture_condition_targets_class_handle() {
-    assert_eq!(
-        bridge::app_server_client_capture_condition(),
-        "!window.__alunixaXAppServerClientClass"
-    );
-}
-
-#[test]
-fn parse_app_server_client_capture_location_reads_renderer_report() {
-    let report = json!({
-        "urlRegex": "app://-/assets/app-initial-abc123.js",
-        "lineNumber": 1796_u64,
-        "columnNumber": 87512_u64,
-    });
-    let (url_regex, line, column) = bridge::parse_app_server_client_capture_location(
-        &serde_json::Value::String(report.to_string()),
-    )
-    .expect("renderer report should parse");
-    assert_eq!(url_regex, "app://-/assets/app-initial-abc123.js");
-    assert_eq!(line, 1796);
-    assert_eq!(column, 87512);
-    assert!(bridge::parse_app_server_client_capture_location(&json!("null")).is_none());
-    assert!(bridge::parse_app_server_client_capture_location(&json!("{}")).is_none());
-    assert!(bridge::parse_app_server_client_capture_location(&json!("")).is_none());
-}
-
-#[test]
-fn injection_script_restores_remote_and_worktree_adapters_without_obsolete_dropdowns() {
-    let script = assets::injection_script(57321);
-    for removed in [
-        "installUpstreamBranchDropdownAdapter",
-        "annotateBranchMenuWorktreeUsage",
-        "data-codex-branch-worktree-path",
-    ] {
-        assert!(!script.contains(removed), "retired entrypoint: {removed}");
-    }
-    assert!(script.contains("/upstream-worktree/create"));
-    assert!(script.contains("/zed-remote/open"));
-    assert!(script.contains("installUpstreamWorktreeNativeAdapter"));
-}
-
-#[test]
-fn injection_script_preserves_native_menu_placement_without_language_rewrites() {
-    let script = assets::injection_script(57321);
-    assert!(script.contains("nativeMenuPlacement"));
-    assert!(!script.contains("codexMenuLocalizationMap"));
-    assert!(!script.contains("function localizeCodexMenus"));
-    assert!(!script.contains("localizeCodexMenus();"));
 }

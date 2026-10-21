@@ -520,10 +520,6 @@ pub fn hide_official_usage_alert_config(settings: &BackendSettings) -> bool {
     profile.relay_mode == crate::settings::RelayMode::Official && profile.official_mix_api_key
 }
 
-pub fn force_chinese_locale_config(settings: &BackendSettings) -> Value {
-    json!({ "enabled": settings.codex_app_force_chinese_locale, "locale": "zh-CN" })
-}
-
 fn renderer_after_document_ready(script: &str) -> String {
     format!(
         "(()=>{{const start=()=>{{{script}\n}};if(document.body)start();else document.addEventListener('DOMContentLoaded',start,{{once:true}});}})();"
@@ -551,7 +547,6 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let dream_skin_theme = &settings.codex_app_dream_skin_theme_config;
     let dream_skin_target_runtime = dream_skin_target_runtime_script(settings, false);
     let paste_fix = paste_fix_enabled_config(settings);
-    let force_chinese_locale = force_chinese_locale_config(settings);
     let hide_official_usage_alert = hide_official_usage_alert_config(settings);
     // Fast 的新文档脚本需要 Page.enable；DOM 增强必须等正常文档就绪，不能访问空的根节点。
     let renderer_runtime = if settings.enhancements_enabled && settings.codex_app_native_fast_unlock {
@@ -654,6 +649,7 @@ fn dream_skin_content_signature(value: &[u8]) -> String {
 
 pub fn image_overlay_config(helper_port: u16, settings: &BackendSettings) -> Value {
     let mut config = crate::wallpaper::runtime_config(helper_port, settings);
+    if config["enabled"] != true { config["imageUrl"] = json!(""); }
     // Keep the image fallback, but never embed large video files in a CDP payload.
     if config["enabled"] == true && config["kind"] == "image" {
         let path = Path::new(settings.codex_app_image_overlay_path.trim());

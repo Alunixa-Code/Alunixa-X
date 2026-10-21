@@ -1,6 +1,6 @@
 use super::{
     LocalSession, SchemaKind, codex_thread_filter, optional_column_expression, schema_kind,
-    table_columns,
+    table_columns, has_table,
 };
 use rusqlite::{Connection, OpenFlags, Row, params_from_iter};
 use std::collections::HashSet;
@@ -128,6 +128,10 @@ impl LocalSessionPager {
                 let connection =
                     Connection::open_with_flags(path.as_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
                 connection.busy_timeout(Duration::from_millis(250))?;
+                connection.query_row("PRAGMA schema_version", [], |_| Ok(()))?;
+                if !has_table(&connection, "threads")? && !has_table(&connection, "automation_runs")? {
+                    return Ok(None);
+                }
                 let stamp = DatabaseStamp::read(path)?;
                 Ok(Some((connection, stamp)))
             })();

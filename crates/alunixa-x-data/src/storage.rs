@@ -28,7 +28,55 @@ pub fn delete_local_from_paths_with_home(
     session: &SessionRef,
     home: &Path,
 ) -> DeleteResult {
-    delete_local_from_paths_inner(db_paths, backup_store, session, Some(home))
+    let id = normalize_codex_thread_id(&session.session_id);
+    let mut index = match crate::session_index::SessionIndex::open(home, false) {
+        Ok(index) => index,
+        Err(error) => return failed(&id, error.to_string()),
+    };
+    let lines = index.as_ref().map(|index| index.lines(&id)).unwrap_or_default();
+    let metadata_token = (|| -> anyhow::Result<Option<String>> {
+        let sidebar = crate::provider_sync::snapshot_thread_sidebar_references(home, &id)?;
+        let mut tables = Map::new();
+        if !lines.is_empty() { tables.insert("__session_index".into(), json!(lines)); }
+        if validate_sidebar_restore_shape(&sidebar)? { tables.insert("__sidebar".into(), sidebar); }
+        if tables.is_empty() { return Ok(None) }
+        Ok(Some(backup_store.write_backup(&id, &home.join("session_index.jsonl"), Value::Object(tables))?))
+    })();
+    let metadata_token = match metadata_token {
+        Ok(token) => token,
+        Err(error) => return failed(&id, format!("备份失败，未删除会话：{error}")),
+    };
+    let mut result = delete_local_from_paths_inner(db_paths, backup_store.clone(), session, None);
+    let missing = result.undo_token.is_none() && (
+        result.message == "Thread not found in local storage"
+        || result.message.starts_with("Database not found:"));
+    let mut tokens = result.undo_token.as_deref().map(|token|
+        serde_json::from_str::<Vec<String>>(token).unwrap_or_else(|_| vec![token.to_string()])).unwrap_or_default();
+    if let Some(token) = metadata_token.as_ref() { tokens.push(token.clone()); }
+    if !tokens.is_empty() {
+        result.undo_token = Some(if tokens.len() == 1 { tokens.remove(0) } else { json!(tokens).to_string() });
+    }
+    if result.status != DeleteStatus::LocalDeleted && !missing { return result }
+    if let Some(index) = index.as_mut() && !lines.is_empty() {
+        if let Err(error) = index.remove(&id) {
+            result.status = DeleteStatus::Failed;
+            result.message = format!("session_index.jsonl 删除失败，可从备份恢复：{error}");
+            return result;
+        }
+        result.status = DeleteStatus::LocalDeleted;
+        result.message = "已从本地存储和会话索引删除".into();
+    }
+    match crate::provider_sync::remove_thread_sidebar_references(home, &id) {
+        Ok(cleanup) if cleanup.global_state_entries_removed > 0 || cleanup.catalog_rows_removed > 0 => {
+            result.status = DeleteStatus::LocalDeleted;
+        }
+        Ok(_) => {}
+        Err(error) => {
+            result.status = DeleteStatus::Failed;
+            result.message = format!("侧边栏索引删除失败，可从备份恢复：{error}");
+        }
+    }
+    result
 }
 
 fn delete_local_from_paths_inner(
@@ -465,26 +513,6 @@ impl ToSql for OwnedSqlValue {
 }
 
 impl SQLiteStorageAdapter {
-    pub fn list_local_session_ids(&self) -> anyhow::Result<Vec<String>> {
-        if !self.db_path.exists() {
-            return Ok(Vec::new());
-        }
-        let db = Connection::open(&self.db_path)?;
-        let (table, id_column, filter) = match schema_kind(&db)? {
-            Some(SchemaKind::CodexThreads) => ("threads", "id", codex_thread_filter(&db)?),
-            Some(SchemaKind::CodexAutomationRuns) => (
-                "automation_runs",
-                "thread_id",
-                "WHERE COALESCE(thread_id, '') <> ''".to_string(),
-            ),
-            _ => anyhow::bail!("Unsupported local storage schema"),
-        };
-        let sql = format!("SELECT {id_column} FROM {table} {filter} ORDER BY {id_column}");
-        let mut stmt = db.prepare(&sql)?;
-        let rows = stmt.query_map([], |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
-    }
-
     pub fn new(db_path: impl Into<PathBuf>, backup_store: BackupStore) -> Self {
         let db_path = db_path.into();
         Self {
@@ -541,6 +569,9 @@ impl SQLiteStorageAdapter {
     }
 
     pub fn delete_local(&self, session: &SessionRef) -> DeleteResult {
+        if let Some(home) = self.codex_home.as_deref() {
+            return delete_local_from_paths_with_home([self.db_path.clone()], self.backup_store.clone(), session, home);
+        }
         self.delete_local_classified(session).0
     }
 
@@ -573,7 +604,7 @@ impl SQLiteStorageAdapter {
                 SchemaKind::CodexAutomationRuns => {
                     ("automation_runs", "thread_id", thread_id.as_str())
                 }
-                SchemaKind::CodexThreadCatalog => ("local_thread_catalog", "id", thread_id.as_str()),
+                SchemaKind::CodexThreadCatalog => ("local_thread_catalog", "thread_id", thread_id.as_str()),
             };
             let mut found = db
                 .query_row(
@@ -594,6 +625,11 @@ impl SQLiteStorageAdapter {
                     .is_some();
             }
             if !found {
+                if kind != SchemaKind::CodexThreadCatalog && has_table(&db, "local_thread_catalog")?
+                    && !select_dicts(&db, &format!("SELECT * FROM local_thread_catalog WHERE {}", local_catalog_filter(&db)?), &[&thread_id])?.is_empty()
+                {
+                    return self.delete_catalog_thread(&mut db, session);
+                }
                 disposition = DeleteDisposition::NotFound;
                 return Ok(failed(
                     &session.session_id,
@@ -1747,6 +1783,7 @@ fn restore_backups(
     codex_home: Option<&Path>,
     backup_store: &BackupStore,
 ) -> anyhow::Result<()> {
+    let mut index_lines = Vec::new();
     // 所有清单先完整校验；损坏的后续备份不能在前一份已经恢复后才被发现。
     for backup in backups {
         validate_restore_backup(backup)?;
@@ -1754,7 +1791,7 @@ fn restore_backups(
     for backup in backups {
         let tables = backup["tables"].as_object().unwrap();
         if metadata_only_backup(tables) {
-            validate_metadata_backup_home(backup, codex_home)?;
+            validate_metadata_backup_home(backup, codex_home, fallback_db_path, allowed_db_paths)?;
         } else {
             let source_db = backup_source_db(backup, fallback_db_path, allowed_db_paths)?;
             let db = Connection::open_with_flags(&source_db, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
@@ -1780,10 +1817,15 @@ fn restore_backups(
                 .iter()
                 .map(|line| line.as_str().unwrap().to_string())
                 .collect::<Vec<_>>();
-            crate::provider_sync::preflight_restore_session_index_entries(home, &lines)?;
+            let _ = home;
+            index_lines.extend(lines);
         }
     }
 
+    let mut index = if index_lines.is_empty() { None } else {
+        crate::session_index::SessionIndex::open(codex_home.unwrap(), true)?
+    };
+    let index_text = index.as_ref().map(|index| index.plan_restore(&index_lines)).transpose()?;
     for backup in backups {
         let tables = backup["tables"].as_object().unwrap();
         if !metadata_only_backup(tables) {
@@ -1798,22 +1840,17 @@ fn restore_backups(
                 backup_store.restore_file(backup["token"].as_str().unwrap_or(""), file)?;
             }
         }
-        if let Some(entries) = tables.get("__session_index").and_then(Value::as_array) {
-            let lines = entries
-                .iter()
-                .map(|line| line.as_str().unwrap().to_string())
-                .collect::<Vec<_>>();
-            if !lines.is_empty() {
-                if let Some(home) = codex_home {
-                    crate::provider_sync::restore_session_index_entries(home, &lines)?;
-                }
-            }
-        }
         if let Some(sidebar) = tables.get("__sidebar") {
             if let Some(home) = codex_home {
                 let _ = crate::provider_sync::restore_thread_sidebar_references(home, sidebar)?;
             }
         }
+    }
+    if let (Some(index), Some(text)) = (index.as_mut(), index_text) {
+        index.write(&text)?;
+        let ids = index_lines.iter().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter_map(|value| value["id"].as_str().map(str::to_string)).collect();
+        crate::provider_sync::clear_thread_tombstones(codex_home.unwrap(), &ids);
     }
     Ok(())
 }
@@ -1822,10 +1859,11 @@ fn metadata_only_backup(tables: &Map<String, Value>) -> bool {
     !tables.is_empty() && tables.keys().all(|key| matches!(key.as_str(), "__session_index" | "__sidebar"))
 }
 
-fn validate_metadata_backup_home(backup: &Value, home: Option<&Path>) -> anyhow::Result<()> {
+fn validate_metadata_backup_home(backup: &Value, home: Option<&Path>, fallback: &Path, allowed: &[PathBuf]) -> anyhow::Result<()> {
     let home = home.ok_or_else(|| anyhow::anyhow!("Codex home is required to restore the session index"))?;
-    anyhow::ensure!(backup["source_db"].as_str().map(Path::new) == Some(home.join("session_index.jsonl").as_path()),
-        "session index backup is outside the configured Codex home");
+    if backup["source_db"].as_str().map(Path::new) != Some(home.join("session_index.jsonl").as_path()) {
+        backup_source_db(backup, fallback, allowed)?;
+    }
     if let Some(entries) = backup["tables"]["__session_index"].as_array() {
         let id = backup["session_id"].as_str().unwrap_or_default();
         for line in entries {
@@ -2691,29 +2729,4 @@ mod wsl_path_tests {
     }
 }
 
-fn codex_thread_filter(db: &Connection) -> anyhow::Result<String> {
-    let mut subagent_filters = Vec::new();
-    if has_table(db, "thread_spawn_edges")?
-        && table_columns(db, "thread_spawn_edges")?
-            .iter()
-            .any(|column| column == "child_thread_id")
-    {
-        subagent_filters.push(
-            "NOT EXISTS (SELECT 1 FROM thread_spawn_edges e WHERE e.child_thread_id = threads.id)",
-        );
-    }
-    if has_table(db, "agent_job_items")?
-        && table_columns(db, "agent_job_items")?
-            .iter()
-            .any(|column| column == "assigned_thread_id")
-    {
-        subagent_filters.push(
-            "NOT EXISTS (SELECT 1 FROM agent_job_items j WHERE j.assigned_thread_id = threads.id)",
-        );
-    }
-    Ok(if subagent_filters.is_empty() {
-        String::new()
-    } else {
-        format!("WHERE {}", subagent_filters.join(" AND "))
-    })
-}
+

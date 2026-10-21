@@ -3410,7 +3410,9 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
             ok(
             "设置已加载。",
             SettingsPayload {
-                revision: settings.settings_revision.clone(),
+                revision: alunixa_x_core::config_transaction::revision(
+                    &alunixa_x_core::paths::default_settings_path(), &home,
+                ).ok(),
                 settings,
                 settings_path: alunixa_x_core::paths::default_settings_path()
                     .to_string_lossy()
@@ -3506,8 +3508,10 @@ pub async fn save_settings(
                 &native_baseline,
                 &settings,
             )?;
-            SettingsStore::default()
-                .save_preserving_runtime_model_selection(&settings)
+            let store = SettingsStore::default();
+            let next = store.preserving_runtime_model_selection(&settings)?;
+            alunixa_x_core::aggregate_catalog::save_with_active_catalog_refresh(&store, &home, &next)
+                .map(|_| ())
                 .and_then(|_| {
                     if settings.codex_app_sub_agent_max_threads
                         == previous.codex_app_sub_agent_max_threads
@@ -3574,6 +3578,7 @@ pub async fn save_settings(
     );
     match save_result {
         Ok(()) => {
+            crate::auto_takeover::apply_enabled(settings.codex_app_auto_takeover);
             if let Ok(runtime) = weixin_runtime().lock()
                 && let Some(runtime) = runtime.as_ref()
             {
@@ -8794,8 +8799,8 @@ cwd = \"/tmp\"
         assert_eq!(result.payload["recoveryJournalPath"], "/artificial/operation-1/recovery-journal.json");
     }
 
-    #[test]
-    fn manager_stale_save_returns_latest_snapshot_without_overwriting_patch() {
+    #[tokio::test]
+    async fn manager_stale_save_returns_latest_snapshot_without_overwriting_patch() {
         let _guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("settings.json");
@@ -8803,10 +8808,14 @@ cwd = \"/tmp\"
         let store = SettingsStore::default();
         store.save(&BackendSettings { enhancements_enabled: false, ..BackendSettings::default() }).unwrap();
         let stale = store.load().unwrap();
-        let revision = stale.settings_revision.clone();
+        let revision = alunixa_x_core::config_transaction::revision(
+            store.path(), &alunixa_x_core::codex_home::default_codex_home_dir(),
+        ).unwrap();
         store.update(json!({"providerSyncEnabled":true})).unwrap();
-        let current_revision = store.revision().unwrap();
-        let result = save_settings(stale, Some(revision));
+        let current_revision = alunixa_x_core::config_transaction::revision(
+            store.path(), &alunixa_x_core::codex_home::default_codex_home_dir(),
+        ).ok();
+        let result = save_settings(stale, Some(revision), None).await;
         alunixa_x_core::paths::set_settings_path_for_tests(previous);
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("revision_conflict"));

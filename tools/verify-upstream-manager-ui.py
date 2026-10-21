@@ -71,7 +71,7 @@ with m.server_url() as url,sync_playwright() as p:
   assert json.loads(page.evaluate('window.__fixtureSettings.relayProfiles.find(p=>p.id==="Standard").modelProtocols'))['claude-opus']=='anthropicMessages'
   page.once('dialog',lambda d:d.accept());page.get_by_role('button',name='返回列表',exact=True).click()
   edit('Custom')
-  custom=page.locator('.relay-custom-model');expect(custom).to_have_count(1)
+  custom=page.locator('.custom-model-block');expect(custom).to_have_count(1)
   custom.get_by_label('模型协议',exact=True).select_option('geminiGenerateContent')
   custom.get_by_label('模型名称',exact=True).fill('custom-renamed')
   page.get_by_role('button',name='保存供应商',exact=True).click();page.wait_for_function('window.__fixtureSaves.length===2')
@@ -87,7 +87,7 @@ with m.server_url() as url,sync_playwright() as p:
    page.wait_for_load_state('networkidle');expect(page.locator('.rail-language-select')).to_have_value(language)
    page.set_viewport_size({'width':960,'height':720})
    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'),language
-   page.screenshot(path=str(m.ROOT/'.tmp/upstream-20261011'/('manager-'+language+'.png')),full_page=True)
+   page.screenshot(path=str(m.ROOT/'.tmp/upstream-v110-20261020/ui'/('manager-'+language+'.png')),full_page=True)
   assert not errors,errors
   print(json.dumps({'status':'PASS','checks':['five per-model protocols','Claude adaptive gate','context save','save failure persistence','custom-model protocol/name/key save','MCP navigation','three locales','minimum window','no advertising']},ensure_ascii=False))
  finally:b.close()

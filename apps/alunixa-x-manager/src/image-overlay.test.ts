@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { it } from "node:test";
 
 const source = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
-const install = source.match(/^  function installCodexPlusImageOverlay\([^]*?^  \}/m)?.[0];
+const install = source.match(/^  function installAlunixaXCompositedImageOverlay\([^]*?^  \}/m)?.[0];
 assert.ok(install);
 
 // Browser suites verify pixels, positioning, lifetimes and bounded work.

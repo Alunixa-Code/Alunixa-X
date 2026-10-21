@@ -13,8 +13,10 @@ const source = process.env.CODEX_OVERLAY_CANDIDATE_FUNCTION
   ? execFileSync("git", ["show", process.env.CODEX_OVERLAY_BASELINE + ":assets/inject/renderer-inject.js"],
     { cwd: repo, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 })
   : fs.readFileSync(path.join(repo, "assets/inject/renderer-inject.js"), "utf8");
-const install = source.match(/^  function installCodexPlusImageOverlay\([^]*?^  \}/m)[0];
-const injection = 'const alunixaXImageOverlayId="alunixa-x-image-overlay";const sendCodexPlusDiagnostic=()=>{};' + install;
+const install = source.match(/^  function install(?:AlunixaXComposited|CodexPlus)ImageOverlay\([^]*?^  \}/m)[0];
+const injection = 'const alunixaXImageOverlayId="alunixa-x-image-overlay";const sendCodexPlusDiagnostic=()=>{};' + install
+  + (install.includes("function installAlunixaXCompositedImageOverlay")
+    ? "\nfunction installCodexPlusImageOverlay(){ return installAlunixaXCompositedImageOverlay(); }" : "");
 const assets = {};
 let browser, started = false;
 const bitmap = async color => "data:image/png;base64," + (await sharp({
@@ -51,7 +53,8 @@ async function configure(page, options = {}) {
   const timing = await page.evaluate(async config => {
     window.__ALUNIXA_X_IMAGE_OVERLAY__ = config;
     const start = performance.now();
-    installCodexPlusImageOverlay();
+    (typeof installAlunixaXCompositedImageOverlay === "function"
+      ? installAlunixaXCompositedImageOverlay : installCodexPlusImageOverlay)();
     return { ready: await window.__alunixaXImageOverlayReady, milliseconds: performance.now() - start };
   }, { enabled: true, dataUrl: assets.wall, fitMode: "stretch", opacity: .2, ...options });
   assert.ok(timing.ready, "valid overlay becomes ready");

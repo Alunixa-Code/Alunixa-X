@@ -347,6 +347,7 @@ type BackendSettings = WhaleBalanceSettings & {
   codexAppNativeMenuPlacement: boolean;
   codexAppNativeBrowserRequireIdentification: boolean;
   codexAppNativeFastUnlock: boolean;
+  codexAppServiceTierControls: boolean;
   codexAppPetRealMouseLook: boolean;
   codexAppActivityOverlayRight: boolean;
   codexAppCapacityAutoRetry: boolean;
@@ -400,7 +401,6 @@ type BackendSettings = WhaleBalanceSettings & {
   computerUseGuardEnabled: boolean;
   codexAppPackagedProxyRepair: boolean;
   codexAppPluginAutoExpand: boolean;
-  codexAppForceChineseLocale: boolean;
   codexAppFastStartup: boolean;
   codexAppDisableAutoUpdate: boolean;
   codexAppDisableWss: boolean;
@@ -1168,7 +1168,7 @@ const defaultSettings: BackendSettings = {
   computerUseGuardEnabled: false,
   codexAppPackagedProxyRepair: true,
   codexAppPluginAutoExpand: true,
-  codexAppForceChineseLocale: true,
+  codexAppForceChineseLocale: false,
   codexAppFastStartup: false,
   codexAppDisableAutoUpdate: false,
   codexAppDisableWss: false,
@@ -1216,7 +1216,6 @@ const defaultSettings: BackendSettings = {
   codexAppMarkdownExport: true,
   codexAppUsageStatusLine: true,
   codexAppPasteFix: false,
-  codexAppForceChineseLocale: false,
   codexAppTypingEffect: "off",
   codexAppThreadIdBadge: false,
   codexAppConversationView: false,
@@ -1224,6 +1223,7 @@ const defaultSettings: BackendSettings = {
   codexAppNativeMenuPlacement: true,
   codexAppNativeBrowserRequireIdentification: false,
   codexAppNativeFastUnlock: false,
+  codexAppServiceTierControls: false,
   codexAppPetRealMouseLook: false,
   codexAppActivityOverlayRight: false,
   codexAppCapacityAutoRetry: false,
@@ -6135,6 +6135,8 @@ function EnhanceScreen({
                 <FeatureToggle title={t("插件市场解锁")} detail={t("API Key 模式下扩展插件市场请求，尽量显示完整插件列表；官方/混合模式通常不需要。")} checked={form.codexAppPluginMarketplaceUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppPluginMarketplaceUnlock", value)} />
                 <FeatureToggle title={t("模型白名单解锁")} detail={t("从环境变量和 config.toml 的 /v1/models 拉取模型并补进模型列表。")} checked={form.codexAppModelWhitelistUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppModelWhitelistUnlock", value)} />
                 <FeatureToggle title={t("原生 Fast 强制解锁")} detail={t("纯 API Key 模式恢复原生 Fast 开关；保存后重新启动 Codex 生效，实际支持与计费由供应商决定。")} checked={form.codexAppNativeFastUnlock} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppNativeFastUnlock", value)} />
+                <FeatureToggle title={t("Fast 按钮")} checked={form.codexAppServiceTierControls}
+                  disabled={!masterEnabled} onChange={value => setEnhanceFlag("codexAppServiceTierControls", value)} />
               </FeatureGroup>
               <FeatureGroup title={t("对话与输入")} detail={t("调整会话管理、输入行为和对话阅读体验。")}>
                 <FeatureToggle title={t("会话删除")} detail={t("在会话列表悬停显示删除按钮，并支持撤销。")} checked={form.codexAppSessionDelete} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppSessionDelete", value)} />
@@ -6338,7 +6340,6 @@ function EnhanceScreen({
                 </div>
               ) : null}
 
-              <FeatureToggle title={t("强制中文界面")} detail={t("强制启用 Codex App 内置 zh-CN 语言包，避免 Statsig/VPN 不通时回退英文。需重启 Codex 才能完整生效。")} checked={form.codexAppForceChineseLocale} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppForceChineseLocale", value)} />
               <FeatureToggle title={t("快速启动")} detail={t("默认关闭；无 VPN 时可开启，让 Statsig 初始化快速失败，减少启动时长。需重启 Codex 才生效。")} checked={form.codexAppFastStartup} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppFastStartup", value)} />
               <FeatureToggle title={t("关闭 Codex 自动更新")} detail={t("阻止官方 Codex 自动下载和安装更新，不影响 Alunixa X 自身的 GitHub Release 更新。需重启 Codex 才能完整生效。")} checked={form.codexAppDisableAutoUpdate} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppDisableAutoUpdate", value)} />
               <FeatureToggle title={t("禁用 WSS")} detail={t("强制 Codex 使用 HTTP Responses，不使用 WebSocket/WSS；会将当前 provider 的 supports_websockets 设为 false。需重启 Codex 才生效。")} checked={nativeChecked("codexAppDisableWss")} unknown={typeof nativeDiskValues.codexAppDisableWss !== "boolean"} disabled={!masterEnabled || !nativeCapabilityEditable("codexAppDisableWss")} onChange={(value) => void editNative("codexAppDisableWss", value)} />
@@ -14020,7 +14021,8 @@ function activeRelayProfile(settings: BackendSettings): RelayProfile {
 
 /** 协议取值归一化：认不出的值一律回退 Responses，避免脏数据把上游写成直连。 */
 function normalizeRelayProtocol(value: RelayProtocol | undefined): RelayProtocol {
-  if (value === "chatCompletions" || value === "anthropicMessages") return value;
+  if (value === "chatCompletions" || value === "anthropicMessages"
+      || value === "completions" || value === "geminiGenerateContent") return value;
   return "responses";
 }
 

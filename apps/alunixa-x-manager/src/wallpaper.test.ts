@@ -4,7 +4,8 @@ import { test } from "node:test";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const source = read("../../../assets/inject/renderer-inject.js");
-const runtime = source.split("function installAlunixaXImageOverlay()")[1].split("function scheduleAlunixaXImageOverlay")[0];
+const runtime = read("../../../assets/inject/renderer-inject/00-media-dispatch.js")
+  + source.split("function installAlunixaXMediaOverlay()")[1].split("function scheduleAlunixaXImageOverlay")[0];
 
 test("production startup schedules the media runtime instead of the obsolete image-only bootstrap", () => {
   const startup = read("../../../assets/inject/renderer-inject/99-startup.js");

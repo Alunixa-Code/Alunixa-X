@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 const RESTORED_AX_KEYS: &[&str] = &[
     "codexAppFastStartup",
+    "codexAppForceChineseLocale",
     "codexAppNativeMenuLocalization",
     "codexAppZedRemoteOpen",
     "zedRemoteOpenStrategy",
@@ -60,11 +61,26 @@ fn updates_preserve_restored_ax_preferences_and_unrelated_user_data() {
 }
 
 #[test]
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\ours
 fn explicit_language_and_fast_startup_settings_reach_guarded_runtime_configuration() {
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\base
-fn retired_language_and_fast_startup_do_not_affect_injection() {
-=======
+    let settings: BackendSettings = serde_json::from_value(old_settings()).unwrap();
+    let script = injection_script_with_settings(0, &settings);
+    assert!(script.contains("__ALUNIXA_X_FORCE_CHINESE_LOCALE__"));
+    assert!(script.contains("__alunixaXForceChineseLocaleInstalled"));
+    assert!(!script.contains("installForceChineseLocalePatch"));
+    assert!(script.contains("__ALUNIXA_X_FAST_STARTUP__"));
+    assert!(script.contains("__alunixaXFastStartupInstalled"));
+    assert!(script.contains("statsigTimeoutMs"));
+    let disabled = injection_script_with_settings(
+        0,
+        &BackendSettings {
+            enhancements_enabled: false,
+            ..settings
+        },
+    );
+    assert!(disabled.contains(r#"__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {"enabled":false"#));
+}
+
+#[test]
 fn force_chinese_locale_defaults_to_false() {
     let settings = BackendSettings::default();
     assert!(!settings.codex_app_force_chinese_locale);
@@ -76,10 +92,7 @@ fn force_chinese_locale_defaults_to_false() {
         Some(false),
         "default BackendSettings JSON should include codexAppForceChineseLocale = false"
     );
-    assert!(
-        json.get("codexAppFastStartup").is_none(),
-        "fast startup stays retired"
-    );
+    assert_eq!(json["codexAppFastStartup"], false);
 }
 
 #[test]
@@ -131,39 +144,14 @@ fn force_chinese_locale_config_follows_the_switch() {
 }
 
 #[test]
-fn force_chinese_locale_is_injected_and_fast_startup_is_not() {
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\theirs
+fn force_chinese_locale_is_injected_and_retained_fast_startup_remains_explicit() {
     let settings: BackendSettings = serde_json::from_value(old_settings()).unwrap();
     let script = injection_script_with_settings(0, &settings);
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\ours
-    assert!(script.contains("__ALUNIXA_X_FORCE_CHINESE_LOCALE__"));
-    assert!(script.contains("__alunixaXForceChineseLocaleInstalled"));
-    assert!(!script.contains("installForceChineseLocalePatch"));
-    assert!(script.contains("__ALUNIXA_X_FAST_STARTUP__"));
-    assert!(script.contains("__alunixaXFastStartupInstalled"));
-    assert!(script.contains("statsigTimeoutMs"));
-    let disabled = injection_script_with_settings(
-        0,
-        &BackendSettings {
-            enhancements_enabled: false,
-            ..settings
-        },
-    );
-    assert!(disabled.contains(r#"__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {"enabled":false"#));
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\base
-    assert!(!script.contains("__ALUNIXA_X_FORCE_CHINESE_LOCALE__"));
-    assert!(!script.contains("__alunixaXForceChineseLocaleInstalled"));
-    assert!(!script.contains("installForceChineseLocalePatch"));
-    assert!(!script.contains("__ALUNIXA_X_FAST_STARTUP__"));
-    assert!(!script.contains("__alunixaXFastStartupInstalled"));
-    assert!(!script.contains("statsigTimeoutMs"));
-=======
     assert!(script.contains("window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {\"enabled\":true,\"locale\":\"zh-CN\"}"));
     assert!(script.contains("installCodexPlusForceChineseLocale"));
     // 撤下后没有回来：清理 shim 和快速启动都不得再出现在产物里。
-    assert!(!script.contains("restoreCodexPlusManagedLocale"));
-    assert!(!script.contains("__ALUNIXA_X_FAST_STARTUP__"));
-    assert!(!script.contains("__alunixaXFastStartupInstalled"));
-    assert!(!script.contains("statsigTimeoutMs"));
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\force_chinese_locale_settings.rs\theirs
+    assert!(script.contains("restoreCodexPlusManagedLocale"));
+    assert!(script.contains("__ALUNIXA_X_FAST_STARTUP__"));
+    assert!(script.contains("__alunixaXFastStartupInstalled"));
+    assert!(!script.contains("window.__statsigReady = true"));
 }

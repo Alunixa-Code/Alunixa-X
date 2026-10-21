@@ -535,7 +535,8 @@
   }
 
   function applyCodexServiceTierRequestOverride(method, params, threadIdHint = "") {
-    return applyCodexRemoteSessionProviderOverride(method, params);
+    const providerParams = applyCodexRemoteSessionProviderOverride(method, params);
+    return applyCodexServiceTierRequestOnly(method, providerParams, threadIdHint);
   }
 
   function codexRemoteSessionActiveProfile() {

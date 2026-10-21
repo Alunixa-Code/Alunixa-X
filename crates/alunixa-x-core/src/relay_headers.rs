@@ -139,6 +139,13 @@ pub fn apply_with_api_key(
     relay: &RelayProfile,
     api_key: &str,
 ) -> RequestBuilder {
+    if relay.protocol == crate::settings::RelayProtocol::GeminiGenerateContent {
+        let has_key = relay.custom_headers.iter().any(|header| header.key.trim().eq_ignore_ascii_case("x-goog-api-key"));
+        let builder = if !relay.uses_no_auth() && !has_key {
+            builder.header("x-goog-api-key", api_key.trim())
+        } else { builder };
+        return apply_headers(builder, &relay.custom_headers);
+    }
     if relay.protocol != crate::settings::RelayProtocol::AnthropicMessages {
         let builder = if relay.uses_no_auth() || has_authorization(&relay.custom_headers) {
             builder

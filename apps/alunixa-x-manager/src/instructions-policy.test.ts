@@ -9,7 +9,9 @@ test("advanced instructions apply before launch and subsequent config writers pr
   const repair = launcher.indexOf("codex_instructions::apply_model_instructions_policy(");
   assert.ok(repair >= 0);
   assert.ok(repair > launcher.indexOf(".apply_active_relay_profile(&settings)"));
-  assert.ok(repair < launcher.indexOf(".launch_codex(&app_dir, debug_port, &settings"));
+  const launch = launcher.indexOf(".launch_codex(", repair);
+  assert.ok(launch > repair);
+  assert.match(launcher.slice(launch, launch + 320), /&app_dir[\s\S]*debug_port[\s\S]*&settings/);
   const relay = readFileSync(new URL("../../../crates/alunixa-x-core/src/relay_config.rs", import.meta.url), "utf8");
   assert.match(relay, /preserve_model_instructions_file/);
   const entrypoint = readFileSync(

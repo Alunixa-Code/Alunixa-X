@@ -10,23 +10,30 @@ pub fn proxied_client(user_agent: &str) -> anyhow::Result<reqwest::Client> {
     } else {
         user_agent.trim().to_string()
     };
+    let proxy = crate::proxy::detect_system_proxy()
+        .or_else(|| std::env::var("HTTPS_PROXY").ok())
+        .or_else(|| std::env::var("https_proxy").ok())
+        .or_else(|| std::env::var("ALL_PROXY").ok())
+        .or_else(|| std::env::var("all_proxy").ok());
+    let cache_key = format!("{ua}\n{}", proxy.as_deref().unwrap_or(""));
     let clients = PROXIED_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut clients = clients
         .lock()
         .map_err(|_| anyhow::anyhow!("HTTP client cache lock poisoned"))?;
-    if let Some(client) = clients.get(&ua) {
+    if let Some(client) = clients.get(&cache_key) {
         return Ok(client.clone());
     }
-    let client = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .pool_idle_timeout(std::time::Duration::from_secs(90))
         .pool_max_idle_per_host(16)
-        .user_agent(&ua)
-        .build()?;
+        .user_agent(&ua);
+    if let Some(proxy) = proxy { builder = builder.proxy(reqwest::Proxy::all(proxy)?); }
+    let client = builder.build()?;
     if clients.len() >= MAX_PROXIED_CLIENTS {
         clients.clear();
     }
-    clients.insert(ua, client.clone());
+    clients.insert(cache_key, client.clone());
     Ok(client)
 }
 

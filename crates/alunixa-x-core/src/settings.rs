@@ -14,6 +14,7 @@ use toml_edit::{DocumentMut, Item};
 
 use crate::tools::{ToolConfig, ToolId};
 use crate::zed_remote::ZedOpenStrategy;
+mod safety;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -663,7 +664,7 @@ pub struct BackendSettings {
     pub claude_app_localization: bool,
     #[serde(rename = "codexAppPasteFix", default)]
     pub codex_app_paste_fix: bool,
-    #[serde(rename = "codexAppForceChineseLocale", default = "default_true")]
+    #[serde(rename = "codexAppForceChineseLocale", default)]
     pub codex_app_force_chinese_locale: bool,
     #[serde(rename = "codexAppFastStartup", default)]
     pub codex_app_fast_startup: bool,
@@ -957,7 +958,7 @@ impl Default for BackendSettings {
             claude_app_voice_input: true,
             claude_app_localization: true,
             codex_app_paste_fix: false,
-            codex_app_force_chinese_locale: true,
+            codex_app_force_chinese_locale: false,
             codex_app_fast_startup: false,
             codex_app_disable_auto_update: false,
             codex_app_disable_wss: false,
@@ -2045,6 +2046,17 @@ impl SettingsStore {
         })
     }
 
+    pub fn preserving_runtime_model_selection(
+        &self,
+        settings: &BackendSettings,
+    ) -> anyhow::Result<BackendSettings> {
+        let current = self.load()?;
+        let mut next = settings.clone();
+        next.image_models = current.image_models.clone();
+        preserve_runtime_model_selection(&mut next, &current);
+        Ok(next)
+    }
+
     fn save_unlocked(&self, settings: &BackendSettings) -> anyhow::Result<()> {
         atomic_write_unique(&self.path, &self.prepare_save_bytes(settings)?)
     }
@@ -2055,6 +2067,7 @@ impl SettingsStore {
             anyhow::bail!("settings_revision_conflict：设置已被其他操作更新，请重载后合并；原文件未修改");
         }
         let previous = self.load_raw_object()?;
+        safety::validate_profile_updates(settings, &previous)?;
         let count = previous
             .get("relayProfiles")
             .and_then(Value::as_array)
@@ -2069,10 +2082,8 @@ impl SettingsStore {
         );
         let mut settings = normalize_settings_config_sections(settings.clone())?;
         settings.codex_extra_args = normalize_codex_extra_args(&settings.codex_extra_args);
-        let mut raw = self.load_raw_object()?;
-        for (key, value) in settings_to_object(&settings) {
-            raw.insert(key, value);
-        }
+        let mut raw = settings_to_object(&settings);
+        safety::preserve_unknown_settings_fields(&mut raw, &previous)?;
         raw.remove("revision");
         let mut value = Value::Object(raw);
         crate::retired_context::strip_settings_value(&mut value)?;
@@ -2108,6 +2119,7 @@ impl SettingsStore {
         }
 
         let mut raw = self.load_raw_object()?;
+        let original_raw = raw.clone();
         merge_known_setting_fields(&mut raw, &payload);
         let mut cleaned = Value::Object(raw);
         crate::retired_context::strip_settings_value(&mut cleaned)?;
@@ -2119,6 +2131,7 @@ impl SettingsStore {
             serde_json::from_value(Value::Object(raw.clone()))
                 .context("invalid settings update")?,
         )?;
+        safety::validate_profile_updates(&settings, &original_raw)?;
         raw.insert("tools".into(), serde_json::to_value(&settings.tools)?);
         raw.insert(
             "relayCommonConfigContents".to_string(),
@@ -2128,6 +2141,10 @@ impl SettingsStore {
             "relayContextConfigContents".to_string(),
             Value::String(settings.relay_context_config_contents.clone()),
         );
+        safety::preserve_unknown_settings_fields(&mut raw, &original_raw)?;
+        let mut cleaned = Value::Object(raw);
+        crate::retired_context::strip_settings_value(&mut cleaned)?;
+        let mut raw = cleaned.as_object().context("settings must be an object")?.clone();
         raw.remove("revision");
         let bytes = serialize_settings_bounded(&Value::Object(raw))?;
         atomic_write_unique(&self.path, &bytes)?;
@@ -2972,6 +2989,10 @@ mod tests {
         fn allow_transport_origin_fill(before: &mut Value, after: &Value) {
             match (before, after) {
                 (Value::Object(before), Value::Object(after)) => {
+                    if before.get("apiKeys").is_none() && after.get("apiKeys").is_some() {
+                        before.insert("apiKeys".into(), after["apiKeys"].clone());
+                        before.insert("activeApiKeyId".into(), after["activeApiKeyId"].clone());
+                    }
                     let origin = after.get("upstreamBaseUrl").cloned();
                     if before.get("upstreamBaseUrl").and_then(Value::as_str) == Some("")
                         && origin.is_some()
@@ -3030,9 +3051,13 @@ mod tests {
 
     fn assert_stable_settings_roundtrip(store: &SettingsStore, expected: &BackendSettings) {
         let loaded = store.load().unwrap();
-        assert_eq!(&loaded, expected);
+        let mut expected = expected.clone();
+        expected.settings_revision = loaded.settings_revision.clone();
+        assert_eq!(loaded, expected);
         store.save(&loaded).unwrap();
-        assert_eq!(&store.load().unwrap(), expected);
+        let reloaded = store.load().unwrap();
+        expected.settings_revision = reloaded.settings_revision.clone();
+        assert_eq!(reloaded, expected);
     }
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -3166,7 +3191,7 @@ mod tests {
         assert!(settings.codex_app_plugin_marketplace_unlock);
         assert!(settings.codex_app_plugin_auto_expand);
         assert!(!settings.codex_app_thread_id_badge);
-        assert!(settings.codex_app_force_chinese_locale);
+        assert!(!settings.codex_app_force_chinese_locale);
         assert!(!settings.codex_app_disable_auto_update);
         assert!(!settings.codex_app_responses_id_negotiation);
         assert!(!settings.codex_goals_enabled);
@@ -3681,7 +3706,9 @@ experimental_bearer_token = "sk-existing""#
         let dir = temp_dir();
         let store = SettingsStore::new(dir.join("settings.json"));
 
-        assert_eq!(store.load().unwrap(), BackendSettings::default());
+        assert_eq!(store.load().unwrap(), BackendSettings {
+            settings_revision: "missing".into(), ..BackendSettings::default()
+        });
     }
 
     #[test]
@@ -3837,7 +3864,8 @@ experimental_bearer_token = "sk-existing""#
         store.save(&settings).unwrap();
 
         let loaded = store.load().unwrap();
-        let expected = canonical_roundtrip_expected(&settings);
+        let mut expected = canonical_roundtrip_expected(&settings);
+        expected.settings_revision = store.revision().unwrap();
         let active_aggregate = loaded.active_aggregate_relay_profile().unwrap();
         assert_eq!(loaded, expected);
         assert_stable_settings_roundtrip(&store, &expected);
@@ -4851,6 +4879,10 @@ impl BackendSettings {
 }
 
 fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+    for key in ["codexAppNativeFastUnlock", "codexAppCapacityAutoRetry", "codexAppUsageStatusLine",
+        "codexAppActivityOverlayRight", "codexAppStandaloneQuotaUnlock", "claudeAppVoiceInput", "claudeAppLocalization"] {
+        merge_bool_setting(target, source, key);
+    }
     if let Some(patch) = source.get("dictation").and_then(Value::as_object) {
         let mut dictation = target
             .get("dictation")
@@ -5224,6 +5256,8 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
             Value::String(ToolId::parse(value).as_str().to_string()),
         );
     }
+}
+
     // 自动接管的两个设置字段必须走既有 settings.json 链路持久化：
     // 守护线程在另一个线程里读同一个文件，写不进就等于开关无效。
     #[test]
@@ -5254,5 +5288,3 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
         assert!(reloaded.codex_app_auto_takeover);
         assert_eq!(reloaded.codex_app_auto_takeover_when_active, "immediate");
     }
-
-}

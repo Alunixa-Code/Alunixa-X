@@ -1849,7 +1849,7 @@
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginAutoExpand:true, projectMove:true, performanceProtection:true, zedRemoteOpen:true, upstreamWorktreeCreate:true, nativeMenuLocalization:true, pluginMarketplaceUnlock:true, modelWhitelistUnlock:true, sessionDelete:true, markdownExport:true, sessionShare:true, pasteFix:false, typingEffect:"off", threadIdBadge:false, conversationView:false, whaleWidget:false, conversationViewMaxWidth:conversationViewDefaultWidth, threadScrollRestore:true, nativeMenuPlacement:true, serviceTierControls:false, nativeFastUnlock:false, petRealMouseLook:false, activityOverlayRight:false, stepwise:false, answerOutline:false, usageStatusLine:true, capacityAutoRetry:false, capacityAutoRetryMaxAttempts:15, capacityAutoRetryIntervalSeconds:0, dreamSkinEnabled:false, dreamSkinPaused:false, dreamSkinThemeConfig:window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath:"" };
+    return { pluginAutoExpand: true, projectMove: true, performanceProtection: true, zedRemoteOpen: true, upstreamWorktreeCreate: true, nativeMenuLocalization: true, pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, nativeFastUnlock: false, petRealMouseLook: false, activityOverlayRight: false, stepwise: false, answerOutline: false, usageStatusLine: true, capacityAutoRetry: false, capacityAutoRetryMaxAttempts: 15, capacityAutoRetryIntervalSeconds: 0, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
   }
 
   const alunixaXBackendSettingMap = {
@@ -1869,6 +1869,7 @@
     whaleWidget: "codexAppWhaleWidgetEnabled",
     threadScrollRestore: "codexAppThreadScrollRestore",
     nativeMenuPlacement: "codexAppNativeMenuPlacement",
+    serviceTierControls: "codexAppServiceTierControls",
     nativeFastUnlock: "codexAppNativeFastUnlock",
     petRealMouseLook: "codexAppPetRealMouseLook",
     activityOverlayRight: "codexAppActivityOverlayRight",
@@ -1914,6 +1915,7 @@
         conversationViewMaxWidth: conversationViewDefaultWidth,
         threadScrollRestore: false,
         nativeMenuPlacement: false,
+        serviceTierControls: false,
         nativeFastUnlock: false,
         petRealMouseLook: false,
         activityOverlayRight: false,
@@ -1932,7 +1934,6 @@
     try {
       const settings = { ...defaultCodexPlusSettings(), ...JSON.parse(localStorage.getItem(alunixaXSettingsKey) || "{}"), ...backendCodexPlusSettings() };
       delete settings.customLayout;
-      delete settings.serviceTierControls;
       return settings;
     } catch {
       const settings = { ...defaultCodexPlusSettings(), ...backendCodexPlusSettings() };

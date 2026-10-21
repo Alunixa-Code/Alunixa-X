@@ -96,22 +96,11 @@ fn windows_workflows_verify_nsis_and_support_both_program_files_directories() {
         let text = std::fs::read_to_string(format!("../../.github/workflows/{workflow}"))
             .unwrap()
             .replace("\r\n", "\n");
-        let install = text
-            .split_once("      - name: Install NSIS\n")
-            .unwrap()
-            .1
-            .split("      - name:")
-            .next()
-            .unwrap();
-        let build = text
-            .split_once("      - name: Build Windows installer\n")
-            .unwrap()
-            .1
-            .split("      - name:")
-            .next()
-            .unwrap();
-        for step in [install, build] {
-            assert!(step.contains("shell: pwsh"), "{workflow}");
+        assert!(text.contains("scripts/installer/windows/install-nsis.ps1"), "{workflow}");
+        assert!(text.contains("scripts/installer/windows/package.ps1"), "{workflow}");
+        let install = std::fs::read_to_string("../../scripts/installer/windows/install-nsis.ps1").unwrap();
+        let build = std::fs::read_to_string("../../scripts/installer/windows/package.ps1").unwrap();
+        for step in [&install, &build] {
             assert!(
                 step.contains(r"${env:ProgramFiles(x86)}\NSIS\makensis.exe"),
                 "{workflow}"
@@ -125,19 +114,16 @@ fn windows_workflows_verify_nsis_and_support_both_program_files_directories() {
                 step.contains("Test-Path -LiteralPath $_ -PathType Leaf"),
                 "{workflow}"
             );
-            assert!(step.contains("if (-not $makensis) {"), "{workflow}");
+            assert!(step.to_ascii_lowercase().contains("$compiler"), "{workflow}");
         }
-        assert!(install.contains("& $makensis /VERSION"), "{workflow}");
-        assert!(
-            install.contains("if ($LASTEXITCODE -eq 0) { break }"),
-            "{workflow}"
-        );
+        assert!(install.contains("& $compiler /VERSION"), "{workflow}");
+        assert!(install.contains("if ($LASTEXITCODE -eq 0)"), "{workflow}");
         assert!(install.contains("$attempt -le 3"), "{workflow}");
         assert!(
             build.contains("if ($LASTEXITCODE -ne 0) { throw"),
             "{workflow}"
         );
-        assert!(build.contains("} finally {"), "{workflow}");
+        assert!(build.contains("Join-Path $PSScriptRoot"), "{workflow}");
     }
 }
 
@@ -245,13 +231,13 @@ fn macos_dmg_includes_one_visible_app_and_hidden_legacy_updater() {
     assert_eq!(
         app_commands,
         [
-            r#"create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-plus" "com.bigpizzav3.codexplusplus" "false""#,
-            r#"create_app "Alunixa X 管理工具" "AlunixaXManager" "$BINARY_DIR/alunixa-x-legacy-shim" "com.bigpizzav3.codexplusplus.manager" "true""#,
+            r#"create_app "Alunixa X" "AlunixaX" "$BINARY_DIR/alunixa-x-plus" "io.github.alunixacode.alunixax" "false""#,
+            r#"create_app "Alunixa X 管理工具" "AlunixaXManager" "$BINARY_DIR/alunixa-x-legacy-shim" "io.github.alunixacode.alunixax.manager" "true""#,
         ]
     );
     assert!(script.contains("printf '%s\\n' \"Alunixa X 管理工具.app\" > \"$STAGE/.hidden\""));
     assert!(script.contains("chflags hidden \"$STAGE/Alunixa X 管理工具.app\""));
-    assert!(script.contains("set visible of item \"Alunixa X 管理工具.app\" to false"));
+    assert!(!script.contains("set visible of item \"Alunixa X 管理工具.app\" to false"));
 }
 
 #[test]

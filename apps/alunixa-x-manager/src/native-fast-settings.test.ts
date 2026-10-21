@@ -28,7 +28,7 @@ test("native Fast renderer preference defaults off, follows backend settings and
   assert.equal(context.alunixaXSettings().nativeFastUnlock, false);
   backend.codexAppNativeFastUnlock = true;
   assert.equal(context.alunixaXSettings().nativeFastUnlock, true);
-  assert.equal(context.alunixaXSettings().serviceTierControls, undefined);
+  assert.equal(context.alunixaXSettings().serviceTierControls, false);
   backend.codexAppNativeFastUnlock = false;
   stored.nativeFastUnlock = true;
   assert.equal(context.alunixaXSettings().nativeFastUnlock, false, "the backend value must override a stale browser preference");
@@ -39,11 +39,11 @@ test("native Fast renderer preference defaults off, follows backend settings and
   assert.equal(context.alunixaXSettings().nativeFastUnlock, true);
 });
 
-test("in-app settings expose native Fast unlock without the retired service tier badge", () => {
+test("in-app settings keep native Fast unlock separate from retained service tier controls", () => {
   assert.match(settingsPage, /data-alunixa-x-setting="nativeFastUnlock"/);
   assert.match(settingsPage, /原生 Fast 强制解锁/);
   assert.match(settingsPage, /纯 API Key 模式恢复原生 Fast 开关；保存后重新启动 Codex 生效，实际支持与计费由供应商决定。/);
-  assert.doesNotMatch(settingsPage, /data-alunixa-x-setting="serviceTierControls"/);
+  assert.match(settingsPage, /data-alunixa-x-setting="serviceTierControls"/);
 });
 
 test("backend loads and saves publish only native Fast policy flags and tolerate an absent helper", async () => {
@@ -66,6 +66,8 @@ test("backend loads and saves publish only native Fast policy flags and tolerate
       alunixaXBackendSettingsSeq: 0,
       postJson: async () => response,
       refreshCodexPlusBackendToggles: () => {},
+      alunixaXSettings: () => ({ serviceTierControls: false }),
+      refreshCodexServiceTierStateAfterBackendSync: () => {},
     });
     vm.runInContext([
       extractAsync(serviceTier, "loadBackendSettingsState"),

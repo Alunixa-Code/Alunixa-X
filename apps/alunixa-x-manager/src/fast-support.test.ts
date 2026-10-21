@@ -61,7 +61,7 @@ test("Fast support declarations stay available for model metadata without enforc
   assert.equal(supported("gpt-5.4"), true);
 });
 
-test("retired Fast preferences cannot rewrite the native service tier or enable native unlock", () => {
+test("retained Fast controls stay independent of the opt-in native unlock", () => {
   const style = fragment("10-style.js");
   const map = style.match(/  const alunixaXBackendSettingMap = \{[^]*?^  \};/m)?.[0];
   assert.ok(map);
@@ -72,26 +72,27 @@ test("retired Fast preferences cannot rewrite the native service tier or enable 
     alunixaXSettingsKey: "settings",
     alunixaXBackendSettings: { enhancementsEnabled: true, codexAppServiceTierControls: true },
     applyCodexRemoteSessionProviderOverride: (_method: string, params: unknown) => params,
+    applyCodexServiceTierRequestOnly: (_method: string, params: unknown) => params,
   });
   vm.runInContext([map, ...["defaultCodexPlusSettings", "backendCodexPlusSettings", "alunixaXSettings"]
     .map((name) => extract(style, name)), extract(fragment("30-service-tier.js"), "applyCodexServiceTierRequestOverride")].join("\n"), context);
-  assert.equal(context.alunixaXSettings().serviceTierControls, undefined);
+  assert.equal(context.alunixaXSettings().serviceTierControls, true);
   assert.equal(context.alunixaXSettings().nativeFastUnlock, false);
   for (const params of [{ model: "custom", serviceTier: "priority" }, { model: "custom", service_tier: "flex" }, { model: "custom" }]) {
     assert.equal(context.applyCodexServiceTierRequestOverride("turn/start", params), params);
   }
 });
 
-test("reinjection removes the retired composer Fast badge", () => {
+test("disabling retained Fast controls removes the composer badge", () => {
   let removed = 0;
   const context = vm.createContext({ document: { querySelectorAll: (selector: string) => {
     assert.equal(selector, '[data-codex-service-tier-badge="true"]');
     return [{ remove: () => { removed += 1; } }];
   } } });
-  vm.runInContext(extract(fragment("90-action-groups.js"), "removeLegacyCodexServiceTierBadges"), context);
-  context.removeLegacyCodexServiceTierBadges();
+  vm.runInContext(extract(fragment("90-action-groups.js"), "removeCodexServiceTierBadges"), context);
+  context.removeCodexServiceTierBadges();
   assert.equal(removed, 1);
-  assert.doesNotMatch(fragment("90-action-groups.js"), /function installCodexServiceTierBadge/);
+  assert.match(fragment("90-action-groups.js"), /function installCodexServiceTierBadge/);
 });
 
 test("Fast-only UI metadata leaves an existing native descriptor's name and reasoning default intact", () => {

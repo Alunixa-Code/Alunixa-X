@@ -980,6 +980,7 @@ where
                     status_store,
                     status_started_at_ms: degraded.started_at_ms,
                     helper_started,
+                    isolated_quota_gate: None,
                     hooks: Arc::clone(&hooks),
                 });
             }
@@ -1268,9 +1269,6 @@ impl LaunchHooks for DefaultLaunchHooks {
                 let _ = crate::native_menu::install_native_menu_localizer(port).await;
             });
         }
-        let isolated_multi_instance =
-            std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").is_some_and(|value| value == "1");
-        let launch_extra_args = normalize_codex_extra_args(extra_args);
         let isolated_multi_instance =
             std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").is_some_and(|value| value == "1");
         // 打包版（MSIX/Store）上的多开必须另走一条路。
@@ -2414,8 +2412,11 @@ async fn handle_protocol_proxy_connection(
                     error.downcast_ref::<crate::protocol_proxy::UnsupportedEncryptedAgentContent>();
                 let search =
                     error.downcast_ref::<crate::protocol_proxy::UnsupportedNativeWebSearch>();
+                let file = error.downcast_ref::<crate::protocol_proxy::UnsupportedInputFile>();
+                let vlm = error.downcast_ref::<crate::vision::VlmPreprocessError>();
                 let conversion = crate::protocol_proxy::is_protocol_conversion_error(&error);
-                let status = if unsupported.is_some() || search.is_some() || conversion {
+                let status = if unsupported.is_some() || search.is_some() || file.is_some() || conversion
+                    || matches!(vlm, Some(crate::vision::VlmPreprocessError::MissingConfiguration)) {
                     "400 Bad Request"
                 } else {
                     "502 Bad Gateway"
@@ -2424,6 +2425,8 @@ async fn handle_protocol_proxy_connection(
                     &unsupported
                         .map(|error| error.response_body())
                         .or_else(|| search.map(|error| error.response_body()))
+                        .or_else(|| file.map(|error| error.response_body()))
+                        .or_else(|| vlm.map(|error| error.response_body()))
                         .unwrap_or_else(
                             || serde_json::json!({
                                 "status":"failed",
@@ -2553,10 +2556,17 @@ async fn handle_protocol_proxy_connection(
                     upstream.wire_api,
                     &request,
                 );
+            if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::ChatCompletions {
+                converter = converter.with_chat_upstream();
+                wire_converter = None;
+            }
+            let mut native_completion = (upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages)
+                .then(crate::anthropic_bridge::AnthropicSseToChatSse::default);
             let mut bytes_stream = upstream.take_response()?.bytes_stream();
             while let Some(chunk) = bytes_stream.next().await {
                 match chunk {
                     Ok(bytes) => {
+                        if let Some(observer) = native_completion.as_mut() { observer.push_bytes(&bytes); }
                         if let Some(wire_converter) = &mut wire_converter {
                             converter.push_upstream_bytes(&wire_converter.push_bytes(&bytes));
                         } else {
@@ -2571,6 +2581,12 @@ async fn handle_protocol_proxy_connection(
             }
             if let Some(wire_converter) = &mut wire_converter {
                 converter.push_upstream_bytes(&wire_converter.finish());
+            }
+            if let Some(observer) = native_completion.as_mut() {
+                observer.finish();
+                if !observer.has_successful_compaction_completion() {
+                    converter.fail("Anthropic 压缩流缺少正常 message_stop".into(), Some("compaction_incomplete".into()));
+                }
             }
             let outcome = converter.finish_with_outcome();
             stream.write_all(&outcome.payload).await?;
@@ -2650,27 +2666,21 @@ async fn handle_protocol_proxy_connection(
         }
     };
     if upstream.compaction {
-        if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages {
-            let request = request_json.as_ref().cloned().unwrap_or_default();
-            let converted =
-                convert_protocol_proxy_json(&upstream_body, upstream.wire_api, &request)?;
-            upstream_body = serde_json::to_vec(&converted)?;
+        let original: serde_json::Value = serde_json::from_slice(&upstream_body)?;
+        if let Err(error) = crate::protocol_proxy::validate_compaction_json_completion(&original, upstream.wire_api) {
+            let mut converter = crate::protocol_proxy::CompactionSseConverter::new("");
+            converter.fail(error.to_string(), Some("compaction_incomplete".to_string()));
+            write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &converter.finish()).await?;
+            stream.shutdown().await?;
+            return Ok(());
         }
-        // v2 远程压缩非流式路径：同样重组为单个 compaction 输出项。
-        if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages {
-            let original: serde_json::Value = serde_json::from_slice(&upstream_body)?;
-            if let Err(error) = crate::protocol_proxy::validate_compaction_json_completion(&original, upstream.wire_api) {
-                let mut converter = crate::protocol_proxy::CompactionSseConverter::new("");
-                converter.fail(error.to_string(), Some("compaction_incomplete".to_string()));
-                write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &converter.finish()).await?;
-                stream.shutdown().await?;
-                return Ok(());
-            }
-        }
-        let compaction_input = crate::anthropic_bridge::normalize_non_stream_body_for_compaction(
-            upstream.wire_api,
-            &upstream_body,
-        )?;
+        let request = request_json.as_ref().cloned().unwrap_or_default();
+        let normalized = if upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::Responses {
+            original
+        } else {
+            convert_protocol_proxy_json(&upstream_body, upstream.wire_api, &request)?
+        };
+        let compaction_input = serde_json::to_vec(&normalized)?;
         let body = crate::protocol_proxy::wrap_non_stream_response_as_compaction(
             &compaction_input,
             request_json
@@ -2745,9 +2755,6 @@ async fn handle_protocol_proxy_connection(
             return Ok(());
         }
     };
-    if !thinking_blocks.is_empty() {
-        crate::anthropic_bridge::attach_thinking_to_responses(&mut response_json, &thinking_blocks);
-    }
     let body = serde_json::to_vec(&response_json)?;
     write_http_response(stream, "200 OK", "application/json; charset=utf-8", &body).await?;
     log_helper_response(

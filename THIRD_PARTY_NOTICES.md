@@ -37,6 +37,10 @@ Alunixa X includes adapted CSS and renderer injection logic from:
 
 https://github.com/Fei-Away/Codex-Dream-Skin
 
+Bundled Dream Skin renderer and CSS: upstream v1.5.20
+(commit `1c2e8fea9e44e2ce8384bbd1c8759b99397c5d7d`), with Alunixa X host,
+code-block toolbar, compact home and composer compatibility adaptations retained.
+
 Original license:
 
 MIT License

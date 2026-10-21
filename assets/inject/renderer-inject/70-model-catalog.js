@@ -44,6 +44,20 @@
       dispatchMessage: (dispatcher, type, payload) => dispatchCodexPlusMessage(dispatcher, type, payload),
       requestOverride: (message) => codexServiceTierRequestOverride(message),
       diagnostics: () => [...(window.__alunixaXServiceTierTestDiagnostics || [])],
+      statusSummary: (state = {}) => {
+        const current = { ...codexServiceTierState, ...state };
+        return serviceTierStatusMessage(current.controlMode, current.threadMode, current.effectiveMode,
+          current.defaultMode, current.effectiveServiceTier, current.serviceTierSource);
+      },
+      resolveInheritedServiceTier: () => resolveInheritedServiceTier(),
+      setServiceTierState: (state = {}) => {
+        codexServiceTierState = { ...codexServiceTierState, ...state };
+      },
+      setThreadState: (state = {}) => {
+        localStorage.setItem(codexThreadServiceTierKey, JSON.stringify({
+          version: codexThreadServiceTierVersion, mode: "inherit", defaultMode: "inherit", entries: {}, ...state,
+        }));
+      },
       currentModelName: () => codexServiceTierCurrentModelName(),
       fastAvailability: (modelName = codexServiceTierCurrentModelName()) => codexServiceTierFastAvailability(modelName),
       modelDescriptor: (modelName) => alunixaXModelDescriptor(modelName),

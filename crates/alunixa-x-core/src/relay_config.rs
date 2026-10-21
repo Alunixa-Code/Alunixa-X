@@ -995,7 +995,9 @@ pub async fn test_relay_profile(
         let auth = chatgpt_auth_status_from_home(&default_codex_home_dir());
         return Ok(RelayProfileTestResult {
             http_status: 0,
-            endpoint: OFFICIAL_LOGIN_BASE_URL.to_string(),
+            endpoint: crate::official_login::official_base_url(),
+            protocol_valid: false,
+            completion_status: "unverified".to_string(),
             response_preview: json!({
                 "authenticated": auth.authenticated,
                 "requestVerified": false,
@@ -1026,7 +1028,11 @@ pub async fn test_relay_profile(
         anyhow::bail!("API Key 不能为空");
     }
 
-    let client = crate::http_client::proxied_client("AlunixaX/RelayTest")?;
+    let user_agent = if profile.protocol == RelayProtocol::AnthropicMessages && profile.anthropic_impersonate_claude_code {
+        crate::anthropic_bridge::CLAUDE_CODE_USER_AGENT
+    } else if !profile.user_agent.trim().is_empty() { profile.user_agent.trim() }
+    else { "AlunixaX/RelayTest" };
+    let client = crate::http_client::proxied_client(user_agent)?;
     let test_model = model.trim();
     if test_model.is_empty() {
         anyhow::bail!("测试模型不能为空");
@@ -1034,15 +1040,9 @@ pub async fn test_relay_profile(
 
     let payload = relay_profile_test_payload(protocol, test_model);
     let endpoint = relay_profile_test_endpoint(protocol, base_url, test_model);
-    let request = client
-        .post(&endpoint)
-        .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .json(&payload);
-    let request = if profile.uses_no_auth() {
-        request
-    } else {
-        relay_profile_test_auth(request, protocol, api_key)
-    };
+    let mut effective_profile = profile.clone();
+    effective_profile.protocol = protocol;
+    let request = relay_test_request(&client, &endpoint, &effective_profile, api_key, &payload);
     let response = request.send().await?;
     let http_status = response.status().as_u16();
 
@@ -1118,6 +1118,19 @@ pub fn validate_relay_test_response(protocol: RelayProtocol, status: u16, text: 
                 Some("max_tokens" | "pause_turn" | "refusal") => "incomplete",
                 _ => return failed(),
             }
+        },
+        RelayProtocol::Completions => {
+            let Some(choices) = value.get("choices").and_then(Value::as_array).filter(|v| !v.is_empty()) else { return failed() };
+            if choices.iter().any(|choice| !choice.get("text").is_some_and(Value::is_string)) { return failed() }
+            if choices.iter().all(|choice| choice["finish_reason"] == "stop") { "completed" }
+            else if choices.iter().all(|choice| matches!(choice["finish_reason"].as_str(), Some("stop" | "length"))) { "incomplete" }
+            else { return failed() }
+        },
+        RelayProtocol::GeminiGenerateContent => {
+            let Some(candidates) = value.get("candidates").and_then(Value::as_array).filter(|v| !v.is_empty()) else { return failed() };
+            if candidates.iter().any(|candidate| !candidate.pointer("/content/parts").is_some_and(Value::is_array)) { return failed() }
+            if candidates.iter().all(|candidate| candidate["finishReason"] == "STOP") { "completed" }
+            else { "incomplete" }
         },
     };
     (true, state.to_string())

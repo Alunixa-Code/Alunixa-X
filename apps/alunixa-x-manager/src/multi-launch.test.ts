@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { hasModelProtocols } from "./model-protocols.ts";
 import { normalizeRelayModelRoutes } from "./model-routes.ts";
+import { isAggregateProfile } from "./aggregate-members.ts";
 
 const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const tree = ts.createSourceFile("App.tsx", app, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -22,9 +23,9 @@ function declaration(name: string): string {
 function compile(source: string) {
   return ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
 }
-const supported = new Function("normalizeRelayModelRoutes", "hasModelProtocols",
+const supported = new Function("normalizeRelayModelRoutes", "hasModelProtocols", "isAggregateProfile",
   `${compile(declaration("isAggregateRelayProfile") + "\n" + declaration("multiLaunchSupported"))}; return multiLaunchSupported;`)(
-  normalizeRelayModelRoutes, hasModelProtocols,
+  normalizeRelayModelRoutes, hasModelProtocols, isAggregateProfile,
 ) as (value: ReturnType<typeof profile>) => boolean;
 function profile(id = "one", patch: Record<string, unknown> = {}) {
   return {
@@ -49,6 +50,8 @@ function harness(options: { queue?: Promise<void>; response?: Promise<unknown> }
     settingsSaveQueueRef: { current: options.queue ?? Promise.resolve() },
     multiLaunchSupported: supported,
     setMultiLaunchPending: (id: string | null) => pending.push(id),
+    refreshMultiLaunchInstances: async () => {},
+    pollMultiLaunchOutcome: async () => "ready",
     t: (value: string) => value,
     run: (operation: () => unknown) => operation(),
     showNotice: (...args: unknown[]) => notices.push(args),

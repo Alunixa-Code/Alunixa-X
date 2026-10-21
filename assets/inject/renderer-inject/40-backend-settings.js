@@ -1132,6 +1132,28 @@
                   <div><div class="alunixa-x-row-title">原生 Fast 强制解锁</div><div class="alunixa-x-row-description">纯 API Key 模式恢复原生 Fast 开关；保存后重新启动 Codex 生效，实际支持与计费由供应商决定。</div></div>
                   <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="nativeFastUnlock"><span></span></button>
                 </div>
+                <div class="alunixa-x-row">
+                  <div class="alunixa-x-row-title">Fast 按钮</div>
+                  <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="serviceTierControls"><span></span></button>
+                </div>
+                <div class="alunixa-x-row" data-codex-service-tier-controls="true">
+                  <div class="alunixa-x-row-title">服务模式</div>
+                  <div class="alunixa-x-service-tier-control">
+                    <div class="alunixa-x-service-tier-status" data-codex-service-tier-status="true" data-status="loading">正在读取…</div>
+                    <div class="alunixa-x-service-tier-actions">
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-inherit="true">继承</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-standard="true">全局 Standard</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-fast="true">全局 Fast</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-custom="true">自定义</button>
+                    </div>
+                    <div class="alunixa-x-service-tier-actions alunixa-x-service-tier-thread-actions">
+                      <span class="alunixa-x-service-tier-thread-label">当前 thread 覆盖</span>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-inherit="true">继承</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-standard="true">Standard</button>
+                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-fast="true">Fast</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </section>
             <section class="alunixa-x-settings-section" aria-label="对话与输入">
@@ -1321,6 +1343,21 @@
     }, true);
     overlay.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      for (const [attribute, value, thread] of [
+        ["inherit", "inherit", false], ["standard", "global-standard", false],
+        ["fast", "global-fast", false], ["custom", "custom", false],
+        ["thread-inherit", "inherit", true], ["thread-standard", "standard", true],
+        ["thread-fast", "fast", true],
+      ]) {
+        const button = target?.closest(`[data-codex-service-tier-${attribute}]`);
+        if (!button) continue;
+        event.preventDefault();
+        if (!button.disabled) {
+          if (thread) setCodexThreadServiceTierMode(value);
+          else setCodexServiceTierControlMode(value);
+        }
+        return;
+      }
       // 拓展注册的菜单项。放在最前面是因为它的判定完全基于自己的 data 属性，
       // 与下面那些内置分支不会重叠；万一将来重叠，也应当由拓展优先拿到。
       if (handleCodexPlusExtensionMenuClick(target)) return;

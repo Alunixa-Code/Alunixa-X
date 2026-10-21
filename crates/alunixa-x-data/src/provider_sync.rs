@@ -3770,7 +3770,7 @@ fn record_thread_tombstone(codex_home: &Path, thread_id: &str) -> anyhow::Result
 }
 
 /// 撤销删除时清除墓碑，否则刚恢复的会话会被重建流程一直挡在列表外。
-fn clear_thread_tombstones(codex_home: &Path, thread_ids: &HashSet<String>) {
+pub(crate) fn clear_thread_tombstones(codex_home: &Path, thread_ids: &HashSet<String>) {
     if thread_ids.is_empty() {
         return;
     }
@@ -4427,7 +4427,7 @@ fn backup_sqlite_database(source: &Path, root: &Path, relative: &Path) -> anyhow
         anyhow::bail!("SQLite backup integrity check failed: {integrity}");
     }
     drop(target_db);
-    File::open(&target)?.sync_all()?;
+    OpenOptions::new().write(true).open(&target)?.sync_all()?;
     crate::backup::sync_directory(parent)?;
     Ok(())
 }

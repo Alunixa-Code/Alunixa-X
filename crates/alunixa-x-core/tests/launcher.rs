@@ -31,49 +31,6 @@ fn browser_identity_change_requires_two_distinct_observations() {
     assert!(browser_identity_changed(Some("browser-a"), "browser-b"));
 }
 
-#[tokio::test]
-async fn launch_receipt_status_and_injection_follow_final_wrapper_port() {
-    let temp = tempfile::tempdir().unwrap();
-    let app = temp.path().join("Codex.app");
-    std::fs::create_dir(&app).unwrap();
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let hooks = FakeHooks::new(events.clone()).with_launch_result(CodexLaunch::Process {
-        command: vec!["ChatGPT.exe".into(), "--remote-debugging-port=19451".into()],
-        wait_strategy: alunixa_x_core::launcher::ProcessWaitStrategy::ExternalWaitCommand,
-        macos_cleanup_policy: None,
-    });
-    let handle = launch_and_inject_with_hooks(
-        LaunchOptions {
-            app_dir: Some(app),
-            debug_port: 19450,
-            helper_port: 19452,
-            status_store: StatusStore::new(temp.path().join("status.json")),
-            codex_home: Some(temp.path().join("codex-home")),
-            sqlite_home: Some(temp.path().join("sqlite-home")),
-            state_dir: Some(temp.path().join("state")),
-        },
-        &hooks,
-    )
-    .await
-    .unwrap();
-    assert_eq!(handle.debug_port, 19451);
-    let status = handle.status_store.load_latest().unwrap().unwrap();
-    assert_eq!(status.debug_port, Some(19451));
-    assert_eq!(status.helper_port, Some(19452));
-    assert!(
-        events
-            .lock()
-            .unwrap()
-            .contains(&"inject:19451:19452".into())
-    );
-    assert!(
-        !events
-            .lock()
-            .unwrap()
-            .contains(&"inject:19450:19452".into())
-    );
-}
-
 #[test]
 fn app_paths_find_latest_windows_package_prefers_highest_version_app_dir() {
     let temp = tempfile::tempdir().unwrap();
@@ -1201,57 +1158,6 @@ async fn launch_lifecycle_runs_enabled_maintenance_without_applying_relay_profil
 }
 
 #[tokio::test]
-async fn native_fast_reload_runs_only_after_successful_opt_in_launch_injection() {
-    for (enhancements, native_fast, injection_ok) in [
-        (true, true, true),
-        (true, false, true),
-        (false, true, true),
-        (true, true, false),
-    ] {
-        let temp = tempfile::tempdir().unwrap();
-        let app_dir = temp.path().join("Codex.app");
-        std::fs::create_dir_all(&app_dir).unwrap();
-        let events = Arc::new(Mutex::new(Vec::<String>::new()));
-        let mut hooks = FakeHooks::new(events.clone()).with_settings(BackendSettings {
-            enhancements_enabled: enhancements,
-            codex_app_native_fast_unlock: native_fast,
-            relay_profiles_enabled: false,
-            ..BackendSettings::default()
-        });
-        if !injection_ok {
-            hooks = hooks.with_inject_error("fixture injection unavailable");
-        }
-        let handle = launch_and_inject_with_hooks(
-            LaunchOptions {
-                app_dir: Some(app_dir),
-                debug_port: 9229,
-                helper_port: 57321,
-                status_store: StatusStore::new(temp.path().join("status.json")),
-                ..Default::default()
-            },
-            &hooks,
-        )
-        .await
-        .unwrap();
-        handle.wait_for_codex_exit().await.unwrap();
-        let events = events.lock().unwrap();
-        let reload = events.iter().position(|event| event == "native-fast:9229");
-        assert_eq!(reload.is_some(), enhancements && native_fast && injection_ok);
-        if let Some(reload) = reload {
-            let injection = events
-                .iter()
-                .position(|event| event == "inject:9229:57321")
-                .unwrap();
-            assert!(injection < reload);
-            assert_eq!(
-                events.iter().filter(|event| *event == "native-fast:9229").count(),
-                1
-            );
-        }
-    }
-}
-
-#[tokio::test]
 async fn launch_lifecycle_passes_configured_extra_args_to_codex_launch() {
     let temp = tempfile::tempdir().unwrap();
     let app_dir = temp.path().join("Codex.app");
@@ -1996,8 +1902,6 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             base_url: "https://chat-only.example.test/v1".to_string(),
             upstream_base_url: "https://chat-only.example.test/v1".to_string(),
             api_key: "sk-test".to_string(),
-            api_keys: Vec::new(),
-            active_api_key_id: String::new(),
             protocol: RelayProtocol::ChatCompletions,
             relay_mode: alunixa_x_core::settings::RelayMode::MixedApi,
             official_mix_api_key: false,
@@ -2025,26 +1929,12 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             custom_headers: Vec::new(),
             standard_openai_protocol: false,
             web_search_history_compat: false,
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\ours
             rate_limit_cooldown_enabled: false,
             channel_queue_enabled: false,
             channel_requests_per_minute:
                 alunixa_x_core::settings::default_channel_requests_per_minute(),
             cooldown_error_statuses: alunixa_x_core::settings::default_cooldown_error_statuses(),
             ..RelayProfile::default()
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\base
-            rate_limit_cooldown_enabled: false,
-            channel_queue_enabled: false,
-            channel_requests_per_minute:
-                alunixa_x_core::settings::default_channel_requests_per_minute(),
-            cooldown_error_statuses: alunixa_x_core::settings::default_cooldown_error_statuses(),
-=======
-            anthropic_auth_header: String::new(),
-            anthropic_max_tokens: 0,
-            anthropic_prompt_cache: true,
-            anthropic_impersonate_claude_code: false,
-            anthropic_thinking_mode: String::new(),
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\theirs
         }],
         active_relay_id: "relay-chat".to_string(),
         ..BackendSettings::default()
@@ -2053,11 +1943,13 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
 
     let handle = launch_and_inject_with_hooks(
         LaunchOptions {
+        codex_home: None,
+        sqlite_home: None,
+        state_dir: None,
             app_dir: Some(app_dir),
             debug_port: 9229,
             helper_port: 58000,
             status_store,
-            ..Default::default()
         },
         &hooks,
     )
@@ -2210,11 +2102,13 @@ async fn launch_lifecycle_keeps_codex_and_helper_when_post_launch_status_save_fa
 
     let handle = launch_and_inject_with_hooks(
         LaunchOptions {
+        codex_home: None,
+        sqlite_home: None,
+        state_dir: None,
             app_dir: Some(app_dir),
             debug_port: 9229,
             helper_port: 57321,
             status_store,
-            ..Default::default()
         },
         &hooks,
     )
@@ -2348,7 +2242,6 @@ async fn degraded_packaged_launch_captures_identity_before_monitoring_and_keeps_
     );
     exit.notify_one();
     waiting.await.unwrap();
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\ours
     assert!(
         events
             .lock()
@@ -2360,145 +2253,6 @@ async fn degraded_packaged_launch_captures_identity_before_monitoring_and_keeps_
         handle.status_store.load_latest().unwrap().unwrap().status,
         "stopped"
     );
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\base
-    assert!(events.lock().unwrap().iter().any(|event| event == "shutdown-helper:57321"));
-    assert_eq!(handle.status_store.load_latest().unwrap().unwrap().status, "stopped");
-=======
-    assert!(
-        events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|event| event == "shutdown-helper:57321")
-    );
-    assert_eq!(
-        handle.status_store.load_latest().unwrap().unwrap().status,
-        "stopped"
-    );
-}
-
-#[tokio::test]
-async fn standalone_quota_unlock_disabled_does_not_connect_to_cdp() {
-    let temp = tempfile::tempdir().unwrap();
-    let app_dir = temp.path().join("Codex.app");
-    std::fs::create_dir_all(&app_dir).unwrap();
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .unwrap();
-    let hooks = FakeHooks::new(Arc::new(Mutex::new(Vec::new()))).with_settings(BackendSettings {
-        enhancements_enabled: false,
-        codex_app_standalone_quota_unlock: false,
-        provider_sync_enabled: false,
-        ..BackendSettings::default()
-    });
-    let handle = launch_and_inject_with_hooks(
-        LaunchOptions {
-            app_dir: Some(app_dir),
-            debug_port: listener.local_addr().unwrap().port(),
-            status_store: StatusStore::new(temp.path().join("status.json")),
-            ..LaunchOptions::default()
-        },
-        &hooks,
-    )
-    .await
-    .unwrap();
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
-            .await
-            .is_err()
-    );
-    handle.wait_for_codex_exit().await.unwrap();
-}
-
-#[tokio::test]
-async fn isolated_quota_gate_is_not_started_when_status_save_fails() {
-    let temp = tempfile::tempdir().unwrap();
-    let app_dir = temp.path().join("Codex.app");
-    std::fs::create_dir_all(&app_dir).unwrap();
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .unwrap();
-    let hooks = FakeHooks::new(Arc::new(Mutex::new(Vec::new()))).with_settings(BackendSettings {
-        enhancements_enabled: false,
-        codex_app_standalone_quota_unlock: true,
-        provider_sync_enabled: false,
-        ..BackendSettings::default()
-    });
-    let result = launch_and_inject_with_hooks(
-        LaunchOptions {
-            app_dir: Some(app_dir),
-            debug_port: listener.local_addr().unwrap().port(),
-            status_store: StatusStore::new(temp.path().join("unwritable/status.json")),
-            ..LaunchOptions::default()
-        },
-        &hooks,
-    );
-    std::fs::write(temp.path().join("unwritable"), "not a directory").unwrap();
-    assert!(result.await.is_err());
-    assert!(
-        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept(),)
-            .await
-            .is_err()
-    );
-}
-
-#[tokio::test]
-async fn isolated_quota_gate_stops_on_exit_monitor_error_and_explicit_restart() {
-    use tokio::io::AsyncReadExt;
-    for (wait_error, explicit_stop) in [(false, false), (true, false), (false, true)] {
-        let temp = tempfile::tempdir().unwrap();
-        let app_dir = temp.path().join("Codex.app");
-        std::fs::create_dir_all(&app_dir).unwrap();
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-            .await
-            .unwrap();
-        let debug_port = listener.local_addr().unwrap().port();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let mut hooks = FakeHooks::new(events).with_settings(BackendSettings {
-            enhancements_enabled: false,
-            codex_app_standalone_quota_unlock: true,
-            provider_sync_enabled: false,
-            ..BackendSettings::default()
-        });
-        hooks.wait_error = wait_error;
-        let handle = launch_and_inject_with_hooks(
-            LaunchOptions {
-                app_dir: Some(app_dir),
-                debug_port,
-                status_store: StatusStore::new(temp.path().join("latest-status.json")),
-                ..LaunchOptions::default()
-            },
-            &hooks,
-        )
-        .await
-        .unwrap();
-        let (mut stream, _) =
-            tokio::time::timeout(std::time::Duration::from_secs(2), listener.accept())
-                .await
-                .unwrap()
-                .unwrap();
-        let mut buffer = [0; 2048];
-        stream.read(&mut buffer).await.unwrap();
-        if explicit_stop {
-            handle.stop_isolated_api_quota_gate().await;
-        } else {
-            assert_eq!(handle.wait_for_codex_exit().await.is_err(), wait_error);
-        }
-        // 同一端口仍被保留，旧会话不允许再探测或注入它。
-        assert_eq!(
-            tokio::time::timeout(std::time::Duration::from_secs(1), stream.read(&mut buffer),)
-                .await
-                .unwrap()
-                .unwrap(),
-            0
-        );
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(550), listener.accept(),)
-                .await
-                .is_err()
-        );
-    }
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\theirs
 }
 
 #[tokio::test]
@@ -2521,23 +2275,12 @@ async fn proxy_only_packaged_launch_captures_identity_without_attempting_rendere
             debug_port: 9229,
             helper_port: 57321,
             status_store: StatusStore::new(temp.path().join("latest-status.json")),
-<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\ours
-        },
-        &hooks,
-    )
-    .await
-    .unwrap();
-||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\base
-        }, &hooks,
-    ).await.unwrap();
-=======
             ..Default::default()
         },
         &hooks,
     )
     .await
     .unwrap();
->>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\launcher.rs\theirs
     let current = events.lock().unwrap().clone();
     assert_eq!(
         current
@@ -3034,5 +2777,222 @@ impl LaunchHooks for FakeHooks {
         } else {
             self.event("terminate-codex");
         }
+    }
+}
+
+#[tokio::test]
+async fn launch_receipt_status_and_injection_follow_final_wrapper_port() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = temp.path().join("Codex.app");
+    std::fs::create_dir(&app).unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let hooks = FakeHooks::new(events.clone()).with_launch_result(CodexLaunch::Process {
+        command: vec!["ChatGPT.exe".into(), "--remote-debugging-port=19451".into()],
+        wait_strategy: alunixa_x_core::launcher::ProcessWaitStrategy::ExternalWaitCommand,
+        macos_cleanup_policy: None,
+    });
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app),
+            debug_port: 19450,
+            helper_port: 19452,
+            status_store: StatusStore::new(temp.path().join("status.json")),
+            codex_home: Some(temp.path().join("codex-home")),
+            sqlite_home: Some(temp.path().join("sqlite-home")),
+            state_dir: Some(temp.path().join("state")),
+        },
+        &hooks,
+    )
+    .await
+    .unwrap();
+    assert_eq!(handle.debug_port, 19451);
+    let status = handle.status_store.load_latest().unwrap().unwrap();
+    assert_eq!(status.debug_port, Some(19451));
+    assert_eq!(status.helper_port, Some(19452));
+    assert!(
+        events
+            .lock()
+            .unwrap()
+            .contains(&"inject:19451:19452".into())
+    );
+    assert!(
+        !events
+            .lock()
+            .unwrap()
+            .contains(&"inject:19450:19452".into())
+    );
+}
+
+#[tokio::test]
+async fn native_fast_reload_runs_only_after_successful_opt_in_launch_injection() {
+    for (enhancements, native_fast, injection_ok) in [
+        (true, true, true),
+        (true, false, true),
+        (false, true, true),
+        (true, true, false),
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("Codex.app");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let events = Arc::new(Mutex::new(Vec::<String>::new()));
+        let mut hooks = FakeHooks::new(events.clone()).with_settings(BackendSettings {
+            enhancements_enabled: enhancements,
+            codex_app_native_fast_unlock: native_fast,
+            relay_profiles_enabled: false,
+            ..BackendSettings::default()
+        });
+        if !injection_ok {
+            hooks = hooks.with_inject_error("fixture injection unavailable");
+        }
+        let handle = launch_and_inject_with_hooks(
+            LaunchOptions {
+                app_dir: Some(app_dir),
+                debug_port: 9229,
+                helper_port: 57321,
+                status_store: StatusStore::new(temp.path().join("status.json")),
+                ..Default::default()
+            },
+            &hooks,
+        )
+        .await
+        .unwrap();
+        handle.wait_for_codex_exit().await.unwrap();
+        let events = events.lock().unwrap();
+        let reload = events.iter().position(|event| event == "native-fast:9229");
+        assert_eq!(reload.is_some(), enhancements && native_fast && injection_ok);
+        if let Some(reload) = reload {
+            let injection = events
+                .iter()
+                .position(|event| event == "inject:9229:57321")
+                .unwrap();
+            assert!(injection < reload);
+            assert_eq!(
+                events.iter().filter(|event| *event == "native-fast:9229").count(),
+                1
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn standalone_quota_unlock_disabled_does_not_connect_to_cdp() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let hooks = FakeHooks::new(Arc::new(Mutex::new(Vec::new()))).with_settings(BackendSettings {
+        enhancements_enabled: false,
+        codex_app_standalone_quota_unlock: false,
+        provider_sync_enabled: false,
+        ..BackendSettings::default()
+    });
+    let handle = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: listener.local_addr().unwrap().port(),
+            status_store: StatusStore::new(temp.path().join("status.json")),
+            ..LaunchOptions::default()
+        },
+        &hooks,
+    )
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+    handle.wait_for_codex_exit().await.unwrap();
+}
+
+#[tokio::test]
+async fn isolated_quota_gate_is_not_started_when_status_save_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_dir = temp.path().join("Codex.app");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let hooks = FakeHooks::new(Arc::new(Mutex::new(Vec::new()))).with_settings(BackendSettings {
+        enhancements_enabled: false,
+        codex_app_standalone_quota_unlock: true,
+        provider_sync_enabled: false,
+        ..BackendSettings::default()
+    });
+    let result = launch_and_inject_with_hooks(
+        LaunchOptions {
+            app_dir: Some(app_dir),
+            debug_port: listener.local_addr().unwrap().port(),
+            status_store: StatusStore::new(temp.path().join("unwritable/status.json")),
+            ..LaunchOptions::default()
+        },
+        &hooks,
+    );
+    std::fs::write(temp.path().join("unwritable"), "not a directory").unwrap();
+    assert!(result.await.is_err());
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept(),)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn isolated_quota_gate_stops_on_exit_monitor_error_and_explicit_restart() {
+    use tokio::io::AsyncReadExt;
+    for (wait_error, explicit_stop) in [(false, false), (true, false), (false, true)] {
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("Codex.app");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let debug_port = listener.local_addr().unwrap().port();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut hooks = FakeHooks::new(events).with_settings(BackendSettings {
+            enhancements_enabled: false,
+            codex_app_standalone_quota_unlock: true,
+            provider_sync_enabled: false,
+            ..BackendSettings::default()
+        });
+        hooks.wait_error = wait_error;
+        let handle = launch_and_inject_with_hooks(
+            LaunchOptions {
+                app_dir: Some(app_dir),
+                debug_port,
+                status_store: StatusStore::new(temp.path().join("latest-status.json")),
+                ..LaunchOptions::default()
+            },
+            &hooks,
+        )
+        .await
+        .unwrap();
+        let (mut stream, _) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), listener.accept())
+                .await
+                .unwrap()
+                .unwrap();
+        let mut buffer = [0; 2048];
+        stream.read(&mut buffer).await.unwrap();
+        if explicit_stop {
+            handle.stop_isolated_api_quota_gate().await;
+        } else {
+            assert_eq!(handle.wait_for_codex_exit().await.is_err(), wait_error);
+        }
+        // 同一端口仍被保留，旧会话不允许再探测或注入它。
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), stream.read(&mut buffer),)
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(550), listener.accept(),)
+                .await
+                .is_err()
+        );
     }
 }

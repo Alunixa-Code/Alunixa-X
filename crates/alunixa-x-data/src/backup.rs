@@ -154,7 +154,7 @@ impl BackupStore {
             &serde_json::to_vec_pretty(&payload)?,
         )?;
         pending.committed = true;
-        File::open(self.path_for(&token))?.sync_all()?;
+        fs::OpenOptions::new().write(true).open(self.path_for(&token))?.sync_all()?;
         Ok((token, entries))
     }
 

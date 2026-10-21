@@ -21,7 +21,8 @@ test("manager saves settings for the next Alunixa X launcher startup", () => {
   const saveSettings = commandsSource.slice(start, end);
 
   assert.ok(start >= 0);
-  assert.match(saveSettings, /save_preserving_runtime_model_selection/);
+  assert.match(saveSettings, /preserving_runtime_model_selection/);
+  assert.match(saveSettings, /save_with_active_catalog_refresh/);
   assert.match(saveSettings, /下次通过 Alunixa X 启动器启动 Codex 时完整应用/);
   assert.doesNotMatch(saveSettings, /apply_current_runtime_config_and_models/);
   assert.doesNotMatch(saveSettings, /runtimeApply/);
