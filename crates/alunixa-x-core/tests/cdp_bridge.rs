@@ -5591,10 +5591,12 @@ async fn install_bridge_routes_binding_while_waiting_for_command_response() {
 
         let response = recv_json(&mut socket).await;
         assert_eq!(response["method"], "Runtime.evaluate");
-        assert!(response["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteResolve"));
+        assert!(
+            response["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteResolve")
+        );
         send_json(&mut socket, json!({ "id": response["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -5731,10 +5733,12 @@ async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() 
         .await;
 
         let resolve = recv_json(&mut socket).await;
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("after-return"));
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("after-return")
+        );
         send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -5848,25 +5852,33 @@ async fn install_bridge_rejects_bad_payload_with_id_and_continues_after_unparsea
         .await;
 
         let reject = recv_json(&mut socket).await;
-        assert!(reject["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteReject"));
-        assert!(reject["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("bad-1"));
+        assert!(
+            reject["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteReject")
+        );
+        assert!(
+            reject["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("bad-1")
+        );
         send_json(&mut socket, json!({ "id": reject["id"], "result": {} })).await;
 
         let resolve = recv_json(&mut socket).await;
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("__codexSessionDeleteResolve"));
-        assert!(resolve["params"]["expression"]
-            .as_str()
-            .expect("expression should be string")
-            .contains("ok-1"));
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("__codexSessionDeleteResolve")
+        );
+        assert!(
+            resolve["params"]["expression"]
+                .as_str()
+                .expect("expression should be string")
+                .contains("ok-1")
+        );
         send_json(&mut socket, json!({ "id": resolve["id"], "result": {} })).await;
         close_socket(&mut socket).await;
     })
@@ -6624,7 +6636,10 @@ fn injection_script_retains_legacy_fast_controls_and_keeps_native_unlock_indepen
         "setCodexThreadServiceTierMode",
         "applyCodexServiceTierRequestOnly",
     ] {
-        assert!(script.contains(retired), "retained Fast contract: {retired}");
+        assert!(
+            script.contains(retired),
+            "retained Fast contract: {retired}"
+        );
     }
     assert!(script.contains("data-alunixa-x-setting=\"nativeFastUnlock\""));
     assert!(script.contains("__alunixaXNativeFastUnlock"));
@@ -6639,13 +6654,31 @@ fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
     let cases = run_native_tier_and_provider_contract_harness();
 
     // 旧浏览器开关和线程模式残留不能再注入或剥离原生 service tier。
-    assert_eq!(cases["withoutNativeTier"]["serviceTier"], serde_json::Value::Null);
-    assert_eq!(cases["withoutNativeTier"]["service_tier"], serde_json::Value::Null);
-    assert_eq!(cases["customModelNativeTier"]["serviceTier"], serde_json::Value::Null);
+    assert_eq!(
+        cases["withoutNativeTier"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["withoutNativeTier"]["service_tier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["customModelNativeTier"]["serviceTier"],
+        serde_json::Value::Null
+    );
     assert_eq!(cases["customModelNativeTier"]["service_tier"], "priority");
-    assert_eq!(cases["threadOnlyRequest"]["serviceTier"], serde_json::Value::Null);
-    assert_eq!(cases["customModelNativeSnakeTier"]["service_tier"], "priority");
-    assert_eq!(cases["startConversation"]["serviceTier"], serde_json::Value::Null);
+    assert_eq!(
+        cases["threadOnlyRequest"]["serviceTier"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        cases["customModelNativeSnakeTier"]["service_tier"],
+        "priority"
+    );
+    assert_eq!(
+        cases["startConversation"]["serviceTier"],
+        serde_json::Value::Null
+    );
     assert_eq!(
         cases["explicitProjectStartConversation"]["workspaceKind"],
         "project"
@@ -6662,10 +6695,15 @@ fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
         cases["projectlessStartConversation"]["projectlessOutputDirectory"],
         "C:/projectless/outputs"
     );
-    assert!(cases["projectlessStartConversation"]
-        .get("projectAssignment")
-        .is_none());
-    assert_eq!(cases["fetchStartConversation"]["serviceTier"], serde_json::Value::Null);
+    assert!(
+        cases["projectlessStartConversation"]
+            .get("projectAssignment")
+            .is_none()
+    );
+    assert_eq!(
+        cases["fetchStartConversation"]["serviceTier"],
+        serde_json::Value::Null
+    );
     assert_eq!(
         cases["fetchSendCliRequest"]["params"]["serviceTier"],
         serde_json::Value::Null
@@ -6784,8 +6822,14 @@ fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
     assert_eq!(cases["failedModelSwitchResumeAttempts"], 2);
     assert_eq!(cases["failedModelSwitchTurnAttempts"], 2);
     assert_eq!(cases["delayedResumeWaited"], true);
-    assert_eq!(cases["hungSettingsForwarded"], json!(["instance", "prototype"]));
-    assert_eq!(cases["lateSettingsIgnored"], json!(["stale_vendor", "stale_vendor"]));
+    assert_eq!(
+        cases["hungSettingsForwarded"],
+        json!(["instance", "prototype"])
+    );
+    assert_eq!(
+        cases["lateSettingsIgnored"],
+        json!(["stale_vendor", "stale_vendor"])
+    );
     assert_eq!(cases["turnCompletedBeforeCatalogRead"], true);
     assert_eq!(cases["hungCatalogListReturned"], true);
     assert_eq!(cases["lateCatalogIgnored"], "failed");
@@ -7090,18 +7134,28 @@ await serviceTierClient.prewarmThreadStart({{ threadId: "thread-service-tier", m
 const serviceTierClientSendTier = serviceTierClientCalls[0]?.params?.serviceTier;
 const serviceTierClientPrewarmTier = serviceTierClientCalls[1]?.params?.serviceTier;
 // 运行中升级必须替换旧闭包，不能因为旧版本标记而保留旧 Fast 请求覆盖。
+api.setBackendSettings({{ codexAppServiceTierControls: false }});
+localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: false }}));
 const retiredCalls = [];
 const retiredOriginal = async (method, params) => {{ retiredCalls.push(params); return params; }};
+const retiredOriginalPrewarm = async (params) => {{ retiredCalls.push(params); return params; }};
 const retiredClient = {{
   __alunixaXModelRequestPatch: "23",
   __alunixaXModelOriginalSendRequest: retiredOriginal,
+  __alunixaXServiceTierOriginalPrewarmThreadStart: retiredOriginalPrewarm,
   sendRequest: async (method, params) => retiredOriginal(method, {{ ...params, serviceTier: "legacy-forced-fast" }}),
+  prewarmThreadStart: async (params) => retiredOriginalPrewarm({{ ...params, serviceTier: "legacy-forced-fast" }}),
 }};
 const retiredNativeParams = {{ threadId: "thread-retired-fast", model: "gpt-5.4", serviceTier: "default", service_tier: "priority" }};
 api.patchAppServerClient(retiredClient);
 await retiredClient.sendRequest("turn/start", retiredNativeParams);
+await retiredClient.prewarmThreadStart(retiredNativeParams);
 const retiredClientPatchReplaced = retiredCalls[0] === retiredNativeParams
-  && retiredCalls[0].serviceTier === "default" && retiredCalls[0].service_tier === "priority";
+  && retiredCalls[0].serviceTier === "default" && retiredCalls[0].service_tier === "priority"
+  && retiredCalls[1] === retiredNativeParams
+  && retiredCalls[1].serviceTier === "default" && retiredCalls[1].service_tier === "priority";
+api.setBackendSettings({{ codexAppServiceTierControls: true }});
+localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: true }}));
 const frozenClient = Object.preventExtensions({{ async sendRequest() {{ return {{ ok: true }}; }} }});
 const frozenClientPatchSkipped = api.patchAppServerClient(frozenClient) === false;
 const captureSample = "x" + String.fromCharCode(10) + "async sendRequest(e,t,n){{if(this.dispatchMessage==null)throw Error(`AppServerRequestClient is missing a message dispatcher`);}}";

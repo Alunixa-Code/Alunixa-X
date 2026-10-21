@@ -3,11 +3,11 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
 use alunixa_x_core::agent_collaboration::{
     CollaborationConfig, Store, TaskRequest, executor, integration, mcp, native_refresh,
 };
 use alunixa_x_core::settings::SettingsStore;
+use anyhow::{Context, bail};
 use serde_json::{Value, json};
 
 #[tauri::command]
@@ -258,10 +258,7 @@ mod tests {
     #[test]
     fn generated_configuration_round_trips_spaces_quotes_and_shared_state() {
         let dir = tempfile::tempdir().unwrap();
-        let executable = dir
-            .path()
-            .join("Alunixa X \"local\".app")
-            .join("AlunixaX");
+        let executable = dir.path().join("Alunixa X \"local\".app").join("AlunixaX");
         let state_dir = dir.path().join("collaboration state");
         let config = mcp_configuration(&executable, &state_dir).unwrap();
         let codex: toml_edit::DocumentMut = config["codexToml"].as_str().unwrap().parse().unwrap();

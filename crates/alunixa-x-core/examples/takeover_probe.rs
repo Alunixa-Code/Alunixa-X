@@ -35,7 +35,10 @@ fn main() {
     println!("other_instance = {}", probe.other_instance);
     match &probe.app {
         AppProbe::Running(key) => {
-            println!("app          = Running(pid={}, incarnation={})", key.pid, key.lstart)
+            println!(
+                "app          = Running(pid={}, incarnation={})",
+                key.pid, key.lstart
+            )
         }
         AppProbe::NotRunning => println!("app          = NotRunning"),
         AppProbe::Unknown => println!("app          = Unknown"),

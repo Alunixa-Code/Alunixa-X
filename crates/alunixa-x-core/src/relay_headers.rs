@@ -140,10 +140,15 @@ pub fn apply_with_api_key(
     api_key: &str,
 ) -> RequestBuilder {
     if relay.protocol == crate::settings::RelayProtocol::GeminiGenerateContent {
-        let has_key = relay.custom_headers.iter().any(|header| header.key.trim().eq_ignore_ascii_case("x-goog-api-key"));
+        let has_key = relay
+            .custom_headers
+            .iter()
+            .any(|header| header.key.trim().eq_ignore_ascii_case("x-goog-api-key"));
         let builder = if !relay.uses_no_auth() && !has_key {
             builder.header("x-goog-api-key", api_key.trim())
-        } else { builder };
+        } else {
+            builder
+        };
         return apply_headers(builder, &relay.custom_headers);
     }
     if relay.protocol != crate::settings::RelayProtocol::AnthropicMessages {
@@ -164,8 +169,8 @@ pub fn apply_with_api_key(
         .any(|header| header.key.trim().eq_ignore_ascii_case("anthropic-version"));
     let mut builder = builder;
     if !relay.uses_no_auth() {
-        let wants_bearer = relay.anthropic_auth_header()
-            == crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_BEARER;
+        let wants_bearer =
+            relay.anthropic_auth_header() == crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_BEARER;
         if wants_bearer {
             if !has_authorization(&relay.custom_headers) && !api_key.is_empty() {
                 builder = builder.bearer_auth(api_key);
@@ -175,7 +180,10 @@ pub fn apply_with_api_key(
         }
     }
     if !has_custom_version {
-        builder = builder.header("anthropic-version", crate::anthropic_bridge::ANTHROPIC_VERSION);
+        builder = builder.header(
+            "anthropic-version",
+            crate::anthropic_bridge::ANTHROPIC_VERSION,
+        );
     }
     apply_headers(builder, &relay.custom_headers)
 }

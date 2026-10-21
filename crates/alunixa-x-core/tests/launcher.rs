@@ -1943,9 +1943,9 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
 
     let handle = launch_and_inject_with_hooks(
         LaunchOptions {
-        codex_home: None,
-        sqlite_home: None,
-        state_dir: None,
+            codex_home: None,
+            sqlite_home: None,
+            state_dir: None,
             app_dir: Some(app_dir),
             debug_port: 9229,
             helper_port: 58000,
@@ -2102,9 +2102,9 @@ async fn launch_lifecycle_keeps_codex_and_helper_when_post_launch_status_save_fa
 
     let handle = launch_and_inject_with_hooks(
         LaunchOptions {
-        codex_home: None,
-        sqlite_home: None,
-        state_dir: None,
+            codex_home: None,
+            sqlite_home: None,
+            state_dir: None,
             app_dir: Some(app_dir),
             debug_port: 9229,
             helper_port: 57321,
@@ -2859,7 +2859,10 @@ async fn native_fast_reload_runs_only_after_successful_opt_in_launch_injection()
         handle.wait_for_codex_exit().await.unwrap();
         let events = events.lock().unwrap();
         let reload = events.iter().position(|event| event == "native-fast:9229");
-        assert_eq!(reload.is_some(), enhancements && native_fast && injection_ok);
+        assert_eq!(
+            reload.is_some(),
+            enhancements && native_fast && injection_ok
+        );
         if let Some(reload) = reload {
             let injection = events
                 .iter()
@@ -2867,7 +2870,10 @@ async fn native_fast_reload_runs_only_after_successful_opt_in_launch_injection()
                 .unwrap();
             assert!(injection < reload);
             assert_eq!(
-                events.iter().filter(|event| *event == "native-fast:9229").count(),
+                events
+                    .iter()
+                    .filter(|event| *event == "native-fast:9229")
+                    .count(),
                 1
             );
         }
@@ -2931,7 +2937,9 @@ async fn isolated_quota_gate_is_not_started_when_status_save_fails() {
         &hooks,
     );
     std::fs::write(temp.path().join("unwritable"), "not a directory").unwrap();
-    let handle = result.await.expect("post-launch failure keeps the app in degraded mode");
+    let handle = result
+        .await
+        .expect("post-launch failure keeps the app in degraded mode");
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept(),)
             .await

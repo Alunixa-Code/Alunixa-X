@@ -284,7 +284,8 @@ pub fn recover_provider_sync_from_backup(
         anyhow::bail!("recovery backup is outside managed backup root");
     }
     let metadata: Value = serde_json::from_slice(&fs::read(backup.join("metadata.json"))?)?;
-    if metadata["managedBy"] != "Alunixa X provider sync" || metadata["namespace"] != "provider-sync"
+    if metadata["managedBy"] != "Alunixa X provider sync"
+        || metadata["namespace"] != "provider-sync"
     {
         anyhow::bail!("unmanaged provider sync backup");
     }

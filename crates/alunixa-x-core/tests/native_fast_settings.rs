@@ -12,7 +12,10 @@ fn native_fast_unlock_requires_explicit_opt_in() {
     let legacy: BackendSettings =
         serde_json::from_value(json!({ "codexAppServiceTierControls": true })).unwrap();
     assert!(!legacy.codex_app_native_fast_unlock);
-    assert_eq!(serde_json::to_value(legacy).unwrap()["codexAppServiceTierControls"], true);
+    assert_eq!(
+        serde_json::to_value(legacy).unwrap()["codexAppServiceTierControls"],
+        true
+    );
 
     let imported: BackendSettings = serde_json::from_value(json!({
         "codexAppNativeFastUnlock": true,
@@ -20,7 +23,10 @@ fn native_fast_unlock_requires_explicit_opt_in() {
     }))
     .unwrap();
     assert!(imported.codex_app_native_fast_unlock);
-    assert_eq!(serde_json::to_value(imported).unwrap()["codexAppServiceTierControls"], false);
+    assert_eq!(
+        serde_json::to_value(imported).unwrap()["codexAppServiceTierControls"],
+        false
+    );
 }
 
 #[test]

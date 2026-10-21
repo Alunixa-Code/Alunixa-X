@@ -1095,8 +1095,7 @@ impl LaunchHooks for LauncherHooks {
         // 口径与 run_activation_provider_sync 一致：失败只记诊断日志，不阻断启动。
         self.index_repair_due.store(true, Ordering::SeqCst);
         let started = std::time::Instant::now();
-        let outcome =
-            tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None)).await;
+        let outcome = tokio::task::spawn_blocking(|| alunixa_x_data::run_provider_sync(None)).await;
         match outcome {
             Ok(result) => {
                 let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
@@ -2518,9 +2517,7 @@ mod tests {
             app_dir: Some(PathBuf::from("/test/Codex.app")),
             debug_port: 9333,
             helper_port: 57322,
-            status_store: alunixa_x_core::status::StatusStore::new(
-                temp.path().join("latest.json"),
-            ),
+            status_store: alunixa_x_core::status::StatusStore::new(temp.path().join("latest.json")),
             ..LaunchOptions::default()
         };
         let request = LaunchStatus {

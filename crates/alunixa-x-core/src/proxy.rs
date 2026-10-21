@@ -23,9 +23,14 @@ pub fn detect_system_proxy_for_url(url: &str) -> Option<String> {
         return Some(proxy);
     }
     #[cfg(windows)]
-    { windows_pac_proxy(url) }
+    {
+        windows_pac_proxy(url)
+    }
     #[cfg(not(windows))]
-    { let _ = url; None }
+    {
+        let _ = url;
+        None
+    }
 }
 
 #[cfg(windows)]
@@ -38,29 +43,64 @@ fn windows_pac_proxy(url: &str) -> Option<String> {
         WinHttpGetIEProxyConfigForCurrentUser(&mut config).ok()?;
         let pac = config.lpszAutoConfigUrl.to_string().unwrap_or_default();
         let auto_detect = config.fAutoDetect.as_bool();
-        for pointer in [config.lpszAutoConfigUrl, config.lpszProxy, config.lpszProxyBypass] {
-            if !pointer.is_null() { let _ = GlobalFree(HGLOBAL(pointer.0.cast())); }
+        for pointer in [
+            config.lpszAutoConfigUrl,
+            config.lpszProxy,
+            config.lpszProxyBypass,
+        ] {
+            if !pointer.is_null() {
+                let _ = GlobalFree(HGLOBAL(pointer.0.cast()));
+            }
         }
-        if pac.is_empty() && !auto_detect { return None; }
-        let session = WinHttpOpen(w!("AlunixaX"), WINHTTP_ACCESS_TYPE_NO_PROXY,
-            PCWSTR::null(), PCWSTR::null(), 0);
-        if session.is_null() { return None; }
+        if pac.is_empty() && !auto_detect {
+            return None;
+        }
+        let session = WinHttpOpen(
+            w!("AlunixaX"),
+            WINHTTP_ACCESS_TYPE_NO_PROXY,
+            PCWSTR::null(),
+            PCWSTR::null(),
+            0,
+        );
+        if session.is_null() {
+            return None;
+        }
         let _ = WinHttpSetTimeouts(session, 5000, 5000, 5000, 5000);
         let pac_wide: Vec<u16> = pac.encode_utf16().chain(Some(0)).collect();
         let url_wide: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
         let mut options = WINHTTP_AUTOPROXY_OPTIONS {
-            dwFlags: if pac.is_empty() { WINHTTP_AUTOPROXY_AUTO_DETECT } else { WINHTTP_AUTOPROXY_CONFIG_URL },
-            dwAutoDetectFlags: if pac.is_empty() { WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A } else { 0 },
-            lpszAutoConfigUrl: if pac.is_empty() { PCWSTR::null() } else { PCWSTR(pac_wide.as_ptr()) },
+            dwFlags: if pac.is_empty() {
+                WINHTTP_AUTOPROXY_AUTO_DETECT
+            } else {
+                WINHTTP_AUTOPROXY_CONFIG_URL
+            },
+            dwAutoDetectFlags: if pac.is_empty() {
+                WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
+            } else {
+                0
+            },
+            lpszAutoConfigUrl: if pac.is_empty() {
+                PCWSTR::null()
+            } else {
+                PCWSTR(pac_wide.as_ptr())
+            },
             ..Default::default()
         };
         let mut info = WINHTTP_PROXY_INFO::default();
-        let result = WinHttpGetProxyForUrl(session, PCWSTR(url_wide.as_ptr()), &mut options, &mut info);
+        let result =
+            WinHttpGetProxyForUrl(session, PCWSTR(url_wide.as_ptr()), &mut options, &mut info);
         let proxy = if result.is_ok() && info.dwAccessType != WINHTTP_ACCESS_TYPE_NO_PROXY {
-            info.lpszProxy.to_string().ok().and_then(|value| parse_windows_proxy_server(&value))
-        } else { None };
+            info.lpszProxy
+                .to_string()
+                .ok()
+                .and_then(|value| parse_windows_proxy_server(&value))
+        } else {
+            None
+        };
         for pointer in [info.lpszProxy, info.lpszProxyBypass] {
-            if !pointer.is_null() { let _ = GlobalFree(HGLOBAL(pointer.0.cast())); }
+            if !pointer.is_null() {
+                let _ = GlobalFree(HGLOBAL(pointer.0.cast()));
+            }
         }
         let _ = WinHttpCloseHandle(session);
         proxy

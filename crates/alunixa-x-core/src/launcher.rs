@@ -1187,7 +1187,11 @@ impl LaunchHooks for DefaultLaunchHooks {
             .join("\n\n"),
         );
         crate::relay_config::apply_relay_profile_with_preservation(
-            &home, &profile, &common_config, crate::protocol_proxy::protocol_proxy_port(), settings.relay_preserve_nonprovider_settings,
+            &home,
+            &profile,
+            &common_config,
+            crate::protocol_proxy::protocol_proxy_port(),
+            settings.relay_preserve_nonprovider_settings,
         )?;
         Ok(())
     }
@@ -2415,8 +2419,14 @@ async fn handle_protocol_proxy_connection(
                 let file = error.downcast_ref::<crate::protocol_proxy::UnsupportedInputFile>();
                 let vlm = error.downcast_ref::<crate::vision::VlmPreprocessError>();
                 let conversion = crate::protocol_proxy::is_protocol_conversion_error(&error);
-                let status = if unsupported.is_some() || search.is_some() || file.is_some() || conversion
-                    || matches!(vlm, Some(crate::vision::VlmPreprocessError::MissingConfiguration)) {
+                let status = if unsupported.is_some()
+                    || search.is_some()
+                    || file.is_some()
+                    || conversion
+                    || matches!(
+                        vlm,
+                        Some(crate::vision::VlmPreprocessError::MissingConfiguration)
+                    ) {
                     "400 Bad Request"
                 } else {
                     "502 Bad Gateway"
@@ -2560,13 +2570,16 @@ async fn handle_protocol_proxy_connection(
                 converter = converter.with_chat_upstream();
                 wire_converter = None;
             }
-            let mut native_completion = (upstream.wire_api == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages)
+            let mut native_completion = (upstream.wire_api
+                == crate::protocol_proxy::UpstreamWireApi::AnthropicMessages)
                 .then(crate::anthropic_bridge::AnthropicSseToChatSse::default);
             let mut bytes_stream = upstream.take_response()?.bytes_stream();
             while let Some(chunk) = bytes_stream.next().await {
                 match chunk {
                     Ok(bytes) => {
-                        if let Some(observer) = native_completion.as_mut() { observer.push_bytes(&bytes); }
+                        if let Some(observer) = native_completion.as_mut() {
+                            observer.push_bytes(&bytes);
+                        }
                         if let Some(wire_converter) = &mut wire_converter {
                             converter.push_upstream_bytes(&wire_converter.push_bytes(&bytes));
                         } else {
@@ -2585,13 +2598,20 @@ async fn handle_protocol_proxy_connection(
             if let Some(observer) = native_completion.as_mut() {
                 observer.finish();
                 if !observer.has_successful_compaction_completion() {
-                    converter.fail("Anthropic 压缩流缺少正常 message_stop".into(), Some("compaction_incomplete".into()));
+                    converter.fail(
+                        "Anthropic 压缩流缺少正常 message_stop".into(),
+                        Some("compaction_incomplete".into()),
+                    );
                 }
             }
             let outcome = converter.finish_with_outcome();
             stream.write_all(&outcome.payload).await?;
             log_helper_response(
-                if outcome.succeeded { "helper.protocol_proxy_compaction_ok" } else { "helper.protocol_proxy_compaction_failed" },
+                if outcome.succeeded {
+                    "helper.protocol_proxy_compaction_ok"
+                } else {
+                    "helper.protocol_proxy_compaction_failed"
+                },
                 method,
                 path,
                 "200 OK",
@@ -2661,16 +2681,26 @@ async fn handle_protocol_proxy_connection(
     let mut upstream_body = match upstream.read_body().await {
         Ok(body) => body,
         Err(error) => {
-            if let Some(outcome) = upstream.exec_outcome.as_mut() { outcome.finish(false); }
+            if let Some(outcome) = upstream.exec_outcome.as_mut() {
+                outcome.finish(false);
+            }
             return Err(error);
         }
     };
     if upstream.compaction {
         let original: serde_json::Value = serde_json::from_slice(&upstream_body)?;
-        if let Err(error) = crate::protocol_proxy::validate_compaction_json_completion(&original, upstream.wire_api) {
+        if let Err(error) =
+            crate::protocol_proxy::validate_compaction_json_completion(&original, upstream.wire_api)
+        {
             let mut converter = crate::protocol_proxy::CompactionSseConverter::new("");
             converter.fail(error.to_string(), Some("compaction_incomplete".to_string()));
-            write_http_response(stream, "200 OK", "text/event-stream; charset=utf-8", &converter.finish()).await?;
+            write_http_response(
+                stream,
+                "200 OK",
+                "text/event-stream; charset=utf-8",
+                &converter.finish(),
+            )
+            .await?;
             stream.shutdown().await?;
             return Ok(());
         }
@@ -2905,7 +2935,10 @@ mod dictation_receipt_tests {
         let again: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(again["port"], 57322);
         assert_eq!(again["token"], "token-def");
-        assert!(!path.with_extension("json.tmp").exists(), "临时文件必须被改名走");
+        assert!(
+            !path.with_extension("json.tmp").exists(),
+            "临时文件必须被改名走"
+        );
         remove_dictation_helper_receipt_at(&path);
         assert!(!path.exists());
     }
@@ -4445,7 +4478,10 @@ async fn apply_native_fast_unlock_on_launch(debug_port: u16) -> anyhow::Result<(
 }
 
 fn native_fast_launch_state(result: &Value) -> (bool, bool, bool) {
-    let Some(text) = result.pointer("/result/result/value").and_then(Value::as_str) else {
+    let Some(text) = result
+        .pointer("/result/result/value")
+        .and_then(Value::as_str)
+    else {
         return (false, false, false);
     };
     let Ok(value) = serde_json::from_str::<Value>(text) else {

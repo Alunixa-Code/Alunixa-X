@@ -210,7 +210,8 @@ fn dream_skin_target_runtime_script(settings: &BackendSettings, include_art: boo
     let (engine, renderer, base_css) = dream_skin_target_assets(settings);
     let managed_css = managed_dream_skin_css(settings);
     // 原生 shell 兼容属于基础主题：内置图片和没有 Safe CSS 的图片也必须可达。
-    let native_shell_css = include_str!("../../../assets/inject/dream-skin-native-shell-compat.css");
+    let native_shell_css =
+        include_str!("../../../assets/inject/dream-skin-native-shell-compat.css");
     let css = format!("{base_css}\n{native_shell_css}\n{managed_css}");
     let theme = serde_json::to_string(&settings.codex_app_dream_skin_theme_config)
         .expect("dream skin target theme should serialize");
@@ -549,7 +550,8 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let paste_fix = paste_fix_enabled_config(settings);
     let hide_official_usage_alert = hide_official_usage_alert_config(settings);
     // Fast 的新文档脚本需要 Page.enable；DOM 增强必须等正常文档就绪，不能访问空的根节点。
-    let renderer_runtime = if settings.enhancements_enabled && settings.codex_app_native_fast_unlock {
+    let renderer_runtime = if settings.enhancements_enabled && settings.codex_app_native_fast_unlock
+    {
         renderer_after_document_ready(renderer_script())
     } else {
         renderer_script().to_string()
@@ -649,7 +651,9 @@ fn dream_skin_content_signature(value: &[u8]) -> String {
 
 pub fn image_overlay_config(helper_port: u16, settings: &BackendSettings) -> Value {
     let mut config = crate::wallpaper::runtime_config(helper_port, settings);
-    if config["enabled"] != true { config["imageUrl"] = json!(""); }
+    if config["enabled"] != true {
+        config["imageUrl"] = json!("");
+    }
     // Keep the image fallback, but never embed large video files in a CDP payload.
     if config["enabled"] == true && config["kind"] == "image" {
         let path = Path::new(settings.codex_app_image_overlay_path.trim());
@@ -710,7 +714,8 @@ mod tests {
     #[test]
     fn native_fast_renderer_waits_for_dom_and_reinjection_runs_immediately() {
         let wrapped = renderer_after_document_ready("window.started=(window.started||0)+1;");
-        let test = format!(r#"
+        let test = format!(
+            r#"
           const vm=require('node:vm'),assert=require('node:assert/strict');
           for(const ready of [false,true]){{
             let listener;
@@ -721,15 +726,31 @@ mod tests {
             assert.equal(window.started,ready?1:undefined);
             if(!ready){{document.body={{}};listener();assert.equal(window.started,1);}}
           }}
-        "#, serde_json::to_string(&wrapped).unwrap());
-        let output = std::process::Command::new("node").arg("-e").arg(test).output().unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        "#,
+            serde_json::to_string(&wrapped).unwrap()
+        );
+        let output = std::process::Command::new("node")
+            .arg("-e")
+            .arg(test)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
     fn native_shell_compatibility_is_present_without_managed_safe_css() {
         let temp = tempfile::tempdir().unwrap();
-        for image in [String::new(), temp.path().join("selected.png").to_string_lossy().into_owned()] {
+        for image in [
+            String::new(),
+            temp.path()
+                .join("selected.png")
+                .to_string_lossy()
+                .into_owned(),
+        ] {
             let mut settings = BackendSettings::default();
             settings.codex_app_dream_skin_enabled = true;
             settings.codex_app_dream_skin_image_path = image;

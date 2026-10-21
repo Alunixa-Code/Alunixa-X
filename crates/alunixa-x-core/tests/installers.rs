@@ -96,9 +96,16 @@ fn windows_workflows_verify_nsis_and_support_both_program_files_directories() {
         let text = std::fs::read_to_string(format!("../../.github/workflows/{workflow}"))
             .unwrap()
             .replace("\r\n", "\n");
-        assert!(text.contains("scripts/installer/windows/install-nsis.ps1"), "{workflow}");
-        assert!(text.contains("scripts/installer/windows/package.ps1"), "{workflow}");
-        let install = std::fs::read_to_string("../../scripts/installer/windows/install-nsis.ps1").unwrap();
+        assert!(
+            text.contains("scripts/installer/windows/install-nsis.ps1"),
+            "{workflow}"
+        );
+        assert!(
+            text.contains("scripts/installer/windows/package.ps1"),
+            "{workflow}"
+        );
+        let install =
+            std::fs::read_to_string("../../scripts/installer/windows/install-nsis.ps1").unwrap();
         let build = std::fs::read_to_string("../../scripts/installer/windows/package.ps1").unwrap();
         for step in [&install, &build] {
             assert!(
@@ -114,7 +121,10 @@ fn windows_workflows_verify_nsis_and_support_both_program_files_directories() {
                 step.contains("Test-Path -LiteralPath $_ -PathType Leaf"),
                 "{workflow}"
             );
-            assert!(step.to_ascii_lowercase().contains("$compiler"), "{workflow}");
+            assert!(
+                step.to_ascii_lowercase().contains("$compiler"),
+                "{workflow}"
+            );
         }
         assert!(install.contains("& $compiler /VERSION"), "{workflow}");
         assert!(install.contains("if ($LASTEXITCODE -eq 0)"), "{workflow}");

@@ -629,23 +629,31 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let observed = Arc::new(Mutex::new(Vec::<UpdateProgress>::new()));
         let observed_for_callback = observed.clone();
-        let (written_path, downloaded, total) = download_release_asset_with_progress(
-            &release,
-            directory.path(),
-            &mut |progress| observed_for_callback.lock().unwrap().push(progress),
-        )
-        .await
-        .unwrap();
+        let (written_path, downloaded, total) =
+            download_release_asset_with_progress(&release, directory.path(), &mut |progress| {
+                observed_for_callback.lock().unwrap().push(progress)
+            })
+            .await
+            .unwrap();
         server.join().unwrap();
 
         assert_eq!(downloaded, body.len() as u64);
         assert_eq!(total, Some(body.len() as u64));
         assert_eq!(std::fs::read(&written_path).unwrap(), body);
         let observed = observed.lock().unwrap();
-        assert_eq!(observed.first().map(|progress| progress.stage), Some(UpdateStage::Downloading));
-        assert!(observed
-            .iter()
-            .any(|progress| progress.stage == UpdateStage::Downloading && progress.downloaded_bytes > 0));
-        assert_eq!(observed.last().map(|progress| progress.stage), Some(UpdateStage::Writing));
+        assert_eq!(
+            observed.first().map(|progress| progress.stage),
+            Some(UpdateStage::Downloading)
+        );
+        assert!(
+            observed
+                .iter()
+                .any(|progress| progress.stage == UpdateStage::Downloading
+                    && progress.downloaded_bytes > 0)
+        );
+        assert_eq!(
+            observed.last().map(|progress| progress.stage),
+            Some(UpdateStage::Writing)
+        );
     }
 }

@@ -154,7 +154,10 @@ impl BackupStore {
             &serde_json::to_vec_pretty(&payload)?,
         )?;
         pending.committed = true;
-        fs::OpenOptions::new().write(true).open(self.path_for(&token))?.sync_all()?;
+        fs::OpenOptions::new()
+            .write(true)
+            .open(self.path_for(&token))?
+            .sync_all()?;
         Ok((token, entries))
     }
 
@@ -351,7 +354,12 @@ pub(crate) fn private_atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<
 pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        File::open(if path.as_os_str().is_empty() { Path::new(".") } else { path })?.sync_all()?;
+        File::open(if path.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            path
+        })?
+        .sync_all()?;
     }
     #[cfg(not(unix))]
     let _ = path;

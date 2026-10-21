@@ -44,7 +44,9 @@ pub async fn read_codex_model_catalog() -> Value {
     if settings_path.exists() {
         if let Ok(settings) = SettingsStore::new(settings_path).load() {
             let profile = settings.active_relay_profile();
-            let catalog = if let Some(aggregate) = crate::aggregate_catalog::active_model_aggregation(&settings) {
+            let catalog = if let Some(aggregate) =
+                crate::aggregate_catalog::active_model_aggregation(&settings)
+            {
                 crate::aggregate_catalog::catalog_summary(&home, &settings, &aggregate)
                     .unwrap_or_else(|_| relay_profile_model_catalog_value(&home, &profile))
             } else {
@@ -227,14 +229,19 @@ fn model_ui_metadata_map_with_overrides(models: &[String], user_json: &str) -> V
 
 fn relay_profile_model_ui_metadata_map(profile: &RelayProfile, models: &[String]) -> Value {
     let mut metadata = model_ui_metadata_map_with_overrides(models, &profile.model_metadata)
-        .as_object().cloned().unwrap_or_default();
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
     let windows: std::collections::BTreeMap<String, String> =
         serde_json::from_str::<Value>(&profile.model_windows)
             .ok()
             .and_then(|value| value.as_object().cloned())
-            .map(|object| object.into_iter()
-                .filter_map(|(key, value)| value.as_str().map(|text| (key, text.to_string())))
-                .collect())
+            .map(|object| {
+                object
+                    .into_iter()
+                    .filter_map(|(key, value)| value.as_str().map(|text| (key, text.to_string())))
+                    .collect()
+            })
             .unwrap_or_default();
     let fallback = crate::model_suffix::parse_window_token(&profile.context_window);
     for model in models {
@@ -243,7 +250,12 @@ fn relay_profile_model_ui_metadata_map(profile: &RelayProfile, models: &[String]
             .or(fallback);
         if let Some(window) = window {
             let entry = metadata.entry(model.clone()).or_insert_with(|| json!({}));
-            for field in ["contextWindow", "maxContextWindow", "context_window", "max_context_window"] {
+            for field in [
+                "contextWindow",
+                "maxContextWindow",
+                "context_window",
+                "max_context_window",
+            ] {
                 entry[field] = json!(window);
             }
         }
@@ -264,7 +276,12 @@ mod window_override_tests {
             ..Default::default()
         };
         let metadata = relay_profile_model_ui_metadata_map(&profile, &models);
-        for field in ["contextWindow", "maxContextWindow", "context_window", "max_context_window"] {
+        for field in [
+            "contextWindow",
+            "maxContextWindow",
+            "context_window",
+            "max_context_window",
+        ] {
             assert_eq!(metadata["gpt-5.5"][field], 1_000_000);
             assert_eq!(metadata["vendor-model"][field], 128_000);
         }
@@ -1510,7 +1527,8 @@ mod model_fetch_tests {
             let mut buffer = [0_u8; 4096];
             let read = stream.read(&mut buffer).await.unwrap();
             let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-            let body = r#"{"data":[{"slug":"gpt-6.1-sol"},{"slug":"gpt-reserve","visibility":"hide"}]}"#;
+            let body =
+                r#"{"data":[{"slug":"gpt-6.1-sol"},{"slug":"gpt-reserve","visibility":"hide"}]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                 body.len(),
@@ -1530,7 +1548,10 @@ mod model_fetch_tests {
         };
         let (models, endpoint) = fetch_relay_profile_model_ids(&profile).await.unwrap();
         assert_eq!(models, vec!["gpt-6.1-sol"]);
-        assert!(endpoint.ends_with("/backend-api/codex/models"), "{endpoint}");
+        assert!(
+            endpoint.ends_with("/backend-api/codex/models"),
+            "{endpoint}"
+        );
 
         let request = server.await.unwrap();
         let lower = request.to_ascii_lowercase();

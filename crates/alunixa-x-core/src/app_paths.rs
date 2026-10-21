@@ -1594,7 +1594,9 @@ mod beta_executable_tests {
     fn standalone_cli_is_not_a_desktop_host() {
         let temp = tempfile::tempdir().unwrap();
         for (index, name) in ["codex.exe", "Codex.exe"].into_iter().enumerate() {
-            let directory = temp.path().join(format!("{index}-{}", name.replace('.', "-")));
+            let directory = temp
+                .path()
+                .join(format!("{index}-{}", name.replace('.', "-")));
             std::fs::create_dir(&directory).unwrap();
             let executable = directory.join(name);
             std::fs::write(&executable, "cli").unwrap();

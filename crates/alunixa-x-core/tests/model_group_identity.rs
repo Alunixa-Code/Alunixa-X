@@ -14,8 +14,8 @@ use alunixa_x_core::aggregate_catalog::{
 };
 use alunixa_x_core::model_suffix::model_ui_metadata_with_override;
 use alunixa_x_core::settings::{
-    AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings, RelayMode,
-    RelayProfile, RelaySessionProvider,
+    AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
+    RelayMode, RelayProfile, RelaySessionProvider,
 };
 use serde_json::{Value, json};
 
@@ -99,7 +99,10 @@ fn catalog_slugs(catalog: &Value) -> Vec<&str> {
 fn default_member_models_publish_bare_names_with_group_identity() {
     let aggregate = aggregate(&["relay-a", "relay-b"], "relay-a");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
     let catalog = catalog(&settings, &aggregate);
@@ -114,7 +117,9 @@ fn default_member_models_publish_bare_names_with_group_identity() {
 
     // 默认成员不发布带前缀的副本，裸名天然落回它。
     assert!(
-        !catalog_slugs(&catalog).iter().any(|slug| slug.starts_with("cpx-relay-a/")),
+        !catalog_slugs(&catalog)
+            .iter()
+            .any(|slug| slug.starts_with("cpx-relay-a/")),
         "默认成员不该再发布带前缀的副本：{:?}",
         catalog_slugs(&catalog)
     );
@@ -122,19 +127,31 @@ fn default_member_models_publish_bare_names_with_group_identity() {
 
 #[test]
 fn imported_default_marker_cannot_override_the_actual_aggregate_default() {
-    let aggregate=aggregate(&["relay-b","relay-a"],"relay-a");
-    let mut stale=member("relay-b","Other");
-    stale.model_metadata=json!({"relay-b-main":{"alunixa_x_default":true}}).to_string();
-    let settings=settings(vec![stale,member("relay-a","Default")],&aggregate);
-    let payload=catalog(&settings,&aggregate);
-    let marked:Vec<_>=payload["models"].as_array().unwrap().iter().filter(|model|model["alunixa_x_default"]==true)
-        .filter_map(|model|model["alunixa_x_group_id"].as_str()).collect();
-    assert!(!marked.is_empty());assert!(marked.iter().all(|id|*id=="relay-a"),"{marked:?}");
-    let home=tempfile::tempdir().unwrap();std::fs::create_dir(home.path().join("model-catalogs")).unwrap();
-    let path=home.path().join("model-catalogs/agg.json");std::fs::write(&path,payload.to_string()).unwrap();
-    std::fs::write(home.path().join("config.toml"),format!("model_catalog_json = {:?}\n",path.to_str().unwrap())).unwrap();
-    let summary=catalog_summary(home.path(),&settings,&aggregate).unwrap();
-    assert_eq!(summary["alunixa_x_default_group_id"],"relay-a");
+    let aggregate = aggregate(&["relay-b", "relay-a"], "relay-a");
+    let mut stale = member("relay-b", "Other");
+    stale.model_metadata = json!({"relay-b-main":{"alunixa_x_default":true}}).to_string();
+    let settings = settings(vec![stale, member("relay-a", "Default")], &aggregate);
+    let payload = catalog(&settings, &aggregate);
+    let marked: Vec<_> = payload["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|model| model["alunixa_x_default"] == true)
+        .filter_map(|model| model["alunixa_x_group_id"].as_str())
+        .collect();
+    assert!(!marked.is_empty());
+    assert!(marked.iter().all(|id| *id == "relay-a"), "{marked:?}");
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join("model-catalogs")).unwrap();
+    let path = home.path().join("model-catalogs/agg.json");
+    std::fs::write(&path, payload.to_string()).unwrap();
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!("model_catalog_json = {:?}\n", path.to_str().unwrap()),
+    )
+    .unwrap();
+    let summary = catalog_summary(home.path(), &settings, &aggregate).unwrap();
+    assert_eq!(summary["alunixa_x_default_group_id"], "relay-a");
 }
 
 /// 非默认成员：`display_name` 仍带「（供应商）」后缀（前端兜底还要用），
@@ -143,7 +160,10 @@ fn imported_default_marker_cannot_override_the_actual_aggregate_default() {
 fn non_default_member_models_keep_provider_suffix_and_group_identity() {
     let aggregate = aggregate(&["relay-a", "relay-b"], "relay-a");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
     let catalog = catalog(&settings, &aggregate);
@@ -162,7 +182,10 @@ fn catalog_summary_model_metadata_carries_group_identity() {
     let temp = tempfile::tempdir().unwrap();
     let aggregate = aggregate(&["relay-a", "relay-b"], "relay-a");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
 
@@ -173,8 +196,14 @@ fn catalog_summary_model_metadata_carries_group_identity() {
     assert_eq!(metadata["relay-a-mini"]["alunixa_x_group"], "哈基米 国模");
     assert_eq!(metadata["relay-a-mini"]["alunixa_x_group_id"], "relay-a");
     // 非默认成员同样带分组键，既有展示字段原样保留。
-    assert_eq!(metadata["cpx-relay-b/relay-b-mini"]["alunixa_x_group"], "jojocodemax");
-    assert_eq!(metadata["cpx-relay-b/relay-b-mini"]["alunixa_x_group_id"], "relay-b");
+    assert_eq!(
+        metadata["cpx-relay-b/relay-b-mini"]["alunixa_x_group"],
+        "jojocodemax"
+    );
+    assert_eq!(
+        metadata["cpx-relay-b/relay-b-mini"]["alunixa_x_group_id"],
+        "relay-b"
+    );
     assert_eq!(
         metadata["cpx-relay-b/relay-b-mini"]["displayName"],
         "relay-b-mini（jojocodemax）"
@@ -192,7 +221,10 @@ fn catalog_summary_model_metadata_carries_group_identity() {
 fn duplicate_member_entries_do_not_create_duplicate_groups() {
     let aggregate = aggregate(&["relay-a", "relay-a", "relay-b"], "relay-a");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
     let catalog = catalog(&settings, &aggregate);
@@ -201,7 +233,11 @@ fn duplicate_member_entries_do_not_create_duplicate_groups() {
     let mut unique = all_slugs.clone();
     unique.sort_unstable();
     unique.dedup();
-    assert_eq!(all_slugs.len(), unique.len(), "重复成员不该发布重复模型：{all_slugs:?}");
+    assert_eq!(
+        all_slugs.len(),
+        unique.len(),
+        "重复成员不该发布重复模型：{all_slugs:?}"
+    );
     assert_eq!(all_slugs.len(), 4, "两个成员各 2 个模型：{all_slugs:?}");
 
     let group_ids: Vec<&str> = catalog["models"]
@@ -295,7 +331,10 @@ fn default_member_is_marked_in_catalog_and_summary() {
     let temp = tempfile::tempdir().unwrap();
     let aggregate = aggregate(&["relay-a", "relay-b"], "relay-a");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
 
@@ -308,15 +347,20 @@ fn default_member_is_marked_in_catalog_and_summary() {
         );
     }
     // 非默认成员不写这个键（不是 false，避免污染目录条目）。
-    assert!(catalog_model(&catalog, "cpx-relay-b/relay-b-main")
-        .get("alunixa_x_default")
-        .is_none());
+    assert!(
+        catalog_model(&catalog, "cpx-relay-b/relay-b-main")
+            .get("alunixa_x_default")
+            .is_none()
+    );
 
     let summary = catalog_summary(temp.path(), &settings, &aggregate).unwrap();
     assert_eq!(summary["alunixa_x_default_group_id"], "relay-a");
     // 标记要能流到前端读的 modelMetadata（白名单结构，不显式转发就丢）。
     assert_eq!(metadata_default_flag(&summary, "relay-a-mini"), Some(true));
-    assert_eq!(metadata_default_flag(&summary, "cpx-relay-b/relay-b-mini"), None);
+    assert_eq!(
+        metadata_default_flag(&summary, "cpx-relay-b/relay-b-mini"),
+        None
+    );
 }
 
 fn metadata_default_flag(summary: &Value, slug: &str) -> Option<bool> {
@@ -331,7 +375,10 @@ fn unset_default_member_publishes_no_default_marker() {
     let temp = tempfile::tempdir().unwrap();
     let aggregate = aggregate(&["relay-a", "relay-b"], "");
     let settings = settings(
-        vec![member("relay-a", "哈基米 国模"), member("relay-b", "jojocodemax")],
+        vec![
+            member("relay-a", "哈基米 国模"),
+            member("relay-b", "jojocodemax"),
+        ],
         &aggregate,
     );
 

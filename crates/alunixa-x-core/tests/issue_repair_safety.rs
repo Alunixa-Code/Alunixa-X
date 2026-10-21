@@ -228,10 +228,8 @@ fn active_member_save_publishes_and_repairs_a_drifted_projection() {
     )
     .unwrap();
     assert!(
-        alunixa_x_core::aggregate_catalog::save_with_active_catalog_refresh(
-            &store, &home, &latest
-        )
-        .is_err()
+        alunixa_x_core::aggregate_catalog::save_with_active_catalog_refresh(&store, &home, &latest)
+            .is_err()
     );
     // 换一个合法新投影验证不会因 previous == next 而直接跳过。
     let mut repaired = store.load().unwrap();

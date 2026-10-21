@@ -2447,7 +2447,8 @@ fn session_index_cleanup_write_failure_reports_backup_and_preserves_original() {
 }
 
 use alunixa_x_data::{
-    ProviderSyncProgressPhase, run_provider_sync_with_target_and_progress, validate_provider_sync_target,
+    ProviderSyncProgressPhase, run_provider_sync_with_target_and_progress,
+    validate_provider_sync_target,
 };
 
 use std::time::Instant;
@@ -2458,20 +2459,53 @@ fn write_provider_config(home: &Path, provider: &str) {
 
 #[test]
 fn pending_full_sync_journal_blocks_both_remote_control_writers_without_changes() {
-    let temp=tempdir().unwrap();let home=temp.path().join("home");fs::create_dir_all(&home).unwrap();write_provider_config(&home,"apigather");
-    let db=home.join("state_5.sqlite");create_state_db_with_providers(&db,&[("thread-1","openai",0)]);
-    let rollout=home.join("sessions/rollout-thread-1.jsonl");write_rollout(&rollout,"openai","thread-1","C:/workspace");
-    let before_db=fs::read(&db).unwrap();let before_rollout=fs::read(&rollout).unwrap();
-    let backup=home.join("backups_state/provider-sync/unfinished");fs::create_dir_all(&backup).unwrap();
-    fs::write(backup.join("metadata.json"),br#"{"version":2,"managedBy":"Alunixa X provider sync","namespace":"provider-sync"}"#).unwrap();
-    let journal=backup.join("recovery-journal.json");fs::write(&journal,br#"{"version":1,"state":"prepared","entries":[]}"#).unwrap();
-    let catalog=run_remote_control_session_catalog_recovery_for_thread_with_target(Some(&home),"thread-1","apigather");
-    let finalization=run_remote_control_session_finalization_for_thread_with_target(Some(&home),"thread-1","apigather");
-    for result in [catalog,finalization] {
-        assert_eq!(result.status,ProviderSyncStatus::PartialFailure);assert_eq!(result.recovery_journal_path.as_ref(),Some(&journal));assert_eq!(result.changed_session_files,0);assert_eq!(result.sqlite_rows_updated,0);
+    let temp = tempdir().unwrap();
+    let home = temp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let db = home.join("state_5.sqlite");
+    create_state_db_with_providers(&db, &[("thread-1", "openai", 0)]);
+    let rollout = home.join("sessions/rollout-thread-1.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let before_db = fs::read(&db).unwrap();
+    let before_rollout = fs::read(&rollout).unwrap();
+    let backup = home.join("backups_state/provider-sync/unfinished");
+    fs::create_dir_all(&backup).unwrap();
+    fs::write(
+        backup.join("metadata.json"),
+        br#"{"version":2,"managedBy":"Alunixa X provider sync","namespace":"provider-sync"}"#,
+    )
+    .unwrap();
+    let journal = backup.join("recovery-journal.json");
+    fs::write(
+        &journal,
+        br#"{"version":1,"state":"prepared","entries":[]}"#,
+    )
+    .unwrap();
+    let catalog = run_remote_control_session_catalog_recovery_for_thread_with_target(
+        Some(&home),
+        "thread-1",
+        "apigather",
+    );
+    let finalization = run_remote_control_session_finalization_for_thread_with_target(
+        Some(&home),
+        "thread-1",
+        "apigather",
+    );
+    for result in [catalog, finalization] {
+        assert_eq!(result.status, ProviderSyncStatus::PartialFailure);
+        assert_eq!(result.recovery_journal_path.as_ref(), Some(&journal));
+        assert_eq!(result.changed_session_files, 0);
+        assert_eq!(result.sqlite_rows_updated, 0);
     }
-    assert!(fs::read(&db).unwrap()==before_db);assert!(fs::read(&rollout).unwrap()==before_rollout);
-    assert_eq!(fs::read_dir(home.join("backups_state/provider-sync")).unwrap().count(),1);
+    assert!(fs::read(&db).unwrap() == before_db);
+    assert!(fs::read(&rollout).unwrap() == before_rollout);
+    assert_eq!(
+        fs::read_dir(home.join("backups_state/provider-sync"))
+            .unwrap()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -2584,7 +2618,7 @@ fn provider_sync_blocks_when_recovery_namespace_is_not_directory() {
         result.message
     );
     assert_eq!(result.recovery_journal_path, Some(backup_root));
-    assert_eq!(result.changed_session_files,0);
+    assert_eq!(result.changed_session_files, 0);
     assert_eq!(result.sqlite_rows_updated, 0);
     assert_eq!(result.repair_audit.catalog_only_sessions, 0);
 }

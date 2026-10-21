@@ -28,7 +28,9 @@ fn standalone_quota_unlock_persists_independently_of_the_master_switch() {
     assert!(!settings.enhancements_enabled);
     assert!(settings.codex_app_standalone_quota_unlock);
     assert!(store.load().unwrap().codex_app_standalone_quota_unlock);
-    let settings = store.update(json!({ "enhancementsEnabled": true })).unwrap();
+    let settings = store
+        .update(json!({ "enhancementsEnabled": true }))
+        .unwrap();
     assert!(settings.codex_app_standalone_quota_unlock);
     let settings = store
         .update(json!({ "codexAppStandaloneQuotaUnlock": false }))

@@ -142,7 +142,9 @@ async fn requests_go_to_messages_endpoint_with_anthropic_body_and_headers() {
         "未命中 Messages 端点：{headers}"
     );
     assert!(
-        headers.to_ascii_lowercase().contains("x-api-key: sk-anthropic"),
+        headers
+            .to_ascii_lowercase()
+            .contains("x-api-key: sk-anthropic"),
         "缺少 x-api-key：{headers}"
     );
     assert!(
@@ -160,7 +162,10 @@ async fn requests_go_to_messages_endpoint_with_anthropic_body_and_headers() {
     assert_eq!(sent["messages"][0]["content"][0]["text"], "你好");
     assert_eq!(sent["tools"][0]["name"], "lookup");
     assert_eq!(sent["tools"][0]["input_schema"]["type"], "object");
-    assert!(sent.get("input").is_none(), "不该把 Responses 的 input 原样发出");
+    assert!(
+        sent.get("input").is_none(),
+        "不该把 Responses 的 input 原样发出"
+    );
 
     // 上游返回体保持原样，转换由 launcher 负责（这里复现同一条链路）。
     let raw = upstream.read_body().await.unwrap();
@@ -168,7 +173,10 @@ async fn requests_go_to_messages_endpoint_with_anthropic_body_and_headers() {
     let message: Value = serde_json::from_slice(&raw).unwrap();
     let chat = anthropic_message_to_chat_completion(message).unwrap();
     let response = chat_completion_to_response_with_request(chat, &request).unwrap();
-    assert_eq!(response["output"][0]["content"][0]["text"], "你好，我是 Claude");
+    assert_eq!(
+        response["output"][0]["content"][0]["text"],
+        "你好，我是 Claude"
+    );
     assert_eq!(response["usage"]["input_tokens"], 12);
     assert_eq!(response["usage"]["output_tokens"], 6);
 }
@@ -187,12 +195,9 @@ async fn bearer_mode_switches_authentication_header() {
 
     let mut settings = anthropic_settings(format!("http://{address}"));
     settings.relay_profiles[0].anthropic_auth_header = "authorization".to_string();
-    let _ = open_responses_proxy_request_with_settings(
-        &codex_request(false).to_string(),
-        settings,
-    )
-    .await
-    .unwrap();
+    let _ = open_responses_proxy_request_with_settings(&codex_request(false).to_string(), settings)
+        .await
+        .unwrap();
 
     let (headers, _) = server.await.unwrap();
     let lowered = headers.to_ascii_lowercase();
@@ -247,7 +252,10 @@ async fn streaming_upstream_sse_becomes_responses_events() {
     let mut converter = AnthropicSseToResponsesConverter::with_request(&request);
     let mut output = converter.push_bytes(&raw[..split]);
     output.extend(converter.push_bytes(&raw[split..]));
-    assert!(converter.has_terminal_event(), "message_stop 应被识别为终止事件");
+    assert!(
+        converter.has_terminal_event(),
+        "message_stop 应被识别为终止事件"
+    );
     output.extend(converter.finish());
     let text = String::from_utf8_lossy(&output).to_string();
     assert!(text.contains("response.created"), "{text}");
@@ -270,14 +278,18 @@ async fn provider_test_probe_hits_messages_endpoint() {
     ));
 
     let profile = anthropic_profile(format!("http://{address}"));
-    let result = test_relay_profile(&profile, "claude-sonnet-5").await.unwrap();
+    let result = test_relay_profile(&profile, "claude-sonnet-5")
+        .await
+        .unwrap();
     assert_eq!(result.http_status, 200);
     assert_eq!(result.endpoint, format!("http://{address}/v1/messages"));
 
     let (headers, sent) = server.await.unwrap();
     assert!(headers.starts_with("POST /v1/messages "), "{headers}");
     assert!(
-        headers.to_ascii_lowercase().contains("x-api-key: sk-anthropic"),
+        headers
+            .to_ascii_lowercase()
+            .contains("x-api-key: sk-anthropic"),
         "{headers}"
     );
     assert_eq!(sent["model"], "claude-sonnet-5");
@@ -341,12 +353,9 @@ async fn impersonation_sends_claude_code_identity_and_headers() {
 
     let mut settings = anthropic_settings(format!("http://{address}"));
     settings.relay_profiles[0].anthropic_impersonate_claude_code = true;
-    let _ = open_responses_proxy_request_with_settings(
-        &codex_request(false).to_string(),
-        settings,
-    )
-    .await
-    .unwrap();
+    let _ = open_responses_proxy_request_with_settings(&codex_request(false).to_string(), settings)
+        .await
+        .unwrap();
 
     let (headers, sent) = server.await.unwrap();
     let lowered = headers.to_ascii_lowercase();
@@ -381,12 +390,9 @@ async fn explicit_max_tokens_and_prompt_cache_reach_upstream() {
 
     let mut settings = anthropic_settings(format!("http://{address}"));
     settings.relay_profiles[0].anthropic_max_tokens = 64000;
-    let _ = open_responses_proxy_request_with_settings(
-        &codex_request(false).to_string(),
-        settings,
-    )
-    .await
-    .unwrap();
+    let _ = open_responses_proxy_request_with_settings(&codex_request(false).to_string(), settings)
+        .await
+        .unwrap();
 
     let (_, sent) = server.await.unwrap();
     // 请求里是 256，供应商里显式填了 64000 → 以显式值为准。

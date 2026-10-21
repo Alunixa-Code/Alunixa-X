@@ -1092,7 +1092,6 @@ fn thread_usage_history_reads_rollout_token_count_events() {
     );
 }
 
-
 #[test]
 fn thread_usage_live_reads_only_the_tail_of_the_rollout() {
     let tmp = tempdir().unwrap();

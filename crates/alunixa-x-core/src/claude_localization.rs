@@ -25,16 +25,28 @@ struct ProbeOutput {
 
 fn probe_output(command: &mut Command, deadline: Instant) -> Result<ProbeOutput> {
     ensure!(Instant::now() < deadline, "Claude 检测超时，请重试");
-    let path = std::env::temp_dir().join(format!("alunixa-x-claude-probe-{}.tmp", uuid::Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!(
+        "alunixa-x-claude-probe-{}.tmp",
+        uuid::Uuid::new_v4()
+    ));
     struct Capture(PathBuf);
     impl Drop for Capture {
-        fn drop(&mut self) { let _ = fs::remove_file(&self.0); }
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
     }
-    let mut capture = fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path)?;
+    let mut capture = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
     // 句柄必须先关闭再移除（Windows 不允许删除仍打开的文件）。
     let cleanup = Capture(path);
     let result = (|| {
-        command.stdin(Stdio::null()).stdout(capture.try_clone()?).stderr(Stdio::null());
+        command
+            .stdin(Stdio::null())
+            .stdout(capture.try_clone()?)
+            .stderr(Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -45,11 +57,15 @@ fn probe_output(command: &mut Command, deadline: Instant) -> Result<ProbeOutput>
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+                Ok(None) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20))
+                }
                 result => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    if let Err(error) = result { return Err(error.into()); }
+                    if let Err(error) = result {
+                        return Err(error.into());
+                    }
                     bail!("Claude 检测超时，检测进程已结束，请重试");
                 }
             }
@@ -67,21 +83,34 @@ fn probe_output(command: &mut Command, deadline: Instant) -> Result<ProbeOutput>
 }
 
 #[derive(Clone, Copy)]
-enum AppLayout { Bundle, Executable }
+enum AppLayout {
+    Bundle,
+    Executable,
+}
 
 impl AppLayout {
     fn current() -> Self {
-        if cfg!(windows) { Self::Executable } else { Self::Bundle }
+        if cfg!(windows) {
+            Self::Executable
+        } else {
+            Self::Bundle
+        }
     }
 
     fn exists(self, app: &Path) -> bool {
-        match self { Self::Bundle => app.is_dir(), Self::Executable => app.is_file() }
+        match self {
+            Self::Bundle => app.is_dir(),
+            Self::Executable => app.is_file(),
+        }
     }
 
     fn root(self, app: &Path) -> Result<&Path> {
         match self {
             Self::Bundle => Ok(app),
-            Self::Executable => app.parent().filter(|p| !p.as_os_str().is_empty()).context("Claude 可执行文件缺少目录"),
+            Self::Executable => app
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .context("Claude 可执行文件缺少目录"),
         }
     }
 }
@@ -89,24 +118,38 @@ impl AppLayout {
 /// 替换完整应用目录（Windows 不能只移动 exe，resources 等文件必须一起移动）。
 /// 校验过的暂存目录才会进入这里；替换失败时恢复旧副本，不删除任何副本。
 fn replace_copy(layout: AppLayout, staged: &Path, copy: &Path, backup: &Path) -> Result<()> {
-    replace_copy_with(layout, staged, copy, backup, |from, to| fs::rename(from, to))
+    replace_copy_with(layout, staged, copy, backup, |from, to| {
+        fs::rename(from, to)
+    })
 }
 
 fn replace_copy_with(
-    layout: AppLayout, staged: &Path, copy: &Path, backup: &Path,
+    layout: AppLayout,
+    staged: &Path,
+    copy: &Path,
+    backup: &Path,
     mut rename: impl FnMut(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
     ensure!(layout.exists(staged), "Claude 暂存副本不存在，保留旧副本");
     let staged = layout.root(staged)?;
     let copy = layout.root(copy)?;
     let backup = layout.root(backup)?;
-    ensure!(staged != copy && copy != backup && staged != backup, "Claude 副本目录不能相同");
+    ensure!(
+        staged != copy && copy != backup && staged != backup,
+        "Claude 副本目录不能相同"
+    );
     ensure!(!backup.exists(), "Claude 备份目录已存在，保留旧副本");
-    if let Some(parent) = copy.parent() { fs::create_dir_all(parent)?; }
+    if let Some(parent) = copy.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let had_copy = copy.exists();
-    if had_copy { rename(copy, backup)?; }
+    if had_copy {
+        rename(copy, backup)?;
+    }
     if let Err(error) = rename(staged, copy) {
-        if had_copy { rename(backup, copy).context("替换失败且旧副本还原失败，旧副本保留在备份目录")?; }
+        if had_copy {
+            rename(backup, copy).context("替换失败且旧副本还原失败，旧副本保留在备份目录")?;
+        }
         return Err(error.into());
     }
     Ok(())
@@ -202,8 +245,11 @@ fn source_app(_deadline: Instant) -> Result<PathBuf> {
 
 #[cfg(target_os = "windows")]
 fn source_app(deadline: Instant) -> Result<PathBuf> {
-    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(home_dir);
-    let program = std::env::var_os("ProgramFiles").map(PathBuf::from)
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(home_dir);
+    let program = std::env::var_os("ProgramFiles")
+        .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Program Files"));
     let query = probe_output(Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference = 'Stop'; @(Get-AppxPackage -Name Claude; Get-AppxPackage -Name AnthropicPBC.Claude) | Select-Object Name,InstallLocation | ConvertTo-Json -Compress"]), deadline);
@@ -211,7 +257,9 @@ fn source_app(deadline: Instant) -> Result<PathBuf> {
         if output.status.success() {
             for install in claude_package_locations(&output.stdout)? {
                 let packaged = PathBuf::from(install).join(r"app\Claude.exe");
-                if packaged.is_file() { return Ok(packaged); }
+                if packaged.is_file() {
+                    return Ok(packaged);
+                }
             }
         }
     }
@@ -223,10 +271,15 @@ fn source_app(deadline: Instant) -> Result<PathBuf> {
         local.join(r"Claude\Claude.exe"),
         program.join(r"Claude\Claude.exe"),
     ];
-    if let Some(path) = candidates.into_iter().find(|path| path.is_file()) { return Ok(path); }
+    if let Some(path) = candidates.into_iter().find(|path| path.is_file()) {
+        return Ok(path);
+    }
     // 查询失败不是「未安装」，明确返回错误，避免把超时误报成未安装。
     let output = query?;
-    ensure!(output.status.success(), "无法检测 Claude 安装位置，请检查 Windows 应用包服务后重试");
+    ensure!(
+        output.status.success(),
+        "无法检测 Claude 安装位置，请检查 Windows 应用包服务后重试"
+    );
     Ok(local.join(r"Programs\Claude\Claude.exe"))
 }
 
@@ -313,15 +366,23 @@ fn home_dir() -> PathBuf {
 }
 
 #[cfg(target_os = "macos")]
-fn copy_app(_source: &Path) -> PathBuf { runtime_dir().join("Claude CN.app") }
+fn copy_app(_source: &Path) -> PathBuf {
+    runtime_dir().join("Claude CN.app")
+}
 
 #[cfg(target_os = "windows")]
 fn copy_app(source: &Path) -> PathBuf {
-    if windows_msix_source(source) { source.to_path_buf() } else { runtime_dir().join("Claude CN").join("Claude.exe") }
+    if windows_msix_source(source) {
+        source.to_path_buf()
+    } else {
+        runtime_dir().join("Claude CN").join("Claude.exe")
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn copy_app(_source: &Path) -> PathBuf { runtime_dir().join("Claude CN") }
+fn copy_app(_source: &Path) -> PathBuf {
+    runtime_dir().join("Claude CN")
+}
 
 #[cfg(target_os = "windows")]
 fn staged_copy_path(label: &str) -> PathBuf {
@@ -403,7 +464,9 @@ fn find_runtime(name: &str, deadline: Instant) -> Result<Option<PathBuf>> {
     }
     let mut checked = std::collections::BTreeSet::new();
     for path in candidates {
-        if !checked.insert(path.clone()) || !path.is_file() { continue; }
+        if !checked.insert(path.clone()) || !path.is_file() {
+            continue;
+        }
         let mut command = Command::new(&path);
         if name == "node" {
             command.args(["-e", "process.exit(typeof WebSocket === 'function' && typeof fetch === 'function' ? 0 : 1)"]);
@@ -414,11 +477,15 @@ fn find_runtime(name: &str, deadline: Instant) -> Result<Option<PathBuf>> {
         }
         match probe_output(&mut command, deadline) {
             Ok(output) if output.status.success() => return Ok(Some(path)),
-            Ok(_) => {},
+            Ok(_) => {}
             // PATH 里不可执行/已经失效的候选沿用旧行为继续找；超时必须反馈给用户。
-            Err(error) if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
-                matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied)
-            }) => {},
+            Err(error)
+                if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                    matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+                    )
+                }) => {}
             Err(error) => return Err(error),
         }
     }
@@ -427,55 +494,98 @@ fn find_runtime(name: &str, deadline: Instant) -> Result<Option<PathBuf>> {
 
 #[cfg(target_os = "macos")]
 fn app_version(app: &Path, key: &str, deadline: Instant) -> Result<String> {
-    if !app.is_dir() { return Ok(String::new()); }
-    let output = probe_output(Command::new("/usr/bin/defaults")
-        .args(["read"]).arg(app.join("Contents/Info")).arg(key), deadline)?;
-    Ok(if output.status.success() { String::from_utf8_lossy(&output.stdout).trim().to_string() } else { String::new() })
+    if !app.is_dir() {
+        return Ok(String::new());
+    }
+    let output = probe_output(
+        Command::new("/usr/bin/defaults")
+            .args(["read"])
+            .arg(app.join("Contents/Info"))
+            .arg(key),
+        deadline,
+    )?;
+    Ok(if output.status.success() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        String::new()
+    })
 }
 
 #[cfg(target_os = "windows")]
 fn app_version(app: &Path, _key: &str, deadline: Instant) -> Result<String> {
-    if !app.is_file() { return Ok(String::new()); }
+    if !app.is_file() {
+        return Ok(String::new());
+    }
     let escaped = app.to_string_lossy().replace('\'', "''");
-    let output = probe_output(Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-Command"])
-        .arg(format!("(Get-Item -LiteralPath '{escaped}').VersionInfo.ProductVersion")), deadline)?;
-    Ok(if output.status.success() { String::from_utf8_lossy(&output.stdout).trim().to_string() } else { String::new() })
+    let output = probe_output(
+        Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(format!(
+                "(Get-Item -LiteralPath '{escaped}').VersionInfo.ProductVersion"
+            )),
+        deadline,
+    )?;
+    Ok(if output.status.success() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        String::new()
+    })
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn app_version(_app: &Path, _key: &str, _deadline: Instant) -> Result<String> { Ok(String::new()) }
+fn app_version(_app: &Path, _key: &str, _deadline: Instant) -> Result<String> {
+    Ok(String::new())
+}
 
 #[cfg(target_os = "macos")]
 fn claude_running(deadline: Instant) -> Result<bool> {
-    let output = probe_output(Command::new("/usr/bin/pgrep")
-        .args(["-f", "/Contents/MacOS/Claude( |$)"]), deadline)?;
-    ensure!(matches!(output.status.code(), Some(0 | 1)), "无法检测 Claude 运行状态");
+    let output = probe_output(
+        Command::new("/usr/bin/pgrep").args(["-f", "/Contents/MacOS/Claude( |$)"]),
+        deadline,
+    )?;
+    ensure!(
+        matches!(output.status.code(), Some(0 | 1)),
+        "无法检测 Claude 运行状态"
+    );
     Ok(output.status.success())
 }
 
 #[cfg(any(windows, test))]
 fn tasklist_contains_claude(output: &[u8]) -> bool {
     String::from_utf8_lossy(output).lines().any(|line| {
-        let name = line.trim().strip_prefix('"').and_then(|line| line.split('"').next());
-        name.is_some_and(|name| name.eq_ignore_ascii_case("Claude.exe") || name.eq_ignore_ascii_case("claude-desktop.exe"))
+        let name = line
+            .trim()
+            .strip_prefix('"')
+            .and_then(|line| line.split('"').next());
+        name.is_some_and(|name| {
+            name.eq_ignore_ascii_case("Claude.exe")
+                || name.eq_ignore_ascii_case("claude-desktop.exe")
+        })
     })
 }
 
 #[cfg(target_os = "windows")]
 fn claude_running(deadline: Instant) -> Result<bool> {
-    let output = probe_output(Command::new("tasklist.exe").args(["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq Claude*"]), deadline)?;
+    let output = probe_output(
+        Command::new("tasklist.exe").args(["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq Claude*"]),
+        deadline,
+    )?;
     ensure!(output.status.success(), "无法检测 Claude 运行状态");
     Ok(tasklist_contains_claude(&output.stdout))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn claude_running(_deadline: Instant) -> Result<bool> { Ok(false) }
+fn claude_running(_deadline: Instant) -> Result<bool> {
+    Ok(false)
+}
 
 fn catalog_entries() -> usize {
-    ASSETS.iter().find(|(name, _)| *name == "catalogs/zh-Hans.json")
+    ASSETS
+        .iter()
+        .find(|(name, _)| *name == "catalogs/zh-Hans.json")
         .and_then(|(_, bytes)| serde_json::from_slice::<Value>(bytes).ok())
-        .and_then(|value| value.as_object().map(|obj| obj.len())).unwrap_or(0)
+        .and_then(|value| value.as_object().map(|obj| obj.len()))
+        .unwrap_or(0)
 }
 
 fn initial_status(source: &Path, copy: &Path) -> ClaudeLocalizationStatus {
@@ -484,12 +594,21 @@ fn initial_status(source: &Path, copy: &Path) -> ClaudeLocalizationStatus {
         supported: false,
         source_app: source.to_string_lossy().to_string(),
         copy_app: copy.to_string_lossy().to_string(),
-        source_version: String::new(), copy_version: String::new(),
-        prepared: false, needs_rebuild: false, running: false,
-        node_available: false, python_available: false, shell_locale: None,
+        source_version: String::new(),
+        copy_version: String::new(),
+        prepared: false,
+        needs_rebuild: false,
+        running: false,
+        node_available: false,
+        python_available: false,
+        shell_locale: None,
         catalog_entries: catalog_entries(),
-        voice_input: settings.as_ref().is_none_or(|settings| settings.claude_app_voice_input),
-        localization: settings.as_ref().is_none_or(|settings| settings.claude_app_localization),
+        voice_input: settings
+            .as_ref()
+            .is_none_or(|settings| settings.claude_app_voice_input),
+        localization: settings
+            .as_ref()
+            .is_none_or(|settings| settings.claude_app_localization),
     }
 }
 
@@ -500,7 +619,9 @@ fn inspect_installed_source(
     mut state: ClaudeLocalizationStatus,
     inspect: impl FnOnce(&mut ClaudeLocalizationStatus) -> Result<()>,
 ) -> Result<ClaudeLocalizationStatus> {
-    if !layout.exists(source) { return Ok(state); }
+    if !layout.exists(source) {
+        return Ok(state);
+    }
     state.supported = true;
     inspect(&mut state)?;
     Ok(state)
@@ -510,25 +631,43 @@ pub fn status() -> Result<ClaudeLocalizationStatus> {
     let deadline = Instant::now() + STATUS_TIMEOUT;
     let source = source_app(deadline)?;
     let copy = copy_app(&source);
-    inspect_installed_source(&source, AppLayout::current(), initial_status(&source, &copy), |state| {
-        state.source_version = app_version(&source, "CFBundleShortVersionString", deadline)?;
-        state.copy_version = app_version(&copy, "CFBundleShortVersionString", deadline)?;
-        let current_build = if cfg!(windows) { state.source_version.clone() }
-            else { app_version(&source, "CFBundleVersion", deadline)? };
-        let receipt = fs::read(runtime_dir().join("prepared.json")).ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-        state.prepared = AppLayout::current().exists(&copy) && receipt.is_some();
-        state.needs_rebuild = state.prepared &&
-            (receipt.as_ref().and_then(|r| r.get("sourceBuild")).and_then(Value::as_str) != Some(current_build.as_str())
-                || state.copy_version != state.source_version);
-        state.shell_locale = read_config(&config_path()).ok()
-            .and_then(|v| v.get("locale")?.as_str().map(str::to_string));
-        state.running = claude_running(deadline)?;
-        state.node_available = find_runtime("node", deadline)?.is_some();
-        // Windows 的准备脚本用 PowerShell，不需遍历或执行 Python 安装别名。
-        state.python_available = if cfg!(windows) { false } else { find_runtime("python3", deadline)?.is_some() };
-        Ok(())
-    })
+    inspect_installed_source(
+        &source,
+        AppLayout::current(),
+        initial_status(&source, &copy),
+        |state| {
+            state.source_version = app_version(&source, "CFBundleShortVersionString", deadline)?;
+            state.copy_version = app_version(&copy, "CFBundleShortVersionString", deadline)?;
+            let current_build = if cfg!(windows) {
+                state.source_version.clone()
+            } else {
+                app_version(&source, "CFBundleVersion", deadline)?
+            };
+            let receipt = fs::read(runtime_dir().join("prepared.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            state.prepared = AppLayout::current().exists(&copy) && receipt.is_some();
+            state.needs_rebuild = state.prepared
+                && (receipt
+                    .as_ref()
+                    .and_then(|r| r.get("sourceBuild"))
+                    .and_then(Value::as_str)
+                    != Some(current_build.as_str())
+                    || state.copy_version != state.source_version);
+            state.shell_locale = read_config(&config_path())
+                .ok()
+                .and_then(|v| v.get("locale")?.as_str().map(str::to_string));
+            state.running = claude_running(deadline)?;
+            state.node_available = find_runtime("node", deadline)?.is_some();
+            // Windows 的准备脚本用 PowerShell，不需遍历或执行 Python 安装别名。
+            state.python_available = if cfg!(windows) {
+                false
+            } else {
+                find_runtime("python3", deadline)?.is_some()
+            };
+            Ok(())
+        },
+    )
 }
 
 /// 语音入口开关。读不到设置时按开启处理，与 settings 里的默认值保持一致。
@@ -576,7 +715,12 @@ fn saved_shell_locale(backup: &Path) -> Option<String> {
     fs::read(backup)
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|value| value.get("locale").and_then(Value::as_str).map(str::to_string))
+        .and_then(|value| {
+            value
+                .get("locale")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
 }
 
 /// 把官方 Claude 的外壳语言还原成汉化前备份里的值。
@@ -600,7 +744,13 @@ fn install_assets(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn run_script(program: &Path, script: &str, source: &Path, copy: &Path, args: &[&str]) -> Result<()> {
+fn run_script(
+    program: &Path,
+    script: &str,
+    source: &Path,
+    copy: &Path,
+    args: &[&str],
+) -> Result<()> {
     let root = runtime_dir();
     let log = root.join("operation.log");
     let output = fs::File::create(&log)?;
@@ -696,7 +846,10 @@ fn set_locale_at(config: &Path, backup: &Path, locale: Option<&str>, restore: bo
 }
 
 pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
-    ensure!(cfg!(any(target_os = "macos", target_os = "windows")), "Claude 增强目前支持 macOS 和 Windows");
+    ensure!(
+        cfg!(any(target_os = "macos", target_os = "windows")),
+        "Claude 增强目前支持 macOS 和 Windows"
+    );
     ensure!(
         ["prepare", "check", "launch", "restore"].contains(&action),
         "未知汉化操作"
@@ -706,7 +859,10 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
         .map_err(|_| anyhow::anyhow!("另一项 Claude 增强操作正在进行"))?;
     let deadline = Instant::now() + STATUS_TIMEOUT;
     let source = source_app(deadline)?;
-    ensure!(AppLayout::current().exists(&source), "未检测到 Claude，请先安装官方应用");
+    ensure!(
+        AppLayout::current().exists(&source),
+        "未检测到 Claude，请先安装官方应用"
+    );
     let script_runtime = if cfg!(target_os = "windows") {
         find_runtime("powershell", deadline)?.context("未找到 Windows PowerShell")?
     } else {
@@ -728,26 +884,33 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                 "需要带有内置 WebSocket 的 Node.js 22 或更新版本才能中文启动"
             );
             if cfg!(target_os = "windows") && windows_msix_source(&source) {
-                fs::write(root.join("prepared.json"), serde_json::to_vec(&json!({
-                    "sourceBuild": app_version(&source, "ProductVersion", Instant::now() + STATUS_TIMEOUT)?,
-                    "msix": true
-                }))?)?;
+                fs::write(
+                    root.join("prepared.json"),
+                    serde_json::to_vec(&json!({
+                        "sourceBuild": app_version(&source, "ProductVersion", Instant::now() + STATUS_TIMEOUT)?,
+                        "msix": true
+                    }))?,
+                )?;
                 "已检测到 Windows MSIX 版 Claude；保留官方包不变，使用启动注入。".to_string()
             } else {
-            let staged = staged_copy_path(&format!("Claude-staging-{}", uuid::Uuid::new_v4()));
-            let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
-            run_script(&script_runtime, script, &source, &staged, &[])?;
-            run_script(&script_runtime, script, &source, &staged, &["--check"])?;
-            // 校验通过后才替换；旧副本保留，构建失败时不会影响它。
-            let old = staged_copy_path(&format!("Claude-backup-{}", uuid::Uuid::new_v4()));
-            replace_copy(AppLayout::current(), &staged, &copy, &old)?;
-            fs::write(
-                root.join("prepared.json"),
-                serde_json::to_vec(&json!({
-                    "sourceBuild": app_version(&source, "CFBundleVersion", Instant::now() + STATUS_TIMEOUT)?
-                }))?,
-            )?;
-            "副本已准备并通过签名及 app.asar 一致性校验。".to_string()
+                let staged = staged_copy_path(&format!("Claude-staging-{}", uuid::Uuid::new_v4()));
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
+                run_script(&script_runtime, script, &source, &staged, &[])?;
+                run_script(&script_runtime, script, &source, &staged, &["--check"])?;
+                // 校验通过后才替换；旧副本保留，构建失败时不会影响它。
+                let old = staged_copy_path(&format!("Claude-backup-{}", uuid::Uuid::new_v4()));
+                replace_copy(AppLayout::current(), &staged, &copy, &old)?;
+                fs::write(
+                    root.join("prepared.json"),
+                    serde_json::to_vec(&json!({
+                        "sourceBuild": app_version(&source, "CFBundleVersion", Instant::now() + STATUS_TIMEOUT)?
+                    }))?,
+                )?;
+                "副本已准备并通过签名及 app.asar 一致性校验。".to_string()
             }
         }
         "check" => {
@@ -755,7 +918,11 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                 ensure!(source.exists(), "未找到 Claude MSIX 安装入口");
                 "Windows MSIX 安装入口已检测到，采用原版包启动注入。".to_string()
             } else {
-                let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
                 run_script(&script_runtime, script, &source, &copy, &["--check"])?;
                 "副本签名、中文词表、注入开关及 app.asar 一致性校验通过。".to_string()
             }
@@ -764,10 +931,15 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
             let launcher = if cfg!(target_os = "windows") {
                 script_runtime.clone()
             } else {
-                find_runtime("node", Instant::now() + STATUS_TIMEOUT)?.context("未找到带内置 WebSocket 的 Node.js 22 或更新版本")?
+                find_runtime("node", Instant::now() + STATUS_TIMEOUT)?
+                    .context("未找到带内置 WebSocket 的 Node.js 22 或更新版本")?
             };
             if !(cfg!(target_os = "windows") && windows_msix_source(&source)) {
-                let script = if cfg!(target_os = "windows") { "build-copy.ps1" } else { "build-copy.py" };
+                let script = if cfg!(target_os = "windows") {
+                    "build-copy.ps1"
+                } else {
+                    "build-copy.py"
+                };
                 run_script(&script_runtime, script, &source, &copy, &["--check"])?;
             }
             let config = config_path();
@@ -798,8 +970,21 @@ pub fn perform(action: &str) -> Result<ClaudeLocalizationResult> {
                         .to_string(),
                 }
             };
-            let script = if cfg!(target_os = "windows") { "inject-cn.ps1" } else { "inject-cn.js" };
-            if let Err(error) = run_script(&launcher, script, &source, &copy, &[if cfg!(windows) { "-Locale" } else { "--locale" }, locale.as_str()]) {
+            let script = if cfg!(target_os = "windows") {
+                "inject-cn.ps1"
+            } else {
+                "inject-cn.js"
+            };
+            if let Err(error) = run_script(
+                &launcher,
+                script,
+                &source,
+                &copy,
+                &[
+                    if cfg!(windows) { "-Locale" } else { "--locale" },
+                    locale.as_str(),
+                ],
+            ) {
                 // 启动失败后只在应用未运行时还原本次外壳语言，避免与 Claude 写盘竞争。
                 if !claude_running(Instant::now() + PROBE_TIMEOUT).unwrap_or(true) {
                     let _ = set_locale_at(
@@ -867,7 +1052,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn catalog_entries_come_from_the_chinese_catalog() {
         // 曾经用 ASSETS[7] 取词表：往资产清单里插一个文件就让下标整体错位，
@@ -878,11 +1062,20 @@ mod tests {
 
     fn empty_test_status() -> ClaudeLocalizationStatus {
         ClaudeLocalizationStatus {
-            supported: false, source_app: String::new(), copy_app: String::new(),
-            source_version: String::new(), copy_version: String::new(),
-            prepared: false, needs_rebuild: false, running: false,
-            node_available: false, python_available: false, shell_locale: None,
-            catalog_entries: 0, voice_input: true, localization: true,
+            supported: false,
+            source_app: String::new(),
+            copy_app: String::new(),
+            source_version: String::new(),
+            copy_version: String::new(),
+            prepared: false,
+            needs_rebuild: false,
+            running: false,
+            node_available: false,
+            python_available: false,
+            shell_locale: None,
+            catalog_entries: 0,
+            voice_input: true,
+            localization: true,
         }
     }
 
@@ -890,9 +1083,11 @@ mod tests {
     fn missing_claude_returns_without_running_any_deep_probe() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("Claude.exe");
-        let result = inspect_installed_source(&missing, AppLayout::Executable, empty_test_status(), |_| {
-            panic!("没有安装 Claude 时不应探测运行时、版本或读取官方配置");
-        }).unwrap();
+        let result =
+            inspect_installed_source(&missing, AppLayout::Executable, empty_test_status(), |_| {
+                panic!("没有安装 Claude 时不应探测运行时、版本或读取官方配置");
+            })
+            .unwrap();
         assert!(!result.supported);
         assert!(!result.prepared);
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
@@ -909,19 +1104,29 @@ mod tests {
         assert!(!AppLayout::Bundle.exists(&exe));
         assert!(AppLayout::Bundle.exists(&bundle));
         assert!(!AppLayout::Executable.exists(&bundle));
-        let result = inspect_installed_source(&exe, AppLayout::Executable, empty_test_status(), |state| {
-            state.prepared = true;
-            Ok(())
-        }).unwrap();
+        let result =
+            inspect_installed_source(&exe, AppLayout::Executable, empty_test_status(), |state| {
+                state.prepared = true;
+                Ok(())
+            })
+            .unwrap();
         assert!(result.supported && result.prepared);
     }
 
     #[test]
     fn tasklist_success_without_matching_process_is_not_running() {
-        assert!(!tasklist_contains_claude(b"INFO: No tasks are running which match the specified criteria.\r\n"));
-        assert!(!tasklist_contains_claude(b"\"NotClaude.exe\",\"12\",\"Console\"\r\n"));
-        assert!(tasklist_contains_claude(b"\"cLaUdE.exe\",\"123\",\"Console\"\r\n"));
-        assert!(tasklist_contains_claude(b"\"claude-desktop.exe\",\"123\",\"Console\"\r\n"));
+        assert!(!tasklist_contains_claude(
+            b"INFO: No tasks are running which match the specified criteria.\r\n"
+        ));
+        assert!(!tasklist_contains_claude(
+            b"\"NotClaude.exe\",\"12\",\"Console\"\r\n"
+        ));
+        assert!(tasklist_contains_claude(
+            b"\"cLaUdE.exe\",\"123\",\"Console\"\r\n"
+        ));
+        assert!(tasklist_contains_claude(
+            b"\"claude-desktop.exe\",\"123\",\"Console\"\r\n"
+        ));
     }
 
     fn seed_windows_copy(root: &Path, version: &[u8]) -> PathBuf {
@@ -938,9 +1143,15 @@ mod tests {
         let copy = seed_windows_copy(&dir.path().join("copy"), b"old");
         let backup = dir.path().join("backup/Claude.exe");
         replace_copy(AppLayout::Executable, &staged, &copy, &backup).unwrap();
-        assert_eq!(fs::read(copy.parent().unwrap().join("resources/app.asar")).unwrap(), b"new");
+        assert_eq!(
+            fs::read(copy.parent().unwrap().join("resources/app.asar")).unwrap(),
+            b"new"
+        );
         assert_eq!(fs::read(&copy).unwrap(), b"new");
-        assert_eq!(fs::read(backup.parent().unwrap().join("resources/app.asar")).unwrap(), b"old");
+        assert_eq!(
+            fs::read(backup.parent().unwrap().join("resources/app.asar")).unwrap(),
+            b"old"
+        );
     }
 
     #[test]
@@ -950,16 +1161,30 @@ mod tests {
         let copy = seed_windows_copy(&dir.path().join("copy"), b"old");
         let backup = dir.path().join("backup/Claude.exe");
         let mut calls = 0;
-        let result = replace_copy_with(AppLayout::Executable, &staged, &copy, &backup, |from, to| {
-            calls += 1;
-            if calls == 2 { return Err(std::io::Error::other("模拟第二次 rename 失败")); }
-            fs::rename(from, to)
-        });
+        let result = replace_copy_with(
+            AppLayout::Executable,
+            &staged,
+            &copy,
+            &backup,
+            |from, to| {
+                calls += 1;
+                if calls == 2 {
+                    return Err(std::io::Error::other("模拟第二次 rename 失败"));
+                }
+                fs::rename(from, to)
+            },
+        );
         assert!(result.is_err());
         assert_eq!(calls, 3);
         assert_eq!(fs::read(&copy).unwrap(), b"old");
-        assert_eq!(fs::read(copy.parent().unwrap().join("resources/app.asar")).unwrap(), b"old");
-        assert_eq!(fs::read(staged.parent().unwrap().join("resources/app.asar")).unwrap(), b"new");
+        assert_eq!(
+            fs::read(copy.parent().unwrap().join("resources/app.asar")).unwrap(),
+            b"old"
+        );
+        assert_eq!(
+            fs::read(staged.parent().unwrap().join("resources/app.asar")).unwrap(),
+            b"new"
+        );
     }
 
     #[test]
@@ -970,14 +1195,19 @@ mod tests {
             let text = std::str::from_utf8(bytes).unwrap();
             assert!(!text.contains('\0'));
             assert!(text.contains("ALUNIXA_X_CLAUDE_COPY"));
-            assert!(text.replace('\n', "\r\n").contains("$ErrorActionPreference"));
+            assert!(
+                text.replace('\n', "\r\n")
+                    .contains("$ErrorActionPreference")
+            );
         }
     }
 
     /// 超时回归的子进程就是当前测试二进制，不运行 shell 或用户安装的脚本。
     #[test]
     fn probe_fixture_child() {
-        let Some(marker) = std::env::var_os("ALUNIXA_X_CLAUDE_TEST_PROBE") else { return; };
+        let Some(marker) = std::env::var_os("ALUNIXA_X_CLAUDE_TEST_PROBE") else {
+            return;
+        };
         fs::write(&marker, b"started").unwrap();
         std::thread::sleep(Duration::from_millis(900));
         fs::write(marker, b"not killed").unwrap();
@@ -988,15 +1218,28 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("probe-state");
         let mut command = Command::new(std::env::current_exe().unwrap());
-        command.args(["--exact", "claude_localization::tests::probe_fixture_child", "--nocapture"])
+        command
+            .args([
+                "--exact",
+                "claude_localization::tests::probe_fixture_child",
+                "--nocapture",
+            ])
             .env("ALUNIXA_X_CLAUDE_TEST_PROBE", &marker);
         let started = Instant::now();
         let result = probe_output(&mut command, started + Duration::from_millis(500));
         assert!(result.unwrap_err().to_string().contains("超时"));
         assert!(started.elapsed() < Duration::from_secs(2));
-        assert_eq!(fs::read(&marker).unwrap(), b"started", "子进程应已启动才能验证回收");
+        assert_eq!(
+            fs::read(&marker).unwrap(),
+            b"started",
+            "子进程应已启动才能验证回收"
+        );
         std::thread::sleep(Duration::from_millis(700));
-        assert_eq!(fs::read(marker).unwrap(), b"started", "超时返回后子进程不能继续运行");
+        assert_eq!(
+            fs::read(marker).unwrap(),
+            b"started",
+            "超时返回后子进程不能继续运行"
+        );
     }
 
     #[test]
@@ -1005,11 +1248,19 @@ mod tests {
         // 否则会把用户自己的语言设置删掉。
         let dir = tempfile::tempdir().unwrap();
         let backup = dir.path().join("locale-backup.json");
-        assert_eq!(saved_shell_locale(&backup), None, "没有备份时不能凭空给一个语言");
+        assert_eq!(
+            saved_shell_locale(&backup),
+            None,
+            "没有备份时不能凭空给一个语言"
+        );
         fs::write(&backup, br#"{"locale":"ja-JP","other":1}"#).unwrap();
         assert_eq!(saved_shell_locale(&backup).as_deref(), Some("ja-JP"));
         fs::write(&backup, b"not json").unwrap();
-        assert_eq!(saved_shell_locale(&backup), None, "备份损坏时不能乱动用户设置");
+        assert_eq!(
+            saved_shell_locale(&backup),
+            None,
+            "备份损坏时不能乱动用户设置"
+        );
     }
 
     #[test]

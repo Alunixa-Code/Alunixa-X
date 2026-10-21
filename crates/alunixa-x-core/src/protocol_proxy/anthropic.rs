@@ -10,9 +10,14 @@ const MAX_THINKING_BYTES: usize = 16 * 1024 * 1024;
 const DEFAULT_MAX_TOKENS: u64 = 4096;
 
 pub(super) fn responses_request_to_anthropic(mut body: Value) -> anyhow::Result<Value> {
-    responses_request_to_anthropic_with_options(body, &crate::anthropic_bridge::AnthropicRequestOptions {
-        max_tokens: DEFAULT_MAX_TOKENS, prompt_cache: false, ..Default::default()
-    })
+    responses_request_to_anthropic_with_options(
+        body,
+        &crate::anthropic_bridge::AnthropicRequestOptions {
+            max_tokens: DEFAULT_MAX_TOKENS,
+            prompt_cache: false,
+            ..Default::default()
+        },
+    )
 }
 
 pub(super) fn responses_request_to_anthropic_with_options(
@@ -84,7 +89,11 @@ pub(super) fn responses_request_to_anthropic_with_options(
         .and_then(Value::as_u64)
         .filter(|value| *value > 0)
         .unwrap_or(options.max_tokens);
-    let max_tokens = if options.force_max_tokens { options.max_tokens } else { requested_max_tokens };
+    let max_tokens = if options.force_max_tokens {
+        options.max_tokens
+    } else {
+        requested_max_tokens
+    };
     result["max_tokens"] = json!(max_tokens);
 
     let reasoning = body.get("reasoning").filter(|value| !value.is_null());
@@ -105,9 +114,11 @@ pub(super) fn responses_request_to_anthropic_with_options(
     let adaptive_model = match options.thinking_mode {
         crate::anthropic_bridge::AnthropicThinkingMode::Adaptive => true,
         crate::anthropic_bridge::AnthropicThinkingMode::Budget => false,
-        _ => uses_adaptive_thinking(model)
+        _ => {
+            uses_adaptive_thinking(model)
         // Preserve AX's explicit adaptive/xhigh/ultra selection for Claude aliases.
-        || (is_claude_model(model) && matches!(effort, Some("adaptive" | "xhigh" | "ultra"))),
+        || (is_claude_model(model) && matches!(effort, Some("adaptive" | "xhigh" | "ultra")))
+        }
     };
     let cannot_disable = thinking_cannot_be_disabled(model);
     let explicitly_disabled = reasoning_explicitly_disabled(effort);
@@ -135,7 +146,8 @@ pub(super) fn responses_request_to_anthropic_with_options(
         result["thinking"] = json!({"type":"adaptive"});
         // AX's xhigh/ultra/adaptive mean model-controlled adaptive thinking.
         if options.thinking_mode == crate::anthropic_bridge::AnthropicThinkingMode::Adaptive
-            || !matches!(effort, Some("adaptive" | "xhigh" | "ultra")) {
+            || !matches!(effort, Some("adaptive" | "xhigh" | "ultra"))
+        {
             if let Some(mapped) = effort.and_then(codex_effort_to_anthropic) {
                 result["output_config"] = json!({"effort":mapped});
             } else if explicitly_disabled && cannot_disable {
@@ -224,8 +236,12 @@ pub(super) fn responses_request_to_anthropic_with_options(
     if let Some(model) = result.get("model").and_then(Value::as_str) {
         result["model"] = json!(crate::anthropic_bridge::strip_context_marker(model));
     }
-    if options.prompt_cache { crate::anthropic_bridge::inject_prompt_cache(&mut result); }
-    if options.impersonate_claude_code { crate::anthropic_bridge::prepend_claude_code_identity(&mut result); }
+    if options.prompt_cache {
+        crate::anthropic_bridge::inject_prompt_cache(&mut result);
+    }
+    if options.impersonate_claude_code {
+        crate::anthropic_bridge::prepend_claude_code_identity(&mut result);
+    }
     Ok(result)
 }
 

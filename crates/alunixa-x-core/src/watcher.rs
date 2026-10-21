@@ -66,7 +66,11 @@ pub fn disable_watcher() -> std::io::Result<()> {
 
 /// 开关式开机启动：开启时确保「已注册 + 未禁用」，关闭时确保「已注销 + 已禁用」。
 /// 关闭时额外写禁用标记，是为了让「注销失败但仍残留的登记」也不会在下次登录打开界面。
-pub fn set_watcher_enabled(enabled: bool, launcher_path: &Path, debug_port: u16) -> anyhow::Result<()> {
+pub fn set_watcher_enabled(
+    enabled: bool,
+    launcher_path: &Path,
+    debug_port: u16,
+) -> anyhow::Result<()> {
     if enabled {
         if !watcher_is_installed() {
             install_watcher(launcher_path, debug_port)?;
@@ -943,7 +947,9 @@ pub fn find_session_index_cleanup_blocking_processes_from_snapshot(
 ) -> Vec<u32> {
     let mut ids = processes
         .iter()
-        .filter(|process| crate::app_paths::is_windows_desktop_app_executable_name(&process.exe_file))
+        .filter(|process| {
+            crate::app_paths::is_windows_desktop_app_executable_name(&process.exe_file)
+        })
         .map(|process| process.process_id)
         .collect::<Vec<_>>();
     ids.sort_unstable();

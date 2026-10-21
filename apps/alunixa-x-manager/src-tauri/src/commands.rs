@@ -42,7 +42,10 @@ pub async fn download_dictation_local_model() -> CommandResult<Value> {
 #[tauri::command]
 pub async fn claude_localization_status() -> CommandResult<Value> {
     match tauri::async_runtime::spawn_blocking(alunixa_x_core::claude_localization::status).await {
-        Ok(Ok(status)) => ok("Claude 增强状态已读取。", serde_json::to_value(status).unwrap_or_else(|_| json!({}))),
+        Ok(Ok(status)) => ok(
+            "Claude 增强状态已读取。",
+            serde_json::to_value(status).unwrap_or_else(|_| json!({})),
+        ),
         Ok(Err(error)) => failed(&error.to_string(), json!({})),
         Err(error) => failed(&format!("Claude 检测失败：{error}"), json!({})),
     }
@@ -68,9 +71,15 @@ pub async fn claude_localization_action(action: String) -> CommandResult<Value> 
 pub async fn claude_localization_set_voice_input(enabled: bool) -> CommandResult<Value> {
     match tauri::async_runtime::spawn_blocking(move || {
         alunixa_x_core::claude_localization::set_voice_input(enabled)
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(status)) => ok(
-            if enabled { "语音输入已开启。" } else { "语音输入已关闭。" },
+            if enabled {
+                "语音输入已开启。"
+            } else {
+                "语音输入已关闭。"
+            },
             serde_json::to_value(status).unwrap_or_else(|_| json!({})),
         ),
         Ok(Err(error)) => failed(&error.to_string(), json!({})),
@@ -82,9 +91,15 @@ pub async fn claude_localization_set_voice_input(enabled: bool) -> CommandResult
 pub async fn claude_localization_set_localization(enabled: bool) -> CommandResult<Value> {
     match tauri::async_runtime::spawn_blocking(move || {
         alunixa_x_core::claude_localization::set_localization(enabled)
-    }).await {
+    })
+    .await
+    {
         Ok(Ok(status)) => ok(
-            if enabled { "界面汉化已开启。" } else { "界面汉化已关闭。" },
+            if enabled {
+                "界面汉化已开启。"
+            } else {
+                "界面汉化已关闭。"
+            },
             serde_json::to_value(status).unwrap_or_else(|_| json!({})),
         ),
         Ok(Err(error)) => failed(&error.to_string(), json!({})),
@@ -3398,29 +3413,41 @@ pub fn load_settings() -> CommandResult<SettingsPayload> {
     };
     let store = SettingsStore::default();
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    if let Err(error) = alunixa_x_core::aggregate_catalog::recover_pending_catalog_refresh(&store, &home) {
-        return failed(&format!("模型目录存在待恢复操作：{error}"), fallback_settings_payload());
+    if let Err(error) =
+        alunixa_x_core::aggregate_catalog::recover_pending_catalog_refresh(&store, &home)
+    {
+        return failed(
+            &format!("模型目录存在待恢复操作：{error}"),
+            fallback_settings_payload(),
+        );
     }
     match alunixa_x_core::provider_import::initialize_local_config_provider(&store, &home) {
         Ok(_) => {
             let settings = match store.load() {
                 Ok(settings) => settings,
-                Err(error) => return failed(&format!("重新读取设置失败：{error}"), fallback_settings_payload()),
+                Err(error) => {
+                    return failed(
+                        &format!("重新读取设置失败：{error}"),
+                        fallback_settings_payload(),
+                    );
+                }
             };
             ok(
-            "设置已加载。",
-            SettingsPayload {
-                revision: alunixa_x_core::config_transaction::revision(
-                    &alunixa_x_core::paths::default_settings_path(), &home,
-                ).ok(),
-                settings,
-                settings_path: alunixa_x_core::paths::default_settings_path()
-                    .to_string_lossy()
-                    .to_string(),
-                user_scripts: user_script_inventory(),
-            },
-        )
-        },
+                "设置已加载。",
+                SettingsPayload {
+                    revision: alunixa_x_core::config_transaction::revision(
+                        &alunixa_x_core::paths::default_settings_path(),
+                        &home,
+                    )
+                    .ok(),
+                    settings,
+                    settings_path: alunixa_x_core::paths::default_settings_path()
+                        .to_string_lossy()
+                        .to_string(),
+                    user_scripts: user_script_inventory(),
+                },
+            )
+        }
         Err(error) => failed(
             &format!("读取本机默认供应商失败：{error}"),
             fallback_settings_payload(),
@@ -3510,70 +3537,72 @@ pub async fn save_settings(
             )?;
             let store = SettingsStore::default();
             let next = store.preserving_runtime_model_selection(&settings)?;
-            alunixa_x_core::aggregate_catalog::save_with_active_catalog_refresh(&store, &home, &next)
+            alunixa_x_core::aggregate_catalog::save_with_active_catalog_refresh(
+                &store, &home, &next,
+            )
+            .map(|_| ())
+            .and_then(|_| {
+                if settings.codex_app_sub_agent_max_threads
+                    == previous.codex_app_sub_agent_max_threads
+                {
+                    return Ok(());
+                }
+                alunixa_x_core::relay_config::set_codex_sub_agent_max_threads_in_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    settings.codex_app_sub_agent_max_threads,
+                )
                 .map(|_| ())
-                .and_then(|_| {
-                    if settings.codex_app_sub_agent_max_threads
-                        == previous.codex_app_sub_agent_max_threads
-                    {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_sub_agent_max_threads_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_sub_agent_max_threads,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    if settings.codex_app_fast_mode == native_baseline.codex_app_fast_mode {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_fast_mode,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    if settings.codex_goals_enabled == native_baseline.codex_goals_enabled {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::set_codex_goals_feature_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_goals_enabled,
-                    )
-                })
-                .and_then(|_| {
-                    if settings.codex_app_disable_wss == native_baseline.codex_app_disable_wss {
-                        return Ok(());
-                    }
-                    alunixa_x_core::relay_config::apply_wss_policy_to_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        settings.codex_app_disable_wss,
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| remove_retired_context_config())
-                .and_then(|_| {
-                    alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                    )
-                    .map(|_| ())
-                })
-                .and_then(|_| {
-                    alunixa_x_core::codex_instructions::sync_model_instructions_after_settings_save(
-                        &alunixa_x_core::relay_config::default_codex_home_dir(),
-                        &previous,
-                        &settings,
-                    )
-                })
-                .and_then(|_| apply_codex_hook_policy(&settings))
-                .and_then(|_| {
-                    alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
-                        settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
-                        &settings.codex_app_dream_skin_theme_config,
-                    )
-                })
+            })
+            .and_then(|_| {
+                if settings.codex_app_fast_mode == native_baseline.codex_app_fast_mode {
+                    return Ok(());
+                }
+                alunixa_x_core::relay_config::set_codex_fast_mode_in_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    settings.codex_app_fast_mode,
+                )
+                .map(|_| ())
+            })
+            .and_then(|_| {
+                if settings.codex_goals_enabled == native_baseline.codex_goals_enabled {
+                    return Ok(());
+                }
+                alunixa_x_core::relay_config::set_codex_goals_feature_in_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    settings.codex_goals_enabled,
+                )
+            })
+            .and_then(|_| {
+                if settings.codex_app_disable_wss == native_baseline.codex_app_disable_wss {
+                    return Ok(());
+                }
+                alunixa_x_core::relay_config::apply_wss_policy_to_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    settings.codex_app_disable_wss,
+                )
+                .map(|_| ())
+            })
+            .and_then(|_| remove_retired_context_config())
+            .and_then(|_| {
+                alunixa_x_core::relay_config::repair_stale_feature_entries_in_home(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                )
+                .map(|_| ())
+            })
+            .and_then(|_| {
+                alunixa_x_core::codex_instructions::sync_model_instructions_after_settings_save(
+                    &alunixa_x_core::relay_config::default_codex_home_dir(),
+                    &previous,
+                    &settings,
+                )
+            })
+            .and_then(|_| apply_codex_hook_policy(&settings))
+            .and_then(|_| {
+                alunixa_x_core::dream_skin::sync_default_dream_skin_base_theme(
+                    settings.enhancements_enabled && settings.codex_app_dream_skin_enabled,
+                    &settings.codex_app_dream_skin_theme_config,
+                )
+            })
         },
     );
     match save_result {
@@ -4411,24 +4440,54 @@ pub fn load_ccs_providers() -> CommandResult<CcsProvidersPayload> {
 }
 
 #[tauri::command]
-pub fn import_ccs_providers(bindings: Option<std::collections::BTreeMap<String, String>>) -> CommandResult<SettingsPayload> {
+pub fn import_ccs_providers(
+    bindings: Option<std::collections::BTreeMap<String, String>>,
+) -> CommandResult<SettingsPayload> {
     let store = SettingsStore::default();
     let mut settings = match store.load() {
         Ok(settings) => settings,
-        Err(error) => return failed(&format!("读取设置失败：{error}"), fallback_settings_payload()),
+        Err(error) => {
+            return failed(
+                &format!("读取设置失败：{error}"),
+                fallback_settings_payload(),
+            );
+        }
     };
-    let source = match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
-        Ok(source) => source,
-        Err(error) => return failed(&format!("读取 cc-switch 供应商配置失败：{error}"), fallback_settings_payload()),
-    };
-    let (imported, linked) = match alunixa_x_core::ccs_import::import_providers_with_origins(&mut settings, &source, &bindings.unwrap_or_default()) {
+    let source =
+        match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
+            Ok(source) => source,
+            Err(error) => {
+                return failed(
+                    &format!("读取 cc-switch 供应商配置失败：{error}"),
+                    fallback_settings_payload(),
+                );
+            }
+        };
+    let (imported, linked) = match alunixa_x_core::ccs_import::import_providers_with_origins(
+        &mut settings,
+        &source,
+        &bindings.unwrap_or_default(),
+    ) {
         Ok(counts) => counts,
-        Err(error) => return failed(&format!("导入 cc-switch 失败：{error}"), fallback_settings_payload()),
+        Err(error) => {
+            return failed(
+                &format!("导入 cc-switch 失败：{error}"),
+                fallback_settings_payload(),
+            );
+        }
     };
-    if imported == 0 && linked == 0 { return settings_payload("供应商均已导入，保留已有配置。", "设置读取失败"); }
+    if imported == 0 && linked == 0 {
+        return settings_payload("供应商均已导入，保留已有配置。", "设置读取失败");
+    }
     match store.save(&settings) {
-        Ok(()) => settings_payload(&format!("已导入 {imported} 个供应商，关联 {linked} 个已有供应商；已有配置未覆盖。"), "导入后读取设置失败"),
-        Err(error) => failed(&format!("保存 cc-switch 供应商失败：{error}"), fallback_settings_payload()),
+        Ok(()) => settings_payload(
+            &format!("已导入 {imported} 个供应商，关联 {linked} 个已有供应商；已有配置未覆盖。"),
+            "导入后读取设置失败",
+        ),
+        Err(error) => failed(
+            &format!("保存 cc-switch 供应商失败：{error}"),
+            fallback_settings_payload(),
+        ),
     }
 }
 
@@ -5140,14 +5199,21 @@ pub fn load_provider_sync_recovery() -> CommandResult<Value> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
     match alunixa_x_data::pending_recovery_journal(&home) {
         Some(path) => {
-            let recoverable = path.file_name().and_then(|name| name.to_str()) == Some("recovery-journal.json");
-            ok(if recoverable { "发现未完成的历史会话修复，请检查并恢复。" }
-                else { "恢复目录不可读取，请检查目录权限或路径；新的修复已停止。" }, json!({
-                "syncStatus": "partial_failure", "recoveryJournalPath": path,
-                "backupDir": if recoverable { path.parent() } else { None },
-                "recoveryAvailable": recoverable,
-            }))
-        },
+            let recoverable =
+                path.file_name().and_then(|name| name.to_str()) == Some("recovery-journal.json");
+            ok(
+                if recoverable {
+                    "发现未完成的历史会话修复，请检查并恢复。"
+                } else {
+                    "恢复目录不可读取，请检查目录权限或路径；新的修复已停止。"
+                },
+                json!({
+                    "syncStatus": "partial_failure", "recoveryJournalPath": path,
+                    "backupDir": if recoverable { path.parent() } else { None },
+                    "recoveryAvailable": recoverable,
+                }),
+            )
+        }
         None => ok("没有待恢复的历史会话修复。", json!({"syncStatus":"none"})),
     }
 }
@@ -5155,7 +5221,11 @@ pub fn load_provider_sync_recovery() -> CommandResult<Value> {
 #[tauri::command]
 pub async fn recover_provider_sync(backup_dir: String) -> CommandResult<Value> {
     let home = alunixa_x_core::relay_config::default_codex_home_dir();
-    match tauri::async_runtime::spawn_blocking(move || alunixa_x_data::recover_provider_sync_from_backup(&home, Path::new(&backup_dir))).await {
+    match tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_data::recover_provider_sync_from_backup(&home, Path::new(&backup_dir))
+    })
+    .await
+    {
         Ok(Ok(report)) => {
             let payload = json!({
                 "syncStatus": if report.completed { "recovered" } else { "partial_failure" },
@@ -5169,9 +5239,15 @@ pub async fn recover_provider_sync(backup_dir: String) -> CommandResult<Value> {
                 "changedSessionFiles": report.remaining_rollout_files,
                 "sqliteRowsUpdated": report.database_outcomes.iter().map(|item| item.remaining_rows).sum::<usize>(),
             });
-            if report.completed { ok("未完成修复已恢复。", payload) }
-            else { failed("部分改动存在冲突，已保留后来写入的数据，请查看恢复记录。", payload) }
-        },
+            if report.completed {
+                ok("未完成修复已恢复。", payload)
+            } else {
+                failed(
+                    "部分改动存在冲突，已保留后来写入的数据，请查看恢复记录。",
+                    payload,
+                )
+            }
+        }
         Ok(Err(error)) => failed(&format!("恢复失败：{error}"), json!({})),
         Err(error) => failed(&format!("恢复任务失败：{error}"), json!({})),
     }
@@ -5300,11 +5376,16 @@ fn provider_sync_command_result(sync: alunixa_x_data::ProviderSyncResult) -> Com
         }
         _ => success_message,
     };
-    let failure_message = if matches!(sync.status, alunixa_x_data::ProviderSyncStatus::PartialFailure) {
+    let failure_message = if matches!(
+        sync.status,
+        alunixa_x_data::ProviderSyncStatus::PartialFailure
+    ) {
         format!("历史会话修复部分失败，仍有改动需处理：{}", sync.message)
     } else if matches!(sync.status, alunixa_x_data::ProviderSyncStatus::Failed) {
         format!("历史会话修复失败：{}", sync.message)
-    } else { format!("历史会话修复未执行：{}", sync.message) };
+    } else {
+        format!("历史会话修复未执行：{}", sync.message)
+    };
     let payload = json!({
         "operationId": sync.backup_dir.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy()),
         "syncStatus": sync.status,
@@ -5701,10 +5782,17 @@ pub fn import_ccs_skills() -> CommandResult<SkillsPayload> {
     }
     let payload = current_skills_payload(&manager);
     if errors.is_empty() {
-        ok(&format!("已从 cc-switch 导入 {imported} 个 Skill。"), payload)
+        ok(
+            &format!("已从 cc-switch 导入 {imported} 个 Skill。"),
+            payload,
+        )
     } else {
         failed(
-            &format!("已从 cc-switch 导入 {imported} 个 Skill，{} 个失败：{}", errors.len(), errors.join("；")),
+            &format!(
+                "已从 cc-switch 导入 {imported} 个 Skill，{} 个失败：{}",
+                errors.len(),
+                errors.join("；")
+            ),
             payload,
         )
     }
@@ -5749,22 +5837,33 @@ async fn install_or_update_skill(
         }
     };
     let installed = manager.load_state().installed.get(id).cloned();
-    if installed.as_ref().is_some_and(|item| item.repo_key != repo_key || item.repo_path.is_empty()) {
+    if installed
+        .as_ref()
+        .is_some_and(|item| item.repo_key != repo_key || item.repo_path.is_empty())
+    {
         return failed(
-            &format!("{failure_prefix}：旧安装记录缺少来源路径或来源不同，请先备份卸载原项后重新安装。"),
+            &format!(
+                "{failure_prefix}：旧安装记录缺少来源路径或来源不同，请先备份卸载原项后重新安装。"
+            ),
             current_skills_payload(&manager),
         );
     }
-    let Some(mut skill) = skills.iter().find(|skill| match &installed {
-        Some(item) => skill.repo_path == item.repo_path,
-        None => skill.id == id,
-    }).cloned() else {
+    let Some(mut skill) = skills
+        .iter()
+        .find(|skill| match &installed {
+            Some(item) => skill.repo_path == item.repo_path,
+            None => skill.id == id,
+        })
+        .cloned()
+    else {
         return failed(
             &format!("{failure_prefix}：仓库里没有找到 {id}。"),
             current_skills_payload(&manager),
         );
     };
-    if installed.is_some() { skill.id = id.to_string(); }
+    if installed.is_some() {
+        skill.id = id.to_string();
+    }
 
     let zip = match alunixa_x_core::skills::download_repo_zip(&repo).await {
         Ok(bytes) => bytes,
@@ -5843,12 +5942,20 @@ pub fn delete_skill_backup(backup_id: String) -> CommandResult<SkillsPayload> {
 }
 
 #[tauri::command]
-pub async fn upsert_skill_repo(repo: alunixa_x_core::skills::SkillRepo, previous_key: Option<String>) -> CommandResult<SkillsPayload> {
+pub async fn upsert_skill_repo(
+    repo: alunixa_x_core::skills::SkillRepo,
+    previous_key: Option<String>,
+) -> CommandResult<SkillsPayload> {
     let manager = default_skills_manager();
     match manager.update_repo_enabled_if_unchanged(&repo, previous_key.as_deref()) {
         Ok(true) => return ok("仓库启用状态已保存。", current_skills_payload(&manager)),
-        Ok(false) => {},
-        Err(error) => return failed(&format!("保存仓库状态失败：{error}"), current_skills_payload(&manager)),
+        Ok(false) => {}
+        Err(error) => {
+            return failed(
+                &format!("保存仓库状态失败：{error}"),
+                current_skills_payload(&manager),
+            );
+        }
     }
     let repo_key = repo.key();
     let cached = cached_repo_skills(&repo_key);
@@ -5863,16 +5970,25 @@ pub async fn upsert_skill_repo(repo: alunixa_x_core::skills::SkillRepo, previous
     };
     let resolved_key = repo.key();
     let old_key = previous_key.as_deref().or_else(|| {
-        manager.list_repos().iter().any(|r| r.key() == repo_key).then_some(repo_key.as_str())
+        manager
+            .list_repos()
+            .iter()
+            .any(|r| r.key() == repo_key)
+            .then_some(repo_key.as_str())
     });
     match manager.save_repo(repo, old_key) {
         Ok(_) => {
             if let Some(old_key) = old_key {
-                if old_key != resolved_key { forget_repo_skills(old_key); }
+                if old_key != resolved_key {
+                    forget_repo_skills(old_key);
+                }
             }
             store_repo_skills(&resolved_key, &skills);
             let count = skills.len();
-            ok(&format!("仓库已验证并保存，发现 {count} 个 Skill。"), current_skills_payload(&manager))
+            ok(
+                &format!("仓库已验证并保存，发现 {count} 个 Skill。"),
+                current_skills_payload(&manager),
+            )
         }
         Err(error) => failed(
             &format!("保存仓库源失败：{error}"),
@@ -5890,25 +6006,47 @@ pub struct SkillRepositoryPayload {
 }
 
 #[tauri::command]
-pub async fn inspect_skill_repo(repo: alunixa_x_core::skills::SkillRepo) -> CommandResult<SkillRepositoryPayload> {
+pub async fn inspect_skill_repo(
+    repo: alunixa_x_core::skills::SkillRepo,
+) -> CommandResult<SkillRepositoryPayload> {
     let manager = default_skills_manager();
     let cached = cached_repo_skills(&repo.key());
     match alunixa_x_core::skills::resolve_repo_skills(repo.clone(), &cached).await {
         Ok((resolved, skills)) => {
             let count = skills.len();
             // 预览未保存仓库不会修改仓库设置。
-            if manager.list_repos().iter().any(|r| r.key() == resolved.key()) {
+            if manager
+                .list_repos()
+                .iter()
+                .any(|r| r.key() == resolved.key())
+            {
                 store_repo_skills(&resolved.key(), &skills);
             }
-            ok(&format!("已解析仓库，发现 {count} 个 Skill。"), SkillRepositoryPayload {
-                repo: resolved, skills: manager.merge_entries(&skills).into_iter()
-                    .filter(|s| skills.iter().any(|r| r.id == s.id && r.repo_key == s.repo_key)).collect(),
-                skill_count: count,
-            })
+            ok(
+                &format!("已解析仓库，发现 {count} 个 Skill。"),
+                SkillRepositoryPayload {
+                    repo: resolved,
+                    skills: manager
+                        .merge_entries(&skills)
+                        .into_iter()
+                        .filter(|s| {
+                            skills
+                                .iter()
+                                .any(|r| r.id == s.id && r.repo_key == s.repo_key)
+                        })
+                        .collect(),
+                    skill_count: count,
+                },
+            )
         }
-        Err(error) => failed(&format!("解析仓库失败：{error:#}"), SkillRepositoryPayload {
-            repo, skills: Vec::new(), skill_count: 0,
-        }),
+        Err(error) => failed(
+            &format!("解析仓库失败：{error:#}"),
+            SkillRepositoryPayload {
+                repo,
+                skills: Vec::new(),
+                skill_count: 0,
+            },
+        ),
     }
 }
 
@@ -5934,16 +6072,38 @@ fn skills_payload(
 ) -> SkillsPayload {
     let repos = manager.list_repos();
     let all_remote = all_cached_repo_skills();
-    let repository_skills = manager.merge_entries(&all_remote).into_iter()
-        .filter(|skill| all_remote.iter().any(|r| r.id == skill.id && r.repo_key == skill.repo_key))
+    let repository_skills = manager
+        .merge_entries(&all_remote)
+        .into_iter()
+        .filter(|skill| {
+            all_remote
+                .iter()
+                .any(|r| r.id == skill.id && r.repo_key == skill.repo_key)
+        })
         .collect();
-    let repo_counts = repo_skill_cache().lock().ok().map(|cache| {
-        repos.iter().filter_map(|repo| cache.get(&repo.key())
-            .map(|skills| (repo.key(), skills.len()))).collect()
-    }).unwrap_or_default();
-    let remote: Vec<_> = remote.iter().filter(|skill| {
-        repos.iter().any(|repo| repo.enabled && repo.key() == skill.repo_key)
-    }).cloned().collect();
+    let repo_counts = repo_skill_cache()
+        .lock()
+        .ok()
+        .map(|cache| {
+            repos
+                .iter()
+                .filter_map(|repo| {
+                    cache
+                        .get(&repo.key())
+                        .map(|skills| (repo.key(), skills.len()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let remote: Vec<_> = remote
+        .iter()
+        .filter(|skill| {
+            repos
+                .iter()
+                .any(|repo| repo.enabled && repo.key() == skill.repo_key)
+        })
+        .cloned()
+        .collect();
     SkillsPayload {
         skills: if remote.is_empty() {
             manager.local_inventory()
@@ -5986,8 +6146,12 @@ fn repo_skill_cache() -> &'static std::sync::Mutex<RepoSkillCache> {
     static CACHE: std::sync::OnceLock<std::sync::Mutex<RepoSkillCache>> =
         std::sync::OnceLock::new();
     CACHE.get_or_init(|| {
-        let cache = std::fs::read(alunixa_x_core::paths::default_app_state_dir().join("skill-catalog.json"))
-            .ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        let cache = std::fs::read(
+            alunixa_x_core::paths::default_app_state_dir().join("skill-catalog.json"),
+        )
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
         std::sync::Mutex::new(cache)
     })
 }
@@ -6150,7 +6314,13 @@ where
         );
     };
     let download_dir = alunixa_x_core::paths::default_app_state_dir().join("updates");
-    match alunixa_x_core::update::perform_update_with_progress(&release, &download_dir, &mut on_progress).await {
+    match alunixa_x_core::update::perform_update_with_progress(
+        &release,
+        &download_dir,
+        &mut on_progress,
+    )
+    .await
+    {
         Ok(result) => ok(
             if cfg!(target_os = "macos") {
                 "安装包已验证，Alunixa X 将关闭以安装更新，完成后自动重启；失败时保留旧版。"
@@ -6188,8 +6358,11 @@ pub fn load_watcher_state() -> CommandResult<WatcherPayload> {
 pub fn set_watcher_enabled(enabled: bool) -> CommandResult<WatcherPayload> {
     let launcher_path =
         alunixa_x_core::install::companion_binary_path(alunixa_x_core::install::SILENT_BINARY);
-    match alunixa_x_core::watcher::set_watcher_enabled(enabled, &launcher_path, default_debug_port())
-    {
+    match alunixa_x_core::watcher::set_watcher_enabled(
+        enabled,
+        &launcher_path,
+        default_debug_port(),
+    ) {
         Ok(()) if enabled => ok("开机启动已开启。", watcher_payload()),
         Ok(()) => ok("开机启动已关闭。", watcher_payload()),
         Err(error) if enabled => failed(&format!("开启开机启动失败：{error}"), watcher_payload()),
@@ -7019,8 +7192,13 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
     };
     match alunixa_x_core::relay_config::test_relay_profile(&profile, &test_model).await {
         Ok(result) => {
-            let status = if !result.protocol_valid { "failed" }
-                else if result.completion_status != "completed" { "warning" } else { "ok" };
+            let status = if !result.protocol_valid {
+                "failed"
+            } else if result.completion_status != "completed" {
+                "warning"
+            } else {
+                "ok"
+            };
             let preview = result.response_preview.trim();
             let detail = if preview.is_empty() {
                 "响应内容为空".to_string()
@@ -7319,8 +7497,13 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
 
     match alunixa_x_core::relay_config::test_relay_profile(&profile, &test_model).await {
         Ok(result) => {
-            let status = if !result.protocol_valid { "failed" }
-                else if result.completion_status != "completed" { "warning" } else { "ok" };
+            let status = if !result.protocol_valid {
+                "failed"
+            } else if result.completion_status != "completed" {
+                "warning"
+            } else {
+                "ok"
+            };
             let preview = result.response_preview.trim();
             checks.push(ProviderDoctorCheck {
                 id: "request".to_string(),
@@ -8464,19 +8647,32 @@ mod tests {
     fn skills_payload_hides_disabled_repository_catalog() {
         let temp = tempfile::tempdir().unwrap();
         let manager = alunixa_x_core::skills::SkillsManager::new(
-            temp.path().join("skills"), temp.path().join("backups"),
-            temp.path().join("skills.json"), temp.path().join("home"),
+            temp.path().join("skills"),
+            temp.path().join("backups"),
+            temp.path().join("skills.json"),
+            temp.path().join("home"),
         );
         let mut repo = alunixa_x_core::skills::parse_repo_key("acme/kit@main").unwrap();
         let remote = vec![alunixa_x_core::skills::RemoteSkill {
-            id: "alpha".to_string(), name: "alpha".to_string(), description: String::new(),
-            repo_key: repo.key(), repo_path: "alpha".to_string(), content_hash: "v1".to_string(),
+            id: "alpha".to_string(),
+            name: "alpha".to_string(),
+            description: String::new(),
+            repo_key: repo.key(),
+            repo_path: "alpha".to_string(),
+            content_hash: "v1".to_string(),
         }];
         manager.upsert_repo(repo.clone()).unwrap();
-        assert_eq!(skills_payload(&manager, &remote, Vec::new()).skills.len(), 1);
+        assert_eq!(
+            skills_payload(&manager, &remote, Vec::new()).skills.len(),
+            1
+        );
         repo.enabled = false;
         manager.upsert_repo(repo).unwrap();
-        assert!(skills_payload(&manager, &remote, Vec::new()).skills.is_empty());
+        assert!(
+            skills_payload(&manager, &remote, Vec::new())
+                .skills
+                .is_empty()
+        );
     }
 
     /// 进程级全局状态的测试锁。
@@ -8786,9 +8982,14 @@ cwd = \"/tmp\"
 
     #[test]
     fn partial_provider_sync_exposes_residual_counts_and_recovery_path() {
-        let mut sync = provider_sync_result_for_test(alunixa_x_data::ProviderSyncStatus::PartialFailure, "concurrent update preserved");
+        let mut sync = provider_sync_result_for_test(
+            alunixa_x_data::ProviderSyncStatus::PartialFailure,
+            "concurrent update preserved",
+        );
         sync.backup_dir = Some(PathBuf::from("/artificial/operation-1"));
-        sync.recovery_journal_path = Some(PathBuf::from("/artificial/operation-1/recovery-journal.json"));
+        sync.recovery_journal_path = Some(PathBuf::from(
+            "/artificial/operation-1/recovery-journal.json",
+        ));
         sync.sqlite_rows_updated = 3;
         sync.recovery_errors = vec!["人工冲突".into()];
         let result = provider_sync_command_result(sync);
@@ -8796,7 +8997,10 @@ cwd = \"/tmp\"
         assert!(result.message.contains("部分失败"));
         assert_eq!(result.payload["sqliteRowsUpdated"], 3);
         assert_eq!(result.payload["operationId"], "operation-1");
-        assert_eq!(result.payload["recoveryJournalPath"], "/artificial/operation-1/recovery-journal.json");
+        assert_eq!(
+            result.payload["recoveryJournalPath"],
+            "/artificial/operation-1/recovery-journal.json"
+        );
     }
 
     #[tokio::test]
@@ -8806,15 +9010,24 @@ cwd = \"/tmp\"
         let path = temp.path().join("settings.json");
         let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(path));
         let store = SettingsStore::default();
-        store.save(&BackendSettings { enhancements_enabled: false, ..BackendSettings::default() }).unwrap();
+        store
+            .save(&BackendSettings {
+                enhancements_enabled: false,
+                ..BackendSettings::default()
+            })
+            .unwrap();
         let stale = store.load().unwrap();
         let revision = alunixa_x_core::config_transaction::revision(
-            store.path(), &alunixa_x_core::codex_home::default_codex_home_dir(),
-        ).unwrap();
+            store.path(),
+            &alunixa_x_core::codex_home::default_codex_home_dir(),
+        )
+        .unwrap();
         store.update(json!({"providerSyncEnabled":true})).unwrap();
         let current_revision = alunixa_x_core::config_transaction::revision(
-            store.path(), &alunixa_x_core::codex_home::default_codex_home_dir(),
-        ).ok();
+            store.path(),
+            &alunixa_x_core::codex_home::default_codex_home_dir(),
+        )
+        .ok();
         let result = save_settings(stale, Some(revision), None).await;
         alunixa_x_core::paths::set_settings_path_for_tests(previous);
         assert_eq!(result.status, "failed");
@@ -9297,7 +9510,11 @@ base_url = "https://example.invalid/v1"
         // 本地主线的同名单测（e0cb49cd）与远端（eb241dbf）做的是同一件事，
         // 这里采用远端版本：额外写入一份默认 settings.json，隔离更彻底。
         let settings_path = temp.path().join("settings.json");
-        std::fs::write(&settings_path, serde_json::to_vec(&BackendSettings::default()).unwrap()).unwrap();
+        std::fs::write(
+            &settings_path,
+            serde_json::to_vec(&BackendSettings::default()).unwrap(),
+        )
+        .unwrap();
         let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
 
         let result = apply_aggregate_relay_injection_to_home(
@@ -10818,8 +11035,13 @@ model_reasoning_effort = "high"
         let options = temp.path().join("worker-options.json");
         std::fs::write(&options, "{}").unwrap();
         let mut child = std::process::Command::new("/bin/sleep")
-            .arg0(format!("AlunixaX --alunixa-x-multi-worker {}", options.display()))
-            .arg("30").spawn().unwrap();
+            .arg0(format!(
+                "AlunixaX --alunixa-x-multi-worker {}",
+                options.display()
+            ))
+            .arg("30")
+            .spawn()
+            .unwrap();
         let result = terminate_multi_worker(child.id(), &options, None);
         let remained_alive = child.try_wait().unwrap().is_none();
         // 只清理本测试持有 Child 的合成进程，不借用真实应用的 PID。
@@ -10885,7 +11107,10 @@ model_reasoning_effort = "high"
     fn multi_launch_result_roundtrips_through_instance_directory() {
         let temp = tempfile::tempdir().unwrap();
         let result = CodexMultiLaunchResult {
-            instance_id: String::new(), generation: 0, helper_port: None, identity: None,
+            instance_id: String::new(),
+            generation: 0,
+            helper_port: None,
+            identity: None,
             status: "failed".to_string(),
             message: "Codex 多开实例启动后调试端口 9456 未就绪，Codex 可能已退出。".to_string(),
             finished_at_ms: 1234,

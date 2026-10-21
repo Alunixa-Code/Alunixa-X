@@ -27,7 +27,8 @@ fn real_settings_catalog_has_no_nested_prefix() {
         .filter(|slug| {
             slug.split_once('/')
                 .and_then(|(member, rest)| {
-                    rest.strip_prefix(member).and_then(|rest| rest.strip_prefix('/'))
+                    rest.strip_prefix(member)
+                        .and_then(|rest| rest.strip_prefix('/'))
                 })
                 .is_some()
         })

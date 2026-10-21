@@ -507,16 +507,26 @@ pub(crate) fn terminate_verified_multi_worker(
     }
     let _guard = HandleGuard(handle);
     let actual_birth = process_birth_id_from_handle(handle);
-    if actual_birth != expected_birth { return Ok(false); }
-    let Some(command_line) = process_command_line_from_handle(handle) else { return Ok(false); };
+    if actual_birth != expected_birth {
+        return Ok(false);
+    }
+    let Some(command_line) = process_command_line_from_handle(handle) else {
+        return Ok(false);
+    };
     let wide = wide_null(&command_line);
     let mut count = 0;
     let argv = unsafe { CommandLineToArgvW(PCWSTR(wide.as_ptr()), &mut count) };
-    if argv.is_null() { return Ok(false); }
+    if argv.is_null() {
+        return Ok(false);
+    }
     let arguments = if count == 3 {
-        unsafe { std::slice::from_raw_parts(argv, count as usize) }.iter()
-            .map(|value| unsafe { value.to_string() }.ok()).collect::<Option<Vec<_>>>()
-    } else { None };
+        unsafe { std::slice::from_raw_parts(argv, count as usize) }
+            .iter()
+            .map(|value| unsafe { value.to_string() }.ok())
+            .collect::<Option<Vec<_>>>()
+    } else {
+        None
+    };
     // CommandLineToArgvW 分配的 argv 必须用 LocalFree 释放。
     unsafe { LocalFree(HLOCAL(argv.cast())) };
     let Some(arguments) = arguments else {
@@ -530,10 +540,15 @@ pub(crate) fn terminate_verified_multi_worker(
     ) {
         return Ok(false);
     }
-    let Some(image) = process_image_path_from_handle(handle) else { return Ok(false); };
-    let Ok(expected_image) = std::env::current_exe().and_then(|path| path.canonicalize())
-        else { return Ok(false); };
-    if image.canonicalize().ok().as_ref() != Some(&expected_image) { return Ok(false); }
+    let Some(image) = process_image_path_from_handle(handle) else {
+        return Ok(false);
+    };
+    let Ok(expected_image) = std::env::current_exe().and_then(|path| path.canonicalize()) else {
+        return Ok(false);
+    };
+    if image.canonicalize().ok().as_ref() != Some(&expected_image) {
+        return Ok(false);
+    }
     unsafe { TerminateProcess(handle, 0) }.context("结束已验证的多开 worker 失败")?;
     Ok(true)
 }

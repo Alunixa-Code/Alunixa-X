@@ -87,19 +87,29 @@ pub fn switch_relay_profile_in_home(
         "relay_switch.after",
     );
     crate::codex_app_state::prune_stale_model_references_after_switch_nonfatal(
-        home, &result.settings, "relay_switch.after",
+        home,
+        &result.settings,
+        "relay_switch.after",
     );
     Ok(result)
 }
 
 fn restore_missing_saved_profiles(selected: &mut BackendSettings, saved: &BackendSettings) {
     for profile in &saved.relay_profiles {
-        if !selected.relay_profiles.iter().any(|item| item.id == profile.id) {
+        if !selected
+            .relay_profiles
+            .iter()
+            .any(|item| item.id == profile.id)
+        {
             selected.relay_profiles.push(profile.clone());
         }
     }
     for aggregate in &saved.aggregate_relay_profiles {
-        if !selected.aggregate_relay_profiles.iter().any(|item| item.id == aggregate.id) {
+        if !selected
+            .aggregate_relay_profiles
+            .iter()
+            .any(|item| item.id == aggregate.id)
+        {
             selected.aggregate_relay_profiles.push(aggregate.clone());
         }
     }
@@ -148,11 +158,21 @@ fn apply_selected_relay_profile(
     let relay = settings.active_relay_profile();
     let common_config = relay_combined_common_config(settings);
     let result = if relay.relay_mode == RelayMode::Official && !relay.official_mix_api_key {
-        crate::relay_config::apply_relay_profile_with_preservation(home, &relay, &common_config, crate::protocol_proxy::protocol_proxy_port(), settings.relay_preserve_nonprovider_settings)?
+        crate::relay_config::apply_relay_profile_with_preservation(
+            home,
+            &relay,
+            &common_config,
+            crate::protocol_proxy::protocol_proxy_port(),
+            settings.relay_preserve_nonprovider_settings,
+        )?
     } else {
         validate_switch_profile_files(&relay)?;
         crate::relay_config::apply_relay_profile_with_preservation(
-            home, &relay, &common_config, crate::protocol_proxy::protocol_proxy_port(), settings.relay_preserve_nonprovider_settings,
+            home,
+            &relay,
+            &common_config,
+            crate::protocol_proxy::protocol_proxy_port(),
+            settings.relay_preserve_nonprovider_settings,
         )?
     };
     crate::relay_config::sync_codex_agent_capabilities_in_home(home, settings)?;

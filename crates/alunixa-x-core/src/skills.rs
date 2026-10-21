@@ -239,20 +239,34 @@ impl SkillsManager {
     }
 
     /// 仅启停既有源不依赖网络；身份变更必须由调用方验证后保存。
-    pub fn update_repo_enabled_if_unchanged(&self, repo: &SkillRepo, previous_key: Option<&str>) -> anyhow::Result<bool> {
+    pub fn update_repo_enabled_if_unchanged(
+        &self,
+        repo: &SkillRepo,
+        previous_key: Option<&str>,
+    ) -> anyhow::Result<bool> {
         let repo = normalize_repo(repo.clone())?;
         let key = repo.key();
-        if previous_key.is_some_and(|previous| previous != key) { return Ok(false); }
+        if previous_key.is_some_and(|previous| previous != key) {
+            return Ok(false);
+        }
         let _guard = self.state_lock.lock().unwrap();
         let mut state = self.load_state_unlocked();
-        let Some(existing) = state.repos.iter_mut().find(|item| item.key() == key) else { return Ok(false) };
-        if existing.enabled == repo.enabled { return Ok(false); }
+        let Some(existing) = state.repos.iter_mut().find(|item| item.key() == key) else {
+            return Ok(false);
+        };
+        if existing.enabled == repo.enabled {
+            return Ok(false);
+        }
         existing.enabled = repo.enabled;
         self.save_state_unlocked(&state)?;
         Ok(true)
     }
 
-    pub fn save_repo(&self, repo: SkillRepo, previous_key: Option<&str>) -> anyhow::Result<Vec<SkillRepo>> {
+    pub fn save_repo(
+        &self,
+        repo: SkillRepo,
+        previous_key: Option<&str>,
+    ) -> anyhow::Result<Vec<SkillRepo>> {
         let repo = normalize_repo(repo)?;
         let _guard = self.state_lock.lock().unwrap();
         let mut state = self.load_state_unlocked();
@@ -289,9 +303,13 @@ impl SkillsManager {
         let mut entries: BTreeMap<(String, String), SkillEntry> = BTreeMap::new();
 
         for skill in remote {
-            let installed = state.installed.values().find(|item|
-                item.repo_key == skill.repo_key && item.repo_path == skill.repo_path);
-            let id = installed.map(|item| item.id.clone()).unwrap_or_else(|| skill.id.clone());
+            let installed = state
+                .installed
+                .values()
+                .find(|item| item.repo_key == skill.repo_key && item.repo_path == skill.repo_path);
+            let id = installed
+                .map(|item| item.id.clone())
+                .unwrap_or_else(|| skill.id.clone());
             entries.insert(
                 (skill.repo_key.clone(), id.clone()),
                 SkillEntry {
@@ -320,34 +338,43 @@ impl SkillsManager {
 
         // 已安装但远端清单里没有的（仓库删了、或本地手工放的），仍要能看见和卸载。
         for (id, installed) in &state.installed {
-            entries.entry((installed.repo_key.clone(), id.clone())).or_insert_with(|| SkillEntry {
-                id: id.clone(),
-                name: if installed.name.is_empty() {
-                    id.clone()
-                } else {
-                    installed.name.clone()
-                },
-                description: installed.description.clone(),
-                repo_key: installed.repo_key.clone(),
-                repo_path: installed.repo_path.clone(),
-                installed: true,
-                enabled: is_linked(&linked.join(id)),
-                bundled: false,
-                content_hash: installed.content_hash.clone(),
-                remote_hash: String::new(),
-                update_available: false,
-            });
+            entries
+                .entry((installed.repo_key.clone(), id.clone()))
+                .or_insert_with(|| SkillEntry {
+                    id: id.clone(),
+                    name: if installed.name.is_empty() {
+                        id.clone()
+                    } else {
+                        installed.name.clone()
+                    },
+                    description: installed.description.clone(),
+                    repo_key: installed.repo_key.clone(),
+                    repo_path: installed.repo_path.clone(),
+                    installed: true,
+                    enabled: is_linked(&linked.join(id)),
+                    bundled: false,
+                    content_hash: installed.content_hash.clone(),
+                    remote_hash: String::new(),
+                    update_available: false,
+                });
         }
 
         for skill in self.list_bundled_skills() {
-            entries.entry((skill.repo_key.clone(), skill.id.clone())).or_insert(skill);
+            entries
+                .entry((skill.repo_key.clone(), skill.id.clone()))
+                .or_insert(skill);
         }
 
         // 用户让 Codex 自己建的 skill（或手工放进 skills 目录的）不会进 state.installed，
         // 也不在远端清单里，此前因此完全不显示（issue #862）。这里扫描 linked_dir 补上。
         for skill in self.list_local_skills() {
-            if !entries.values().any(|item| item.id == skill.id && item.installed) {
-                entries.entry((skill.repo_key.clone(), skill.id.clone())).or_insert(skill);
+            if !entries
+                .values()
+                .any(|item| item.id == skill.id && item.installed)
+            {
+                entries
+                    .entry((skill.repo_key.clone(), skill.id.clone()))
+                    .or_insert(skill);
             }
         }
 
@@ -411,27 +438,49 @@ impl SkillsManager {
         validate_skill_id(id)?;
         let manifest = external_dir.join(SKILL_MANIFEST_FILE);
         if !manifest.is_file() {
-            anyhow::bail!("{} 下没有 SKILL.md，不是有效的 Skill", external_dir.display());
+            anyhow::bail!(
+                "{} 下没有 SKILL.md，不是有效的 Skill",
+                external_dir.display()
+            );
         }
         std::fs::create_dir_all(&self.source_dir)?;
-        if self.source_dir.canonicalize()?.starts_with(external_dir.canonicalize()?) {
+        if self
+            .source_dir
+            .canonicalize()?
+            .starts_with(external_dir.canonicalize()?)
+        {
             anyhow::bail!("导入目录不能包含受控源目录");
         }
-        let staging = self.source_dir.join(format!(".import-{id}-{}", uuid::Uuid::new_v4()));
+        let staging = self
+            .source_dir
+            .join(format!(".import-{id}-{}", uuid::Uuid::new_v4()));
         if let Err(error) = copy_dir_all(external_dir, &staging) {
             let _ = remove_link(&staging);
             return Err(error);
         }
         let (name, description) = read_skill_manifest(&manifest, id);
-        self.commit_staged_skill(&staging, InstalledSkill {
-            id: id.to_string(), name, description, repo_key: "cc-switch".to_string(),
-            repo_path: String::new(), content_hash: String::new(),
-            installed_at: current_unix_timestamp_string(),
-        }, false)
+        self.commit_staged_skill(
+            &staging,
+            InstalledSkill {
+                id: id.to_string(),
+                name,
+                description,
+                repo_key: "cc-switch".to_string(),
+                repo_path: String::new(),
+                content_hash: String::new(),
+                installed_at: current_unix_timestamp_string(),
+            },
+            false,
+        )
     }
 
     /// 目录、链接和安装记录一起提交；失败时恢复两处原内容。
-    fn commit_staged_skill(&self, staging: &Path, installed: InstalledSkill, enabled: bool) -> anyhow::Result<SkillsState> {
+    fn commit_staged_skill(
+        &self,
+        staging: &Path,
+        installed: InstalledSkill,
+        enabled: bool,
+    ) -> anyhow::Result<SkillsState> {
         let id = installed.id.clone();
         let destination = self.source_dir.join(&id);
         let _guard = self.state_lock.lock().unwrap();
@@ -461,22 +510,30 @@ impl SkillsManager {
         })();
         if let Err(error) = result {
             let rollback = (|| -> anyhow::Result<()> {
-                if creating_link { remove_link(&link)?; }
-                if published { std::fs::rename(&destination, &staging)?; }
+                if creating_link {
+                    remove_link(&link)?;
+                }
+                if published {
+                    std::fs::rename(&destination, &staging)?;
+                }
                 for (original, backup) in displaced.iter().rev() {
                     std::fs::rename(backup, original)?;
                 }
                 Ok(())
             })();
             if let Err(rollback_error) = rollback {
-                return Err(error.context(format!("回滚失败，原内容保留在备份目录：{rollback_error:#}")));
+                return Err(error.context(format!(
+                    "回滚失败，原内容保留在备份目录：{rollback_error:#}"
+                )));
             }
             let _ = remove_link(&staging);
             return Err(error);
         }
         // 旧安装软链不含独立内容，实体目录备份则必须保留。
         for (_, backup) in &displaced {
-            if std::fs::symlink_metadata(backup).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            if std::fs::symlink_metadata(backup)
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            {
                 if let Err(error) = remove_link(backup) {
                     eprintln!("清理已提交的 Skill 软链备份失败：{error:#}");
                 }
@@ -531,7 +588,9 @@ impl SkillsManager {
         validate_skill_id(&skill.id)?;
         if let Some(installed) = self.load_state().installed.get(&skill.id) {
             if installed.repo_key != skill.repo_key || installed.repo_path != skill.repo_path {
-                anyhow::bail!("同名 Skill 的来源路径不同或旧记录缺少路径，不能覆盖；请先备份卸载原项");
+                anyhow::bail!(
+                    "同名 Skill 的来源路径不同或旧记录缺少路径，不能覆盖；请先备份卸载原项"
+                );
             }
         }
         let enable_after_install = !self.load_state().installed.contains_key(&skill.id)
@@ -547,7 +606,8 @@ impl SkillsManager {
         }
         result?;
 
-        self.commit_staged_skill(&staging,
+        self.commit_staged_skill(
+            &staging,
             InstalledSkill {
                 id: skill.id.clone(),
                 name: skill.name.clone(),
@@ -570,10 +630,16 @@ impl SkillsManager {
             let state = self.load_state();
             let physical_copy = std::fs::symlink_metadata(&link)
                 .is_ok_and(|metadata| !metadata.file_type().is_symlink());
-            if link.is_dir() && (physical_copy || !source.is_dir() || !state.installed.contains_key(id)) {
+            if link.is_dir()
+                && (physical_copy || !source.is_dir() || !state.installed.contains_key(id))
+            {
                 // 复制回退后的安装位置可能已有用户修改；未纳管软链也需要保留可再启用的源。
                 std::fs::create_dir_all(&self.source_dir)?;
-                if self.source_dir.canonicalize()?.starts_with(link.canonicalize()?) {
+                if self
+                    .source_dir
+                    .canonicalize()?
+                    .starts_with(link.canonicalize()?)
+                {
                     anyhow::bail!("Skill 目录不能包含受控源目录，未执行停用");
                 }
                 let staging = self.staging_dir(id);
@@ -636,13 +702,17 @@ impl SkillsManager {
         if let Err(error) = result {
             for (original, backup) in displaced.iter().rev() {
                 if let Err(rollback_error) = std::fs::rename(backup, original) {
-                    return Err(error.context(format!("卸载回滚失败，原内容保留在备份目录：{rollback_error}")));
+                    return Err(error.context(format!(
+                        "卸载回滚失败，原内容保留在备份目录：{rollback_error}"
+                    )));
                 }
             }
             return Err(error);
         }
         for (_, backup) in &displaced {
-            if std::fs::symlink_metadata(backup).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            if std::fs::symlink_metadata(backup)
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            {
                 if let Err(error) = remove_link(backup) {
                     eprintln!("清理已卸载的 Skill 软链备份失败：{error:#}");
                 }
@@ -843,17 +913,26 @@ pub fn parse_skills_from_tree(repo: &SkillRepo, tree: &Value) -> Vec<RemoteSkill
         if item.get("type").and_then(Value::as_str) != Some("blob") {
             continue;
         }
-        let Some(path) = item.get("path").and_then(Value::as_str) else { continue };
-        let Some(rest) = path.strip_prefix(&prefix) else { continue };
+        let Some(path) = item.get("path").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(rest) = path.strip_prefix(&prefix) else {
+            continue;
+        };
         if rest == SKILL_MANIFEST_FILE || rest.ends_with("/SKILL.md") {
-            let directory = path.strip_suffix(SKILL_MANIFEST_FILE).unwrap().trim_end_matches('/');
+            let directory = path
+                .strip_suffix(SKILL_MANIFEST_FILE)
+                .unwrap()
+                .trim_end_matches('/');
             if directory.is_empty() || safe_relative_path(directory).is_ok() {
                 directories.insert(directory.to_string());
             }
         }
     }
-    let mut subtrees: BTreeMap<String, Vec<(String, String)>> =
-        directories.iter().map(|dir| (dir.clone(), Vec::new())).collect();
+    let mut subtrees: BTreeMap<String, Vec<(String, String)>> = directories
+        .iter()
+        .map(|dir| (dir.clone(), Vec::new()))
+        .collect();
     for item in items {
         if item.get("type").and_then(Value::as_str) != Some("blob") {
             continue;
@@ -867,7 +946,11 @@ pub fn parse_skills_from_tree(repo: &SkillRepo, tree: &Value) -> Vec<RemoteSkill
             .unwrap_or_default()
             .to_string();
         for (directory, files) in &mut subtrees {
-            let directory_prefix = if directory.is_empty() { String::new() } else { format!("{directory}/") };
+            let directory_prefix = if directory.is_empty() {
+                String::new()
+            } else {
+                format!("{directory}/")
+            };
             if let Some(relative) = path.strip_prefix(&directory_prefix) {
                 files.push((relative.to_string(), sha.clone()));
             }
@@ -876,7 +959,11 @@ pub fn parse_skills_from_tree(repo: &SkillRepo, tree: &Value) -> Vec<RemoteSkill
     subtrees
         .into_iter()
         .filter_map(|(repo_path, mut files)| {
-            let base = if repo_path.is_empty() { repo.name.clone() } else { repo_path.rsplit('/').next()?.to_string() };
+            let base = if repo_path.is_empty() {
+                repo.name.clone()
+            } else {
+                repo_path.rsplit('/').next()?.to_string()
+            };
             // 嵌套路径始终使用稳定身份，不依赖当前同名目录的数量或排序。
             let identity = format!("{repo_key}\0{repo_path}");
             let id = format!("{base}--{:x}", Sha256::digest(identity.as_bytes()));
@@ -894,7 +981,11 @@ pub fn parse_skills_from_tree(repo: &SkillRepo, tree: &Value) -> Vec<RemoteSkill
                 name: base,
                 description: String::new(),
                 repo_key: repo_key.clone(),
-                repo_path: if repo_path.is_empty() { ".".into() } else { repo_path },
+                repo_path: if repo_path.is_empty() {
+                    ".".into()
+                } else {
+                    repo_path
+                },
                 content_hash: format!("{:x}", hasher.finalize()),
             })
         })
@@ -983,15 +1074,22 @@ fn parse_skills_from_zip(
                 .strip_prefix(prefix.as_str())
                 .is_some_and(|path| path.ends_with(&format!("/{SKILL_MANIFEST_FILE}")));
         if is_manifest {
-            manifests.insert(relative.to_string(), String::from_utf8_lossy(&contents).into_owned());
+            manifests.insert(
+                relative.to_string(),
+                String::from_utf8_lossy(&contents).into_owned(),
+            );
         }
     }
     let tree = serde_json::json!({ "tree": tree_items });
     let mut skills = parse_skills_from_tree(repo, &tree);
     for skill in &mut skills {
         if let Some(hit) = cached.get(&skill.id) {
-            if hit.content_hash == skill.content_hash && !hit.description.is_empty()
-                && !matches!(hit.description.as_str(), ">" | ">-" | ">+" | "|" | "|-" | "|+")
+            if hit.content_hash == skill.content_hash
+                && !hit.description.is_empty()
+                && !matches!(
+                    hit.description.as_str(),
+                    ">" | ">-" | ">+" | "|" | "|-" | "|+"
+                )
             {
                 skill.name = hit.name.clone();
                 skill.description = hit.description.clone();
@@ -1008,8 +1106,11 @@ fn parse_skills_from_zip(
 }
 
 fn skill_manifest_path(repo_path: &str) -> String {
-    if repo_path == "." { SKILL_MANIFEST_FILE.into() }
-    else { format!("{repo_path}/{SKILL_MANIFEST_FILE}") }
+    if repo_path == "." {
+        SKILL_MANIFEST_FILE.into()
+    } else {
+        format!("{repo_path}/{SKILL_MANIFEST_FILE}")
+    }
 }
 
 /// 解析 SKILL.md 的 YAML frontmatter。只取 `name` 和 `description` 两个标量，
@@ -1119,7 +1220,11 @@ pub fn extract_skill_subtree(
     if repo_path.is_empty() {
         anyhow::bail!("skill 在仓库中的路径不能为空");
     }
-    let prefix = if repo_path == "." { String::new() } else { format!("{repo_path}/") };
+    let prefix = if repo_path == "." {
+        String::new()
+    } else {
+        format!("{repo_path}/")
+    };
     let mut archive =
         zip::ZipArchive::new(Cursor::new(zip_bytes)).context("skill 仓库压缩包无法解析")?;
     let mut wrote_manifest = false;
@@ -1213,24 +1318,41 @@ fn raw_file_url(repo: &SkillRepo, path: &str) -> String {
 async fn github_client() -> anyhow::Result<reqwest::Client> {
     tokio::task::spawn_blocking(|| {
         let agent = format!("Alunixa X/{}", crate::version::VERSION);
-        if ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy"]
-            .iter().any(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
+        if [
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+        ]
+        .iter()
+        .any(|key| std::env::var(key).is_ok_and(|v| !v.trim().is_empty()))
         {
             return crate::http_client::proxied_client(&agent);
         }
         let mut proxies = BTreeMap::new();
-        for host in ["api.github.com", "codeload.github.com", "raw.githubusercontent.com"] {
-            if let Some(proxy) = crate::proxy::detect_system_proxy_for_url(&format!("https://{host}/")) {
+        for host in [
+            "api.github.com",
+            "codeload.github.com",
+            "raw.githubusercontent.com",
+        ] {
+            if let Some(proxy) =
+                crate::proxy::detect_system_proxy_for_url(&format!("https://{host}/"))
+            {
                 proxies.insert(host.to_string(), proxy);
             }
         }
-        Ok(reqwest::Client::builder().user_agent(agent)
+        Ok(reqwest::Client::builder()
+            .user_agent(agent)
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(90))
             .proxy(reqwest::Proxy::custom(move |url| {
                 url.host_str().and_then(|host| proxies.get(host).cloned())
-            })).build()?)
-    }).await?
+            }))
+            .build()?)
+    })
+    .await?
 }
 
 pub async fn resolve_repo_skills(
@@ -1240,11 +1362,17 @@ pub async fn resolve_repo_skills(
     let repo = normalize_repo(repo)?;
     match fetch_repo_skills(&repo, cached).await {
         Ok(skills) => Ok((repo, skills)),
-        Err(error) if format!("{error:#}").contains("HTTP 404")
-            && matches!(repo.branch.as_str(), "main" | "master") =>
+        Err(error)
+            if format!("{error:#}").contains("HTTP 404")
+                && matches!(repo.branch.as_str(), "main" | "master") =>
         {
             let mut alternative = repo.clone();
-            alternative.branch = if repo.branch == "main" { "master" } else { "main" }.into();
+            alternative.branch = if repo.branch == "main" {
+                "master"
+            } else {
+                "main"
+            }
+            .into();
             match fetch_repo_skills(&alternative, &BTreeMap::new()).await {
                 Ok(skills) => Ok((alternative, skills)),
                 Err(_) => Err(error),
@@ -1285,8 +1413,11 @@ pub async fn fetch_repo_skills(
         .await;
     let response = match response {
         Ok(response) => response,
-        Err(error) => return fetch_repo_skills_from_zip(repo, cached, &client).await
-            .with_context(|| format!("文件树请求失败（{error}），压缩包回退也失败")),
+        Err(error) => {
+            return fetch_repo_skills_from_zip(repo, cached, &client)
+                .await
+                .with_context(|| format!("文件树请求失败（{error}），压缩包回退也失败"));
+        }
     };
     // 不要用 error_for_status() 一把带过：403 限流、404 仓库/分支不存在、401 令牌
     // 无效，处理方式完全不同，但用户只会看到「返回错误状态」，没法自助也没法报障
@@ -1318,8 +1449,12 @@ pub async fn fetch_repo_skills(
         let client = &client;
         async move {
             if let Some(hit) = cached.get(&skill.id) {
-                if hit.content_hash == skill.content_hash && !hit.description.is_empty()
-                    && !matches!(hit.description.as_str(), ">" | ">-" | ">+" | "|" | "|-" | "|+")
+                if hit.content_hash == skill.content_hash
+                    && !hit.description.is_empty()
+                    && !matches!(
+                        hit.description.as_str(),
+                        ">" | ">-" | ">+" | "|" | "|-" | "|+"
+                    )
                 {
                     skill.name = hit.name.clone();
                     skill.description = hit.description.clone();
@@ -1328,7 +1463,9 @@ pub async fn fetch_repo_skills(
             }
             let manifest_url = raw_file_url(repo, &skill_manifest_path(&skill.repo_path));
             if let Ok(response) = with_github_auth(client.get(manifest_url))
-                .timeout(std::time::Duration::from_secs(15)).send().await
+                .timeout(std::time::Duration::from_secs(15))
+                .send()
+                .await
                 && let Ok(response) = response.error_for_status()
                 && let Ok(text) = response.text().await
             {
@@ -1338,7 +1475,10 @@ pub async fn fetch_repo_skills(
             }
             skill
         }
-    })).buffer_unordered(8).collect().await;
+    }))
+    .buffer_unordered(8)
+    .collect()
+    .await;
     Ok(skills)
 }
 
@@ -1507,16 +1647,34 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let external = temp.path().join("external");
-        for (directory, content) in [(&external, "imported"), (&manager.source_dir.join("alpha"), "old source"), (&manager.linked_dir().join("alpha"), "user local")] {
+        for (directory, content) in [
+            (&external, "imported"),
+            (&manager.source_dir.join("alpha"), "old source"),
+            (&manager.linked_dir().join("alpha"), "user local"),
+        ] {
             std::fs::create_dir_all(directory).unwrap();
             std::fs::write(directory.join("SKILL.md"), content).unwrap();
         }
         manager.import_from_directory("alpha", &external).unwrap();
         assert!(!manager.linked_dir().join("alpha").exists());
-        assert_eq!(std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(), "imported");
-        let contents: std::collections::BTreeSet<_> = manager.list_backups().iter()
-            .map(|backup| std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md")).unwrap()).collect();
-        assert_eq!(contents, ["old source".to_string(), "user local".to_string()].into_iter().collect());
+        assert_eq!(
+            std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(),
+            "imported"
+        );
+        let contents: std::collections::BTreeSet<_> = manager
+            .list_backups()
+            .iter()
+            .map(|backup| {
+                std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md"))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            contents,
+            ["old source".to_string(), "user local".to_string()]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]
@@ -1524,7 +1682,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let external = temp.path().join("external");
-        for (directory, content) in [(&external, "imported"), (&manager.source_dir.join("alpha"), "old source"), (&manager.linked_dir().join("alpha"), "user local")] {
+        for (directory, content) in [
+            (&external, "imported"),
+            (&manager.source_dir.join("alpha"), "old source"),
+            (&manager.linked_dir().join("alpha"), "user local"),
+        ] {
             std::fs::create_dir_all(directory).unwrap();
             std::fs::write(directory.join("SKILL.md"), content).unwrap();
         }
@@ -1532,8 +1694,14 @@ mod tests {
         let before = manager.load_state();
         assert!(manager.import_from_directory("alpha", &external).is_err());
         assert_eq!(manager.load_state(), before);
-        assert_eq!(std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(), "old source");
-        assert_eq!(std::fs::read_to_string(manager.linked_dir().join("alpha/SKILL.md")).unwrap(), "user local");
+        assert_eq!(
+            std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(),
+            "old source"
+        );
+        assert_eq!(
+            std::fs::read_to_string(manager.linked_dir().join("alpha/SKILL.md")).unwrap(),
+            "user local"
+        );
         assert!(manager.list_backups().is_empty());
     }
 
@@ -1544,7 +1712,9 @@ mod tests {
         let external = temp.path().join("external");
         std::fs::create_dir_all(&external).unwrap();
         std::fs::write(external.join("SKILL.md"), "---\nname: imported\n---\n").unwrap();
-        manager.import_from_directory("imported", &external).unwrap();
+        manager
+            .import_from_directory("imported", &external)
+            .unwrap();
         let entries = manager.local_inventory();
         let skill = entries.iter().find(|skill| skill.id == "imported").unwrap();
         assert!(skill.installed);
@@ -1553,7 +1723,14 @@ mod tests {
         assert!(manager.source_dir().join("imported/SKILL.md").is_file());
         assert!(external.join("SKILL.md").is_file());
         manager.set_enabled("imported", true).unwrap();
-        assert!(manager.local_inventory().iter().find(|skill| skill.id == "imported").unwrap().enabled);
+        assert!(
+            manager
+                .local_inventory()
+                .iter()
+                .find(|skill| skill.id == "imported")
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]
@@ -1563,17 +1740,53 @@ mod tests {
         let mut repo = parse_repo_key("unreachable-owner/absent-repo@main").unwrap();
         manager.upsert_repo(repo.clone()).unwrap();
         repo.enabled = false;
-        assert!(manager.update_repo_enabled_if_unchanged(&repo, None).unwrap());
-        assert!(!manager.list_repos().iter().find(|item| item.key() == repo.key()).unwrap().enabled);
+        assert!(
+            manager
+                .update_repo_enabled_if_unchanged(&repo, None)
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .list_repos()
+                .iter()
+                .find(|item| item.key() == repo.key())
+                .unwrap()
+                .enabled
+        );
         let old = repo.key();
-        for field in ["other-owner/absent-repo@main", "unreachable-owner/other-repo@main", "unreachable-owner/absent-repo@dev", "unreachable-owner/absent-repo@main:other"] {
+        for field in [
+            "other-owner/absent-repo@main",
+            "unreachable-owner/other-repo@main",
+            "unreachable-owner/absent-repo@dev",
+            "unreachable-owner/absent-repo@main:other",
+        ] {
             let changed = parse_repo_key(field).unwrap();
-            assert!(!manager.update_repo_enabled_if_unchanged(&changed, Some(&old)).unwrap());
-            assert!(!manager.list_repos().iter().any(|item| item.key() == changed.key()));
+            assert!(
+                !manager
+                    .update_repo_enabled_if_unchanged(&changed, Some(&old))
+                    .unwrap()
+            );
+            assert!(
+                !manager
+                    .list_repos()
+                    .iter()
+                    .any(|item| item.key() == changed.key())
+            );
         }
         repo.enabled = true;
-        assert!(manager.update_repo_enabled_if_unchanged(&repo, Some(&old)).unwrap());
-        assert!(manager.list_repos().iter().find(|item| item.key() == old).unwrap().enabled);
+        assert!(
+            manager
+                .update_repo_enabled_if_unchanged(&repo, Some(&old))
+                .unwrap()
+        );
+        assert!(
+            manager
+                .list_repos()
+                .iter()
+                .find(|item| item.key() == old)
+                .unwrap()
+                .enabled
+        );
     }
 
     #[test]
@@ -1583,27 +1796,71 @@ mod tests {
         let original = parse_repo_key("acme/old@main").unwrap();
         manager.upsert_repo(original.clone()).unwrap();
         let replacement = parse_repo_key("acme/new@dev:skills").unwrap();
-        let repos = manager.save_repo(replacement.clone(), Some(&original.key())).unwrap();
+        let repos = manager
+            .save_repo(replacement.clone(), Some(&original.key()))
+            .unwrap();
         assert!(!repos.iter().any(|repo| repo.key() == original.key()));
-        assert_eq!(repos.iter().filter(|repo| repo.key() == replacement.key()).count(), 1);
-        assert!(manager.save_repo(parse_repo_key("openai/skills@main:skills/.curated").unwrap(), Some(&replacement.key())).is_err());
-        assert!(manager.list_repos().iter().any(|repo| repo.key() == replacement.key()));
+        assert_eq!(
+            repos
+                .iter()
+                .filter(|repo| repo.key() == replacement.key())
+                .count(),
+            1
+        );
+        assert!(
+            manager
+                .save_repo(
+                    parse_repo_key("openai/skills@main:skills/.curated").unwrap(),
+                    Some(&replacement.key())
+                )
+                .is_err()
+        );
+        assert!(
+            manager
+                .list_repos()
+                .iter()
+                .any(|repo| repo.key() == replacement.key())
+        );
     }
 
     #[test]
     fn updating_skill_keeps_user_edits_in_recoverable_backups() {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
-        manager.install_from_zip(&sample_skill("alpha", "alpha", "one"), &repo_zip(&[("kit-main/alpha/SKILL.md", "original")])).unwrap();
+        manager
+            .install_from_zip(
+                &sample_skill("alpha", "alpha", "one"),
+                &repo_zip(&[("kit-main/alpha/SKILL.md", "original")]),
+            )
+            .unwrap();
         let local = manager.linked_dir().join("alpha");
         remove_link(&local).unwrap();
         std::fs::create_dir(&local).unwrap();
         std::fs::write(local.join("SKILL.md"), "local edits").unwrap();
-        manager.install_from_zip(&sample_skill("alpha", "alpha", "two"), &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")])).unwrap();
-        assert_eq!(std::fs::read_to_string(local.join("SKILL.md")).unwrap(), "replacement");
-        let contents: std::collections::BTreeSet<_> = manager.list_backups().iter()
-            .map(|backup| std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md")).unwrap()).collect();
-        assert_eq!(contents, ["original".to_string(), "local edits".to_string()].into_iter().collect());
+        manager
+            .install_from_zip(
+                &sample_skill("alpha", "alpha", "two"),
+                &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")]),
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(local.join("SKILL.md")).unwrap(),
+            "replacement"
+        );
+        let contents: std::collections::BTreeSet<_> = manager
+            .list_backups()
+            .iter()
+            .map(|backup| {
+                std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md"))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            contents,
+            ["original".to_string(), "local edits".to_string()]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]
@@ -1613,10 +1870,20 @@ mod tests {
         std::fs::create_dir_all(&manager.codex_home).unwrap();
         std::fs::write(manager.linked_dir(), "blocked").unwrap();
         let before = manager.load_state();
-        assert!(manager.install_from_zip(&sample_skill("alpha", "alpha", "one"), &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")])).is_err());
+        assert!(
+            manager
+                .install_from_zip(
+                    &sample_skill("alpha", "alpha", "one"),
+                    &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")])
+                )
+                .is_err()
+        );
         assert!(!manager.source_dir.join("alpha").exists());
         assert_eq!(manager.load_state(), before);
-        assert_eq!(std::fs::read_to_string(manager.linked_dir()).unwrap(), "blocked");
+        assert_eq!(
+            std::fs::read_to_string(manager.linked_dir()).unwrap(),
+            "blocked"
+        );
     }
 
     #[test]
@@ -1624,12 +1891,30 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let skill = sample_skill("alpha", "alpha", "one");
-        manager.install_from_zip(&skill, &repo_zip(&[("kit-main/alpha/SKILL.md", "original")])).unwrap();
+        manager
+            .install_from_zip(
+                &skill,
+                &repo_zip(&[("kit-main/alpha/SKILL.md", "original")]),
+            )
+            .unwrap();
         std::fs::rename(&manager.state_path, temp.path().join("original-state.json")).unwrap();
         std::fs::create_dir(&manager.state_path).unwrap();
-        assert!(manager.install_from_zip(&sample_skill("alpha", "alpha", "two"), &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")])).is_err());
-        assert_eq!(std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(), "original");
-        assert_eq!(std::fs::read_to_string(manager.linked_dir().join("alpha/SKILL.md")).unwrap(), "original");
+        assert!(
+            manager
+                .install_from_zip(
+                    &sample_skill("alpha", "alpha", "two"),
+                    &repo_zip(&[("kit-main/alpha/SKILL.md", "replacement")])
+                )
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(),
+            "original"
+        );
+        assert_eq!(
+            std::fs::read_to_string(manager.linked_dir().join("alpha/SKILL.md")).unwrap(),
+            "original"
+        );
     }
 
     #[test]
@@ -1637,9 +1922,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let zip = repo_zip(&[("kit-main/alpha/SKILL.md", "---\nname: alpha\n---\n")]);
-        manager.install_from_zip(&sample_skill("alpha", "alpha", "v1"), &zip).unwrap();
+        manager
+            .install_from_zip(&sample_skill("alpha", "alpha", "v1"), &zip)
+            .unwrap();
         manager.set_enabled("alpha", false).unwrap();
-        manager.install_from_zip(&sample_skill("alpha", "alpha", "v2"), &zip).unwrap();
+        manager
+            .install_from_zip(&sample_skill("alpha", "alpha", "v2"), &zip)
+            .unwrap();
         let skills = manager.local_inventory();
         let skill = skills.iter().find(|skill| skill.id == "alpha").unwrap();
         assert!(!skill.enabled);
@@ -1695,9 +1984,12 @@ mod tests {
     #[test]
     fn frontmatter_reads_folded_and_literal_descriptions() {
         let (_, folded) = parse_skill_frontmatter(
-            "---\nname: example\ndescription: >-\n  First line.\n  Second line.\nmetadata:\n  short-description: ignored\n---\n", "example");
+            "---\nname: example\ndescription: >-\n  First line.\n  Second line.\nmetadata:\n  short-description: ignored\n---\n",
+            "example",
+        );
         assert_eq!(folded, "First line. Second line.");
-        let (_, literal) = parse_skill_frontmatter("---\ndescription: |\n  First\n  Second\n---\n", "example");
+        let (_, literal) =
+            parse_skill_frontmatter("---\ndescription: |\n  First\n  Second\n---\n", "example");
         assert_eq!(literal, "First\nSecond");
     }
 
@@ -1733,17 +2025,42 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let repo = parse_repo_key("acme/kit@main").unwrap();
-        let before = parse_skills_from_tree(&repo, &json!({"tree":[{"type":"blob","path":"z/alpha/SKILL.md","sha":"one"}]}));
-        manager.install_from_zip(&before[0], &repo_zip(&[("kit-main/z/alpha/SKILL.md", "original")])).unwrap();
-        let after = parse_skills_from_tree(&repo, &json!({"tree":[
-            {"type":"blob","path":"a/alpha/SKILL.md","sha":"new"},
-            {"type":"blob","path":"z/alpha/SKILL.md","sha":"changed"}
-        ]}));
-        assert_eq!(before[0].id, after.iter().find(|s| s.repo_path == "z/alpha").unwrap().id);
+        let before = parse_skills_from_tree(
+            &repo,
+            &json!({"tree":[{"type":"blob","path":"z/alpha/SKILL.md","sha":"one"}]}),
+        );
+        manager
+            .install_from_zip(
+                &before[0],
+                &repo_zip(&[("kit-main/z/alpha/SKILL.md", "original")]),
+            )
+            .unwrap();
+        let after = parse_skills_from_tree(
+            &repo,
+            &json!({"tree":[
+                {"type":"blob","path":"a/alpha/SKILL.md","sha":"new"},
+                {"type":"blob","path":"z/alpha/SKILL.md","sha":"changed"}
+            ]}),
+        );
+        assert_eq!(
+            before[0].id,
+            after.iter().find(|s| s.repo_path == "z/alpha").unwrap().id
+        );
         let entries = manager.merge_entries(&after);
-        assert!(entries.iter().any(|s| s.repo_path == "z/alpha" && s.installed && s.update_available));
-        assert!(entries.iter().any(|s| s.repo_path == "a/alpha" && !s.installed && !s.update_available));
-        assert_eq!(manager.load_state().installed[&before[0].id].repo_path, "z/alpha");
+        assert!(
+            entries
+                .iter()
+                .any(|s| s.repo_path == "z/alpha" && s.installed && s.update_available)
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|s| s.repo_path == "a/alpha" && !s.installed && !s.update_available)
+        );
+        assert_eq!(
+            manager.load_state().installed[&before[0].id].repo_path,
+            "z/alpha"
+        );
     }
 
     #[test]
@@ -1751,14 +2068,34 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
         let original = sample_skill("alpha", "z/alpha", "one");
-        manager.install_from_zip(&original, &repo_zip(&[("kit-main/z/alpha/SKILL.md", "original")])).unwrap();
+        manager
+            .install_from_zip(
+                &original,
+                &repo_zip(&[("kit-main/z/alpha/SKILL.md", "original")]),
+            )
+            .unwrap();
         let mut state = manager.load_state();
         state.installed.get_mut("alpha").unwrap().repo_path.clear();
         manager.save_state_unlocked(&state).unwrap();
         let remote = sample_skill("alpha", "a/alpha", "new");
-        assert!(!manager.merge_entries(&[remote.clone()]).iter().any(|s| s.repo_path == "a/alpha" && s.update_available));
-        assert!(manager.install_from_zip(&remote, &repo_zip(&[("kit-main/a/alpha/SKILL.md", "wrong")])).is_err());
-        assert_eq!(std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(), "original");
+        assert!(
+            !manager
+                .merge_entries(&[remote.clone()])
+                .iter()
+                .any(|s| s.repo_path == "a/alpha" && s.update_available)
+        );
+        assert!(
+            manager
+                .install_from_zip(
+                    &remote,
+                    &repo_zip(&[("kit-main/a/alpha/SKILL.md", "wrong")])
+                )
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read_to_string(manager.source_dir.join("alpha/SKILL.md")).unwrap(),
+            "original"
+        );
     }
 
     #[test]
@@ -1775,8 +2112,13 @@ mod tests {
         assert_eq!(skills.len(), 3);
         let ids: std::collections::BTreeSet<_> = skills.iter().map(|s| &s.id).collect();
         assert_eq!(ids.len(), 3);
-        assert!(skills.iter().any(|s| s.repo_path == "skills/.curated/alpha"));
-        let scoped = parse_skills_from_tree(&parse_repo_key("acme/kit@main:plugins/a").unwrap(), &tree);
+        assert!(
+            skills
+                .iter()
+                .any(|s| s.repo_path == "skills/.curated/alpha")
+        );
+        let scoped =
+            parse_skills_from_tree(&parse_repo_key("acme/kit@main:plugins/a").unwrap(), &tree);
         assert_eq!(scoped.len(), 1);
         assert!(scoped[0].id.starts_with("alpha--"));
     }
@@ -1785,7 +2127,10 @@ mod tests {
     fn zip_catalog_reads_nested_manifests_and_root_of_selected_subdirectory() {
         let repo = parse_repo_key("acme/kit@main:plugins").unwrap();
         let zip = repo_zip(&[
-            ("kit-main/plugins/alpha/SKILL.md", "---\nname: Actual alpha\ndescription: Nested skill\n---\n"),
+            (
+                "kit-main/plugins/alpha/SKILL.md",
+                "---\nname: Actual alpha\ndescription: Nested skill\n---\n",
+            ),
             ("kit-main/plugins/alpha/scripts/run.py", "print('ok')"),
             ("kit-main/outside/beta/SKILL.md", "---\nname: beta\n---\n"),
         ]);
@@ -1795,14 +2140,22 @@ mod tests {
         assert_eq!(skills[0].description, "Nested skill");
         assert_eq!(skills[0].repo_path, "plugins/alpha");
         let exact = parse_repo_key("acme/kit@main:plugins/alpha").unwrap();
-        assert_eq!(parse_skills_from_zip(&exact, &zip, &BTreeMap::new()).unwrap().len(), 1);
+        assert_eq!(
+            parse_skills_from_zip(&exact, &zip, &BTreeMap::new())
+                .unwrap()
+                .len(),
+            1
+        );
         // Git 对 "hello\n" 的 blob ID；API 和 ZIP 的子树标识必须一致。
         let bytes = repo_zip(&[("kit-main/alpha/SKILL.md", "hello\n")]);
         let root = parse_repo_key("acme/kit@main").unwrap();
         let zipped = parse_skills_from_zip(&root, &bytes, &BTreeMap::new()).unwrap();
         let tree = json!({"tree":[{"type":"blob","path":"alpha/SKILL.md",
             "sha":"ce013625030ba8dba906f756967f9e9ca394464a"}]});
-        assert_eq!(zipped[0].content_hash, parse_skills_from_tree(&root, &tree)[0].content_hash);
+        assert_eq!(
+            zipped[0].content_hash,
+            parse_skills_from_tree(&root, &tree)[0].content_hash
+        );
     }
 
     #[test]
@@ -2021,27 +2374,49 @@ mod tests {
         let local = manager.linked_dir().join("custom");
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(local.join("SKILL.md"), "user original").unwrap();
-        assert!(manager.local_inventory().iter().any(|skill| skill.id == "custom" && skill.installed));
+        assert!(
+            manager
+                .local_inventory()
+                .iter()
+                .any(|skill| skill.id == "custom" && skill.installed)
+        );
         manager.uninstall("custom").unwrap();
         let backups = manager.list_backups();
         assert_eq!(backups.len(), 1);
         assert!(!local.exists());
         manager.restore_backup(&backups[0].id).unwrap();
-        assert_eq!(std::fs::read_to_string(local.join("SKILL.md")).unwrap(), "user original");
+        assert_eq!(
+            std::fs::read_to_string(local.join("SKILL.md")).unwrap(),
+            "user original"
+        );
     }
 
     #[test]
     fn uninstall_preserves_distinct_source_and_local_copies() {
         let temp = tempfile::tempdir().unwrap();
         let manager = manager(&temp);
-        for (directory, content) in [(manager.source_dir.join("custom"), "source"), (manager.linked_dir().join("custom"), "edited local")] {
+        for (directory, content) in [
+            (manager.source_dir.join("custom"), "source"),
+            (manager.linked_dir().join("custom"), "edited local"),
+        ] {
             std::fs::create_dir_all(&directory).unwrap();
             std::fs::write(directory.join("SKILL.md"), content).unwrap();
         }
         manager.uninstall("custom").unwrap();
-        let contents: std::collections::BTreeSet<_> = manager.list_backups().iter()
-            .map(|backup| std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md")).unwrap()).collect();
-        assert_eq!(contents, ["source".to_string(), "edited local".to_string()].into_iter().collect());
+        let contents: std::collections::BTreeSet<_> = manager
+            .list_backups()
+            .iter()
+            .map(|backup| {
+                std::fs::read_to_string(manager.backups_dir.join(&backup.id).join("SKILL.md"))
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(
+            contents,
+            ["source".to_string(), "edited local".to_string()]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]
@@ -2053,7 +2428,10 @@ mod tests {
         std::fs::write(local.join("SKILL.md"), "original").unwrap();
         std::fs::write(&manager.backups_dir, "blocked").unwrap();
         assert!(manager.uninstall("custom").is_err());
-        assert_eq!(std::fs::read_to_string(local.join("SKILL.md")).unwrap(), "original");
+        assert_eq!(
+            std::fs::read_to_string(local.join("SKILL.md")).unwrap(),
+            "original"
+        );
     }
 
     #[test]
@@ -2069,7 +2447,9 @@ mod tests {
             .unwrap();
 
         let physical_copy = !std::fs::symlink_metadata(manager.linked_dir().join("alpha"))
-            .unwrap().file_type().is_symlink();
+            .unwrap()
+            .file_type()
+            .is_symlink();
 
         let state = manager.uninstall("alpha").unwrap();
         assert!(!state.installed.contains_key("alpha"));
@@ -2204,8 +2584,21 @@ mod tests {
         manager.set_enabled("my-own-skill", false).unwrap();
 
         assert!(!manager.linked_dir().join("my-own-skill").exists());
-        assert!(manager.source_dir().join("my-own-skill").join(SKILL_MANIFEST_FILE).exists());
-        assert!(!manager.merge_entries(&[]).iter().find(|entry| entry.id == "my-own-skill").unwrap().enabled);
+        assert!(
+            manager
+                .source_dir()
+                .join("my-own-skill")
+                .join(SKILL_MANIFEST_FILE)
+                .exists()
+        );
+        assert!(
+            !manager
+                .merge_entries(&[])
+                .iter()
+                .find(|entry| entry.id == "my-own-skill")
+                .unwrap()
+                .enabled
+        );
 
         manager.set_enabled("my-own-skill", true).unwrap();
         assert!(manager.linked_dir().join("my-own-skill").exists());

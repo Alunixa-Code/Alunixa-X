@@ -1,8 +1,8 @@
 use alunixa_x_core::watcher::{
     MACOS_WATCHER_LABEL, build_spawn_launcher_command, build_watcher_install_plan, cdp_listening,
     codex_process_ids, disable_watcher_at, enable_watcher_at, filter_killable_launcher_processes,
-    macos_launcher_process_names, macos_launch_agent_installed_at, macos_launch_agent_path_at,
-    macos_launch_agent_plist, process_id_is_running, process_ids_still_running,
+    macos_launch_agent_installed_at, macos_launch_agent_path_at, macos_launch_agent_plist,
+    macos_launcher_process_names, process_id_is_running, process_ids_still_running,
     remove_macos_launch_agent_at, should_recover_stale_launcher, watcher_disabled_flag,
     write_macos_launch_agent_at,
 };
@@ -54,9 +54,7 @@ fn watcher_enable_and_disable_toggle_flag() {
 #[test]
 fn macos_launch_agent_registers_the_gui_at_login() {
     let home = tempfile::tempdir().unwrap();
-    let launcher = home
-        .path()
-        .join("Alunixa X.app/Contents/MacOS/AlunixaX");
+    let launcher = home.path().join("Alunixa X.app/Contents/MacOS/AlunixaX");
     assert!(!macos_launch_agent_installed_at(home.path()));
 
     let path = write_macos_launch_agent_at(home.path(), &launcher).unwrap();

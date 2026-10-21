@@ -1311,8 +1311,7 @@ mod tests {
             root.join(bundle).join("Contents/MacOS").join(executable)
         };
         assert_eq!(
-            installed_root_from_executable(&executable_path("Alunixa X.app", "AlunixaX"))
-                .unwrap(),
+            installed_root_from_executable(&executable_path("Alunixa X.app", "AlunixaX")).unwrap(),
             root
         );
         for executable in [
@@ -1335,11 +1334,9 @@ mod tests {
         ] {
             assert!(installed_root_from_executable(Path::new(executable)).is_err());
         }
-        let renamed = installed_root_from_executable(&executable_path(
-            "Alunixa X 2.app",
-            "AlunixaX",
-        ))
-        .unwrap_err();
+        let renamed =
+            installed_root_from_executable(&executable_path("Alunixa X 2.app", "AlunixaX"))
+                .unwrap_err();
         assert!(renamed.to_string().contains("标准应用目录"));
         assert!(!renamed.to_string().contains("旧双应用"));
     }

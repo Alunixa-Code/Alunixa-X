@@ -25,7 +25,8 @@ use alunixa_x_core::settings::{BackendSettings, RelayMode, RelayProfile, RelayPr
 use serde_json::{Value, json};
 
 fn model() -> String {
-    std::env::var("LIVE_ANTHROPIC_model().as_str()").unwrap_or_else(|_| "claude-sonnet-4-6".to_string())
+    std::env::var("LIVE_ANTHROPIC_model().as_str()")
+        .unwrap_or_else(|_| "claude-sonnet-4-6".to_string())
 }
 
 fn env(name: &str) -> String {
@@ -101,9 +102,21 @@ async fn open(
 #[ignore = "真机用例：需要 LIVE_ANTHROPIC_* 环境变量与可用额度"]
 async fn live_probe_auth_and_endpoint() {
     let profile = settings("", "").relay_profiles[0].clone();
-    let result = test_relay_profile(&profile, model().as_str()).await.unwrap();
-    println!("[probe] status={} endpoint={}", result.http_status, result.endpoint);
-    println!("[probe] preview={}", &result.response_preview.chars().take(160).collect::<String>());
+    let result = test_relay_profile(&profile, model().as_str())
+        .await
+        .unwrap();
+    println!(
+        "[probe] status={} endpoint={}",
+        result.http_status, result.endpoint
+    );
+    println!(
+        "[probe] preview={}",
+        &result
+            .response_preview
+            .chars()
+            .take(160)
+            .collect::<String>()
+    );
     assert_eq!(result.http_status, 200, "供应商测试探针失败");
 }
 
@@ -119,9 +132,18 @@ async fn live_single_turn_non_stream() {
             "content": [{ "type": "input_text", "text": "回复两个字：收到" }] }]
     });
     let mut upstream = open(&request, settings("", "")).await;
-    println!("[non-stream] status={} wire={:?}", upstream.status_code, upstream.wire_api);
+    println!(
+        "[non-stream] status={} wire={:?}",
+        upstream.status_code, upstream.wire_api
+    );
     let raw = upstream.read_body().await.unwrap();
-    println!("[non-stream] upstream={}", String::from_utf8_lossy(&raw).chars().take(200).collect::<String>());
+    println!(
+        "[non-stream] upstream={}",
+        String::from_utf8_lossy(&raw)
+            .chars()
+            .take(200)
+            .collect::<String>()
+    );
     let response = to_responses(&raw, &request);
     let text = response["output"]
         .as_array()
@@ -131,7 +153,10 @@ async fn live_single_turn_non_stream() {
         .flatten()
         .filter_map(|part| part["text"].as_str())
         .collect::<String>();
-    println!("[non-stream] codex_text={text:?} usage={}", response["usage"]);
+    println!(
+        "[non-stream] codex_text={text:?} usage={}",
+        response["usage"]
+    );
     assert!(text.contains("收到"), "文本未透出：{response}");
     assert!(response["usage"]["input_tokens"].as_u64().unwrap() > 0);
 }
@@ -188,8 +213,14 @@ async fn live_tool_call_round_trip() {
         .map(|item| item["type"].as_str().unwrap_or("?").to_string())
         .collect();
     println!("[tool] output items={items:?}");
-    println!("[tool] response={}", response.to_string().chars().take(400).collect::<String>());
-    assert!(items.iter().any(|kind| kind == "function_call"), "未产出 function_call");
+    println!(
+        "[tool] response={}",
+        response.to_string().chars().take(400).collect::<String>()
+    );
+    assert!(
+        items.iter().any(|kind| kind == "function_call"),
+        "未产出 function_call"
+    );
     let call = response["output"]
         .as_array()
         .unwrap()
@@ -197,7 +228,10 @@ async fn live_tool_call_round_trip() {
         .find(|item| item["type"] == "function_call")
         .unwrap();
     assert_eq!(call["name"], "get_weather");
-    println!("[tool] call_id={} arguments={}", call["call_id"], call["arguments"]);
+    println!(
+        "[tool] call_id={} arguments={}",
+        call["call_id"], call["arguments"]
+    );
 }
 
 /// 关键用例：思考 + 工具循环 + 签名回放（第二轮把 reasoning item 原样带回）。
@@ -217,8 +251,7 @@ async fn live_thinking_signature_replay_multi_turn() {
         "input": [{ "type": "message", "role": "user",
             "content": [{ "type": "input_text", "text": "上海现在天气怎么样？用 get_weather 查。" }] }]
     });
-    let mut upstream =
-        open(&first, base_settings.clone()).await;
+    let mut upstream = open(&first, base_settings.clone()).await;
     println!("[think:1] status={}", upstream.status_code);
     let raw = upstream.read_body().await.unwrap();
     let response = to_responses(&raw, &first);
@@ -241,7 +274,11 @@ async fn live_thinking_signature_replay_multi_turn() {
     );
     if let Some(item) = &reasoning {
         let encrypted = item["encrypted_content"].as_str().unwrap_or("");
-        println!("[think:1] 签名信封长度={} 前缀OK={}", encrypted.len(), encrypted.starts_with(alunixa_x_core::anthropic_bridge::ANTHROPIC_THINKING_PREFIX));
+        println!(
+            "[think:1] 签名信封长度={} 前缀OK={}",
+            encrypted.len(),
+            encrypted.starts_with(alunixa_x_core::anthropic_bridge::ANTHROPIC_THINKING_PREFIX)
+        );
     }
     let (Some(reasoning), Some(call)) = (reasoning, call) else {
         panic!("第一轮没有产出 reasoning + function_call，无法验证签名回放：{response}");
@@ -298,7 +335,10 @@ async fn live_thinking_signature_replay_multi_turn() {
     println!("[think:2] status={status}");
     println!(
         "[think:2] upstream={}",
-        String::from_utf8_lossy(&raw).chars().take(300).collect::<String>()
+        String::from_utf8_lossy(&raw)
+            .chars()
+            .take(300)
+            .collect::<String>()
     );
     assert_eq!(status, 200, "第二轮被上游拒绝（多半是签名回放问题）");
     let response = to_responses(&raw, &second);
@@ -331,8 +371,14 @@ async fn live_truncation_is_reported_as_incomplete() {
         "[truncate] status={} incomplete={}",
         response["status"], response["incomplete_details"]
     );
-    assert_eq!(response["status"], "incomplete", "截断必须如实上报：{response}");
-    assert_eq!(response["incomplete_details"]["reason"], "max_output_tokens");
+    assert_eq!(
+        response["status"], "incomplete",
+        "截断必须如实上报：{response}"
+    );
+    assert_eq!(
+        response["incomplete_details"]["reason"],
+        "max_output_tokens"
+    );
 }
 
 /// 1M beta 头：网关是否接受 context-1m-2025-08-07（不接受属网关限制，只记录）。
@@ -351,7 +397,10 @@ async fn live_context_1m_beta_probe() {
     println!(
         "[1m] status={} body={}",
         upstream.status_code,
-        String::from_utf8_lossy(&raw).chars().take(240).collect::<String>()
+        String::from_utf8_lossy(&raw)
+            .chars()
+            .take(240)
+            .collect::<String>()
     );
 }
 
@@ -373,7 +422,10 @@ async fn live_impersonation_probe() {
     println!(
         "[impersonate] status={} body={}",
         upstream.status_code,
-        String::from_utf8_lossy(&raw).chars().take(240).collect::<String>()
+        String::from_utf8_lossy(&raw)
+            .chars()
+            .take(240)
+            .collect::<String>()
     );
 }
 

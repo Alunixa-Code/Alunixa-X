@@ -2964,10 +2964,7 @@ fn responses_request_stream_includes_usage_and_apply_patch_proxy_tools() {
         converted["tools"][0]["function"]["parameters"]["properties"]["input"]["type"],
         "string"
     );
-    assert_eq!(
-        converted["tool_choice"]["function"]["name"],
-        "apply_patch"
-    );
+    assert_eq!(converted["tool_choice"]["function"]["name"], "apply_patch");
 }
 
 #[test]
@@ -6039,9 +6036,7 @@ fn native_search_is_not_replaced_by_a_fake_client_executor() {
     assert_eq!(converted["tools"][0]["function"]["name"], "web_search");
 }
 
-use alunixa_x_core::protocol_proxy::{
-    ensure_web_search_tool_for_history,
-};
+use alunixa_x_core::protocol_proxy::ensure_web_search_tool_for_history;
 
 #[test]
 fn web_search_history_restores_declaration_without_changing_history_or_function_tools() {
@@ -6154,10 +6149,28 @@ fn web_search_history_leaves_unrelated_and_malformed_requests_unchanged() {
 async fn web_search_history_proxy_declares_only_for_standard_responses() {
     for (protocol, path, trigger, enabled, repair) in [
         (RelayProtocol::Responses, "/v1/responses", false, true, true),
-        (RelayProtocol::Responses, "/v1/responses", false, false, false),
+        (
+            RelayProtocol::Responses,
+            "/v1/responses",
+            false,
+            false,
+            false,
+        ),
         (RelayProtocol::Responses, "/v1/responses", true, true, true),
-        (RelayProtocol::Responses, "/v1/responses/compact", false, true, false),
-        (RelayProtocol::ChatCompletions, "/v1/responses", false, true, false),
+        (
+            RelayProtocol::Responses,
+            "/v1/responses/compact",
+            false,
+            true,
+            false,
+        ),
+        (
+            RelayProtocol::ChatCompletions,
+            "/v1/responses",
+            false,
+            true,
+            false,
+        ),
     ] {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -6209,7 +6222,13 @@ async fn web_search_history_proxy_declares_only_for_standard_responses() {
         )
         .await;
         if protocol == RelayProtocol::ChatCompletions {
-            assert!(result.err().unwrap().to_string().contains("web_search_call"));
+            assert!(
+                result
+                    .err()
+                    .unwrap()
+                    .to_string()
+                    .contains("web_search_call")
+            );
             server.abort();
             continue;
         }
@@ -6272,7 +6291,10 @@ async fn web_search_history_streaming_compaction_preserves_native_state() {
         .await
         .unwrap();
     assert!(!result.compaction);
-    assert_eq!(result.read_body().await.unwrap(), response.as_bytes().to_vec());
+    assert_eq!(
+        result.read_body().await.unwrap(),
+        response.as_bytes().to_vec()
+    );
     let (_, sent) = server.await.unwrap();
     let mut expected = request;
     expected["tools"]
@@ -6720,7 +6742,10 @@ async fn aggregate_official_member_forwards_with_oauth_credentials() {
         headers_lower.contains("chatgpt-account-id: acct-official"),
         "{headers}"
     );
-    assert!(headers_lower.contains("originator: codex_cli_rs"), "{headers}");
+    assert!(
+        headers_lower.contains("originator: codex_cli_rs"),
+        "{headers}"
+    );
     assert!(!headers_lower.contains("sk-"), "{headers}");
     assert_eq!(body["model"], "gpt-5.6-sol");
 }
@@ -6865,9 +6890,13 @@ async fn aggregate_official_member_refreshes_and_retries_after_401() {
 
 #[tokio::test]
 async fn aggregate_prefixed_model_binds_member_and_preserves_upstream_model() {
-    let first = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let first = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let first_addr = first.local_addr().unwrap();
-    let second = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let second = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let second_addr = second.local_addr().unwrap();
     let first_server = tokio::spawn(capture_json_request_once(first));
     let second_server = tokio::spawn(respond_once(
@@ -6889,9 +6918,8 @@ async fn aggregate_prefixed_model_binds_member_and_preserves_upstream_model() {
     settings.relay_profiles[0].model_list = "deepseek-v4-pro".to_string();
     settings.aggregate_relay_profiles[0].model_aggregation_enabled = true;
 
-    let request = format!(
-        r#"{{"model":"cpx-{first_id}/deepseek-v4-pro","input":"hi","stream":false}}"#
-    );
+    let request =
+        format!(r#"{{"model":"cpx-{first_id}/deepseek-v4-pro","input":"hi","stream":false}}"#);
     let mut result = open_responses_proxy_request_with_settings(&request, settings)
         .await
         .unwrap();
@@ -6907,9 +6935,13 @@ async fn aggregate_prefixed_model_binds_member_and_preserves_upstream_model() {
 /// 上游模型名去掉 `<前缀>/` 与窗口后缀；未设置默认时保持原有 400。
 #[tokio::test]
 async fn aggregate_default_provider_forwards_unbound_model() {
-    let default_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let default_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let default_addr = default_listener.local_addr().unwrap();
-    let other_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let other_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
     let other_addr = other_listener.local_addr().unwrap();
     let default_server = tokio::spawn(capture_json_request_once(default_listener));
     let other_server = tokio::spawn(respond_once(
@@ -6925,14 +6957,17 @@ async fn aggregate_default_provider_forwards_unbound_model() {
 
     let mut without_default = base.clone();
     without_default.aggregate_relay_profiles[0].model_aggregation_enabled = true;
-    let result =
-        open_responses_proxy_request_with_settings(request, without_default).await.unwrap();
+    let result = open_responses_proxy_request_with_settings(request, without_default)
+        .await
+        .unwrap();
     assert_eq!(result.status_code, 400, "未设置默认供应商时仍是 400");
 
     let mut settings = base;
     settings.aggregate_relay_profiles[0].model_aggregation_enabled = true;
     settings.aggregate_relay_profiles[0].default_relay_id = settings.relay_profiles[1].id.clone();
-    let result = open_responses_proxy_request_with_settings(request, settings).await.unwrap();
+    let result = open_responses_proxy_request_with_settings(request, settings)
+        .await
+        .unwrap();
     assert_eq!(result.status_code, 200);
     let (_, body) = default_server.await.unwrap();
     assert_eq!(
@@ -6955,7 +6990,9 @@ async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() 
     let hold_next = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let release = std::sync::Arc::new(tokio::sync::Notify::new());
     for name in ["a", "b", "c"] {
-        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
         urls.push(format!("http://{}/v1", listener.local_addr().unwrap()));
         let events = events.clone();
         let failing = failing.clone();
@@ -7012,12 +7049,16 @@ async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() 
     async fn request(path: &Path, settings: &BackendSettings, model: &str) -> u16 {
         persist(path, settings);
         let body = json!({"model": model, "input": "hi", "stream": false,
-            "conversation_id": "same-live-session"}).to_string();
+            "conversation_id": "same-live-session"})
+        .to_string();
         let mut response = open_responses_proxy_request(&body, None).await.unwrap();
         let status = response.status_code;
         let body = response.read_body().await.unwrap();
         if status != 200 {
-            eprintln!("mock request status {status}: {}", String::from_utf8_lossy(&body));
+            eprintln!(
+                "mock request status {status}: {}",
+                String::from_utf8_lossy(&body)
+            );
         }
         status
     }
@@ -7025,8 +7066,13 @@ async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() 
         ($model:expr, $target:expr, $upstream_model:expr, $key:expr) => {{
             assert_eq!(request(&settings_path, &settings, $model).await, 200);
             let event = tokio::time::timeout(Duration::from_secs(2), received.recv())
-                .await.unwrap().unwrap();
-            assert_eq!(event, ($target, $upstream_model.to_string(), Some($key.to_string())));
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                event,
+                ($target, $upstream_model.to_string(), Some($key.to_string()))
+            );
             assert!(received.try_recv().is_err(), "不能产生额外上游请求");
         }};
     }
@@ -7050,19 +7096,38 @@ async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() 
     assert_eq!(request(&settings_path, &settings, &first_model).await, 400);
     assert!(received.try_recv().is_err());
     expect!(&second_model, "b", "model-1", "Bearer sk-second");
-    settings.aggregate_relay_profiles[0].members.insert(0, AggregateRelayMember {
-        relay_id: first_id, weight: 1,
-    });
+    settings.aggregate_relay_profiles[0].members.insert(
+        0,
+        AggregateRelayMember {
+            relay_id: first_id,
+            weight: 1,
+        },
+    );
     expect!(&first_model, "c", "model-0", "Bearer synthetic-new-key");
 
     // 关闭按模型聚合后，故障转移遵循成员默认模型，并按新成员列表即时生效。
     settings.aggregate_relay_profiles[0].model_aggregation_enabled = false;
     failing.store(true, std::sync::atomic::Ordering::SeqCst);
-    assert_eq!(request(&settings_path, &settings, "client-model").await, 200);
-    assert_eq!(received.recv().await.unwrap(),
-        ("c", "new-default".to_string(), Some("Bearer synthetic-new-key".to_string())));
-    assert_eq!(received.recv().await.unwrap(),
-        ("b", "model-1".to_string(), Some("Bearer sk-second".to_string())));
+    assert_eq!(
+        request(&settings_path, &settings, "client-model").await,
+        200
+    );
+    assert_eq!(
+        received.recv().await.unwrap(),
+        (
+            "c",
+            "new-default".to_string(),
+            Some("Bearer synthetic-new-key".to_string())
+        )
+    );
+    assert_eq!(
+        received.recv().await.unwrap(),
+        (
+            "b",
+            "model-1".to_string(),
+            Some("Bearer sk-second".to_string())
+        )
+    );
     assert!(received.try_recv().is_err());
     settings.aggregate_relay_profiles[0].members.remove(0);
     expect!("client-model", "b", "model-1", "Bearer sk-second");
@@ -7070,16 +7135,32 @@ async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() 
     hold_next.store(true, std::sync::atomic::Ordering::SeqCst);
     let old_settings = settings.clone();
     let old_path = settings_path.clone();
-    let in_flight = tokio::spawn(async move { request(&old_path, &old_settings, "client-model").await });
-    let event = tokio::time::timeout(Duration::from_secs(2), received.recv()).await.unwrap().unwrap();
-    assert_eq!(event, ("b", "model-1".to_string(), Some("Bearer sk-second".to_string())));
+    let in_flight =
+        tokio::spawn(async move { request(&old_path, &old_settings, "client-model").await });
+    let event = tokio::time::timeout(Duration::from_secs(2), received.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        event,
+        (
+            "b",
+            "model-1".to_string(),
+            Some("Bearer sk-second".to_string())
+        )
+    );
     settings.relay_profiles[1].base_url = urls[0].clone();
     settings.relay_profiles[1].api_key = "synthetic-next-key".to_string();
     settings.relay_profiles[1].model = "next-default-model".to_string();
     persist(&settings_path, &settings);
     release.notify_one();
     assert_eq!(in_flight.await.unwrap(), 200);
-    expect!("client-model", "a", "next-default-model", "Bearer synthetic-next-key");
+    expect!(
+        "client-model",
+        "a",
+        "next-default-model",
+        "Bearer synthetic-next-key"
+    );
     for server in servers {
         server.abort();
     }

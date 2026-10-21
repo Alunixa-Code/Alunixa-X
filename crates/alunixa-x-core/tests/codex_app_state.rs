@@ -335,23 +335,24 @@ fn prune_stale_recent_models_drops_unavailable_entries_and_keeps_the_rest() {
 
     let mut valid = std::collections::HashSet::new();
     valid.insert("cpx-relay-mv5bil9a/deepseek-v4-flash".to_string());
-    let removed = alunixa_x_core::codex_app_state::prune_stale_recent_model_configurations(
-        home, &valid,
-    )
-    .unwrap();
+    let removed =
+        alunixa_x_core::codex_app_state::prune_stale_recent_model_configurations(home, &valid)
+            .unwrap();
 
     assert_eq!(removed, 2);
     let state: Value =
         serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
-    let entries = state["electron-persisted-atom-state"]
-        ["composer-recent-model-configurations-v1"]
+    let entries = state["electron-persisted-atom-state"]["composer-recent-model-configurations-v1"]
         .as_array()
         .unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0]["model"], "cpx-relay-mv5bil9a/deepseek-v4-flash");
     // 没有 model 字段的条目结构不认识，原样保留。
     assert!(entries[1].get("model").is_none());
-    assert_eq!(state["electron-saved-workspace-roots"], json!(["C:/work/app"]));
+    assert_eq!(
+        state["electron-saved-workspace-roots"],
+        json!(["C:/work/app"])
+    );
     assert_eq!(
         state["electron-persisted-atom-state"]["sidebar-width"],
         json!(280)

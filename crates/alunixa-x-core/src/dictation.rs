@@ -603,7 +603,12 @@ static LOCAL_RECOGNIZER_TX: LazyLock<Option<std::sync::mpsc::Sender<LocalRecogni
 
 fn local_recognizer_loop(receiver: std::sync::mpsc::Receiver<LocalRecognizerRequest>) {
     let mut cached: Option<CachedLocalRecognizer> = None;
-    while let Ok(LocalRecognizerRequest::Transcribe { samples, language, reply }) = receiver.recv() {
+    while let Ok(LocalRecognizerRequest::Transcribe {
+        samples,
+        language,
+        reply,
+    }) = receiver.recv()
+    {
         let result = recognize_local(&mut cached, &samples, &language);
         // 调用方已经走远时忽略发送失败：这条线程只负责把结果交回去。
         let _ = reply.send(result);
@@ -692,13 +697,17 @@ fn recognize_local(
         .to_string())
 }
 
-async fn transcribe_local_recording(settings: &DictationSettings, recording: Recording<'_>) -> Result<Value, DictationError> {
+async fn transcribe_local_recording(
+    settings: &DictationSettings,
+    recording: Recording<'_>,
+) -> Result<Value, DictationError> {
     validate_local_wav(recording.audio)?;
     let language = match settings.language.trim() {
         "" => "auto",
         value @ ("auto" | "zh" | "en" | "yue" | "ja" | "ko") => value,
         _ => return Err(DictationError::new(400, "SenseVoice 不支持该语音语言")),
-    }.to_string();
+    }
+    .to_string();
     let sender = LOCAL_RECOGNIZER_TX
         .as_ref()
         .ok_or_else(|| DictationError::new(500, "本地语音推理线程不可用"))?;
@@ -1138,7 +1147,11 @@ mod tests {
     fn local_asset_signature_changes_when_the_model_changes() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("model.int8.onnx");
-        assert_eq!(local_asset_signature(&path), None, "文件不存在时不能给出指纹");
+        assert_eq!(
+            local_asset_signature(&path),
+            None,
+            "文件不存在时不能给出指纹"
+        );
         std::fs::write(&path, b"first").unwrap();
         let first = local_asset_signature(&path).unwrap();
         assert_eq!(first.0, 5);
@@ -1239,7 +1252,9 @@ mod tests {
             base_url: "local://sensevoice".to_string(),
             ..Default::default()
         };
-        let error = transcribe_bridge(&legacy, &bridge_payload(b"invalid-wave", "audio/wav")).await.unwrap_err();
+        let error = transcribe_bridge(&legacy, &bridge_payload(b"invalid-wave", "audio/wav"))
+            .await
+            .unwrap_err();
         assert_eq!(error.status, 400);
         assert!(error.message.contains("WAV"));
     }

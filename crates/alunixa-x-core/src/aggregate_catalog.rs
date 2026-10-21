@@ -11,12 +11,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::Context;
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use serde_json::{json, Map, Value};
 
 use crate::model_suffix::{
-    build_model_catalog_json_with_capabilities, collect_catalog_entries,
-    migrate_model_list_with_suffixes, parse_compact_percent, parse_window_token, ModelCatalogEntry,
+    ModelCatalogEntry, build_model_catalog_json_with_capabilities, collect_catalog_entries,
+    migrate_model_list_with_suffixes, parse_compact_percent, parse_window_token,
 };
 use crate::settings::{
     AggregateRelayProfile, BackendSettings, RelayMode, RelayProfile, SettingsStore,
@@ -342,7 +342,8 @@ pub fn build_catalog_json(
     let mut models = Vec::new();
     for relay in member_profiles(settings, aggregate)? {
         let payload = build_member_catalog(relay)?;
-        let is_default_member = !default_relay_id.is_empty() && relay.id.as_str() == default_relay_id;
+        let is_default_member =
+            !default_relay_id.is_empty() && relay.id.as_str() == default_relay_id;
         // 分组的展示名：成员没起名字时回落 relay id，避免前端渲染出无名分组表头。
         let group_name = if relay.name.trim().is_empty() {
             relay.id.clone()
@@ -357,15 +358,16 @@ pub fn build_catalog_json(
         // （`model` 在列表最前，与目录原本的优先级一致）。
         let mut seen_upstream = HashSet::new();
         for mut model in payload["models"].as_array().into_iter().flatten().cloned() {
-            let upstream = strip_member_model_prefix(
-                &relay.id,
-                model["slug"].as_str().unwrap_or_default(),
-            );
+            let upstream =
+                strip_member_model_prefix(&relay.id, model["slug"].as_str().unwrap_or_default());
             if upstream.is_empty() || !seen_upstream.insert(upstream.clone()) {
                 continue;
             }
             let display = {
-                let raw = model["display_name"].as_str().unwrap_or(&upstream).to_string();
+                let raw = model["display_name"]
+                    .as_str()
+                    .unwrap_or(&upstream)
+                    .to_string();
                 strip_member_model_prefix(&relay.id, &raw)
             };
             model["slug"] = if is_default_member {
@@ -639,7 +641,9 @@ pub fn catalog_summary(
     let applied = published.is_some();
     // 不急切求值候选目录：即使当前编辑无效，已发布的安全快照仍然可展示。
     let desired = build_catalog_json(settings, aggregate);
-    let pending_changes = published.as_ref().is_some_and(|catalog| desired.as_ref().ok() != Some(catalog));
+    let pending_changes = published
+        .as_ref()
+        .is_some_and(|catalog| desired.as_ref().ok() != Some(catalog));
     let payload: Value = match published {
         Some(catalog) => serde_json::from_str(&catalog)?,
         None => serde_json::from_str(&desired?)?,
@@ -795,46 +799,103 @@ mod tests {
     use crate::settings::{AggregateRelayMember, AggregateRelayStrategy, RelayMode};
 
     fn publication_fixture() -> (tempfile::TempDir, SettingsStore, std::path::PathBuf) {
-        let temp=tempfile::tempdir().unwrap();let store=SettingsStore::new(temp.path().join("settings.json"));
-        store.save(&settings()).unwrap();let loaded=store.load().unwrap();let aggregate=active_model_aggregation(&loaded).unwrap();
-        let home=temp.path().join("home");std::fs::create_dir_all(home.join("model-catalogs")).unwrap();
-        let path=home.join("model-catalogs/agg.json");std::fs::write(&path,build_catalog_json(&loaded,&aggregate).unwrap()).unwrap();
-        std::fs::write(home.join("config.toml"),format!("model_catalog_json = {:?}\n",path.to_str().unwrap())).unwrap();
-        (temp,store,home)
+        let temp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::new(temp.path().join("settings.json"));
+        store.save(&settings()).unwrap();
+        let loaded = store.load().unwrap();
+        let aggregate = active_model_aggregation(&loaded).unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(home.join("model-catalogs")).unwrap();
+        let path = home.join("model-catalogs/agg.json");
+        std::fs::write(&path, build_catalog_json(&loaded, &aggregate).unwrap()).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            format!("model_catalog_json = {:?}\n", path.to_str().unwrap()),
+        )
+        .unwrap();
+        (temp, store, home)
     }
 
     #[test]
     fn catalog_publication_failure_restores_settings_and_keeps_old_pointer() {
-        let (_temp,store,home)=publication_fixture();let before=store.snapshot_raw_bytes().unwrap().unwrap();
-        let config=std::fs::read(home.join("config.toml")).unwrap();let mut next=store.load().unwrap();next.relay_profiles[0].model_list.push_str("\nnew-fixture-model");
-        let error=save_with_catalog_publisher(&store,&home,&next,|_,_|anyhow::bail!("injected publication failure")).unwrap_err();
-        assert!(error.to_string().contains("发布失败"));assert_eq!(store.snapshot_raw_bytes().unwrap().unwrap(),before);
-        assert_eq!(std::fs::read(home.join("config.toml")).unwrap(),config);
-        assert!(!recover_pending_catalog_refresh(&store,&home).unwrap());
+        let (_temp, store, home) = publication_fixture();
+        let before = store.snapshot_raw_bytes().unwrap().unwrap();
+        let config = std::fs::read(home.join("config.toml")).unwrap();
+        let mut next = store.load().unwrap();
+        next.relay_profiles[0]
+            .model_list
+            .push_str("\nnew-fixture-model");
+        let error = save_with_catalog_publisher(&store, &home, &next, |_, _| {
+            anyhow::bail!("injected publication failure")
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("发布失败"));
+        assert_eq!(store.snapshot_raw_bytes().unwrap().unwrap(), before);
+        assert_eq!(std::fs::read(home.join("config.toml")).unwrap(), config);
+        assert!(!recover_pending_catalog_refresh(&store, &home).unwrap());
     }
 
     #[test]
     fn prepared_catalog_recovers_after_settings_commit_but_respects_external_config_changes() {
-        for external_change in [false,true] {
-            let (_temp,store,home)=publication_fixture();let mut next=store.load().unwrap();next.relay_profiles[0].model_list.push_str("\nnew-fixture-model");
-            let aggregate=active_model_aggregation(&next).unwrap();let catalog=build_catalog_json(&next,&aggregate).unwrap();
-            let digest=format!("{:x}",Sha256::digest(catalog.as_bytes()));let staged=home.join("model-catalogs").join(format!("aggregate-{}-{digest}.json",aggregate_publication_key(&aggregate.id)));
-            let config=std::fs::read_to_string(home.join("config.toml")).unwrap();let journal=refresh_journal_path(&home,&aggregate.id);
+        for external_change in [false, true] {
+            let (_temp, store, home) = publication_fixture();
+            let mut next = store.load().unwrap();
+            next.relay_profiles[0]
+                .model_list
+                .push_str("\nnew-fixture-model");
+            let aggregate = active_model_aggregation(&next).unwrap();
+            let catalog = build_catalog_json(&next, &aggregate).unwrap();
+            let digest = format!("{:x}", Sha256::digest(catalog.as_bytes()));
+            let staged = home.join("model-catalogs").join(format!(
+                "aggregate-{}-{digest}.json",
+                aggregate_publication_key(&aggregate.id)
+            ));
+            let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
+            let journal = refresh_journal_path(&home, &aggregate.id);
             // 人工构造实际崩溃窗口：prepare已落盘、settings已提交，publish尚未执行。
-            store.save_with_prepared_commit(&next,|revision| {
-                std::fs::write(&staged,&catalog)?;
-                std::fs::write(&journal,serde_json::to_vec(&json!({"status":"prepared","aggregateId":aggregate.id,
+            store
+                .save_with_prepared_commit(
+                    &next,
+                    |revision| {
+                        std::fs::write(&staged, &catalog)?;
+                        std::fs::write(
+                            &journal,
+                            serde_json::to_vec(
+                                &json!({"status":"prepared","aggregateId":aggregate.id,
                     "settingsRevision":revision,"catalogPath":staged,"catalogHash":digest,
-                    "previousConfigHash":format!("{:x}",Sha256::digest(config.as_bytes()))}))?)?;
-                Ok(())
-            },|_|Ok(())).unwrap();
-            if external_change {std::fs::write(home.join("config.toml"),format!("{config}external_setting = true\n")).unwrap();}
-            let before_recovery=std::fs::read(home.join("config.toml")).unwrap();
-            assert_eq!(recover_pending_catalog_refresh(&store,&home).unwrap(),!external_change);
-            if external_change {assert_eq!(std::fs::read(home.join("config.toml")).unwrap(),before_recovery);}
-            else {
-                assert_eq!(config_catalog_pointer(&std::fs::read_to_string(home.join("config.toml")).unwrap()),Some(staged.canonicalize().unwrap().to_string_lossy().to_string()));
-                assert!(!recover_pending_catalog_refresh(&store,&home).unwrap());
+                    "previousConfigHash":format!("{:x}",Sha256::digest(config.as_bytes()))}),
+                            )?,
+                        )?;
+                        Ok(())
+                    },
+                    |_| Ok(()),
+                )
+                .unwrap();
+            if external_change {
+                std::fs::write(
+                    home.join("config.toml"),
+                    format!("{config}external_setting = true\n"),
+                )
+                .unwrap();
+            }
+            let before_recovery = std::fs::read(home.join("config.toml")).unwrap();
+            assert_eq!(
+                recover_pending_catalog_refresh(&store, &home).unwrap(),
+                !external_change
+            );
+            if external_change {
+                assert_eq!(
+                    std::fs::read(home.join("config.toml")).unwrap(),
+                    before_recovery
+                );
+            } else {
+                assert_eq!(
+                    config_catalog_pointer(
+                        &std::fs::read_to_string(home.join("config.toml")).unwrap()
+                    ),
+                    Some(staged.canonicalize().unwrap().to_string_lossy().to_string())
+                );
+                assert!(!recover_pending_catalog_refresh(&store, &home).unwrap());
             }
         }
     }
@@ -903,9 +964,11 @@ mod tests {
             .unwrap();
         assert_eq!(deepseek.relay_id, "deepseek");
         assert_eq!(deepseek.upstream_model, "deepseek-reasoner");
-        assert!(resolve_active_model(&settings, "cpx-openai/gpt-5.6-sol")
-            .unwrap()
-            .is_some());
+        assert!(
+            resolve_active_model(&settings, "cpx-openai/gpt-5.6-sol")
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -920,9 +983,11 @@ mod tests {
                 && model["context_window"] == 1_000_000
                 && model["multi_agent_version"] == "v1"
         }));
-        assert!(models
-            .iter()
-            .any(|model| model["slug"] == "cpx-openai/gpt-5.6-sol"));
+        assert!(
+            models
+                .iter()
+                .any(|model| model["slug"] == "cpx-openai/gpt-5.6-sol")
+        );
     }
 
     /// Kimi 官方成员按原生 Responses 转发时上游不认 tool_search，目录里要关掉，
@@ -1011,7 +1076,10 @@ mod tests {
 
         // 旧聚合 ID 属于「带前缀但解析不出来」：不回落，直接报错。
         let stale = resolve_active_model(&settings, "cpx-removed/old-model").unwrap_err();
-        assert!(stale.to_string().contains("cpx-removed/old-model"), "{stale}");
+        assert!(
+            stale.to_string().contains("cpx-removed/old-model"),
+            "{stale}"
+        );
     }
 
     /// 成员前缀命中但成员不可用时是成员级报错，不会被默认供应商接管。
@@ -1068,7 +1136,6 @@ mod tests {
         assert!(legacy.default_relay_id.is_empty());
     }
 
-
     /// 默认成员的模型用裸名发布，其他成员仍带 `cpx-` 前缀；
     /// 裸名请求因此天然落回默认成员，且按原样转发。
     #[test]
@@ -1085,13 +1152,22 @@ mod tests {
             .filter_map(|model| model["slug"].as_str())
             .collect();
 
-        assert!(slugs.contains(&"deepseek-reasoner"), "默认成员的模型应是裸名：{slugs:?}");
-        assert!(slugs.contains(&"deepseek-chat"), "默认成员的当前模型也应带出来：{slugs:?}");
+        assert!(
+            slugs.contains(&"deepseek-reasoner"),
+            "默认成员的模型应是裸名：{slugs:?}"
+        );
+        assert!(
+            slugs.contains(&"deepseek-chat"),
+            "默认成员的当前模型也应带出来：{slugs:?}"
+        );
         assert!(
             !slugs.iter().any(|slug| slug.starts_with("cpx-deepseek/")),
             "默认成员不该再发布带前缀的副本：{slugs:?}"
         );
-        assert!(slugs.contains(&"cpx-openai/gpt-5.6-sol"), "非默认成员仍带前缀：{slugs:?}");
+        assert!(
+            slugs.contains(&"cpx-openai/gpt-5.6-sol"),
+            "非默认成员仍带前缀：{slugs:?}"
+        );
 
         // 显示名同样分档：默认成员裸名，其他成员带「（供应商）」后缀。
         let by_slug: std::collections::HashMap<&str, &str> = catalog["models"]
@@ -1180,9 +1256,11 @@ mod tests {
                 && binding.upstream_model == "gpt-5.6-sol"
                 && binding.relay_id == "official"
         }));
-        assert!(resolve_active_model(&settings, "cpx-official/gpt-5.6-sol")
-            .unwrap()
-            .is_some());
+        assert!(
+            resolve_active_model(&settings, "cpx-official/gpt-5.6-sol")
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1238,9 +1316,11 @@ mod tests {
                 weight: 1,
             });
 
-        assert!(resolve_active_model(&settings, "cpx-deepseek/deepseek-reasoner")
-            .unwrap()
-            .is_some());
+        assert!(
+            resolve_active_model(&settings, "cpx-deepseek/deepseek-reasoner")
+                .unwrap()
+                .is_some()
+        );
 
         let error = resolve_active_model(&settings, "cpx-ghost/some-model").unwrap_err();
         assert!(error.to_string().contains("ghost"), "{error}");
@@ -1249,8 +1329,12 @@ mod tests {
 
     #[test]
     fn multi_agent_v2_flag_forms_are_detected() {
-        assert!(multi_agent_v2_enabled("[features]\nmulti_agent_v2 = true\n"));
-        assert!(!multi_agent_v2_enabled("[features]\nmulti_agent_v2 = false\n"));
+        assert!(multi_agent_v2_enabled(
+            "[features]\nmulti_agent_v2 = true\n"
+        ));
+        assert!(!multi_agent_v2_enabled(
+            "[features]\nmulti_agent_v2 = false\n"
+        ));
         assert!(multi_agent_v2_enabled(
             "[features.multi_agent_v2]\nmax_concurrent_threads_per_session = 4\n"
         ));

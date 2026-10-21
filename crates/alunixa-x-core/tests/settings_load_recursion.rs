@@ -56,7 +56,12 @@ fn aggregate_profile_with_backfilled_config_contents_loads_without_recursing() {
         .load()
         .expect("聚合档案带 configContents 时 load 不应递归爆栈");
     assert_eq!(loaded.relay_profiles.len(), 2);
-    assert!(loaded.relay_profiles.iter().any(|profile| profile.id == "aggregate-test"));
+    assert!(
+        loaded
+            .relay_profiles
+            .iter()
+            .any(|profile| profile.id == "aggregate-test")
+    );
 
     // 归一化仍然生效：成员档案的 base_url/key 等字段可用（这里只要求不崩且档案完整）。
     let again = SettingsStore::new(path).load().expect("重复 load 同样安全");

@@ -66,8 +66,7 @@ pub(crate) fn member_relay_ready(relay: &RelayProfile) -> bool {
     if crate::official_login::member_uses_official_login_transport(relay) {
         return true;
     }
-    !relay.base_url.trim().is_empty()
-        && (!relay.api_key.trim().is_empty() || relay.uses_no_auth())
+    !relay.base_url.trim().is_empty() && (!relay.api_key.trim().is_empty() || relay.uses_no_auth())
 }
 
 impl std::error::Error for SelectionError {}

@@ -28,7 +28,9 @@ pub fn proxied_client(user_agent: &str) -> anyhow::Result<reqwest::Client> {
         .pool_idle_timeout(std::time::Duration::from_secs(90))
         .pool_max_idle_per_host(16)
         .user_agent(&ua);
-    if let Some(proxy) = proxy { builder = builder.proxy(reqwest::Proxy::all(proxy)?); }
+    if let Some(proxy) = proxy {
+        builder = builder.proxy(reqwest::Proxy::all(proxy)?);
+    }
     let client = builder.build()?;
     if clients.len() >= MAX_PROXIED_CLIENTS {
         clients.clear();

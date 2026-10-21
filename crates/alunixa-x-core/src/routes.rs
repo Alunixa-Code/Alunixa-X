@@ -1007,7 +1007,9 @@ mod dictation_privacy_tests {
 
     #[test]
     fn managed_session_connection_uses_settings_and_local_proxy_only() {
-        use crate::settings::{AggregateRelayProfile, RelayMode, RelayProfile, RelaySessionProvider};
+        use crate::settings::{
+            AggregateRelayProfile, RelayMode, RelayProfile, RelaySessionProvider,
+        };
         let mut settings = BackendSettings {
             relay_profiles_enabled: true,
             active_relay_id: "aggregate".to_string(),
@@ -1084,7 +1086,9 @@ mod dictation_privacy_tests {
     fn settings_bridge_never_returns_named_key_lists() {
         let mut settings = BackendSettings::default();
         settings.relay_profiles[0].api_keys = vec![crate::settings::RelayApiKey {
-            id: "backup".into(), name: "备用".into(), api_key: "fake-backup-secret".into(),
+            id: "backup".into(),
+            name: "备用".into(),
+            api_key: "fake-backup-secret".into(),
         }];
         let result = settings_payload_value(settings, String::new()).unwrap();
         assert!(result["relayProfiles"][0].get("apiKeys").is_none());

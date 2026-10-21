@@ -6804,7 +6804,10 @@ base_url = "https://relay.example.test/v1"
 fn assert_managed_catalog_pointer(home: &std::path::Path, config: &str, filename: &str) {
     let pointer = model_catalog_pointer(config).expect("必须生成 model_catalog_json 指针");
     let path = std::path::Path::new(&pointer);
-    assert!(path.is_absolute(), "受管 catalog 必须使用绝对路径：{pointer}");
+    assert!(
+        path.is_absolute(),
+        "受管 catalog 必须使用绝对路径：{pointer}"
+    );
     assert_eq!(path, home.join("model-catalogs").join(filename));
     assert!(path.is_file(), "catalog 文件必须已写入：{pointer}");
 }
@@ -6838,7 +6841,10 @@ base_url = "https://api.moonshot.cn/v1"
     apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
     assert_managed_catalog_pointer(temp.path(), &config, "kimi-responses.json");
-    let catalog_path = temp.path().join("model-catalogs").join("kimi-responses.json");
+    let catalog_path = temp
+        .path()
+        .join("model-catalogs")
+        .join("kimi-responses.json");
     let catalog: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&catalog_path).unwrap()).unwrap();
     let models = catalog["models"].as_array().unwrap();

@@ -141,8 +141,14 @@ pub fn collect_catalog_entries(
     current_model: &str,
 ) -> Vec<ModelCatalogEntry> {
     // 先解析 model_list，保留顺序并去重；后缀已从 model_list 剥离，窗口来自 model_windows map。
-    let windows = model_windows.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
-    let auto_compacts = model_auto_compact.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+    let windows = model_windows
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    let auto_compacts = model_auto_compact
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
     let mut seen = HashSet::new();
     let mut list_entries: Vec<ModelCatalogEntry> = Vec::new();
     for raw in model_list
@@ -158,11 +164,10 @@ pub fn collect_catalog_entries(
             continue;
         }
         let suffix_window = suffix_window.or_else(|| {
-            lookup_model_map(&windows, &slug)
-                .and_then(|token| parse_window_token(token))
+            lookup_model_map(&windows, &slug).and_then(|token| parse_window_token(token))
         });
-        let auto_compact_percent = lookup_model_map(&auto_compacts, &slug)
-            .and_then(|token| parse_compact_percent(token));
+        let auto_compact_percent =
+            lookup_model_map(&auto_compacts, &slug).and_then(|token| parse_compact_percent(token));
         list_entries.push(ModelCatalogEntry {
             display_name: slug.clone(),
             slug,
@@ -178,8 +183,7 @@ pub fn collect_catalog_entries(
         let (slug, suffix_window) = parse_model_suffix(current_model);
         if !slug.is_empty() {
             let suffix_window = suffix_window.or_else(|| {
-                lookup_model_map(&windows, &slug)
-                    .and_then(|token| parse_window_token(token))
+                lookup_model_map(&windows, &slug).and_then(|token| parse_window_token(token))
             });
             let auto_compact_percent = lookup_model_map(&auto_compacts, &slug)
                 .and_then(|token| parse_compact_percent(token));
@@ -437,7 +441,11 @@ pub fn model_ui_metadata_with_override(slug: &str, user_override: Option<&Value>
     // 注入侧与原生目录使用同一份窗口信息。
     for (source, camel, snake) in [
         ("context_window", "contextWindow", "context_window"),
-        ("max_context_window", "maxContextWindow", "max_context_window"),
+        (
+            "max_context_window",
+            "maxContextWindow",
+            "max_context_window",
+        ),
     ] {
         if let Some(window) = metadata.get(source) {
             ui[camel] = window.clone();
@@ -740,7 +748,11 @@ pub(crate) fn build_model_catalog_json_with_capabilities(
                 .unwrap_or_else(|| metadata_max_window.unwrap_or(context_window));
             model["slug"] = json!(entry.slug);
             // 借用模板不能证明自定义模型支持并行工具调用；精确元数据才有此权威。
-            if !has_model_metadata || !model.get("supports_parallel_tool_calls").is_some_and(Value::is_boolean) {
+            if !has_model_metadata
+                || !model
+                    .get("supports_parallel_tool_calls")
+                    .is_some_and(Value::is_boolean)
+            {
                 model["supports_parallel_tool_calls"] = json!(false);
             }
             if !has_model_metadata {

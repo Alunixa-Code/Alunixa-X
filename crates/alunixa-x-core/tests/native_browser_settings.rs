@@ -43,5 +43,3 @@ fn save_and_partial_update_preserve_explicit_choice() {
     names.sort();
     assert_eq!(names, ["settings.json", "settings.json.lock"]);
 }
-
-

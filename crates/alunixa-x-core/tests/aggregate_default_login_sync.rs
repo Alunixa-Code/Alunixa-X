@@ -10,13 +10,13 @@
 //!   3. 同一账号优先用 live 里更新的一代凭据（Codex 会轮换 refresh token）；
 //!   4. 默认成员不是官方登录、或用户已在 Codex 登录了别的账号时不覆盖，并清掉残留。
 
-use base64::Engine;
 use alunixa_x_core::paths::set_settings_path_for_tests;
 use alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules;
 use alunixa_x_core::settings::{
-    AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings, RelayMode,
-    RelayProfile, RelaySessionProvider, SettingsStore,
+    AggregateRelayMember, AggregateRelayProfile, AggregateRelayStrategy, BackendSettings,
+    RelayMode, RelayProfile, RelaySessionProvider, SettingsStore,
 };
+use base64::Engine;
 use serde_json::{Value, json};
 
 const MEMBER_ID: &str = "official-account";
@@ -151,10 +151,17 @@ fn apply_switch(
 /// 默认关：只写代理 Key，不主动写入成员登录态（与改动前逐字一致）。
 #[test]
 fn sync_disabled_keeps_proxy_key_only() {
-    let (_dir, auth) = apply_switch(official_member("acct-1", "refresh-1"), aggregate_profile(false, MEMBER_ID), None);
+    let (_dir, auth) = apply_switch(
+        official_member("acct-1", "refresh-1"),
+        aggregate_profile(false, MEMBER_ID),
+        None,
+    );
 
     assert_eq!(auth["OPENAI_API_KEY"], PROXY_KEY);
-    assert!(auth.get("tokens").is_none(), "开关关着时不该写入 tokens：{auth}");
+    assert!(
+        auth.get("tokens").is_none(),
+        "开关关着时不该写入 tokens：{auth}"
+    );
     assert!(auth.get("auth_mode").is_none(), "{auth}");
 }
 
@@ -180,7 +187,10 @@ fn sync_enabled_writes_official_login_next_to_proxy_key() {
     let member = official_member("acct-1", "refresh-1");
     let (_dir, auth) = apply_switch(member.clone(), aggregate_profile(true, MEMBER_ID), None);
 
-    assert_eq!(auth["OPENAI_API_KEY"], PROXY_KEY, "代理 Key 必须保留：{auth}");
+    assert_eq!(
+        auth["OPENAI_API_KEY"], PROXY_KEY,
+        "代理 Key 必须保留：{auth}"
+    );
     assert_eq!(auth["auth_mode"], "chatgpt");
     assert_eq!(auth["tokens"]["account_id"], "acct-1");
     assert_eq!(auth["tokens"]["refresh_token"], "refresh-1");

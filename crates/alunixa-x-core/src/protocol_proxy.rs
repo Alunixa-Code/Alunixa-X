@@ -131,9 +131,10 @@ impl CodexToolContext {
     /// （issue #1209 / #586：web_search 被错译成 custom_tool_call 后，客户端
     /// 拿不到搜索结果，表现为「工具调用后无反应」或上游报 tool 名不识别）。
     fn is_builtin_web_search_proxy(&self, upstream_name: &str) -> bool {
-        self.rejected_native_search.contains(upstream_name) || self.custom_tools.get(upstream_name).is_some_and(|spec| {
-            spec.kind == CodexCustomToolKind::BuiltIn && spec.openai_name == "web_search"
-        })
+        self.rejected_native_search.contains(upstream_name)
+            || self.custom_tools.get(upstream_name).is_some_and(|spec| {
+                spec.kind == CodexCustomToolKind::BuiltIn && spec.openai_name == "web_search"
+            })
     }
     fn is_custom_tool_proxy(&self, upstream_name: &str) -> bool {
         self.custom_tools.contains_key(upstream_name)
@@ -1851,30 +1852,31 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         .map(str::trim)
         .unwrap_or("")
         .to_string();
-    let aggregate_model = match crate::aggregate_catalog::resolve_active_model(&settings, &source_model) {
-        Ok(binding) => binding,
-        Err(error) => {
-            return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
-                status_code: 400,
-                content_type: "application/json".to_string(),
-                is_stream: false,
-                wire_api: UpstreamWireApi::Responses,
-                compaction: false,
-                native_compaction_passthrough: false,
-                buffered_body: Some(serde_json::to_vec(&json!({
-                    "error": {
-                        "type": "invalid_request_error",
-                        "code": "aggregate_model_unavailable",
-                        "message": error.to_string()
-                    }
-                }))?),
-                exec_adapted: false,
-                exec_outcome: None,
-                response: None,
-            });
-        }
-    };
+    let aggregate_model =
+        match crate::aggregate_catalog::resolve_active_model(&settings, &source_model) {
+            Ok(binding) => binding,
+            Err(error) => {
+                return Ok(UpstreamProxyResponse {
+                    _channel_permit: None,
+                    status_code: 400,
+                    content_type: "application/json".to_string(),
+                    is_stream: false,
+                    wire_api: UpstreamWireApi::Responses,
+                    compaction: false,
+                    native_compaction_passthrough: false,
+                    buffered_body: Some(serde_json::to_vec(&json!({
+                        "error": {
+                            "type": "invalid_request_error",
+                            "code": "aggregate_model_unavailable",
+                            "message": error.to_string()
+                        }
+                    }))?),
+                    exec_adapted: false,
+                    exec_outcome: None,
+                    response: None,
+                });
+            }
+        };
     if let Some(binding) = &aggregate_model {
         request_json["model"] = Value::String(binding.upstream_model.clone());
     }
@@ -1933,11 +1935,11 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
     for (attempt, relay) in relays.iter().cloned().enumerate() {
         let has_more_candidates = attempt + 1 < relay_count;
         let channel_key = crate::channel_protection::key_for_relay(&relay);
-        let mut channel_permit = Some(crate::channel_protection::acquire(&channel_key, &relay).await);
+        let mut channel_permit =
+            Some(crate::channel_protection::acquire(&channel_key, &relay).await);
         validate_upstream(&relay)?;
         // 官方登录成员：用该账号 OAuth 凭据发往 chatgpt.com，而不是 API Key。
-        let official_member =
-            crate::official_login::member_uses_official_login_transport(&relay);
+        let official_member = crate::official_login::member_uses_official_login_transport(&relay);
         let mut official_credential = if official_member {
             match crate::official_login::resolve_official_credential(&relay, false).await {
                 Ok(credential) => Some(credential),
@@ -1998,7 +2000,8 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             };
         let legacy_native_compaction = relay.protocol == RelayProtocol::Responses
             && is_responses_compact_proxy_path(request_path);
-        let is_compaction_request = compaction || probe_native_compaction || legacy_native_compaction;
+        let is_compaction_request =
+            compaction || probe_native_compaction || legacy_native_compaction;
         let header_timeout = response_header_timeout(is_stream);
         let _ = crate::diagnostic_log::append_diagnostic_log(
             "protocol_proxy.upstream_request",
@@ -2027,24 +2030,44 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
         let mut exec_adapted = false;
         let send = async {
             let builder = build_responses_upstream_request(
-                &relay, &endpoint, &upstream_body, wire_api, is_stream,
-                original_user_agent, beta_features, session_headers, official_credential.as_ref(),
+                &relay,
+                &endpoint,
+                &upstream_body,
+                wire_api,
+                is_stream,
+                original_user_agent,
+                beta_features,
+                session_headers,
+                official_credential.as_ref(),
             )?;
             if eligible {
                 key = Some(crate::responses_exec_transport::cache_key(
-                    &relay.id, &builder.build()?, &upstream_body, &user_agent,
+                    &relay.id,
+                    &builder.build()?,
+                    &upstream_body,
+                    &user_agent,
                 ));
             }
-            if key.as_ref().is_some_and(crate::responses_exec_transport::cached)
+            if key
+                .as_ref()
+                .is_some_and(crate::responses_exec_transport::cached)
                 && let Ok(adapted) = crate::responses_exec::adapt_request(upstream_body.clone())
             {
                 upstream_body = adapted;
                 exec_adapted = true;
             }
             send_responses_upstream_request(
-                &relay, &endpoint, &upstream_body, wire_api, is_stream,
-                original_user_agent, beta_features, session_headers, official_credential.as_ref(),
-            ).await
+                &relay,
+                &endpoint,
+                &upstream_body,
+                wire_api,
+                is_stream,
+                original_user_agent,
+                beta_features,
+                session_headers,
+                official_credential.as_ref(),
+            )
+            .await
         };
         let mut upstream = match send.await {
             Ok(upstream) => upstream,
@@ -2106,24 +2129,34 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                     let retry = async {
                         if eligible {
                             let builder = build_responses_upstream_request(
-                                &relay, &endpoint, &upstream_body, wire_api, is_stream,
-                                original_user_agent, beta_features, session_headers, official_credential.as_ref(),
+                                &relay,
+                                &endpoint,
+                                &upstream_body,
+                                wire_api,
+                                is_stream,
+                                original_user_agent,
+                                beta_features,
+                                session_headers,
+                                official_credential.as_ref(),
                             )?;
                             key = Some(crate::responses_exec_transport::cache_key(
-                                &relay.id, &builder.build()?, &request_json, &user_agent,
+                                &relay.id,
+                                &builder.build()?,
+                                &request_json,
+                                &user_agent,
                             ));
                         }
                         send_responses_upstream_request(
-                        &relay,
-                        &endpoint,
-                        &upstream_body,
-                        wire_api,
-                        is_stream,
-                        original_user_agent,
-                        beta_features,
-                        session_headers,
-                        official_credential.as_ref(),
-                    )
+                            &relay,
+                            &endpoint,
+                            &upstream_body,
+                            wire_api,
+                            is_stream,
+                            original_user_agent,
+                            beta_features,
+                            session_headers,
+                            official_credential.as_ref(),
+                        )
                         .await
                     };
                     match retry.await {
@@ -2174,7 +2207,8 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 let first_retry_after =
                     exec_retry_after_duration(upstream.headers(), SystemTime::now());
                 let (inspected, rejected) =
-                    crate::responses_exec_transport::inspect_rejection(upstream, &upstream_body).await?;
+                    crate::responses_exec_transport::inspect_rejection(upstream, &upstream_body)
+                        .await?;
                 upstream = inspected;
                 if rejected
                     && let Ok(adapted) = crate::responses_exec::adapt_request(upstream_body.clone())
@@ -2189,9 +2223,17 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                         json!({"relayId": relay.id, "stream": is_stream}),
                     );
                     upstream = send_responses_upstream_request(
-                        &relay, &endpoint, &adapted, wire_api, is_stream,
-                        original_user_agent, beta_features, session_headers, official_credential.as_ref(),
-                    ).await?;
+                        &relay,
+                        &endpoint,
+                        &adapted,
+                        wire_api,
+                        is_stream,
+                        original_user_agent,
+                        beta_features,
+                        session_headers,
+                        official_credential.as_ref(),
+                    )
+                    .await?;
                 }
                 Ok::<_, anyhow::Error>(upstream)
             };
@@ -2211,60 +2253,113 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 }
             };
             status_code = upstream.status().as_u16();
-            content_type = upstream.headers().get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok()).unwrap_or("").to_string();
+            content_type = upstream
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_string();
         }
 
-        if settings.enhancements_enabled && settings.codex_app_responses_id_negotiation
-            && wire_api == UpstreamWireApi::Responses && !is_compaction_request
-            && !exec_adapted && matches!(status_code, 400 | 422)
+        if settings.enhancements_enabled
+            && settings.codex_app_responses_id_negotiation
+            && wire_api == UpstreamWireApi::Responses
+            && !is_compaction_request
+            && !exec_adapted
+            && matches!(status_code, 400 | 422)
         {
             let error_body = read_limited_upstream_body(&mut upstream, 64 * 1024).await?;
-            let repair = std::str::from_utf8(&error_body).ok().and_then(|error|
-                repair_responses_item_ids_for_upstream_error(&upstream_body.to_string(), error));
+            let repair = std::str::from_utf8(&error_body).ok().and_then(|error| {
+                repair_responses_item_ids_for_upstream_error(&upstream_body.to_string(), error)
+            });
             if let Some(repair) = repair {
                 let repaired: Value = serde_json::from_str(&repair.body)?;
-                upstream = send_responses_upstream_request(&relay, &endpoint, &repaired, wire_api,
-                    is_stream, original_user_agent, beta_features, session_headers, official_credential.as_ref()).await?;
+                upstream = send_responses_upstream_request(
+                    &relay,
+                    &endpoint,
+                    &repaired,
+                    wire_api,
+                    is_stream,
+                    original_user_agent,
+                    beta_features,
+                    session_headers,
+                    official_credential.as_ref(),
+                )
+                .await?;
                 status_code = upstream.status().as_u16();
-                content_type = upstream.headers().get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|value| value.to_str().ok()).unwrap_or("").to_string();
+                content_type = upstream
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
             } else {
                 return Ok(UpstreamProxyResponse {
-                    status_code, content_type, is_stream: false, wire_api, compaction: false,
-                    native_compaction_passthrough: false, buffered_body: Some(error_body),
-                    exec_adapted: false, exec_outcome: None, response: None, _channel_permit: None,
+                    status_code,
+                    content_type,
+                    is_stream: false,
+                    wire_api,
+                    compaction: false,
+                    native_compaction_passthrough: false,
+                    buffered_body: Some(error_body),
+                    exec_adapted: false,
+                    exec_outcome: None,
+                    response: None,
+                    _channel_permit: None,
                 });
             }
         }
         if !(200..300).contains(&status_code) {
-            crate::channel_protection::mark_failure(&channel_key, &relay, status_code,
-                crate::channel_protection::retry_after_duration(upstream.headers())).await;
+            crate::channel_protection::mark_failure(
+                &channel_key,
+                &relay,
+                status_code,
+                crate::channel_protection::retry_after_duration(upstream.headers()),
+            )
+            .await;
         }
         if legacy_native_compaction {
-            let body = read_limited_upstream_body(&mut upstream, MAX_NATIVE_COMPACTION_PROBE_BODY_BYTES).await?;
+            let body =
+                read_limited_upstream_body(&mut upstream, MAX_NATIVE_COMPACTION_PROBE_BODY_BYTES)
+                    .await?;
             let stream_response = response_body_is_stream(&content_type, &body);
             let success = (200..300).contains(&status_code);
             let terminal_failure = upstream_has_terminal_failure(&body, &content_type);
-            let valid = !success || terminal_failure
+            let valid = !success
+                || terminal_failure
                 || upstream_compaction_item_count(&body, &content_type) == Some(1);
             let (code, body, response_type) = if valid {
                 let body = if success && terminal_failure && stream_response {
                     let mut converter = CompactionSseConverter::new("");
-                    converter.fail("原生压缩上游返回失败或不完整状态".to_string(), Some("compaction_failed".to_string()));
+                    converter.fail(
+                        "原生压缩上游返回失败或不完整状态".to_string(),
+                        Some("compaction_failed".to_string()),
+                    );
                     converter.finish()
-                } else { body };
+                } else {
+                    body
+                };
                 (status_code, body, content_type)
             } else {
-                (502, serde_json::to_vec(&json!({"error":{"type":"compaction_incompatible",
+                (
+                    502,
+                    serde_json::to_vec(&json!({"error":{"type":"compaction_incompatible",
                     "code":"compaction_invalid_response", "message":"压缩上游未返回恰好一个完整有效的 checkpoint"}}))?,
-                    "application/json".to_string())
+                    "application/json".to_string(),
+                )
             };
             return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
-                status_code: code, content_type: response_type, is_stream: valid && stream_response,
-                wire_api, compaction: false, native_compaction_passthrough: valid && success,
-                buffered_body: Some(body), exec_adapted: false, exec_outcome: None, response: None,
+                _channel_permit: None,
+                status_code: code,
+                content_type: response_type,
+                is_stream: valid && stream_response,
+                wire_api,
+                compaction: false,
+                native_compaction_passthrough: valid && success,
+                buffered_body: Some(body),
+                exec_adapted: false,
+                exec_outcome: None,
+                response: None,
             });
         }
         if probe_native_compaction {
@@ -2286,16 +2381,27 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 if !strict_aggregate_model {
                     crate::relay_rotation::record_relay_request_failure(&settings);
                 }
-                let probed = if stream_response && String::from_utf8_lossy(&probed)
-                    .replace("\r\n", "\n").split("\n\n").any(|block|
-                        matches!(sse_block_type(block).as_deref(), Some("response.completed" | "response.output_item.done")))
-                {
+                let probed = if stream_response
+                    && String::from_utf8_lossy(&probed)
+                        .replace("\r\n", "\n")
+                        .split("\n\n")
+                        .any(|block| {
+                            matches!(
+                                sse_block_type(block).as_deref(),
+                                Some("response.completed" | "response.output_item.done")
+                            )
+                        }) {
                     let mut converter = CompactionSseConverter::new("");
-                    converter.fail("原生压缩上游返回失败或不完整状态".to_string(), Some("compaction_failed".to_string()));
+                    converter.fail(
+                        "原生压缩上游返回失败或不完整状态".to_string(),
+                        Some("compaction_failed".to_string()),
+                    );
                     converter.finish()
-                } else { probed };
+                } else {
+                    probed
+                };
                 return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                    _channel_permit: None,
                     status_code,
                     is_stream: stream_response,
                     content_type,
@@ -2318,7 +2424,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                             );
                         }
                         return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                            _channel_permit: None,
                             status_code,
                             is_stream: true,
                             content_type,
@@ -2336,7 +2442,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                             crate::relay_rotation::record_relay_request_failure(&settings);
                         }
                         return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                            _channel_permit: None,
                             status_code,
                             is_stream: true,
                             content_type: "text/event-stream".to_string(),
@@ -2351,9 +2457,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                     }
                     Some(_) => {}
                 }
-            } else if success
-                && upstream_compaction_item_count(&probed, &content_type) == Some(1)
-            {
+            } else if success && upstream_compaction_item_count(&probed, &content_type) == Some(1) {
                 if !strict_aggregate_model {
                     crate::relay_rotation::record_relay_request_event(
                         &settings,
@@ -2362,7 +2466,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 }
                 if !is_stream {
                     return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                        _channel_permit: None,
                         status_code,
                         is_stream: false,
                         content_type,
@@ -2377,7 +2481,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 }
                 if let Some(sse) = render_native_compaction_as_sse(&probed) {
                     return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                        _channel_permit: None,
                         status_code,
                         is_stream: true,
                         content_type: "text/event-stream".to_string(),
@@ -2399,7 +2503,7 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                     continue;
                 }
                 return Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+                    _channel_permit: None,
                     status_code,
                     is_stream: false,
                     content_type,
@@ -2414,7 +2518,9 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
             }
 
             if input_has_native_compaction(&request_json) {
-                return native_compaction_unsupported_result(NativeCompactionUnsupported::history().into());
+                return native_compaction_unsupported_result(
+                    NativeCompactionUnsupported::history().into(),
+                );
             }
             let _ = crate::diagnostic_log::append_diagnostic_log(
                 "protocol_proxy.compaction_fallback",
@@ -2510,7 +2616,8 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 "willFailover": has_more_candidates && !(200..300).contains(&status_code)
             }),
         );
-        if exec_adapted && !(200..300).contains(&status_code)
+        if exec_adapted
+            && !(200..300).contains(&status_code)
             && let Some(key) = key.as_ref()
         {
             crate::responses_exec_transport::evict(key);
@@ -2545,7 +2652,8 @@ async fn open_responses_proxy_request_with_settings_and_user_agent(
                 exec_adapted,
                 exec_outcome: (exec_adapted && (200..300).contains(&status_code)).then(|| {
                     crate::responses_exec_transport::ExecOutcome::new(
-                        key.expect("adapted request has a cache identity"), &settings,
+                        key.expect("adapted request has a cache identity"),
+                        &settings,
                     )
                 }),
                 response: Some(upstream),
@@ -2928,7 +3036,10 @@ async fn upstream_request_parts(
             apply_relay_image_handling(relay, &mut source).await?;
             Ok((
                 anthropic_messages_url(&relay.base_url),
-                anthropic::responses_request_to_anthropic_with_options(source, &crate::anthropic_bridge::request_options(relay))?,
+                anthropic::responses_request_to_anthropic_with_options(
+                    source,
+                    &crate::anthropic_bridge::request_options(relay),
+                )?,
                 UpstreamWireApi::AnthropicMessages,
                 synthetic_compaction,
             ))
@@ -3148,7 +3259,14 @@ async fn send_json_upstream_with_connect_retry(
     _wire_api: UpstreamWireApi,
 ) -> (anyhow::Result<reqwest::Response>, bool) {
     let first = send_upstream_request_for_responses(
-        upstream_request_builder(client.clone(), endpoint, relay, is_stream, upstream_body, None),
+        upstream_request_builder(
+            client.clone(),
+            endpoint,
+            relay,
+            is_stream,
+            upstream_body,
+            None,
+        ),
         is_stream,
     )
     .await;
@@ -3157,7 +3275,14 @@ async fn send_json_upstream_with_connect_retry(
             tokio::time::sleep(UPSTREAM_CONNECT_RETRY_DELAY).await;
             (
                 send_upstream_request_for_responses(
-                    upstream_request_builder(client, endpoint, relay, is_stream, upstream_body, None),
+                    upstream_request_builder(
+                        client,
+                        endpoint,
+                        relay,
+                        is_stream,
+                        upstream_body,
+                        None,
+                    ),
                     is_stream,
                 )
                 .await,
@@ -3168,7 +3293,10 @@ async fn send_json_upstream_with_connect_retry(
     }
 }
 
-async fn apply_relay_image_handling(relay: &crate::settings::RelayProfile, body: &mut Value) -> anyhow::Result<()> {
+async fn apply_relay_image_handling(
+    relay: &crate::settings::RelayProfile,
+    body: &mut Value,
+) -> anyhow::Result<()> {
     // Image handling (per-model): send-as-is / strip / VLM analysis
     let model = body
         .get("model")
@@ -3187,25 +3315,25 @@ async fn apply_relay_image_handling(relay: &crate::settings::RelayProfile, body:
                 }
             }
             ImageHandling::Vlm => {
-                    let vlm_config = crate::vision::VlmConfig {
-                        api_key: relay.vlm_api_key.clone(),
-                        model: relay.vlm_model.clone(),
-                        base_url: relay.vlm_base_url.clone(),
-                    };
+                let vlm_config = crate::vision::VlmConfig {
+                    api_key: relay.vlm_api_key.clone(),
+                    model: relay.vlm_model.clone(),
+                    base_url: relay.vlm_base_url.clone(),
+                };
 
-                    for key in &["messages", "input"] {
-                        if let Some(arr) = body.get_mut(key).and_then(Value::as_array_mut) {
-                            crate::vision::strip_image_blocks(
-                                arr,
-                                &vlm_config,
-                                &relay.model_windows,
-                                &relay.context_window,
-                                &model,
-                                relay.protocol == crate::settings::RelayProtocol::Responses,
-                            )
-                            .await?;
-                        }
+                for key in &["messages", "input"] {
+                    if let Some(arr) = body.get_mut(key).and_then(Value::as_array_mut) {
+                        crate::vision::strip_image_blocks(
+                            arr,
+                            &vlm_config,
+                            &relay.model_windows,
+                            &relay.context_window,
+                            &model,
+                            relay.protocol == crate::settings::RelayProtocol::Responses,
+                        )
+                        .await?;
                     }
+                }
             }
         }
     }
@@ -3267,8 +3395,7 @@ fn finish_upstream_builder(
 
 fn validate_upstream(relay: &crate::settings::RelayProfile) -> anyhow::Result<()> {
     // 纯官方 profile 没有 URL/Key：凭据齐全时走官方登录通道，否则给出可行动的错误。
-    if crate::official_login::is_official_login_profile(relay) && relay.base_url.trim().is_empty()
-    {
+    if crate::official_login::is_official_login_profile(relay) && relay.base_url.trim().is_empty() {
         if crate::official_login::official_login_available(relay) {
             return Ok(());
         }
@@ -3383,8 +3510,15 @@ async fn open_custom_models_proxy_request(
     synthetic.model = model.model.clone();
     let mut request_json = request_json.clone();
     request_json["model"] = json!(model.model.trim());
-    let (mut endpoint, upstream_body, wire_api, compaction) =
-        upstream_request_parts(&synthetic, request_json.clone(), request_path, None, true, None).await?;
+    let (mut endpoint, upstream_body, wire_api, compaction) = upstream_request_parts(
+        &synthetic,
+        request_json.clone(),
+        request_path,
+        None,
+        true,
+        None,
+    )
+    .await?;
     // Native compact state must pass through untouched, not become a normal
     // generation request (CodexPlusPlus v1.5.0 compaction compatibility).
     if is_responses_compact_proxy_path(request_path) {
@@ -3529,16 +3663,25 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
     if wire_api == UpstreamWireApi::Responses && upstream.exec_adapted {
         let (body, valid) = if is_stream {
             let mut converter = crate::responses_exec_sse::ExecSseAdapter::new();
-            let mut output = converter.push_bytes(&upstream_body).unwrap_or_else(|_| converter.fail());
+            let mut output = converter
+                .push_bytes(&upstream_body)
+                .unwrap_or_else(|_| converter.fail());
             output.extend(converter.finish()?);
             (output, converter.succeeded())
         } else {
             crate::responses_exec_transport::adapted_json(&upstream_body)
         };
-        if let Some(outcome) = upstream.exec_outcome.as_mut() { outcome.finish(valid); }
+        if let Some(outcome) = upstream.exec_outcome.as_mut() {
+            outcome.finish(valid);
+        }
         return Ok(ProxyHttpResponse {
             status: "200 OK".into(),
-            content_type: if is_stream { "text/event-stream; charset=utf-8" } else { "application/json; charset=utf-8" }.into(),
+            content_type: if is_stream {
+                "text/event-stream; charset=utf-8"
+            } else {
+                "application/json; charset=utf-8"
+            }
+            .into(),
             body,
         });
     }
@@ -3561,13 +3704,17 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
                         converter.finish()
                     } else {
                         let normalized = convert_upstream_json(json, wire_api, &request_json)?;
-                        wrap_non_stream_response_as_compaction(&serde_json::to_vec(&normalized)?, model)?
+                        wrap_non_stream_response_as_compaction(
+                            &serde_json::to_vec(&normalized)?,
+                            model,
+                        )?
                     }
                 },
             });
         }
         let mut converter = CompactionSseConverter::new(model);
-        let mut wire_converter = UpstreamSseToResponsesConverter::with_request(wire_api, &request_json);
+        let mut wire_converter =
+            UpstreamSseToResponsesConverter::with_request(wire_api, &request_json);
         if wire_api == UpstreamWireApi::ChatCompletions {
             converter = converter.with_chat_upstream();
             wire_converter = None;
@@ -3577,7 +3724,10 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
             observer.push_bytes(&upstream_body);
             observer.finish();
             if !observer.has_successful_compaction_completion() {
-                converter.fail("Anthropic 压缩流缺少正常 message_stop".into(), Some("compaction_incomplete".into()));
+                converter.fail(
+                    "Anthropic 压缩流缺少正常 message_stop".into(),
+                    Some("compaction_incomplete".into()),
+                );
             }
         }
         // 整包已收齐，直接喂给有状态 SSE 解析器（与 launcher 逐 chunk 路径同逻辑）。
@@ -3627,13 +3777,21 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
     })
 }
 
-fn convert_upstream_json(body: Value, wire: UpstreamWireApi, request: &Value) -> anyhow::Result<Value> {
+fn convert_upstream_json(
+    body: Value,
+    wire: UpstreamWireApi,
+    request: &Value,
+) -> anyhow::Result<Value> {
     match wire {
         UpstreamWireApi::Responses => Ok(body),
         UpstreamWireApi::ChatCompletions => chat_completion_to_response_with_request(body, request),
         UpstreamWireApi::Completions => completion_to_response_with_request(body, request),
-        UpstreamWireApi::AnthropicMessages => anthropic_message_to_response_with_request(body, request),
-        UpstreamWireApi::GeminiGenerateContent => gemini_generate_content_to_response_with_request(body, request),
+        UpstreamWireApi::AnthropicMessages => {
+            anthropic_message_to_response_with_request(body, request)
+        }
+        UpstreamWireApi::GeminiGenerateContent => {
+            gemini_generate_content_to_response_with_request(body, request)
+        }
         _ => fidelity::reject("unsupported response conversion"),
     }
 }
@@ -6059,7 +6217,11 @@ fn responses_tools_to_chat_tools(tools: &[Value], context: &CodexToolContext) ->
             let description = response_tool_description(tool);
             if detect_codex_custom_tool_kind(tool, &openai_name) == CodexCustomToolKind::ApplyPatch
             {
-                converted.push(custom_proxy_tool_with_original_definition(tool, &upstream_name, description));
+                converted.push(custom_proxy_tool_with_original_definition(
+                    tool,
+                    &upstream_name,
+                    description,
+                ));
             } else {
                 converted.push(generic_custom_proxy_tool(&upstream_name, description));
             }
@@ -6267,7 +6429,11 @@ fn namespace_tool_to_chat_tools(namespace_tool: &Value, context: &CodexToolConte
             );
             if detect_codex_custom_tool_kind(child, &openai_name) == CodexCustomToolKind::ApplyPatch
             {
-                converted.push(custom_proxy_tool_with_original_definition(child, &upstream_name, &description));
+                converted.push(custom_proxy_tool_with_original_definition(
+                    child,
+                    &upstream_name,
+                    &description,
+                ));
             } else {
                 converted.push(generic_custom_proxy_tool(&upstream_name, &description));
             }
@@ -7288,7 +7454,11 @@ fn reconstruct_custom_tool_call_input_with_context(
     upstream_name: &str,
     arguments: &str,
 ) -> String {
-    if let Some(action) = tool_context.custom_tools.get(upstream_name).and_then(|spec| spec.proxy_action) {
+    if let Some(action) = tool_context
+        .custom_tools
+        .get(upstream_name)
+        .and_then(|spec| spec.proxy_action)
+    {
         return reconstruct_apply_patch_input(Some(action), arguments);
     }
     reconstruct_custom_tool_call_input(arguments)
@@ -7870,8 +8040,15 @@ async fn send_responses_upstream_request(
     official_credential: Option<&crate::official_login::OfficialCredential>,
 ) -> anyhow::Result<reqwest::Response> {
     let builder = build_responses_upstream_request(
-        relay, endpoint, upstream_body, wire_api, is_stream,
-        original_user_agent, beta_features, session_headers, official_credential,
+        relay,
+        endpoint,
+        upstream_body,
+        wire_api,
+        is_stream,
+        original_user_agent,
+        beta_features,
+        session_headers,
+        official_credential,
     )?;
     send_upstream_request_for_responses(builder, is_stream).await
 }
@@ -8033,7 +8210,11 @@ pub fn wrap_non_stream_response_as_compaction(
         );
         return Ok(converter.finish());
     }
-    let wire = if upstream_json.get("choices").is_some() { UpstreamWireApi::ChatCompletions } else { UpstreamWireApi::Responses };
+    let wire = if upstream_json.get("choices").is_some() {
+        UpstreamWireApi::ChatCompletions
+    } else {
+        UpstreamWireApi::Responses
+    };
     if let Some(error) = upstream_json.get("error").filter(|value| !value.is_null()) {
         converter.fail(
             error
@@ -8059,7 +8240,10 @@ pub fn wrap_non_stream_response_as_compaction(
         return Ok(converter.finish());
     }
     if validate_compaction_json_completion(&upstream_json, wire).is_err() {
-        converter.fail("上游压缩摘要未正常完成".to_string(), Some("compaction_incomplete".to_string()));
+        converter.fail(
+            "上游压缩摘要未正常完成".to_string(),
+            Some("compaction_incomplete".to_string()),
+        );
         return Ok(converter.finish());
     }
     converter.completed = true;
@@ -8176,7 +8360,12 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
         let mut count = 0;
         let mut completed = false;
         let tail = text.rsplit("\n\n").next().unwrap_or("");
-        if tail.lines().any(|line| !line.trim().is_empty() && !line.starts_with(':')) { return None; }
+        if tail
+            .lines()
+            .any(|line| !line.trim().is_empty() && !line.starts_with(':'))
+        {
+            return None;
+        }
         for block in text.split("\n\n") {
             let mut event_name = None;
             let mut data_parts = Vec::new();
@@ -8197,7 +8386,9 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
             }
             let json = serde_json::from_str::<Value>(&data).ok()?;
             let event = event_name.or_else(|| json.get("type").and_then(Value::as_str));
-            if completed { return None; }
+            if completed {
+                return None;
+            }
             match event {
                 Some("response.output_item.done")
                     if json
@@ -8213,7 +8404,12 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
                 }
                 Some("response.completed") => {
                     json.get("response")?.get("id")?.as_str()?;
-                    if matches!(json.pointer("/response/status").and_then(Value::as_str), Some("failed" | "incomplete")) { return None; }
+                    if matches!(
+                        json.pointer("/response/status").and_then(Value::as_str),
+                        Some("failed" | "incomplete")
+                    ) {
+                        return None;
+                    }
                     completed = true;
                 }
                 Some("response.failed" | "response.incomplete" | "error") => return None,
@@ -8226,8 +8422,13 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
         return None;
     };
     if json.get("error").is_some_and(|error| !error.is_null())
-        || json.get("status").and_then(Value::as_str).is_some_and(|status| status != "completed")
-    { return None; }
+        || json
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|status| status != "completed")
+    {
+        return None;
+    }
     json_compaction_count(&json)
 }
 
@@ -8407,7 +8608,7 @@ fn native_compaction_unsupported_result(
             }
         });
         Ok(UpstreamProxyResponse {
-        _channel_permit: None,
+            _channel_permit: None,
             status_code: 400,
             content_type: "application/json".to_string(),
             is_stream: false,
@@ -9797,7 +9998,10 @@ impl CompactionSseConverter {
             return;
         }
         let Ok(chunk) = serde_json::from_str::<Value>(&data) else {
-            self.fail("压缩响应包含无效 SSE JSON".to_string(), Some("compaction_invalid_stream".to_string()));
+            self.fail(
+                "压缩响应包含无效 SSE JSON".to_string(),
+                Some("compaction_invalid_stream".to_string()),
+            );
             return;
         };
         let event_type = chunk
@@ -9808,8 +10012,13 @@ impl CompactionSseConverter {
             event_type,
             "response.failed" | "response.incomplete" | "error"
         ) || chunk.get("error").is_some_and(|error| !error.is_null())
-            || chunk.pointer("/response/error").is_some_and(|error| !error.is_null())
-            || matches!(chunk.pointer("/response/status").and_then(Value::as_str), Some("failed" | "incomplete"))
+            || chunk
+                .pointer("/response/error")
+                .is_some_and(|error| !error.is_null())
+            || matches!(
+                chunk.pointer("/response/status").and_then(Value::as_str),
+                Some("failed" | "incomplete")
+            )
         {
             let error = chunk
                 .pointer("/response/error")
@@ -9868,7 +10077,10 @@ impl CompactionSseConverter {
                 if reason == "stop" {
                     self.completed = true;
                 } else {
-                    self.fail("压缩摘要没有正常完成".to_string(), Some("compaction_incomplete".to_string()));
+                    self.fail(
+                        "压缩摘要没有正常完成".to_string(),
+                        Some("compaction_incomplete".to_string()),
+                    );
                 }
             }
             if let Some(content) = choice
@@ -9928,10 +10140,18 @@ impl CompactionSseConverter {
                 Some("compaction_empty_summary".to_string()),
             ));
         }
-        if self.failed.is_none() && (!self.completed || !self.sse_utf8_remainder.is_empty()
-            || self.sse_buffer.lines().any(|line| !line.trim().is_empty() && !line.starts_with(':')))
+        if self.failed.is_none()
+            && (!self.completed
+                || !self.sse_utf8_remainder.is_empty()
+                || self
+                    .sse_buffer
+                    .lines()
+                    .any(|line| !line.trim().is_empty() && !line.starts_with(':')))
         {
-            self.failed = Some(("上游压缩响应未完整结束，未生成 checkpoint".to_string(), Some("compaction_incomplete".to_string())));
+            self.failed = Some((
+                "上游压缩响应未完整结束，未生成 checkpoint".to_string(),
+                Some("compaction_incomplete".to_string()),
+            ));
         }
         let mut output = String::new();
         let mut response = json!({
@@ -9960,7 +10180,10 @@ impl CompactionSseConverter {
                 json!({"type": "response.failed", "sequence_number": 1, "response": response}),
             );
             output.push_str("data: [DONE]\n\n");
-            return CompactionSseOutcome { payload: output.into_bytes(), succeeded: false };
+            return CompactionSseOutcome {
+                payload: output.into_bytes(),
+                succeeded: false,
+            };
         }
         let compaction_item = json!({
             "id": self.compaction_id,
@@ -9994,7 +10217,10 @@ impl CompactionSseConverter {
             }),
         );
         output.push_str("data: [DONE]\n\n");
-        CompactionSseOutcome { payload: output.into_bytes(), succeeded: true }
+        CompactionSseOutcome {
+            payload: output.into_bytes(),
+            succeeded: true,
+        }
     }
 }
 
@@ -10399,9 +10625,6 @@ fn remove_unsupported_native_search(body: &mut Value) -> anyhow::Result<()> {
     Ok(())
 }
 
-
-
-
 use std::time::SystemTime;
 
 use base64::Engine as _;
@@ -10453,7 +10676,9 @@ fn validate_chat_attachments(body: &Value) -> anyhow::Result<()> {
 fn validate_protocol_attachments(body: &Value, allow_documents: bool) -> anyhow::Result<()> {
     fn content(value: &Value, path: &str, allow_documents: bool) -> anyhow::Result<()> {
         if value.get("type").and_then(Value::as_str) == Some("input_file") {
-            if allow_documents && anthropic::document_block_from_input_file(value).is_some() { return Ok(()) }
+            if allow_documents && anthropic::document_block_from_input_file(value).is_some() {
+                return Ok(());
+            }
             return Err(UnsupportedInputFile {
                 param: path.to_string(),
             }
@@ -10462,7 +10687,10 @@ fn validate_protocol_attachments(body: &Value, allow_documents: bool) -> anyhow:
         if let Some(parts) = value.as_array() {
             for (index, part) in parts.iter().enumerate() {
                 if part.get("type").and_then(Value::as_str) == Some("input_file") {
-                    if allow_documents && anthropic::document_block_from_input_file(part).is_some() { continue; }
+                    if allow_documents && anthropic::document_block_from_input_file(part).is_some()
+                    {
+                        continue;
+                    }
                     return Err(UnsupportedInputFile {
                         param: format!("{path}[{index}]"),
                     }
@@ -10524,8 +10752,16 @@ pub(crate) fn validate_compaction_json_completion(
             body.get("stop_reason").and_then(Value::as_str),
             Some("end_turn" | "stop_sequence")
         ),
-        UpstreamWireApi::Completions => body.pointer("/choices/0/finish_reason").and_then(Value::as_str) == Some("stop"),
-        UpstreamWireApi::GeminiGenerateContent => body.pointer("/candidates/0/finishReason").and_then(Value::as_str) == Some("STOP"),
+        UpstreamWireApi::Completions => {
+            body.pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                == Some("stop")
+        }
+        UpstreamWireApi::GeminiGenerateContent => {
+            body.pointer("/candidates/0/finishReason")
+                .and_then(Value::as_str)
+                == Some("STOP")
+        }
         _ => false,
     };
     anyhow::ensure!(complete, "压缩上游没有正常完成状态");
@@ -10639,15 +10875,24 @@ fn normalize_plaintext_agent_messages(mut body: Value) -> anyhow::Result<Value> 
         if item["type"] != "agent_message" {
             return Ok(());
         }
-        let content = item.get("content").ok_or(UnsupportedEncryptedAgentContent)?;
+        let content = item
+            .get("content")
+            .ok_or(UnsupportedEncryptedAgentContent)?;
         if !agent_message_has_confirmed_plaintext_shape(content) {
             return Err(UnsupportedEncryptedAgentContent.into());
         }
-        let parts = item["content"].as_array_mut().ok_or(UnsupportedEncryptedAgentContent)?;
+        let parts = item["content"]
+            .as_array_mut()
+            .ok_or(UnsupportedEncryptedAgentContent)?;
         for part in parts {
-            if part["type"] != "encrypted_content" { continue; }
-            let text = part.get("encrypted_content").or_else(|| part.get("text"))
-                .and_then(Value::as_str).ok_or(UnsupportedEncryptedAgentContent)?;
+            if part["type"] != "encrypted_content" {
+                continue;
+            }
+            let text = part
+                .get("encrypted_content")
+                .or_else(|| part.get("text"))
+                .and_then(Value::as_str)
+                .ok_or(UnsupportedEncryptedAgentContent)?;
             if text.is_empty() || encrypted_content_value_is_opaque(text) {
                 return Err(UnsupportedEncryptedAgentContent.into());
             }
@@ -10657,7 +10902,11 @@ fn normalize_plaintext_agent_messages(mut body: Value) -> anyhow::Result<Value> 
         Ok(())
     }
     match body.get_mut("input") {
-        Some(Value::Array(items)) => for item in items { convert(item)?; },
+        Some(Value::Array(items)) => {
+            for item in items {
+                convert(item)?;
+            }
+        }
         Some(item @ Value::Object(_)) => convert(item)?,
         _ => {}
     }

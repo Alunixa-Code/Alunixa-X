@@ -147,7 +147,9 @@ fn force_chinese_locale_config_follows_the_switch() {
 fn force_chinese_locale_is_injected_and_retained_fast_startup_remains_explicit() {
     let settings: BackendSettings = serde_json::from_value(old_settings()).unwrap();
     let script = injection_script_with_settings(0, &settings);
-    assert!(script.contains("window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {\"enabled\":true,\"locale\":\"zh-CN\"}"));
+    assert!(script.contains(
+        "window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__ = {\"enabled\":true,\"locale\":\"zh-CN\"}"
+    ));
     assert!(script.contains("installCodexPlusForceChineseLocale"));
     // 撤下后没有回来：清理 shim 和快速启动都不得再出现在产物里。
     assert!(script.contains("restoreCodexPlusManagedLocale"));

@@ -951,8 +951,15 @@ fn gpt6_sol_luna_metadata_matches_official_efforts_fast_and_default_window() {
 /// 管理器元数据面板（按模型名查）与任意上游生成的 catalog（含第三方中转）都是 false。
 #[test]
 fn kimi_builtin_metadata_disables_search_tool() {
-    for slug in ["kimi-k3", "k3", "kimi-k2.6", "kimi-k2.7-code-highspeed", "kimi-k3[1M]"] {
-        let metadata = builtin_model_metadata(slug).unwrap_or_else(|| panic!("{slug} 应命中内置元数据"));
+    for slug in [
+        "kimi-k3",
+        "k3",
+        "kimi-k2.6",
+        "kimi-k2.7-code-highspeed",
+        "kimi-k3[1M]",
+    ] {
+        let metadata =
+            builtin_model_metadata(slug).unwrap_or_else(|| panic!("{slug} 应命中内置元数据"));
         assert_eq!(metadata.entry["supports_search_tool"], false, "{slug}");
     }
     let entries = collect_catalog_entries("kimi-k3", &HashMap::new(), &HashMap::new(), "kimi-k3");

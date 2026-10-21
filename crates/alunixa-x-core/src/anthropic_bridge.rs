@@ -145,8 +145,12 @@ pub fn responses_to_anthropic_messages(
         .map(str::to_string);
     let thinking_groups = signed_thinking_groups_from_responses_input(body.get("input"));
     if let Some(items) = body.get_mut("input").and_then(Value::as_array_mut) {
-        items.retain(|item| item["type"] != "reasoning"
-            || item["encrypted_content"].as_str().is_none_or(|value| decode_thinking_blocks(value).is_empty()));
+        items.retain(|item| {
+            item["type"] != "reasoning"
+                || item["encrypted_content"]
+                    .as_str()
+                    .is_none_or(|value| decode_thinking_blocks(value).is_empty())
+        });
     }
     let chat = crate::protocol_proxy::responses_to_chat_completions(body)?;
     let mut result = chat_completions_to_anthropic_messages(chat, options)?;
@@ -159,7 +163,12 @@ pub fn responses_to_anthropic_messages(
         }
     }
 
-    apply_thinking(&mut result, effort.as_deref(), &thinking_groups, options.thinking_mode);
+    apply_thinking(
+        &mut result,
+        effort.as_deref(),
+        &thinking_groups,
+        options.thinking_mode,
+    );
     if options.prompt_cache {
         inject_prompt_cache(&mut result);
     }
@@ -216,8 +225,18 @@ pub fn model_supports_adaptive_thinking(model: &str) -> bool {
     let name = name.rsplit('/').next().unwrap_or(name.as_str());
     let name = name.strip_prefix("claude-").unwrap_or(name);
     const FAMILIES: &[&str] = &[
-        "opus-5", "sonnet-5", "haiku-5", "fable-5", "mythos-5", "opus-4-6", "sonnet-4-6",
-        "haiku-4-6", "opus-4-7", "sonnet-4-7", "opus-4-8", "sonnet-4-8",
+        "opus-5",
+        "sonnet-5",
+        "haiku-5",
+        "fable-5",
+        "mythos-5",
+        "opus-4-6",
+        "sonnet-4-6",
+        "haiku-4-6",
+        "opus-4-7",
+        "sonnet-4-7",
+        "opus-4-8",
+        "sonnet-4-8",
     ];
     FAMILIES.iter().any(|family| name.starts_with(family))
 }
@@ -225,7 +244,10 @@ pub fn model_supports_adaptive_thinking(model: &str) -> bool {
 /// 是否显式关掉了思考。
 fn effort_disables_thinking(effort: Option<&str>) -> bool {
     matches!(
-        effort.map(str::trim).map(str::to_ascii_lowercase).as_deref(),
+        effort
+            .map(str::trim)
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
         Some("none" | "off" | "disabled")
     )
 }
@@ -235,7 +257,10 @@ fn effort_disables_thinking(effort: Option<&str>) -> bool {
 /// 编码的是**整组**思考块（而不是单块）：Chat 中枢每一轮只会产出一个 reasoning
 /// item，多块思考如果各自编码就会丢掉其余块，回放时缺块同样 400。
 pub fn encode_thinking_blocks(blocks: &[Value]) -> Option<String> {
-    let usable: Vec<&Value> = blocks.iter().filter(|block| is_signed_thinking(block)).collect();
+    let usable: Vec<&Value> = blocks
+        .iter()
+        .filter(|block| is_signed_thinking(block))
+        .collect();
     if usable.is_empty() {
         return None;
     }
@@ -263,10 +288,7 @@ pub fn decode_thinking_blocks(encrypted_content: &str) -> Vec<Value> {
         value @ Value::Object(_) => vec![value],
         _ => Vec::new(),
     };
-    blocks
-        .into_iter()
-        .filter(is_signed_thinking)
-        .collect()
+    blocks.into_iter().filter(is_signed_thinking).collect()
 }
 
 fn is_signed_thinking(block: &Value) -> bool {
@@ -380,9 +402,9 @@ fn has_tool_use_history(result: &Value) -> bool {
                     .get("content")
                     .and_then(Value::as_array)
                     .is_some_and(|blocks| {
-                        blocks
-                            .iter()
-                            .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+                        blocks.iter().any(|block| {
+                            block.get("type").and_then(Value::as_str) == Some("tool_use")
+                        })
                     })
             })
         })
@@ -516,7 +538,11 @@ pub fn inject_prompt_cache(result: &mut Value) {
 
     if budget > 0 {
         // 字符串 system 必须先转成块数组才能挂 cache_control。
-        if let Some(text) = result.get("system").and_then(Value::as_str).map(str::to_string) {
+        if let Some(text) = result
+            .get("system")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        {
             result["system"] = json!([{ "type": "text", "text": text }]);
         }
         if let Some(last) = result
@@ -640,10 +666,7 @@ pub fn anthropic_beta_header(impersonate_claude_code: bool, context_1m: bool) ->
 ///
 /// 只认本仓已有的窗口声明机制：`modelWindows` 里该模型的显式窗口，其次是
 /// profile 级 `contextWindow`。
-pub fn model_declares_context_1m(
-    profile: &crate::settings::RelayProfile,
-    model: &str,
-) -> bool {
+pub fn model_declares_context_1m(profile: &crate::settings::RelayProfile, model: &str) -> bool {
     let model = model.trim();
     if model.is_empty() {
         return false;
@@ -991,7 +1014,10 @@ fn chat_content_to_anthropic_blocks(content: Option<&Value>) -> Vec<Value> {
                 vec![json!({ "type": "text", "text": text })]
             }
         }
-        Some(Value::Array(parts)) => parts.iter().filter_map(chat_part_to_anthropic_block).collect(),
+        Some(Value::Array(parts)) => parts
+            .iter()
+            .filter_map(chat_part_to_anthropic_block)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -1113,7 +1139,10 @@ fn chat_tool_message_to_anthropic(message: &Value) -> Option<Value> {
     let content = match message.get("content") {
         Some(Value::String(text)) => Value::String(text.clone()),
         Some(Value::Array(parts)) => {
-            let blocks: Vec<Value> = parts.iter().filter_map(chat_part_to_anthropic_block).collect();
+            let blocks: Vec<Value> = parts
+                .iter()
+                .filter_map(chat_part_to_anthropic_block)
+                .collect();
             if blocks.is_empty() {
                 Value::String(String::new())
             } else {
@@ -1273,9 +1302,15 @@ impl Default for AnthropicSseToChatSse {
 impl AnthropicSseToChatSse {
     /// 摘要必须满足原始 Anthropic 完成契约，不能只信转换后的 finish_reason。
     pub(crate) fn has_successful_compaction_completion(&self) -> bool {
-        self.message_stopped && self.compaction_stop_reason && !self.failed
-            && self.compaction_stream_valid && self.utf8_remainder.is_empty()
-            && self.buffer.lines().all(|line| line.trim().is_empty() || line.starts_with(':'))
+        self.message_stopped
+            && self.compaction_stop_reason
+            && !self.failed
+            && self.compaction_stream_valid
+            && self.utf8_remainder.is_empty()
+            && self
+                .buffer
+                .lines()
+                .all(|line| line.trim().is_empty() || line.starts_with(':'))
     }
 
     pub fn has_failed(&self) -> bool {
@@ -1367,7 +1402,9 @@ impl AnthropicSseToChatSse {
                             self.model = model.to_string();
                         }
                     }
-                    let usage = message.get("usage").map(|usage| anthropic_usage_to_chat_usage(Some(usage)));
+                    let usage = message
+                        .get("usage")
+                        .map(|usage| anthropic_usage_to_chat_usage(Some(usage)));
                     let chunk = self.base_chunk(json!({ "role": "assistant" }), None, usage);
                     emit_chat_chunk(output, &chunk);
                 }
@@ -1441,8 +1478,11 @@ impl AnthropicSseToChatSse {
                                 pending.text.push_str(text);
                             }
                             if !text.is_empty() {
-                                let chunk = self
-                                    .base_chunk(json!({ "reasoning_content": text }), None, None);
+                                let chunk = self.base_chunk(
+                                    json!({ "reasoning_content": text }),
+                                    None,
+                                    None,
+                                );
                                 emit_chat_chunk(output, &chunk);
                             }
                         }
@@ -1483,7 +1523,8 @@ impl AnthropicSseToChatSse {
             "content_block_stop" => self.finalize_pending_thinking(),
             "message_delta" => {
                 let stop_reason = data.pointer("/delta/stop_reason").and_then(Value::as_str);
-                self.compaction_stop_reason = matches!(stop_reason, Some("end_turn" | "stop_sequence"));
+                self.compaction_stop_reason =
+                    matches!(stop_reason, Some("end_turn" | "stop_sequence"));
                 let finish_reason = anthropic_stop_reason_to_finish_reason(stop_reason);
                 let usage = data
                     .get("usage")
@@ -1525,12 +1566,7 @@ impl AnthropicSseToChatSse {
         }
     }
 
-    fn base_chunk(
-        &self,
-        delta: Value,
-        finish_reason: Option<&str>,
-        usage: Option<Value>,
-    ) -> Value {
+    fn base_chunk(&self, delta: Value, finish_reason: Option<&str>, usage: Option<Value>) -> Value {
         let mut chunk = json!({
             "id": self.message_id,
             "object": "chat.completion.chunk",
@@ -1894,7 +1930,9 @@ mod tests {
 
     #[test]
     fn chat_request_maps_to_anthropic_shape() {
-        let converted = chat_completions_to_anthropic_messages(chat_request(), &options_with_max_tokens(8192)).unwrap();
+        let converted =
+            chat_completions_to_anthropic_messages(chat_request(), &options_with_max_tokens(8192))
+                .unwrap();
         assert_eq!(converted["model"], "claude-sonnet-5");
         assert_eq!(converted["max_tokens"], 512);
         assert_eq!(converted["stream"], true);
@@ -1936,11 +1974,16 @@ mod tests {
                 { "role": "user", "content": "继续" }
             ]
         });
-        let converted = chat_completions_to_anthropic_messages(request, &options_with_max_tokens(4096)).unwrap();
+        let converted =
+            chat_completions_to_anthropic_messages(request, &options_with_max_tokens(4096))
+                .unwrap();
         assert_eq!(converted["max_tokens"], 4096);
         let messages = converted["messages"].as_array().unwrap();
         assert_eq!(messages[0]["role"], "user");
-        assert_eq!(messages[0]["content"][0]["text"], "(continuing the conversation)");
+        assert_eq!(
+            messages[0]["content"][0]["text"],
+            "(continuing the conversation)"
+        );
         assert_eq!(messages[1]["role"], "assistant");
         assert_eq!(messages[2]["role"], "user");
     }
@@ -1953,7 +1996,9 @@ mod tests {
             "tools": [],
             "tool_choice": "auto"
         });
-        let converted = chat_completions_to_anthropic_messages(request, &options_with_max_tokens(8192)).unwrap();
+        let converted =
+            chat_completions_to_anthropic_messages(request, &options_with_max_tokens(8192))
+                .unwrap();
         assert!(converted.get("tools").is_none());
         assert!(converted.get("tool_choice").is_none());
     }
@@ -2025,9 +2070,13 @@ mod tests {
             "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
         );
         let request = json!({ "model": "claude-sonnet-5" });
-        let responses = String::from_utf8(anthropic_sse_to_responses_sse(stream, &request)).unwrap();
+        let responses =
+            String::from_utf8(anthropic_sse_to_responses_sse(stream, &request)).unwrap();
         assert!(responses.contains("response.created"), "{responses}");
-        assert!(responses.contains("response.output_text.delta"), "{responses}");
+        assert!(
+            responses.contains("response.output_text.delta"),
+            "{responses}"
+        );
         assert!(responses.contains("你好"), "{responses}");
         assert!(responses.contains("response.completed"), "{responses}");
     }
@@ -2067,7 +2116,10 @@ mod tests {
             "claude-sonnet-4-6",
             "openrouter/claude-opus-5",
         ] {
-            assert!(model_supports_adaptive_thinking(capable), "{capable} 应支持 adaptive");
+            assert!(
+                model_supports_adaptive_thinking(capable),
+                "{capable} 应支持 adaptive"
+            );
         }
         for legacy in [
             "claude-opus-4-5",
@@ -2075,7 +2127,10 @@ mod tests {
             "claude-sonnet-4-5-20250929",
             "claude-3-7-sonnet",
         ] {
-            assert!(!model_supports_adaptive_thinking(legacy), "{legacy} 不该走 adaptive");
+            assert!(
+                !model_supports_adaptive_thinking(legacy),
+                "{legacy} 不该走 adaptive"
+            );
         }
     }
 
@@ -2091,17 +2146,21 @@ mod tests {
         };
 
         // 新代：等级原样透传，不再受 max_tokens/2 压制。
-        let new_gen =
-            responses_to_anthropic_messages(request("claude-sonnet-5"), &options_with_max_tokens(8192))
-                .unwrap();
+        let new_gen = responses_to_anthropic_messages(
+            request("claude-sonnet-5"),
+            &options_with_max_tokens(8192),
+        )
+        .unwrap();
         assert_eq!(new_gen["thinking"], json!({ "type": "adaptive" }));
         assert_eq!(new_gen["output_config"], json!({ "effort": "high" }));
         assert!(new_gen["thinking"].get("budget_tokens").is_none());
 
         // 旧代：回落经典预算（high → 16384，被 max_tokens 夹到 4096）。
-        let legacy =
-            responses_to_anthropic_messages(request("claude-opus-4-5"), &options_with_max_tokens(8192))
-                .unwrap();
+        let legacy = responses_to_anthropic_messages(
+            request("claude-opus-4-5"),
+            &options_with_max_tokens(8192),
+        )
+        .unwrap();
         assert_eq!(legacy["thinking"]["type"], "enabled");
         assert_eq!(legacy["thinking"]["budget_tokens"], 4096);
         assert!(legacy.get("output_config").is_none());
@@ -2131,7 +2190,11 @@ mod tests {
                 ..AnthropicRequestOptions::default()
             };
             responses_to_anthropic_messages(
-                request(if legacy { "claude-opus-4-5" } else { "claude-sonnet-5" }),
+                request(if legacy {
+                    "claude-opus-4-5"
+                } else {
+                    "claude-sonnet-5"
+                }),
                 &options,
             )
             .unwrap()
@@ -2155,11 +2218,26 @@ mod tests {
         }
 
         // 模式字符串解析（设置里是自由文本）。
-        assert_eq!(AnthropicThinkingMode::parse(" adaptive "), AnthropicThinkingMode::Adaptive);
-        assert_eq!(AnthropicThinkingMode::parse("BUDGET"), AnthropicThinkingMode::Budget);
-        assert_eq!(AnthropicThinkingMode::parse("off"), AnthropicThinkingMode::Off);
-        assert_eq!(AnthropicThinkingMode::parse(""), AnthropicThinkingMode::Auto);
-        assert_eq!(AnthropicThinkingMode::parse("看不懂"), AnthropicThinkingMode::Auto);
+        assert_eq!(
+            AnthropicThinkingMode::parse(" adaptive "),
+            AnthropicThinkingMode::Adaptive
+        );
+        assert_eq!(
+            AnthropicThinkingMode::parse("BUDGET"),
+            AnthropicThinkingMode::Budget
+        );
+        assert_eq!(
+            AnthropicThinkingMode::parse("off"),
+            AnthropicThinkingMode::Off
+        );
+        assert_eq!(
+            AnthropicThinkingMode::parse(""),
+            AnthropicThinkingMode::Auto
+        );
+        assert_eq!(
+            AnthropicThinkingMode::parse("看不懂"),
+            AnthropicThinkingMode::Auto
+        );
     }
 
     #[test]
@@ -2385,8 +2463,14 @@ mod tests {
 
     #[test]
     fn context_marker_and_beta_header() {
-        assert_eq!(strip_context_marker("claude-sonnet-5[1m]"), "claude-sonnet-5");
-        assert_eq!(strip_context_marker("claude-sonnet-5[1M]"), "claude-sonnet-5");
+        assert_eq!(
+            strip_context_marker("claude-sonnet-5[1m]"),
+            "claude-sonnet-5"
+        );
+        assert_eq!(
+            strip_context_marker("claude-sonnet-5[1M]"),
+            "claude-sonnet-5"
+        );
         assert_eq!(strip_context_marker("claude-sonnet-5"), "claude-sonnet-5");
 
         assert_eq!(
@@ -2426,8 +2510,7 @@ mod tests {
             "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n",
             "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
         );
-        let output =
-            String::from_utf8(anthropic_sse_to_responses_sse(stream, &json!({}))).unwrap();
+        let output = String::from_utf8(anthropic_sse_to_responses_sse(stream, &json!({}))).unwrap();
         let encrypted = output
             .lines()
             .filter_map(|line| line.strip_prefix("data: "))

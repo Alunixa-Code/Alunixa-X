@@ -764,7 +764,10 @@ fn official_restore_rebuilds_its_catalog_and_keeps_per_model_limits() {
     );
     let catalog_path = std::path::Path::new(config["model_catalog_json"].as_str().unwrap());
     assert!(catalog_path.is_absolute());
-    assert_eq!(catalog_path, home.path().join("model-catalogs").join("official.json"));
+    assert_eq!(
+        catalog_path,
+        home.path().join("model-catalogs").join("official.json")
+    );
     assert!(catalog_path.is_file());
     let catalog: serde_json::Value = serde_json::from_slice(
         &std::fs::read(home.path().join("model-catalogs").join("official.json")).unwrap(),
@@ -783,7 +786,8 @@ fn official_restore_rebuilds_its_catalog_and_keeps_per_model_limits() {
 
     // 生成目录后发生认证错误，旧live与目录均需恢复。
     let config_before = std::fs::read(home.path().join("config.toml")).unwrap();
-    let catalog_before = std::fs::read(home.path().join("model-catalogs").join("official.json")).unwrap();
+    let catalog_before =
+        std::fs::read(home.path().join("model-catalogs").join("official.json")).unwrap();
     let mut invalid = profile.clone();
     invalid.auth_contents = "{bad".to_string();
     invalid.model_windows = r#"{"gpt-5.6-sol":"300000"}"#.to_string();

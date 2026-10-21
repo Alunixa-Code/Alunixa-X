@@ -771,26 +771,39 @@ pub fn apply_relay_profile_with_preservation(
     preserve_nonprovider: bool,
 ) -> anyhow::Result<RelayApplyResult> {
     if !preserve_nonprovider {
-        return apply_relay_profile_to_home_with_switch_rules_and_proxy_port(home, profile, common, proxy_port);
+        return apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
+            home, profile, common, proxy_port,
+        );
     }
     let mut effective = profile.clone();
     let config = if profile.use_common_config {
-        merge_common_config_into_config(&profile.config_contents, &prepare_common_config_for_apply(common)?)?
-    } else { profile.config_contents.clone() };
+        merge_common_config_into_config(
+            &profile.config_contents,
+            &prepare_common_config_for_apply(common)?,
+        )?
+    } else {
+        profile.config_contents.clone()
+    };
     effective.config_contents = preserve_live_nonprovider_settings(home, &config)?;
     effective.use_common_config = false;
-    apply_relay_profile_to_home_with_switch_rules_and_proxy_port(home, &effective, common, proxy_port)
+    apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
+        home, &effective, common, proxy_port,
+    )
 }
 
 pub fn preserve_live_nonprovider_settings(home: &Path, config: &str) -> anyhow::Result<String> {
     let mut target = parse_toml_document(config)?;
     let live = read_optional_text(&home.join("config.toml"))?;
-    if live.trim().is_empty() { return Ok(normalize_optional_toml(target)); }
+    if live.trim().is_empty() {
+        return Ok(normalize_optional_toml(target));
+    }
     let live = parse_toml_document(&live)?;
     // 按项目补缺，不递归提升一个已有项目的 trust 权限。
     preserve_missing_table_keys(&mut target, &live, "projects");
     if target.get("notify").is_none() {
-        if let Some(notify) = live.get("notify") { target["notify"] = notify.clone(); }
+        if let Some(notify) = live.get("notify") {
+            target["notify"] = notify.clone();
+        }
     }
     Ok(normalize_optional_toml(target))
 }
@@ -1028,10 +1041,15 @@ pub async fn test_relay_profile(
         anyhow::bail!("API Key 不能为空");
     }
 
-    let user_agent = if profile.protocol == RelayProtocol::AnthropicMessages && profile.anthropic_impersonate_claude_code {
+    let user_agent = if profile.protocol == RelayProtocol::AnthropicMessages
+        && profile.anthropic_impersonate_claude_code
+    {
         crate::anthropic_bridge::CLAUDE_CODE_USER_AGENT
-    } else if !profile.user_agent.trim().is_empty() { profile.user_agent.trim() }
-    else { "AlunixaX/RelayTest" };
+    } else if !profile.user_agent.trim().is_empty() {
+        profile.user_agent.trim()
+    } else {
+        "AlunixaX/RelayTest"
+    };
     let client = crate::http_client::proxied_client(user_agent)?;
     let test_model = model.trim();
     if test_model.is_empty() {
@@ -1049,9 +1067,19 @@ pub async fn test_relay_profile(
     // 如果 404 且 base_url 末尾没有 /v1，尝试自动补 /v1 后再发一次。
     // 许多上游（中转站、自建代理）暴露的路径以 /v1/ 开头，
     // 用户容易遗漏这个前缀，导致 /responses 或 /chat/completions 404。
-    let complete_endpoint = ["/responses", "/chat/completions", "/messages"].iter()
-        .any(|suffix| base_url.trim_end_matches('#').to_ascii_lowercase().ends_with(suffix));
-    if http_status == 404 && !base_url.ends_with("/v1") && !base_url.ends_with('#') && !complete_endpoint {
+    let complete_endpoint = ["/responses", "/chat/completions", "/messages"]
+        .iter()
+        .any(|suffix| {
+            base_url
+                .trim_end_matches('#')
+                .to_ascii_lowercase()
+                .ends_with(suffix)
+        });
+    if http_status == 404
+        && !base_url.ends_with("/v1")
+        && !base_url.ends_with('#')
+        && !complete_endpoint
+    {
         let v1_url = format!("{base_url}/v1");
         let v1_endpoint = relay_profile_test_endpoint(protocol, &v1_url, test_model);
         let v1_request = client
@@ -1064,22 +1092,26 @@ pub async fn test_relay_profile(
         let v1_status = v1_response.status().as_u16();
         if v1_status < 400 {
             let response_text = v1_response.text().await.unwrap_or_default();
-            let (protocol_valid, completion_status) = validate_relay_test_response(profile.protocol, v1_status, &response_text);
-            if protocol_valid { return Ok(RelayProfileTestResult {
-                protocol_valid,
-                completion_status,
-                http_status: v1_status,
-                endpoint: v1_endpoint,
-                response_preview: format!(
-                    "（Base URL 建议加上 /v1 前缀）{}",
-                    response_text.chars().take(280).collect::<String>()
-                ),
-            }); }
+            let (protocol_valid, completion_status) =
+                validate_relay_test_response(profile.protocol, v1_status, &response_text);
+            if protocol_valid {
+                return Ok(RelayProfileTestResult {
+                    protocol_valid,
+                    completion_status,
+                    http_status: v1_status,
+                    endpoint: v1_endpoint,
+                    response_preview: format!(
+                        "（Base URL 建议加上 /v1 前缀）{}",
+                        response_text.chars().take(280).collect::<String>()
+                    ),
+                });
+            }
         }
     }
 
     let response_text = response.text().await.unwrap_or_default();
-    let (protocol_valid, completion_status) = validate_relay_test_response(profile.protocol, http_status, &response_text);
+    let (protocol_valid, completion_status) =
+        validate_relay_test_response(profile.protocol, http_status, &response_text);
     Ok(RelayProfileTestResult {
         http_status,
         endpoint,
@@ -1090,48 +1122,128 @@ pub async fn test_relay_profile(
 }
 
 /// 模型协议验收与 HTTP 连通分开；合法但被 token 预算截断的响应显示警告。
-pub fn validate_relay_test_response(protocol: RelayProtocol, status: u16, text: &str) -> (bool, String) {
+pub fn validate_relay_test_response(
+    protocol: RelayProtocol,
+    status: u16,
+    text: &str,
+) -> (bool, String) {
     let failed = || (false, "failed".to_string());
-    if !(200..300).contains(&status) { return failed(); }
-    let Ok(value) = serde_json::from_str::<Value>(text) else { return failed(); };
-    if value.get("error").is_some_and(|v| !v.is_null()) { return failed(); }
+    if !(200..300).contains(&status) {
+        return failed();
+    }
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        return failed();
+    };
+    if value.get("error").is_some_and(|v| !v.is_null()) {
+        return failed();
+    }
     let state = match protocol {
         RelayProtocol::Responses => {
-            if value.get("output").and_then(Value::as_array).is_none() { return failed(); }
+            if value.get("output").and_then(Value::as_array).is_none() {
+                return failed();
+            }
             match value.get("status").and_then(Value::as_str) {
                 Some("completed") => "completed",
                 Some("incomplete") => "incomplete",
                 _ => return failed(),
             }
-        },
+        }
         RelayProtocol::ChatCompletions => {
-            let Some(choices) = value.get("choices").and_then(Value::as_array).filter(|v| !v.is_empty()) else { return failed(); };
-            if choices.iter().any(|c| !c.get("message").is_some_and(Value::is_object)) { return failed(); }
-            if choices.iter().all(|c| matches!(c.get("finish_reason").and_then(Value::as_str), Some("stop" | "tool_calls" | "function_call"))) { "completed" }
-            else if choices.iter().all(|c| matches!(c.get("finish_reason").and_then(Value::as_str), Some("stop" | "tool_calls" | "function_call" | "length" | "content_filter"))) { "incomplete" }
-            else { return failed(); }
-        },
+            let Some(choices) = value
+                .get("choices")
+                .and_then(Value::as_array)
+                .filter(|v| !v.is_empty())
+            else {
+                return failed();
+            };
+            if choices
+                .iter()
+                .any(|c| !c.get("message").is_some_and(Value::is_object))
+            {
+                return failed();
+            }
+            if choices.iter().all(|c| {
+                matches!(
+                    c.get("finish_reason").and_then(Value::as_str),
+                    Some("stop" | "tool_calls" | "function_call")
+                )
+            }) {
+                "completed"
+            } else if choices.iter().all(|c| {
+                matches!(
+                    c.get("finish_reason").and_then(Value::as_str),
+                    Some("stop" | "tool_calls" | "function_call" | "length" | "content_filter")
+                )
+            }) {
+                "incomplete"
+            } else {
+                return failed();
+            }
+        }
         RelayProtocol::AnthropicMessages => {
-            if value.get("type").and_then(Value::as_str) != Some("message") || value.get("content").and_then(Value::as_array).is_none() { return failed(); }
+            if value.get("type").and_then(Value::as_str) != Some("message")
+                || value.get("content").and_then(Value::as_array).is_none()
+            {
+                return failed();
+            }
             match value.get("stop_reason").and_then(Value::as_str) {
                 Some("end_turn" | "stop_sequence" | "tool_use") => "completed",
                 Some("max_tokens" | "pause_turn" | "refusal") => "incomplete",
                 _ => return failed(),
             }
-        },
+        }
         RelayProtocol::Completions => {
-            let Some(choices) = value.get("choices").and_then(Value::as_array).filter(|v| !v.is_empty()) else { return failed() };
-            if choices.iter().any(|choice| !choice.get("text").is_some_and(Value::is_string)) { return failed() }
-            if choices.iter().all(|choice| choice["finish_reason"] == "stop") { "completed" }
-            else if choices.iter().all(|choice| matches!(choice["finish_reason"].as_str(), Some("stop" | "length"))) { "incomplete" }
-            else { return failed() }
-        },
+            let Some(choices) = value
+                .get("choices")
+                .and_then(Value::as_array)
+                .filter(|v| !v.is_empty())
+            else {
+                return failed();
+            };
+            if choices
+                .iter()
+                .any(|choice| !choice.get("text").is_some_and(Value::is_string))
+            {
+                return failed();
+            }
+            if choices
+                .iter()
+                .all(|choice| choice["finish_reason"] == "stop")
+            {
+                "completed"
+            } else if choices
+                .iter()
+                .all(|choice| matches!(choice["finish_reason"].as_str(), Some("stop" | "length")))
+            {
+                "incomplete"
+            } else {
+                return failed();
+            }
+        }
         RelayProtocol::GeminiGenerateContent => {
-            let Some(candidates) = value.get("candidates").and_then(Value::as_array).filter(|v| !v.is_empty()) else { return failed() };
-            if candidates.iter().any(|candidate| !candidate.pointer("/content/parts").is_some_and(Value::is_array)) { return failed() }
-            if candidates.iter().all(|candidate| candidate["finishReason"] == "STOP") { "completed" }
-            else { "incomplete" }
-        },
+            let Some(candidates) = value
+                .get("candidates")
+                .and_then(Value::as_array)
+                .filter(|v| !v.is_empty())
+            else {
+                return failed();
+            };
+            if candidates.iter().any(|candidate| {
+                !candidate
+                    .pointer("/content/parts")
+                    .is_some_and(Value::is_array)
+            }) {
+                return failed();
+            }
+            if candidates
+                .iter()
+                .all(|candidate| candidate["finishReason"] == "STOP")
+            {
+                "completed"
+            } else {
+                "incomplete"
+            }
+        }
     };
     (true, state.to_string())
 }
@@ -1486,7 +1598,9 @@ fn backfill_profile_from_text(
             );
         }
         profile.api_keys = vec![crate::settings::RelayApiKey {
-            id: "live-import".into(), name: "导入".into(), api_key: live_key.clone(),
+            id: "live-import".into(),
+            name: "导入".into(),
+            api_key: live_key.clone(),
         }];
         profile.active_api_key_id = "live-import".into();
         restore_profile_credentials_after_backfill(profile, live_auth, &live_key, live_auth)?;
@@ -3240,7 +3354,7 @@ fn apply_model_catalog_to_config_with_live_policy(
             std::fs::create_dir_all(parent)?;
         }
         validate_managed_model_catalog(&catalog_json)?;
-    crate::settings::atomic_write(&catalog_path, catalog_json.as_bytes())?;
+        crate::settings::atomic_write(&catalog_path, catalog_json.as_bytes())?;
         let mut doc = parse_toml_document(&config_text)?;
         if root_key_string(&config_text, "model").is_none()
             && let Ok(catalog) = serde_json::from_str::<Value>(&catalog_json)
@@ -3499,7 +3613,9 @@ fn validate_model_auto_compact(model_auto_compact: &HashMap<String, String>) -> 
     Ok(())
 }
 
-pub(crate) fn parse_model_metadata_map(metadata_json: &str) -> anyhow::Result<serde_json::Map<String, Value>> {
+pub(crate) fn parse_model_metadata_map(
+    metadata_json: &str,
+) -> anyhow::Result<serde_json::Map<String, Value>> {
     if metadata_json.trim().is_empty() {
         return Ok(serde_json::Map::new());
     }
@@ -3811,15 +3927,29 @@ pub(crate) fn apply_model_metadata_overrides(
     Ok(serde_json::to_string_pretty(&catalog)?)
 }
 
-fn validate_catalog_model_fields(slug: &str, model: &Value, require_fields: bool) -> anyhow::Result<()> {
+fn validate_catalog_model_fields(
+    slug: &str,
+    model: &Value,
+    require_fields: bool,
+) -> anyhow::Result<()> {
     for (field, valid) in [
         ("base_instructions", Value::is_string as fn(&Value) -> bool),
-        ("supports_parallel_tool_calls", Value::is_boolean as fn(&Value) -> bool),
+        (
+            "supports_parallel_tool_calls",
+            Value::is_boolean as fn(&Value) -> bool,
+        ),
     ] {
         match model.get(field) {
-            Some(value) if valid(value) => {},
-            None if !require_fields => {},
-            _ => anyhow::bail!("模型 {slug} 的 {field} 类型无效（期望 {}），原目录未修改", if field == "base_instructions" { "string" } else { "boolean" }),
+            Some(value) if valid(value) => {}
+            None if !require_fields => {}
+            _ => anyhow::bail!(
+                "模型 {slug} 的 {field} 类型无效（期望 {}），原目录未修改",
+                if field == "base_instructions" {
+                    "string"
+                } else {
+                    "boolean"
+                }
+            ),
         }
     }
     Ok(())
@@ -3827,10 +3957,14 @@ fn validate_catalog_model_fields(slug: &str, model: &Value, require_fields: bool
 
 pub(crate) fn validate_managed_model_catalog(catalog: &str) -> anyhow::Result<()> {
     let catalog: Value = serde_json::from_str(catalog)?;
-    let models = catalog.get("models").and_then(Value::as_array)
+    let models = catalog
+        .get("models")
+        .and_then(Value::as_array)
         .ok_or_else(|| anyhow::anyhow!("受管模型目录缺少 models 数组"))?;
     for model in models {
-        let slug = model.get("slug").and_then(Value::as_str)
+        let slug = model
+            .get("slug")
+            .and_then(Value::as_str)
             .ok_or_else(|| anyhow::anyhow!("受管模型目录缺少模型 slug"))?;
         validate_catalog_model_fields(slug, model, true)?;
     }
@@ -5051,8 +5185,7 @@ fn complete_relay_profile_config_with_proxy_port(
         // 改成与「官方 + API」混合模式一致的形态：requires_openai_auth = true 让 Codex
         // 读取并显示 auth.json 里的账号登录态，请求仍由 experimental_bearer_token
         // （代理 Key）发往本地聚合代理。为 false 时 Codex 根本不看登录态，界面只显示 provider 名。
-        provider["requires_openai_auth"] =
-            toml_edit::value(aggregate_syncs_member_login(profile));
+        provider["requires_openai_auth"] = toml_edit::value(aggregate_syncs_member_login(profile));
     }
     let provider_base_url = if profile.has_model_routes()
         || profile.uses_no_auth()
@@ -5088,19 +5221,24 @@ pub fn normalize_relay_profile_for_storage(profile: &mut RelayProfile) -> anyhow
         // 保留合法的显式退出/旧 API-only 快照清理语义，其余未知格式不能静默删除。
         let value: Value = serde_json::from_str(&profile.auth_contents)
             .context("认证存档不是有效 JSON，原内容未修改")?;
-        let object = value.as_object().ok_or_else(|| anyhow::anyhow!("认证存档必须是 JSON 对象，原内容未修改"))?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("认证存档必须是 JSON 对象，原内容未修改"))?;
         if object.keys().any(|key| key != "OPENAI_API_KEY") {
             anyhow::bail!("不支持的官方认证存档格式，原内容未修改；请使用受支持的登录流程");
         }
     }
     if profile.api_keys.is_empty()
         && !profile.uses_no_auth()
-        && (profile.relay_mode != crate::settings::RelayMode::Official || profile.official_mix_api_key)
+        && (profile.relay_mode != crate::settings::RelayMode::Official
+            || profile.official_mix_api_key)
     {
         let key = relay_profile_api_key(profile);
         if !key.is_empty() {
             profile.api_keys.push(crate::settings::RelayApiKey {
-                id: "default".into(), name: "默认".into(), api_key: key,
+                id: "default".into(),
+                name: "默认".into(),
+                api_key: key,
             });
         }
     }

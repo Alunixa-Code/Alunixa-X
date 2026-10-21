@@ -16,8 +16,11 @@ pub struct CcsImportOrigin {
 
 fn legacy_source_id_matches(profile_id: &str, source_id: &str) -> bool {
     let base = format!("ccs-{}", sanitize_id(source_id));
-    profile_id == base || profile_id.strip_prefix(&format!("{base}-"))
-        .and_then(|suffix| suffix.parse::<u64>().ok()).is_some_and(|suffix| suffix >= 2)
+    profile_id == base
+        || profile_id
+            .strip_prefix(&format!("{base}-"))
+            .and_then(|suffix| suffix.parse::<u64>().ok())
+            .is_some_and(|suffix| suffix >= 2)
 }
 
 fn legacy_profile_matches_source(profile: &RelayProfile, provider: &CcsProviderImport) -> bool {
@@ -25,7 +28,8 @@ fn legacy_profile_matches_source(profile: &RelayProfile, provider: &CcsProviderI
         && (profile.name.ends_with("（ccswitch）") || profile.name.ends_with("(ccswitch)"))
         && strip_ccs_name_suffix(&profile.name) == strip_ccs_name_suffix(&provider.name)
         && profile.protocol == provider.protocol
-        && profile.upstream_base_url.trim().trim_end_matches('/') == provider.base_url.trim().trim_end_matches('/')
+        && profile.upstream_base_url.trim().trim_end_matches('/')
+            == provider.base_url.trim().trim_end_matches('/')
 }
 
 /// 来源身份来自实际解析成功的库路径；常规 DB 替换不会改变身份。
@@ -39,8 +43,10 @@ pub fn import_providers_with_origins(
     }
     let mut source_ids = std::collections::HashSet::new();
     for provider in &source.providers {
-        anyhow::ensure!(!provider.source_id.trim().is_empty() && source_ids.insert(&provider.source_id),
-            "cc-switch 来源 ID 为空或重复，未导入任何供应商");
+        anyhow::ensure!(
+            !provider.source_id.trim().is_empty() && source_ids.insert(&provider.source_id),
+            "cc-switch 来源 ID 为空或重复，未导入任何供应商"
+        );
     }
     let database = source.db_path.canonicalize()?.to_string_lossy().to_string();
     let mut next = settings.clone();
@@ -97,9 +103,20 @@ pub fn import_providers_with_origins(
             }
             Some(id.clone())
         } else if candidates.len() == 1 {
-            let profile = next.relay_profiles.iter().find(|profile| profile.id == candidates[0]).expect("candidate profile");
-            anyhow::ensure!(source.providers.iter().filter(|source| legacy_profile_matches_source(profile, source)).count() == 1,
-                "多个 cc-switch 来源匹配同一旧供应商，请显式选择来源关联，未自动合并");
+            let profile = next
+                .relay_profiles
+                .iter()
+                .find(|profile| profile.id == candidates[0])
+                .expect("candidate profile");
+            anyhow::ensure!(
+                source
+                    .providers
+                    .iter()
+                    .filter(|source| legacy_profile_matches_source(profile, source))
+                    .count()
+                    == 1,
+                "多个 cc-switch 来源匹配同一旧供应商，请显式选择来源关联，未自动合并"
+            );
             Some(candidates[0].clone())
         } else {
             if candidates.len() > 1
@@ -444,11 +461,7 @@ fn is_chat_protocol(value: &str) -> bool {
 fn is_anthropic_protocol(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
-        "anthropic"
-            | "anthropic_messages"
-            | "anthropic-messages"
-            | "claude"
-            | "claude_messages"
+        "anthropic" | "anthropic_messages" | "anthropic-messages" | "claude" | "claude_messages"
     )
 }
 

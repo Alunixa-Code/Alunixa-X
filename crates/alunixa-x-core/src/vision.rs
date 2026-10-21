@@ -1050,8 +1050,10 @@ pub async fn strip_image_blocks(
                 round_urls.push(url.clone());
             }
         }
-        if !round_urls.is_empty() && (vlm_config.api_key.trim().is_empty()
-            || vlm_config.model.trim().is_empty() || vlm_config.base_url.trim().is_empty())
+        if !round_urls.is_empty()
+            && (vlm_config.api_key.trim().is_empty()
+                || vlm_config.model.trim().is_empty()
+                || vlm_config.base_url.trim().is_empty())
         {
             return Err(VlmPreprocessError::MissingConfiguration);
         }
@@ -1253,7 +1255,9 @@ pub async fn strip_image_blocks(
             );
         });
     }
-    Ok(VlmPreprocessReport { descriptions_injected: descriptions.len() })
+    Ok(VlmPreprocessReport {
+        descriptions_injected: descriptions.len(),
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -1819,7 +1823,9 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap();
 
         // 图片已被删除
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1861,7 +1867,8 @@ mod tests {
             "gpt-4",
             false,
         )
-        .await.unwrap();
+        .await
+        .unwrap();
 
         // 图片已被剥离（防止图片叠加纯文本导致溢出更严重）
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1898,7 +1905,9 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap();
 
         // 消息应保持不变
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1925,7 +1934,9 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // 故意不可达
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap_err();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap_err();
 
         // fail-closed：图片保留
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1978,7 +1989,9 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // VLM 不可达，触发 fail-closed 路径
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await.unwrap_err();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false)
+            .await
+            .unwrap_err();
 
         // VLM 不可达 → analyze_all 返回 Err → strip_image_blocks early return
         // → fail-closed：全部图片保留，不注入任何描述。
@@ -2037,7 +2050,9 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false)
+            .await
+            .unwrap();
 
         // 所有图片已删除
         for msg in &messages {
@@ -2147,7 +2162,9 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4", false)
+            .await
+            .unwrap();
 
         // 所有图片已删除
         for msg in &messages {
@@ -2316,7 +2333,9 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts
@@ -2360,7 +2379,9 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", true).await.unwrap();
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", true)
+            .await
+            .unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
 
@@ -2426,7 +2447,9 @@ mod tests {
             }),
         ];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap();
 
         let parts = messages[1]["content"].as_array().unwrap();
         assert!(
@@ -2524,7 +2547,9 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false)
+            .await
+            .unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts.iter().any(|p| {
@@ -2619,7 +2644,9 @@ mod tests {
             }),
         ];
 
-        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4", false).await.unwrap();
+        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4", false)
+            .await
+            .unwrap();
 
         // 两轮图片均应被剥离
         for (i, label) in ["historical", "current"].iter().enumerate() {

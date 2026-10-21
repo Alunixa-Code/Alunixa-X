@@ -302,9 +302,7 @@ pub fn auth_contents_with_member_login(
     let live_is_same_account = live_login
         .as_ref()
         .is_some_and(|live| live.account_id == login.account_id);
-    if live_is_same_account
-        && let Some(live) = live_login.as_ref()
-    {
+    if live_is_same_account && let Some(live) = live_login.as_ref() {
         if !live.access_token.is_empty() {
             login.access_token = live.access_token.clone();
         }
@@ -554,7 +552,10 @@ async fn refresh_codex_tokens(
         .build()?;
     let response = client
         .post(token_url)
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .form(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
@@ -712,8 +713,10 @@ mod tests {
     fn rejects_auth_without_tokens() {
         assert!(official_login_from_auth_contents(r#"{"OPENAI_API_KEY":"sk-x"}"#).is_none());
         assert!(
-            official_login_from_auth_contents(r#"{"tokens":{"access_token":"","refresh_token":""}}"#)
-                .is_none()
+            official_login_from_auth_contents(
+                r#"{"tokens":{"access_token":"","refresh_token":""}}"#
+            )
+            .is_none()
         );
     }
 
@@ -851,7 +854,10 @@ mod tests {
         assert_eq!(credential.account_id, "acct-1");
 
         let request = server.join().unwrap();
-        assert!(request.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"), "{request}");
+        assert!(
+            request.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"),
+            "{request}"
+        );
         assert!(request.contains("refresh_token=old-refresh"), "{request}");
 
         // 刷新结果（含轮换后的 refresh token）写回快照。

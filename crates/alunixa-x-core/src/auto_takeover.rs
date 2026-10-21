@@ -231,10 +231,9 @@ pub fn probe_desktop_app(app_dir: &Path) -> AppProbe {
             .into_iter()
             .find(|process| process.executable == expected)
         {
-            Some(process) => AppProbe::Running(InstanceKey::new(
-                process.pid,
-                process.lstart.clone(),
-            )),
+            Some(process) => {
+                AppProbe::Running(InstanceKey::new(process.pid, process.lstart.clone()))
+            }
             None => AppProbe::NotRunning,
         };
     }
@@ -282,10 +281,12 @@ fn windows_executable_matches(
 /// crashpad 会再 fork 一个 crashpad，父进程同样叫 `ChatGPT.exe`，
 /// 于是「父进程同名就当成子进程」会漏掉它，把子进程误判成主进程。
 #[cfg(windows)]
-fn windows_is_electron_child(process: &crate::windows_integration::WindowsProcessInfo) -> Option<bool> {
-    crate::windows_integration::process_command_line(process.process_id).map(
-        |command_line| windows_command_line_is_electron_child(&process.exe_file, &command_line),
-    )
+fn windows_is_electron_child(
+    process: &crate::windows_integration::WindowsProcessInfo,
+) -> Option<bool> {
+    crate::windows_integration::process_command_line(process.process_id).map(|command_line| {
+        windows_command_line_is_electron_child(&process.exe_file, &command_line)
+    })
 }
 
 #[cfg(any(windows, test))]
@@ -308,7 +309,11 @@ fn windows_command_line_is_electron_child(executable_name: &str, command_line: &
         } else {
             argument.push(character);
         }
-        backslashes = if character == '\\' { backslashes + 1 } else { 0 };
+        backslashes = if character == '\\' {
+            backslashes + 1
+        } else {
+            0
+        };
     }
     false
 }

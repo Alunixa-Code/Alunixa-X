@@ -31,7 +31,10 @@ async fn bridge_routes_cover_all_current_paths() {
         ("/user-scripts/reload", json!({})),
         ("/user-scripts/load", json!({})),
         ("/cdp/targets", json!({})),
-        ("/cdp/evaluate", json!({"kind":"avatar-overlay","expression":"1"})),
+        (
+            "/cdp/evaluate",
+            json!({"kind":"avatar-overlay","expression":"1"}),
+        ),
         ("/devtools/open", json!({})),
         ("/manager/open", json!({})),
         ("/manager/open-transient", json!({})),
@@ -92,10 +95,7 @@ async fn cdp_evaluate_rejects_empty_expression_without_touching_cdp() {
     let error = evaluate_extension_cdp(1, &json!({"kind": "avatar-overlay"}))
         .await
         .unwrap_err();
-    assert!(
-        error.to_string().contains("expression"),
-        "{error}"
-    );
+    assert!(error.to_string().contains("expression"), "{error}");
 }
 
 #[tokio::test]
@@ -104,7 +104,10 @@ async fn cdp_routes_are_wired_for_extensions() {
     assert_eq!(result["status"], "failed");
     assert_ne!(result["message"], "Unknown bridge path");
     assert!(
-        result["message"].as_str().unwrap_or("").contains("CDP targets"),
+        result["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("CDP targets"),
         "{}",
         result
     );

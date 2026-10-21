@@ -1,5 +1,7 @@
 use alunixa_x_core::models::{DeleteStatus, SessionRef};
-use alunixa_x_data::{BackupStore, SQLiteStorageAdapter, delete_local_from_paths_with_home as delete_local_from_paths};
+use alunixa_x_data::{
+    BackupStore, SQLiteStorageAdapter, delete_local_from_paths_with_home as delete_local_from_paths,
+};
 use rusqlite::Connection;
 use serde_json::json;
 use std::{fs, path::Path};
@@ -98,8 +100,22 @@ fn safety_multi_database_partial_delete_keeps_failure_and_all_undo_information()
         assert_eq!(count(&b), 1);
         assert!(!small.exists());
         assert!(large.exists());
-        assert!(result.undo_token.is_some());
-        assert!(result.backup_path.is_some());
+        let tokens: Vec<String> =
+            serde_json::from_str(result.undo_token.as_deref().unwrap()).unwrap();
+        assert_eq!(
+            tokens.len(),
+            2,
+            "database and sidebar metadata need backups"
+        );
+        assert!(
+            result.backup_path.is_none(),
+            "a grouped undo has multiple backup paths"
+        );
+        for token in &tokens {
+            let path = store.path_for(token);
+            assert!(path.is_file(), "missing backup: {}", path.display());
+            assert!(result.message.contains(path.to_string_lossy().as_ref()));
+        }
         let restored = SQLiteStorageAdapter::new(&a, store)
             .with_allowed_db_paths(paths)
             .with_codex_home(&home)
@@ -112,7 +128,14 @@ fn safety_multi_database_partial_delete_keeps_failure_and_all_undo_information()
         );
         assert_eq!(count(&a), 1);
         assert_eq!(count(&b), 1);
-        assert!(small.exists());
+        assert_eq!(fs::read(&small).unwrap(), b"ok");
+        assert_eq!(fs::read(&large).unwrap(), b"larger than the byte budget");
+        let index = fs::read_to_string(home.join("session_index.jsonl")).unwrap();
+        assert_eq!(index.lines().count(), 1);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&index).unwrap()["id"],
+            "t"
+        );
     }
 }
 
@@ -203,8 +226,10 @@ fn safety_corrupt_backup_structure_never_reports_undone_or_restores_rows() {
         let adapter = SQLiteStorageAdapter::new(&db, store.clone()).with_codex_home(&home);
         let deleted = adapter.delete_local(&session());
         let undo = deleted.undo_token.unwrap();
-        let token = serde_json::from_str::<Vec<String>>(&undo).ok()
-            .and_then(|tokens| tokens.into_iter().next()).unwrap_or_else(|| undo.clone());
+        let token = serde_json::from_str::<Vec<String>>(&undo)
+            .ok()
+            .and_then(|tokens| tokens.into_iter().next())
+            .unwrap_or_else(|| undo.clone());
         let mut backup = store.read_backup(&token).unwrap();
         if corruption.is_null() {
             backup = json!({});
@@ -267,12 +292,7 @@ fn safety_failed_database_transaction_keeps_its_backup_alongside_successful_back
     database(&b, &blocked);
     Connection::open(&b).unwrap().execute_batch("CREATE TRIGGER keep_thread BEFORE DELETE ON threads BEGIN SELECT RAISE(ABORT, 'fixture transaction blocked'); END;").unwrap();
     let store = BackupStore::new(temp.path().join("backups"));
-    let result = delete_local_from_paths(
-        [a.clone(), b.clone()],
-        store.clone(),
-        &session(),
-        &home,
-    );
+    let result = delete_local_from_paths([a.clone(), b.clone()], store.clone(), &session(), &home);
     assert_eq!(result.status, DeleteStatus::Failed);
     assert!(result.message.contains("fixture transaction blocked"));
     assert!(result.backup_path.is_none());
@@ -341,12 +361,7 @@ fn safety_grouped_undo_validates_every_manifest_before_restoring_any_rows() {
     database(&a, &a_file);
     database(&b, &b_file);
     let store = BackupStore::new(temp.path().join("backups"));
-    let result = delete_local_from_paths(
-        [a.clone(), b.clone()],
-        store.clone(),
-        &session(),
-        &home,
-    );
+    let result = delete_local_from_paths([a.clone(), b.clone()], store.clone(), &session(), &home);
     assert_eq!(result.status, DeleteStatus::LocalDeleted);
     let token = result.undo_token.unwrap();
     let tokens: Vec<String> = serde_json::from_str(&token).unwrap();

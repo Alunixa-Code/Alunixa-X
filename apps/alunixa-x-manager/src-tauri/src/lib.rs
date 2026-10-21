@@ -1,5 +1,5 @@
-mod auto_takeover;
 mod agent_collaboration_commands;
+mod auto_takeover;
 pub mod commands;
 pub mod install;
 mod restored_operations;
@@ -274,7 +274,8 @@ pub fn run() {
                         tauri::async_runtime::spawn_blocking(move || {
                             // 退出前先等待自有 CLI 任务清理，避免进程退出后遗留执行器。
                             tauri::async_runtime::block_on(
-                                alunixa_x_core::agent_collaboration::executor::shutdown_owned_tasks(),
+                                alunixa_x_core::agent_collaboration::executor::shutdown_owned_tasks(
+                                ),
                             );
                             if let Err(error) = alunixa_x_launcher::shutdown() {
                                 let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(

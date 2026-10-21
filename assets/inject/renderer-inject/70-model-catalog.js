@@ -777,7 +777,8 @@
         || client.prewarmThreadStart).bind(client);
       client.__alunixaXServiceTierOriginalPrewarmThreadStart = originalPrewarmThreadStart;
       client.prewarmThreadStart = async function alunixaXServiceTierPrewarmThreadStart(params, options) {
-        return await prewarmCodexManagedSession(client, originalPrewarmThreadStart, params, options);
+        return await prewarmCodexManagedSession(client, originalPrewarmThreadStart,
+          applyCodexServiceTierRequestOnly("thread/start", params), options);
       };
     }
     client.__alunixaXModelRequestPatch = codexAppServerModelRequestPatchVersion;
@@ -982,7 +983,8 @@
         || proto.prewarmThreadStart;
       proto.__alunixaXServiceTierOriginalPrewarmThreadStart = originalPrewarmThreadStart;
       proto.prewarmThreadStart = async function alunixaXServiceTierPrewarmThreadStart(params, options) {
-        return await prewarmCodexManagedSession(this, originalPrewarmThreadStart.bind(this), params, options);
+        return await prewarmCodexManagedSession(this, originalPrewarmThreadStart.bind(this),
+          applyCodexServiceTierRequestOnly("thread/start", params), options);
       };
     }
     proto.__alunixaXModelRequestPatch = codexAppServerModelRequestPatchVersion;

@@ -7,9 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use fs2::FileExt;
-use sha2::{Digest, Sha256};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 use toml_edit::{DocumentMut, Item};
 
 use crate::tools::{ToolConfig, ToolId};
@@ -280,9 +280,15 @@ pub struct RelayProfile {
     pub rate_limit_cooldown_enabled: bool,
     #[serde(rename = "channelQueueEnabled", default)]
     pub channel_queue_enabled: bool,
-    #[serde(rename = "channelRequestsPerMinute", default = "default_channel_requests_per_minute")]
+    #[serde(
+        rename = "channelRequestsPerMinute",
+        default = "default_channel_requests_per_minute"
+    )]
     pub channel_requests_per_minute: u32,
-    #[serde(rename = "cooldownErrorStatuses", default = "default_cooldown_error_statuses")]
+    #[serde(
+        rename = "cooldownErrorStatuses",
+        default = "default_cooldown_error_statuses"
+    )]
     pub cooldown_error_statuses: Vec<u16>,
     /// Anthropic 上游的认证字段：`x-api-key`（默认，Anthropic 原生）或
     /// `authorization`（多数 Claude 系中转网关用 Bearer）。
@@ -634,7 +640,11 @@ pub struct BackendSettings {
     pub provider_sync_manual_providers: Vec<String>,
     #[serde(rename = "providerSyncLastSelectedProvider", default)]
     pub provider_sync_last_selected_provider: String,
-    #[serde(rename = "ccsImportSources", default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(
+        rename = "ccsImportSources",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub ccs_import_sources: BTreeMap<String, crate::ccs_import::CcsImportOrigin>,
     #[serde(rename = "relayProfilesEnabled", default = "default_true")]
     pub relay_profiles_enabled: bool,
@@ -1363,7 +1373,9 @@ pub fn default_true() -> bool {
 
 /// Active official processes are left alone until idle by default.
 pub fn default_auto_takeover_when_active() -> String {
-    crate::auto_takeover::ActivePolicy::Defer.as_str().to_string()
+    crate::auto_takeover::ActivePolicy::Defer
+        .as_str()
+        .to_string()
 }
 
 pub fn default_relay_base_url() -> String {
@@ -1865,7 +1877,9 @@ impl SettingsStore {
     }
 
     pub fn revision(&self) -> anyhow::Result<String> {
-        Ok(settings_revision(self.read_contents()?.as_deref().map(str::as_bytes)))
+        Ok(settings_revision(
+            self.read_contents()?.as_deref().map(str::as_bytes),
+        ))
     }
 
     pub(crate) fn with_current_revision<T>(
@@ -1874,8 +1888,10 @@ impl SettingsStore {
         operation: impl FnOnce() -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
         self.with_lock(true, || {
-            anyhow::ensure!(self.revision()? == expected,
-                "settings_revision_conflict：恢复前设置已更新");
+            anyhow::ensure!(
+                self.revision()? == expected,
+                "settings_revision_conflict：恢复前设置已更新"
+            );
             operation()
         })
     }
@@ -1900,9 +1916,11 @@ impl SettingsStore {
     ) -> anyhow::Result<String> {
         self.with_lock(true, || {
             let revision = self.revision()?;
-            anyhow::ensure!(settings.settings_revision == revision
-                || (settings.settings_revision.is_empty() && revision == "missing"),
-                "settings_revision_conflict：设置已被其他操作更新，请重载后合并；原文件未修改");
+            anyhow::ensure!(
+                settings.settings_revision == revision
+                    || (settings.settings_revision.is_empty() && revision == "missing"),
+                "settings_revision_conflict：设置已被其他操作更新，请重载后合并；原文件未修改"
+            );
             let before = self.snapshot_raw_bytes()?;
             let mut settings = settings.clone();
             if self.path.exists() {
@@ -1913,8 +1931,10 @@ impl SettingsStore {
             prepare(&committed)?;
             atomic_write_unique(&self.path, &bytes)?;
             if let Err(error) = publish(&committed) {
-                anyhow::ensure!(self.revision()? == committed,
-                    "关联产物发布失败：{error}；设置已被外部修改，未覆盖新数据");
+                anyhow::ensure!(
+                    self.revision()? == committed,
+                    "关联产物发布失败：{error}；设置已被外部修改，未覆盖新数据"
+                );
                 self.restore_raw_snapshot_unlocked(before.as_deref())?;
                 return Err(error).context("关联产物发布失败，设置已恢复");
             }
@@ -1923,7 +1943,9 @@ impl SettingsStore {
     }
 
     pub(crate) fn snapshot_raw_bytes(&self) -> anyhow::Result<Option<Vec<u8>>> {
-        let Some(contents) = self.read_contents()? else { return Ok(None) };
+        let Some(contents) = self.read_contents()? else {
+            return Ok(None);
+        };
         validate_settings_snapshot(contents.as_bytes())?;
         Ok(Some(contents.into_bytes()))
     }
@@ -1934,8 +1956,10 @@ impl SettingsStore {
         expected_revision: &str,
     ) -> anyhow::Result<()> {
         self.with_lock(true, || {
-            anyhow::ensure!(self.revision()? == expected_revision,
-                "settings_revision_conflict：回滚期间设置已有新变化，未覆盖新数据");
+            anyhow::ensure!(
+                self.revision()? == expected_revision,
+                "settings_revision_conflict：回滚期间设置已有新变化，未覆盖新数据"
+            );
             self.restore_raw_snapshot_unlocked(snapshot)
         })
     }
@@ -1971,10 +1995,12 @@ impl SettingsStore {
     fn load_unlocked(&self) -> anyhow::Result<BackendSettings> {
         let contents = match self.read_contents()? {
             Some(value) => value,
-            None => return Ok(BackendSettings {
-                settings_revision: settings_revision(None),
-                ..BackendSettings::default()
-            }),
+            None => {
+                return Ok(BackendSettings {
+                    settings_revision: settings_revision(None),
+                    ..BackendSettings::default()
+                });
+            }
         };
 
         let mut value = serde_json::from_str::<Value>(&contents).with_context(|| {
@@ -2063,8 +2089,12 @@ impl SettingsStore {
 
     fn prepare_save_bytes(&self, settings: &BackendSettings) -> anyhow::Result<Vec<u8>> {
         serialize_settings_bounded(settings)?;
-        if !settings.settings_revision.is_empty() && settings.settings_revision != self.revision()? {
-            anyhow::bail!("settings_revision_conflict：设置已被其他操作更新，请重载后合并；原文件未修改");
+        if !settings.settings_revision.is_empty()
+            && settings.settings_revision != self.revision()?
+        {
+            anyhow::bail!(
+                "settings_revision_conflict：设置已被其他操作更新，请重载后合并；原文件未修改"
+            );
         }
         let previous = self.load_raw_object()?;
         safety::validate_profile_updates(settings, &previous)?;
@@ -2112,7 +2142,9 @@ impl SettingsStore {
             return self.load_unlocked();
         };
         if let Some(expected) = payload.get("revision") {
-            let expected = expected.as_str().ok_or_else(|| anyhow::anyhow!("revision 必须是字符串"))?;
+            let expected = expected
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("revision 必须是字符串"))?;
             if expected != self.revision()? {
                 anyhow::bail!("settings_revision_conflict：设置已被其他操作更新，补丁未应用");
             }
@@ -2144,7 +2176,10 @@ impl SettingsStore {
         safety::preserve_unknown_settings_fields(&mut raw, &original_raw)?;
         let mut cleaned = Value::Object(raw);
         crate::retired_context::strip_settings_value(&mut cleaned)?;
-        let mut raw = cleaned.as_object().context("settings must be an object")?.clone();
+        let mut raw = cleaned
+            .as_object()
+            .context("settings must be an object")?
+            .clone();
         raw.remove("revision");
         let bytes = serialize_settings_bounded(&Value::Object(raw))?;
         atomic_write_unique(&self.path, &bytes)?;
@@ -2256,10 +2291,7 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     }
     // 自动接管的开关与策略也走同一份 settings.json；漏掉这两行会让开关「保存了但没生效」。
     if let Some(value) = source.get("codexAppAutoTakeover").and_then(Value::as_bool) {
-        target.insert(
-            "codexAppAutoTakeover".to_string(),
-            Value::Bool(value),
-        );
+        target.insert("codexAppAutoTakeover".to_string(), Value::Bool(value));
     }
     if let Some(value) = source
         .get("codexAppAutoTakeoverWhenActive")
@@ -2699,7 +2731,8 @@ fn settings_to_object(settings: &BackendSettings) -> Map<String, Value> {
 }
 
 fn settings_revision(bytes: Option<&[u8]>) -> String {
-    bytes.map(|bytes| format!("sha256:{:x}", Sha256::digest(bytes)))
+    bytes
+        .map(|bytes| format!("sha256:{:x}", Sha256::digest(bytes)))
         .unwrap_or_else(|| "missing".to_string())
 }
 
@@ -2725,7 +2758,12 @@ fn normalize_settings_config_sections(
         profile.config_contents = crate::retired_context::strip_config(&profile.config_contents)?;
     }
     settings.ccs_db_path = settings.ccs_db_path.trim().to_string();
-    settings.ccs_import_sources.retain(|id, _| settings.relay_profiles.iter().any(|profile| &profile.id == id));
+    settings.ccs_import_sources.retain(|id, _| {
+        settings
+            .relay_profiles
+            .iter()
+            .any(|profile| &profile.id == id)
+    });
     let (common, extracted_context) =
         split_context_config_sections(&settings.relay_common_config_contents);
     let context = join_config_sections(&[
@@ -3082,9 +3120,16 @@ mod tests {
         let legacy = legacy.as_object_mut().unwrap();
         legacy.remove("claudeAppVoiceInput");
         legacy.remove("claudeAppLocalization");
-        let parsed: BackendSettings = serde_json::from_value(serde_json::Value::Object(legacy.clone())).unwrap();
-        assert!(parsed.claude_app_voice_input, "缺少键时语音输入应按默认开启");
-        assert!(parsed.claude_app_localization, "缺少键时界面汉化应按默认开启");
+        let parsed: BackendSettings =
+            serde_json::from_value(serde_json::Value::Object(legacy.clone())).unwrap();
+        assert!(
+            parsed.claude_app_voice_input,
+            "缺少键时语音输入应按默认开启"
+        );
+        assert!(
+            parsed.claude_app_localization,
+            "缺少键时界面汉化应按默认开启"
+        );
 
         let mut off = serde_json::to_value(BackendSettings::default()).unwrap();
         off["claudeAppVoiceInput"] = json!(false);
@@ -3706,9 +3751,13 @@ experimental_bearer_token = "sk-existing""#
         let dir = temp_dir();
         let store = SettingsStore::new(dir.join("settings.json"));
 
-        assert_eq!(store.load().unwrap(), BackendSettings {
-            settings_revision: "missing".into(), ..BackendSettings::default()
-        });
+        assert_eq!(
+            store.load().unwrap(),
+            BackendSettings {
+                settings_revision: "missing".into(),
+                ..BackendSettings::default()
+            }
+        );
     }
 
     #[test]
@@ -4760,7 +4809,9 @@ pub struct RelayHeaderKeyValue {
 
 impl RelayProfile {
     pub fn selected_api_key(&self) -> Option<&RelayApiKey> {
-        self.api_keys.iter().find(|entry| entry.id == self.active_api_key_id)
+        self.api_keys
+            .iter()
+            .find(|entry| entry.id == self.active_api_key_id)
             .or_else(|| self.api_keys.first())
     }
 
@@ -4770,7 +4821,11 @@ impl RelayProfile {
 
     pub fn anthropic_auth_header(&self) -> &str {
         let value = self.anthropic_auth_header.trim();
-        if value.is_empty() { crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_API_KEY } else { value }
+        if value.is_empty() {
+            crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_API_KEY
+        } else {
+            value
+        }
     }
 
     pub fn anthropic_thinking_mode(&self) -> crate::anthropic_bridge::AnthropicThinkingMode {
@@ -4780,7 +4835,9 @@ impl RelayProfile {
     pub fn anthropic_max_tokens(&self) -> u64 {
         if self.anthropic_max_tokens == 0 {
             crate::anthropic_bridge::ANTHROPIC_DEFAULT_MAX_TOKENS
-        } else { self.anthropic_max_tokens }
+        } else {
+            self.anthropic_max_tokens
+        }
     }
 
     pub fn uses_no_auth(&self) -> bool {
@@ -4790,10 +4847,12 @@ impl RelayProfile {
 
 pub fn normalize_anthropic_auth_header(value: &str) -> String {
     match value.trim().to_ascii_lowercase().as_str() {
-        "authorization" | "bearer" | "auth_token" | "anthropic_auth_token" =>
-            crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_BEARER.to_string(),
-        "x-api-key" | "x_api_key" | "api_key" | "anthropic_api_key" =>
-            crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_API_KEY.to_string(),
+        "authorization" | "bearer" | "auth_token" | "anthropic_auth_token" => {
+            crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_BEARER.to_string()
+        }
+        "x-api-key" | "x_api_key" | "api_key" | "anthropic_api_key" => {
+            crate::anthropic_bridge::ANTHROPIC_AUTH_HEADER_API_KEY.to_string()
+        }
         _ => String::new(),
     }
 }
@@ -4879,8 +4938,15 @@ impl BackendSettings {
 }
 
 fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<String, Value>) {
-    for key in ["codexAppNativeFastUnlock", "codexAppCapacityAutoRetry", "codexAppUsageStatusLine",
-        "codexAppActivityOverlayRight", "codexAppStandaloneQuotaUnlock", "claudeAppVoiceInput", "claudeAppLocalization"] {
+    for key in [
+        "codexAppNativeFastUnlock",
+        "codexAppCapacityAutoRetry",
+        "codexAppUsageStatusLine",
+        "codexAppActivityOverlayRight",
+        "codexAppStandaloneQuotaUnlock",
+        "claudeAppVoiceInput",
+        "claudeAppLocalization",
+    ] {
         merge_bool_setting(target, source, key);
     }
     if let Some(patch) = source.get("dictation").and_then(Value::as_object) {
@@ -4890,7 +4956,14 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
             .cloned()
             .unwrap_or_default();
         merge_bool_setting(&mut dictation, patch, "enabled");
-        for key in ["provider", "baseUrl", "apiKey", "apiKeyEnv", "model", "language"] {
+        for key in [
+            "provider",
+            "baseUrl",
+            "apiKey",
+            "apiKeyEnv",
+            "model",
+            "language",
+        ] {
             if let Some(value) = patch.get(key).and_then(Value::as_str) {
                 dictation.insert(key.to_string(), Value::String(value.trim().to_string()));
             }
@@ -5258,33 +5331,33 @@ fn merge_latest_setting_fields(target: &mut Map<String, Value>, source: &Map<Str
     }
 }
 
-    // 自动接管的两个设置字段必须走既有 settings.json 链路持久化：
-    // 守护线程在另一个线程里读同一个文件，写不进就等于开关无效。
-    #[test]
-    fn auto_takeover_settings_round_trip_through_settings_file() {
-        let temp = tempfile::tempdir().unwrap();
-        let store = SettingsStore::new(temp.path().join("settings.json"));
+// 自动接管的两个设置字段必须走既有 settings.json 链路持久化：
+// 守护线程在另一个线程里读同一个文件，写不进就等于开关无效。
+#[test]
+fn auto_takeover_settings_round_trip_through_settings_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = SettingsStore::new(temp.path().join("settings.json"));
 
-        let initial = BackendSettings::default();
-        assert!(!initial.codex_app_auto_takeover);
-        assert_eq!(
-            initial.codex_app_auto_takeover_when_active,
-            default_auto_takeover_when_active()
-        );
-        assert_eq!(initial.codex_app_auto_takeover_when_active, "defer");
-        store.save(&initial).unwrap();
+    let initial = BackendSettings::default();
+    assert!(!initial.codex_app_auto_takeover);
+    assert_eq!(
+        initial.codex_app_auto_takeover_when_active,
+        default_auto_takeover_when_active()
+    );
+    assert_eq!(initial.codex_app_auto_takeover_when_active, "defer");
+    store.save(&initial).unwrap();
 
-        let updated = store
-            .update(json!({
-                "codexAppAutoTakeover": true,
-                "codexAppAutoTakeoverWhenActive": "immediate"
-            }))
-            .unwrap();
-        assert!(updated.codex_app_auto_takeover);
-        assert_eq!(updated.codex_app_auto_takeover_when_active, "immediate");
+    let updated = store
+        .update(json!({
+            "codexAppAutoTakeover": true,
+            "codexAppAutoTakeoverWhenActive": "immediate"
+        }))
+        .unwrap();
+    assert!(updated.codex_app_auto_takeover);
+    assert_eq!(updated.codex_app_auto_takeover_when_active, "immediate");
 
-        // 重新读盘：字段名必须与前端/守护线程约定的一致（camelCase）。
-        let reloaded = store.load().unwrap();
-        assert!(reloaded.codex_app_auto_takeover);
-        assert_eq!(reloaded.codex_app_auto_takeover_when_active, "immediate");
-    }
+    // 重新读盘：字段名必须与前端/守护线程约定的一致（camelCase）。
+    let reloaded = store.load().unwrap();
+    assert!(reloaded.codex_app_auto_takeover);
+    assert_eq!(reloaded.codex_app_auto_takeover_when_active, "immediate");
+}

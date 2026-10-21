@@ -306,7 +306,9 @@ fn official_member_with_refresh_token_only_stays_selectable() {
         id: "official-login".to_string(),
         name: "官方登录".to_string(),
         relay_mode: RelayMode::Official,
-        auth_contents: r#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"refresh","account_id":"acct-1"}}"#.to_string(),
+        auth_contents:
+            r#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"refresh","account_id":"acct-1"}}"#
+                .to_string(),
         ..RelayProfile::default()
     });
     settings.aggregate_relay_profiles[0].members = vec![AggregateRelayMember {

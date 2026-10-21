@@ -450,8 +450,10 @@ pub fn restore_login_backup(
     backup: &LoginBackup,
 ) -> anyhow::Result<()> {
     let current = store.load().context("读取恢复前设置失败")?;
-    anyhow::ensure!(current.settings_revision == backup.settings.settings_revision,
-        "settings_revision_conflict：登录期间设置已改变，未覆盖设置或登录文件");
+    anyhow::ensure!(
+        current.settings_revision == backup.settings.settings_revision,
+        "settings_revision_conflict：登录期间设置已改变，未覆盖设置或登录文件"
+    );
     let expected = crate::config_transaction::revision(store.path(), home)?;
     crate::config_transaction::run(store.path(), home, Some(&expected), || {
         store.save(&backup.settings).context("恢复供应商设置失败")?;
@@ -1193,8 +1195,16 @@ mod tests {
         let fresh = capture_login_backup(&store, &home).unwrap();
         store.update(json!({"providerSyncEnabled":true})).unwrap();
         std::fs::write(home.join("auth.json"), b"concurrent-auth").unwrap();
-        assert!(restore_login_backup(&store, &home, &fresh).unwrap_err().to_string().contains("revision_conflict"));
-        assert_eq!(std::fs::read(home.join("auth.json")).unwrap(), b"concurrent-auth");
+        assert!(
+            restore_login_backup(&store, &home, &fresh)
+                .unwrap_err()
+                .to_string()
+                .contains("revision_conflict")
+        );
+        assert_eq!(
+            std::fs::read(home.join("auth.json")).unwrap(),
+            b"concurrent-auth"
+        );
     }
 
     #[test]

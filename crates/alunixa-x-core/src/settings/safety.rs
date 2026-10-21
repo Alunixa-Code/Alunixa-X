@@ -1,23 +1,37 @@
 use super::*;
 
-pub(super) fn validate_profile_updates(settings: &BackendSettings, raw: &Map<String, Value>) -> anyhow::Result<()> {
+pub(super) fn validate_profile_updates(
+    settings: &BackendSettings,
+    raw: &Map<String, Value>,
+) -> anyhow::Result<()> {
     let previous: BackendSettings = serde_json::from_value(Value::Object(raw.clone()))?;
     for profile in &settings.relay_profiles {
         let mut normalized = profile.clone();
-        if let Err(error) = crate::relay_config::normalize_relay_profile_for_storage(&mut normalized) {
+        if let Err(error) =
+            crate::relay_config::normalize_relay_profile_for_storage(&mut normalized)
+        {
             // 旧的不支持快照允许原样保留，不能阻断用户修改无关设置。
-            if previous.relay_profiles.iter().any(|old| old.id == profile.id && old == profile) {
+            if previous
+                .relay_profiles
+                .iter()
+                .any(|old| old.id == profile.id && old == profile)
+            {
                 continue;
             }
-            if profile.relay_mode == RelayMode::Official && !profile.official_mix_api_key
-                && previous.relay_profiles.iter().any(|old| old.id == profile.id && old.auth_contents == profile.auth_contents)
+            if profile.relay_mode == RelayMode::Official
+                && !profile.official_mix_api_key
+                && previous
+                    .relay_profiles
+                    .iter()
+                    .any(|old| old.id == profile.id && old.auth_contents == profile.auth_contents)
             {
                 let mut without_legacy_auth = profile.clone();
                 without_legacy_auth.auth_contents.clear();
                 crate::relay_config::normalize_relay_profile_for_storage(&mut without_legacy_auth)?;
                 continue;
             }
-            return Err(error).with_context(|| format!("供应商 {} 配置无效，原存档未修改", profile.id));
+            return Err(error)
+                .with_context(|| format!("供应商 {} 配置无效，原存档未修改", profile.id));
         }
     }
     Ok(())
@@ -67,7 +81,18 @@ pub(super) fn preserve_unknown_settings_fields(
         "anthropicMaxTokens",
         "anthropicPromptCache",
         "anthropicImpersonateClaudeCode",
-        "anthropicThinkingMode", "customModels", "modelProtocols", "defaultCustomModelId", "modelReasoningEfforts", "lastUsedModel", "contextSelection", "contextSelectionInitialized", "rateLimitCooldownEnabled", "channelQueueEnabled", "channelRequestsPerMinute", "cooldownErrorStatuses",
+        "anthropicThinkingMode",
+        "customModels",
+        "modelProtocols",
+        "defaultCustomModelId",
+        "modelReasoningEfforts",
+        "lastUsedModel",
+        "contextSelection",
+        "contextSelectionInitialized",
+        "rateLimitCooldownEnabled",
+        "channelQueueEnabled",
+        "channelRequestsPerMinute",
+        "cooldownErrorStatuses",
     ];
     fn mark_profiles(value: &mut Value) {
         match value {
@@ -171,4 +196,3 @@ pub(super) fn preserve_unknown_settings_fields(
     *next = target.as_object_mut().expect("settings object").clone();
     Ok(())
 }
-

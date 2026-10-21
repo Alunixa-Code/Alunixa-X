@@ -7,6 +7,9 @@ const translations = {
   "外部 Agent 协作": "External agent collaboration",
   "独立 CLI、任务状态与 MCP 接入": "Independent CLIs, task status and MCP integration",
   "选择实拍截图": "Choose a screenshot",
+  "Alunixa X 每模型协议与上下文配置": "Alunixa X per-model protocols and context settings",
+  "Alunixa X 外部 Agent 协作配置": "Alunixa X external agent collaboration settings",
+  "模型聚合可将模型固定到成员，并按供应商分组显示；外部 Agent 协作和原生 Fast 均需单独开启。用量状态栏按每个模型的窗口计算上下文占用。": "Model aggregation pins models to members and groups them by provider. External agent collaboration and native Fast are opt-in. The usage status line calculates context usage against each model's window.",
   "跳到主要内容": "Skip to main content",
   "Alunixa X 首页": "Alunixa X home",
   "打开导航": "Open navigation",
@@ -375,7 +378,6 @@ const updateRepositoryStats = async () => {
   }
 };
 
-// 与管理工具共用远端清单，不保留需要单独维护的品牌名单或图片映射。
 const platformFromDevice = () => {
   const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
   if (/mac/i.test(platform)) return "macos";
@@ -605,7 +607,7 @@ function setupScreenshotGallery() {
   const showcase = document.querySelector("#showcase");
   const container = showcase?.querySelector(".section-shell");
   const shots = Array.from(showcase?.querySelectorAll("figure") || []);
-  if (!container || shots.length < 2) return;
+  if (!container || shots.length < 2 || shots.some(shot => !shot.querySelector("img"))) return;
   const track = document.createElement("div");
   track.className = "screenshot-track";
   const controls = document.createElement("div");
