@@ -750,7 +750,7 @@
         ? params
         : applyCodexRemoteSessionProviderOverride(requestMethod, params);
       const nextParams = await prepareCodexManagedSessionConnection(String(method || ""),
-        providerParams, client.hostId, originalSendRequest);
+        applyCodexServiceTierRequestOnly(requestMethod, providerParams), client.hostId, originalSendRequest);
       const modelContextRefresh = await refreshCodexThreadModelBeforeTurn(
         client,
         originalSendRequest,
@@ -955,7 +955,7 @@
         ? params
         : applyCodexRemoteSessionProviderOverride(requestMethod, params);
       const nextParams = await prepareCodexManagedSessionConnection(String(method || ""),
-        providerParams, client.hostId, originalSendRequest.bind(client));
+        applyCodexServiceTierRequestOnly(requestMethod, providerParams), client.hostId, originalSendRequest.bind(client));
       const modelContextRefresh = await refreshCodexThreadModelBeforeTurn(
         client,
         originalSendRequest.bind(client),

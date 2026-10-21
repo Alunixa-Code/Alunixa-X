@@ -202,7 +202,9 @@ fn safety_corrupt_backup_structure_never_reports_undone_or_restores_rows() {
         let store = BackupStore::new(temp.path().join("backups"));
         let adapter = SQLiteStorageAdapter::new(&db, store.clone()).with_codex_home(&home);
         let deleted = adapter.delete_local(&session());
-        let token = deleted.undo_token.unwrap();
+        let undo = deleted.undo_token.unwrap();
+        let token = serde_json::from_str::<Vec<String>>(&undo).ok()
+            .and_then(|tokens| tokens.into_iter().next()).unwrap_or_else(|| undo.clone());
         let mut backup = store.read_backup(&token).unwrap();
         if corruption.is_null() {
             backup = json!({});
@@ -210,7 +212,7 @@ fn safety_corrupt_backup_structure_never_reports_undone_or_restores_rows() {
             backup["tables"] = corruption;
         }
         fs::write(store.path_for(&token), backup.to_string()).unwrap();
-        let restored = adapter.undo(&token);
+        let restored = adapter.undo(&undo);
         assert_eq!(
             restored.status,
             DeleteStatus::Failed,
@@ -275,7 +277,7 @@ fn safety_failed_database_transaction_keeps_its_backup_alongside_successful_back
     assert!(result.message.contains("fixture transaction blocked"));
     assert!(result.backup_path.is_none());
     let tokens: Vec<String> = serde_json::from_str(result.undo_token.as_deref().unwrap()).unwrap();
-    assert_eq!(tokens.len(), 2);
+    assert_eq!(tokens.len(), 3);
     for token in tokens {
         assert!(store.path_for(&token).is_file());
         assert!(

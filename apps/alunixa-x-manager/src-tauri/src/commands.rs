@@ -8818,7 +8818,7 @@ cwd = \"/tmp\"
         let result = save_settings(stale, Some(revision), None).await;
         alunixa_x_core::paths::set_settings_path_for_tests(previous);
         assert_eq!(result.status, "failed");
-        assert!(result.message.contains("revision_conflict"));
+        assert!(result.message.contains("配置已被其他页面或程序修改"));
         assert!(result.payload.settings.provider_sync_enabled);
         assert_eq!(result.payload.revision, current_revision);
     }

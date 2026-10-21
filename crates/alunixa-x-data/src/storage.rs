@@ -52,8 +52,15 @@ pub fn delete_local_from_paths_with_home(
         || result.message.starts_with("Database not found:"));
     let mut tokens = result.undo_token.as_deref().map(|token|
         serde_json::from_str::<Vec<String>>(token).unwrap_or_else(|_| vec![token.to_string()])).unwrap_or_default();
-    if let Some(token) = metadata_token.as_ref() { tokens.push(token.clone()); }
+    if result.status == DeleteStatus::LocalDeleted || !tokens.is_empty() || missing {
+        if let Some(token) = metadata_token.as_ref() { tokens.push(token.clone()); }
+    }
     if !tokens.is_empty() {
+        if tokens.len() > 1 {
+            result.backup_path = None;
+            result.message = format!("{}；备份：{}", result.message,
+                tokens.iter().map(|token| backup_store.path_for(token).to_string_lossy().into_owned()).collect::<Vec<_>>().join("、"));
+        }
         result.undo_token = Some(if tokens.len() == 1 { tokens.remove(0) } else { json!(tokens).to_string() });
     }
     if result.status != DeleteStatus::LocalDeleted && !missing { return result }

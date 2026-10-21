@@ -481,7 +481,7 @@ async fn settings_routes_use_settings_service() {
     assert_eq!(updated["providerSyncEnabled"], true);
     assert_eq!(updated["codexAppSessionDelete"], false);
     assert_eq!(updated["codexAppNativeFastUnlock"], true);
-    assert!(updated.get("codexAppServiceTierControls").is_none());
+    assert_eq!(updated["codexAppServiceTierControls"], false);
     assert_eq!(updated["codexAppPetRealMouseLook"], true);
     assert_eq!(updated["codexAppActivityOverlayRight"], true);
     assert_eq!(loaded, updated);

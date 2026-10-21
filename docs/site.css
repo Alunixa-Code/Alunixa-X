@@ -622,6 +622,43 @@ button {
   text-align: right;
 }
 
+.screenshot-track {
+  display: grid;
+  aspect-ratio: 1440 / 1050;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, .16);
+  border-radius: 8px;
+}
+.screenshot-track figure {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 68px;
+  margin: 0;
+  min-height: 0;
+  height: 100%;
+}
+.screenshot-track figure[hidden],
+.showcase-grid[hidden],
+.showcase-personal[hidden] { display: none; }
+.screenshot-track figure img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.screenshot-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 22px; }
+.screenshot-controls button {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.screenshot-controls button[aria-pressed="true"] { border-color: #92adff; background: rgba(125, 150, 230, .16); }
+.screenshot-controls button:focus-visible { outline: 2px solid #b4c4ff; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .screenshot-track { aspect-ratio: 4 / 4; }
+  .screenshot-track figure { grid-template-rows: minmax(0, 1fr) 82px; }
+  .screenshot-track figcaption { padding: 12px; }
+}
+
 .showcase-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

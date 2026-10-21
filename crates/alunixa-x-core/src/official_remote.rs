@@ -452,9 +452,12 @@ pub fn restore_login_backup(
     let current = store.load().context("读取恢复前设置失败")?;
     anyhow::ensure!(current.settings_revision == backup.settings.settings_revision,
         "settings_revision_conflict：登录期间设置已改变，未覆盖设置或登录文件");
-    restore_optional_file(&home.join("config.toml"), backup.config_contents.as_deref())?;
-    restore_optional_file(&home.join("auth.json"), backup.auth_contents.as_deref())?;
-    store.save(&backup.settings).context("恢复供应商设置失败")
+    let expected = crate::config_transaction::revision(store.path(), home)?;
+    crate::config_transaction::run(store.path(), home, Some(&expected), || {
+        store.save(&backup.settings).context("恢复供应商设置失败")?;
+        restore_optional_file(&home.join("config.toml"), backup.config_contents.as_deref())?;
+        restore_optional_file(&home.join("auth.json"), backup.auth_contents.as_deref())
+    })
 }
 
 pub fn migrate_active_profile_after_chatgpt_login(

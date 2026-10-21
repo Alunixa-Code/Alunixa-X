@@ -2,6 +2,11 @@ const repository = "Alunixa-Code/Alunixa-X";
 const releasesUrl = `https://github.com/${repository}/releases/latest`;
 
 const translations = {
+  "高级多模型配置": "Advanced model configuration",
+  "独立协议、上下文窗口和自动压缩阈值": "Independent protocols, context windows and compaction thresholds",
+  "外部 Agent 协作": "External agent collaboration",
+  "独立 CLI、任务状态与 MCP 接入": "Independent CLIs, task status and MCP integration",
+  "选择实拍截图": "Choose a screenshot",
   "跳到主要内容": "Skip to main content",
   "Alunixa X 首页": "Alunixa X home",
   "打开导航": "Open navigation",
@@ -583,6 +588,7 @@ document.querySelectorAll('a[href="#downloads"]').forEach((link) => {
 
 setupNavigation();
 setupPlatformPicker();
+setupScreenshotGallery();
 setupLanguageSwitcher();
 setupHeroNetwork();
 setupReveal();
@@ -594,3 +600,40 @@ window.addEventListener("error", (event) => {
     event.target.closest("figure")?.classList.add("image-unavailable");
   }
 }, true);
+
+function setupScreenshotGallery() {
+  const showcase = document.querySelector("#showcase");
+  const container = showcase?.querySelector(".section-shell");
+  const shots = Array.from(showcase?.querySelectorAll("figure") || []);
+  if (!container || shots.length < 2) return;
+  const track = document.createElement("div");
+  track.className = "screenshot-track";
+  const controls = document.createElement("div");
+  controls.className = "screenshot-controls";
+  controls.setAttribute("role", "group");
+  controls.setAttribute("aria-label", "选择实拍截图");
+  shots[0].before(track);
+  const buttons = shots.map((shot, index) => {
+    track.appendChild(shot);
+    shot.id ||= `screenshot-${index + 1}`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-controls", shot.id);
+    button.setAttribute("aria-pressed", String(index === 0));
+    button.textContent = shot.querySelector("figcaption strong")?.textContent || String(index + 1);
+    button.addEventListener("click", () => {
+      const { scrollX, scrollY } = window;
+      shots.forEach((item, itemIndex) => {
+        item.hidden = itemIndex !== index;
+        buttons[itemIndex].setAttribute("aria-pressed", String(itemIndex === index));
+      });
+      shot.querySelector("img").loading = "eager";
+      window.scrollTo({ left: scrollX, top: scrollY, behavior: "instant" });
+    });
+    controls.appendChild(button);
+    return button;
+  });
+  track.after(controls);
+  showcase.querySelectorAll(".showcase-grid, .showcase-personal").forEach(element => { element.hidden = true; });
+  shots.forEach((shot, index) => { shot.hidden = index !== 0; });
+}

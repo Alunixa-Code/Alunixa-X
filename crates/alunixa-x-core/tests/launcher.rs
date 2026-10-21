@@ -2931,12 +2931,13 @@ async fn isolated_quota_gate_is_not_started_when_status_save_fails() {
         &hooks,
     );
     std::fs::write(temp.path().join("unwritable"), "not a directory").unwrap();
-    assert!(result.await.is_err());
+    let handle = result.await.expect("post-launch failure keeps the app in degraded mode");
     assert!(
         tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept(),)
             .await
             .is_err()
     );
+    handle.wait_for_codex_exit().await.unwrap();
 }
 
 #[tokio::test]
