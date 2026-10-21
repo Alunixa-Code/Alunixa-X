@@ -2,14 +2,6 @@ pub use alunixa_x_core::install::{
     EntryPointState, InstallActionResult, InstallOptions, ShortcutState, inspect_entrypoints,
 };
 
-pub fn install_entrypoints() -> InstallActionResult {
-    alunixa_x_core::install::install_entrypoints(&InstallOptions::default())
-}
-
-pub fn uninstall_entrypoints(options: InstallOptions) -> InstallActionResult {
-    alunixa_x_core::install::uninstall_entrypoints(&options)
-}
-
 pub fn repair_shortcuts() -> InstallActionResult {
     alunixa_x_core::install::repair_entrypoints(&InstallOptions::default())
 }

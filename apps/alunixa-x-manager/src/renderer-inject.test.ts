@@ -2,6 +2,29 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 
+it("keeps background-resume scan scheduling bounded and independent of retired features", async () => {
+  const schedule = await readFile(
+    new URL("../../../assets/inject/renderer-inject/98-scan-schedule.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(schedule, /if \(document\.hidden\) \{\s*clearTimeout/);
+  assert.match(schedule, /window\.__codexSessionDeleteScanPending/);
+  assert.match(schedule, /window\.__codexSessionDeleteDeferredPending/);
+  assert.match(schedule, /requestAnimationFrame/);
+  assert.match(schedule, /document\.addEventListener\("visibilitychange", onScanVisibilityChange\)/);
+  assert.match(schedule, /window\.__alunixaXScanScheduleCleanup/);
+  assert.doesNotMatch(schedule, /scheduleZedRemoteMenuRefresh|__codexZedRemoteMenuRefresh/);
+  const view = await readFile(
+    new URL("../../../assets/inject/renderer-inject/95-conversation-view.js", import.meta.url),
+    "utf8",
+  );
+  const scan = view.match(/^  function scan\(\) \{[^]*?^  \}/m)?.[0];
+  assert.ok(scan);
+  assert.match(scan, /if \(document\.hidden\)/);
+  assert.match(scan, /scheduleDeferredScan\(\)/);
+  assert.doesNotMatch(scan, /requestAnimationFrame/);
+});
+
 const STEPWISE_FRAGMENT_PATHS = [
   "floating-panel/runtime/state.js",
   "floating-panel/core/appearance-runtime.js",
@@ -280,7 +303,8 @@ describe("renderer injection header compatibility", () => {
     assert.match(renderer, /function installCodexPlusPageNavigationCloseHandler\(\)/);
     assert.match(renderer, /target\?\.closest\(selectors\.sidebarThread\)/);
     assert.match(renderer, /closeCodexPlusPageAfterNativeNavigation\(\)/);
-    assert.match(renderer, /setTimeout\(\(\) => \{\s*window\.__alunixaXPageNavigationCloseTimer = null;\s*closeCodexPlusPage\(\);/);
+    assert.match(renderer, /const timer = setTimeout\(\(\) => \{\s*if \(window\.__alunixaXPageNavigationCloseTimer !== timer\) return;/);
+    assert.match(renderer, /if \(document\.querySelector\(`\.\$\{alunixaXPageClass\}`\) === page\) closeCodexPlusPage\(\);/);
     assert.match(renderer, /installCodexPlusNavigationEntries\(\);/);
     assert.match(renderer, /document\.querySelectorAll\(`#\$\{alunixaXMenuId\}/);
   });
@@ -510,7 +534,7 @@ describe("renderer injection header compatibility", () => {
     const renderEnd = renderer.indexOf("\n  let alunixaXBackendSettings =", renderStart);
     assert.ok(renderStart >= 0 && renderEnd > renderStart);
     const settings: Record<string, boolean> = { pluginMarketplaceUnlock: true, threadScrollRestore: true, modelWhitelistUnlock: true };
-    const render = new Function("document", "alunixaXSettings", "alunixaXBackendMappedSettings", "refreshConversationViewControls", "refreshCodexServiceTierControls",
+    const render = new Function("document", "alunixaXSettings", "alunixaXBackendMappedSettings", "refreshConversationViewControls",
       `let alunixaXBackendSettingsLoaded = false; const alunixaXBackendSettings = {};
 ${renderer.slice(renderStart, renderEnd)}
 return (loaded) => { alunixaXBackendSettingsLoaded = loaded; renderCodexPlusMenu(); };`,
@@ -1741,10 +1765,14 @@ describe("renderer inject 分片与产物一致", () => {
   const fragmentDir = new URL("../../../assets/inject/renderer-inject/", import.meta.url);
   const artifactPath = new URL("../../../assets/inject/renderer-inject.js", import.meta.url);
 
-  async function assembleFromFragments(): Promise<{ source: string; names: string[] }> {
+  async function assembleFromFragments(): Promise<{
+    source: string;
+    names: string[];
+    fragments: Array<{ name: string; description?: string; lines: number }>;
+  }> {
     const manifest = JSON.parse(
       await readFile(new URL("manifest.json", fragmentDir), "utf8"),
-    ) as { fragments: Array<{ name: string; description?: string }> };
+    ) as { fragments: Array<{ name: string; description?: string; lines: number }> };
     assert.ok(
       Array.isArray(manifest.fragments) && manifest.fragments.length > 0,
       "manifest.json 必须有 fragments",
@@ -1758,7 +1786,11 @@ describe("renderer inject 分片与产物一致", () => {
         return body;
       }),
     );
-    return { source: bodies.join(""), names: manifest.fragments.map((f) => f.name) };
+    return {
+      source: bodies.join(""),
+      names: manifest.fragments.map((f) => f.name),
+      fragments: manifest.fragments,
+    };
   }
 
   it("分片按 manifest 顺序拼接后与产物逐字节一致", async () => {
@@ -1778,6 +1810,21 @@ describe("renderer inject 分片与产物一致", () => {
     assert.ok(source.includes("\n})();\n"), "必须包含主 IIFE 的收尾");
     // 语法解析（不执行）能抓出分片切坏造成的括号不匹配。
     assert.doesNotThrow(() => new Function(source));
+  });
+
+  it("manifest 的行数与分片内容保持一致且没有重复文件", async () => {
+    const { source, fragments } = await assembleFromFragments();
+    const names = fragments.map((fragment) => fragment.name);
+    assert.equal(new Set(names).size, names.length, "manifest 不得重复引用同一分片");
+    assert.ok(fragments.every((fragment) => Number.isInteger(fragment.lines) && fragment.lines > 0));
+    const manifestLines = fragments.reduce((total, fragment) => total + fragment.lines, 0);
+    const artifactLines = source.endsWith("\n") ? source.slice(0, -1).split("\n").length : source.split("\n").length;
+    assert.equal(manifestLines, artifactLines, "manifest 总行数必须覆盖完整产物");
+    for (const fragment of fragments) {
+      const body = await readFile(new URL(fragment.name, fragmentDir), "utf8");
+      const lineCount = body.endsWith("\n") ? body.slice(0, -1).split("\n").length : body.split("\n").length;
+      assert.equal(lineCount, fragment.lines, fragment.name);
+    }
   });
 
   it("测试辅助依赖的锚点仍落在同一个分片里且顺序不变", async () => {
@@ -1976,7 +2023,7 @@ describe("拓展接口层", () => {
     return Array.from(body.matchAll(/"([^"]+)"/g), ([, route]) => route);
   }
 
-  it("路由白名单只放只读能力，不含设置写入与远端控制", async () => {
+  it("路由白名单不含设置写入与远端控制，CDP 注入需显式开放", async () => {
     const routes = await readRouteWhitelist();
     assert.ok(routes.length > 0, "白名单不能为空");
     // 这些路由一旦开放，第三方脚本就能改用户配置或操作远端，必须显式决策后才能加。
@@ -1984,6 +2031,8 @@ describe("拓展接口层", () => {
       assert.ok(!routes.includes(forbidden), `${forbidden} 不应默认开放给拓展`);
     }
     assert.ok(routes.includes("/diagnostics/log"), "诊断上报应保持开放");
+    assert.ok(routes.includes("/cdp/targets"), "CDP 页面列表应开放给拓展");
+    assert.ok(routes.includes("/cdp/evaluate"), "CDP evaluate 应开放给拓展");
   });
 
   it("接口对象在 IIFE 收尾前挂载", async () => {
@@ -2076,7 +2125,7 @@ describe("拓展菜单项", () => {
  */
 function conversationViewRuntime(renderer: string) {
   const start = renderer.indexOf("  // 旧版（26.9xx 之前）内容容器类名清单");
-  const end = renderer.indexOf("  function codexServiceTierBadgeVisibleElement(", start);
+  const end = renderer.indexOf("  function removeLegacyCodexServiceTierBadges(", start);
   assert.ok(start >= 0 && end > start, "conversation view target finder block not found");
   const finderSource = renderer.slice(start, end);
   // 宽度计算与目标查找在文件里不相邻，单独切一段。
@@ -2401,5 +2450,62 @@ describe("renderer injection conversation view alignment", () => {
     const writeIndex = body.indexOf("conversationViewApplyNativeWidth(el");
     assert.ok(readIndex >= 0 && writeIndex > readIndex, "读取必须在写入之前");
     assert.match(body, /targets\.map\(\(el\) => conversationViewAvailableWidth\(el\)\)/);
+  });
+});
+
+describe("renderer model reasoning efforts patch", () => {
+  // 补全逻辑只依赖 alunixaXModelMetadata，抽出来单独跑，避免再复制一份实现。
+  function reasoningRuntime(renderer: string, metadata: Record<string, unknown> | null) {
+    const start = renderer.indexOf("function modelReasoningEfforts(");
+    const end = renderer.indexOf("\n  function applyCodexPlusModelMetadata(", start);
+    assert.ok(start >= 0 && end > start, "产物里找不到 modelReasoningEfforts");
+    const source = renderer.slice(start, end);
+    const create = new Function(
+      "alunixaXModelMetadata",
+      `${source}\nreturn modelReasoningEfforts;`,
+    ) as (
+      readMetadata: () => Record<string, unknown> | null,
+    ) => (modelName: string) => Array<{ reasoningEffort: string }>;
+    return create(() => metadata);
+  }
+
+  const threeLevelDeclaration = {
+    supportedReasoningEfforts: [
+      { reasoningEffort: "low", description: "Fast responses with lighter reasoning" },
+      { reasoningEffort: "high", description: "Greater reasoning depth for complex problems" },
+      { reasoningEffort: "max", description: "Maximum reasoning depth for the hardest problems" },
+    ],
+  };
+
+  it("不会给只声明三档的 deepseek 模型补出 ultra", async () => {
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+    const efforts = reasoningRuntime(renderer, threeLevelDeclaration)("cpx-relay-mv5bil9a/deepseek-flash");
+
+    assert.deepEqual(
+      efforts.map((entry) => entry.reasoningEffort),
+      ["low", "high", "max"],
+    );
+  });
+
+  it("仍为名单内确认支持 ultra 的模型补 max 与 ultra", async () => {
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+    const efforts = reasoningRuntime(renderer, {
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh"].map((reasoningEffort) => ({ reasoningEffort })),
+    })("gpt-5.6-sol");
+
+    assert.deepEqual(
+      efforts.map((entry) => entry.reasoningEffort),
+      ["low", "medium", "high", "xhigh", "max", "ultra"],
+    );
+  });
+
+  it("没有档位声明时仍回落到完整兜底列表", async () => {
+    const renderer = await readFile(new URL("../../../assets/inject/renderer-inject.js", import.meta.url), "utf8");
+    const efforts = reasoningRuntime(renderer, null)("deepseek-flash");
+
+    assert.deepEqual(
+      efforts.map((entry) => entry.reasoningEffort),
+      ["low", "medium", "high", "xhigh", "max", "ultra"],
+    );
   });
 });

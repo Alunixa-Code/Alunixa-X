@@ -996,7 +996,7 @@
     };
   }
 
-  function sendCodexPlusDiagnostic(event, detail) {
+  async function sendCodexPlusDiagnostic(event, detail) {
     const payload = alunixaXDiagnosticPayload(event, detail);
     if (window.__ALUNIXA_X_TEST_SERVICE_TIER__) {
       window.__alunixaXServiceTierTestDiagnostics = window.__alunixaXServiceTierTestDiagnostics || [];
@@ -1004,7 +1004,10 @@
       return;
     }
     if (window.__codexSessionDeleteBridge) {
-      window.__codexSessionDeleteBridge("/diagnostics/log", payload).catch(() => {});
+      try {
+        const response = await window.__codexSessionDeleteBridge("/diagnostics/log", payload);
+        if (response?.status === "ok") return;
+      } catch (_) {}
     }
     const body = JSON.stringify(payload);
     try {

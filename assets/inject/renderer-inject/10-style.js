@@ -484,11 +484,23 @@
         height: calc(100vh / var(--alunixa-x-zoom, 1) - var(--alunixa-x-page-top, 0px) - var(--alunixa-x-page-bottom, 0px));
         border-radius: var(--alunixa-x-page-radius, 0px);
         overflow: hidden;
-        z-index: 2147483644;
+        /*
+         * 功能页是覆盖在 Codex 内容区上的基础层，不能压过原生侧栏/顶部栏
+         * 的 tooltip 和 menu；原生弹出层在页面打开时由下方规则提升。
+         */
+        z-index: 2147482000;
         display: block;
         background: var(--alunixa-x-bg-primary, #fff);
         pointer-events: auto;
         -webkit-app-region: no-drag;
+      }
+      /* 提升定位包装层，避免只改 tooltip/menu 子节点仍被父级堆叠上下文困住。 */
+      html[data-alunixa-x-page-open] [data-radix-popper-content-wrapper]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [role="tooltip"]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [role="menu"]:not(.${alunixaXPageClass} *),
+      html[data-alunixa-x-page-open] [class*="ApplicationMenuTopBar"],
+      html[data-alunixa-x-page-open] .app-header-tint {
+        z-index: 2147483645 !important;
       }
       .${alunixaXPageClass} .alunixa-x-modal-content {
         width: auto;
@@ -1210,14 +1222,12 @@
       .codex-delete-confirm-message,
       .alunixa-x-row-description,
       .alunixa-x-about,
-      .alunixa-x-service-tier-thread-label,
       .alunixa-x-backend-label,
       .alunixa-x-form-message,
       .alunixa-x-sponsor-text { color: var(--alunixa-x-text-secondary); }
       .codex-delete-confirm-actions button,
       .alunixa-x-action-button,
-      .alunixa-x-issue-button,
-      .alunixa-x-service-tier-button {
+      .alunixa-x-issue-button {
         min-height: 32px;
         border: 1px solid var(--alunixa-x-border);
         border-radius: var(--border-radius-lg, 8px);
@@ -1234,8 +1244,6 @@
       .alunixa-x-action-button:focus-visible,
       .alunixa-x-issue-button:hover,
       .alunixa-x-issue-button:focus-visible,
-      .alunixa-x-service-tier-button:hover,
-      .alunixa-x-service-tier-button:focus-visible,
       .codex-delete-confirm-actions [data-codex-delete-confirm="true"] {
         border-color: var(--color-border-danger, #dc2626);
         background: var(--color-background-danger-solid, #dc2626);
@@ -1269,11 +1277,6 @@
       .alunixa-x-width-input:focus,
       .alunixa-x-typing-effect-select:focus,
       .alunixa-x-form-field input:focus { border-color: var(--alunixa-x-focus); outline: 2px solid color-mix(in srgb, var(--alunixa-x-focus) 25%, transparent); outline-offset: 0; }
-      .alunixa-x-service-tier-button[data-active="true"] {
-        border-color: var(--color-border-primary, var(--alunixa-x-focus));
-        background: var(--color-background-primary-soft, var(--alunixa-x-bg-selected));
-        color: var(--color-text-primary, var(--alunixa-x-text));
-      }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status,
       .alunixa-x-backend-indicator { box-shadow: none; }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status[data-status="ok"],
@@ -1284,18 +1287,6 @@
       .alunixa-x-backend-indicator[data-status="checking"] { background: var(--alunixa-x-warning); }
       #${alunixaXSidebarNavId} .alunixa-x-sidebar-nav-status[data-status="degraded"],
       .alunixa-x-backend-indicator[data-status="degraded"] { background: var(--alunixa-x-warning); }
-      .${codexServiceTierBadgeClass} {
-        height: 24px;
-        border-color: var(--alunixa-x-border);
-        border-radius: var(--border-radius-lg, 8px);
-        background: var(--alunixa-x-bg-secondary);
-        color: var(--alunixa-x-text-secondary);
-        font-family: inherit;
-      }
-      .${codexServiceTierBadgeClass}:hover { border-color: var(--alunixa-x-focus); background: var(--alunixa-x-bg-hover); }
-      .${codexServiceTierBadgeClass}[data-tier="fast"] { border-color: var(--color-border-primary, var(--alunixa-x-focus)); background: var(--color-background-primary-soft, var(--alunixa-x-bg-selected)); color: var(--alunixa-x-text); }
-      .${codexServiceTierBadgeClass}[data-tier="failed"] { border-color: var(--color-border-danger, var(--alunixa-x-danger)); background: var(--alunixa-x-danger-bg); color: var(--alunixa-x-danger); }
-      .${codexServiceTierBadgeClass}[data-tier="unsupported"] { border-color: var(--color-border-warning, var(--alunixa-x-border)); background: var(--color-background-warning-soft, var(--alunixa-x-bg-hover)); color: var(--alunixa-x-warning); }
       .alunixa-x-ad-card { border-color: var(--alunixa-x-border-subtle); background: var(--alunixa-x-bg-secondary); }
       .alunixa-x-ad-card:hover,
       .alunixa-x-ad-card:focus-visible { border-color: var(--alunixa-x-border); background: var(--alunixa-x-bg-hover); }
@@ -1318,10 +1309,10 @@
         color: var(--alunixa-x-warning);
       }
       .alunixa-x-ad-empty { border-color: var(--alunixa-x-border); color: var(--alunixa-x-text-tertiary); }
-      .alunixa-x-form-message[data-status="ok"], .alunixa-x-service-tier-status[data-status="ok"], .alunixa-x-backend-label[data-status="ok"] { color: var(--alunixa-x-success); }
-      .alunixa-x-form-message[data-status="failed"], .alunixa-x-service-tier-status[data-status="failed"], .alunixa-x-backend-label[data-status="failed"] { color: var(--alunixa-x-danger); }
+      .alunixa-x-form-message[data-status="ok"], .alunixa-x-backend-label[data-status="ok"] { color: var(--alunixa-x-success); }
+      .alunixa-x-form-message[data-status="failed"], .alunixa-x-backend-label[data-status="failed"] { color: var(--alunixa-x-danger); }
       .alunixa-x-backend-label[data-status="degraded"] { color: var(--alunixa-x-warning); }
-      .alunixa-x-form-message[data-status="loading"], .alunixa-x-service-tier-status[data-status="unsupported"], .alunixa-x-model-compat-warning { color: var(--alunixa-x-warning); }
+      .alunixa-x-form-message[data-status="loading"], .alunixa-x-model-compat-warning { color: var(--alunixa-x-warning); }
       /* Alunixa X 设置主页：对齐原生设置页，保持其它页面与弹窗的布局独立。 */
       .${alunixaXPageClass} .alunixa-x-modal-content[data-alunixa-x-active-tab="home"] {
         background: var(--alunixa-x-settings-page-bg, var(--alunixa-x-bg-primary)) !important;
@@ -1421,15 +1412,9 @@
         flex-wrap: wrap;
         gap: 8px;
       }
-      .alunixa-x-settings .alunixa-x-service-tier-control {
-        flex: 0 1 300px;
-        min-width: 0;
-      }
-      .alunixa-x-settings .alunixa-x-service-tier-status { overflow-wrap: anywhere; }
       .alunixa-x-settings .alunixa-x-backend-status { overflow-wrap: anywhere; text-align: right; }
       .alunixa-x-settings .alunixa-x-action-button,
       .alunixa-x-settings .alunixa-x-issue-button,
-      .alunixa-x-settings .alunixa-x-service-tier-button,
       .alunixa-x-settings .alunixa-x-width-input,
       .alunixa-x-settings .alunixa-x-typing-effect-select {
         box-sizing: border-box;
@@ -1530,16 +1515,9 @@
       .alunixa-x-settings .alunixa-x-action-button:hover,
       .alunixa-x-settings .alunixa-x-action-button:focus-visible,
       .alunixa-x-settings .alunixa-x-issue-button:hover,
-      .alunixa-x-settings .alunixa-x-issue-button:focus-visible,
-      .alunixa-x-settings .alunixa-x-service-tier-button:hover,
-      .alunixa-x-settings .alunixa-x-service-tier-button:focus-visible {
+      .alunixa-x-settings .alunixa-x-issue-button:focus-visible {
         border-color: var(--alunixa-x-border);
         background: var(--alunixa-x-bg-hover);
-        color: var(--alunixa-x-text);
-      }
-      .alunixa-x-settings .alunixa-x-service-tier-button[data-active="true"] {
-        border-color: var(--alunixa-x-switch-on, #3485ff);
-        background: color-mix(in srgb, var(--alunixa-x-switch-on, #3485ff) 16%, var(--alunixa-x-settings-card-bg, var(--alunixa-x-bg-secondary)));
         color: var(--alunixa-x-text);
       }
       .alunixa-x-settings button:focus-visible,
@@ -1557,9 +1535,6 @@
       }
       @container alunixa-x-settings (max-width: 560px) {
         .alunixa-x-settings .alunixa-x-row { gap: 16px; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] { flex-wrap: wrap; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] > :first-child { flex-basis: 100%; }
-        .alunixa-x-settings .alunixa-x-row[data-codex-service-tier-controls="true"] > .alunixa-x-service-tier-control { flex-basis: 100%; max-width: 100%; }
       }
       /* 拓展与推荐内容使用原生插件页面的导航、标题和轻量列表布局。 */
       .${alunixaXPageClass} .alunixa-x-modal-content:is([data-alunixa-x-active-tab="extensions"], [data-alunixa-x-active-tab="sponsor"]) {
@@ -1874,7 +1849,7 @@
   }
 
   function defaultCodexPlusSettings() {
-    return { pluginAutoExpand:true, projectMove:true, performanceProtection:true, zedRemoteOpen:true, upstreamWorktreeCreate:true, nativeMenuLocalization:true, pluginMarketplaceUnlock: true, modelWhitelistUnlock: true, sessionDelete: true, markdownExport: true, sessionShare: true, pasteFix: false, typingEffect: "off", threadIdBadge: false, conversationView: false, whaleWidget: false, conversationViewMaxWidth: conversationViewDefaultWidth, threadScrollRestore: true, nativeMenuPlacement: true, serviceTierControls: false, petRealMouseLook: false, stepwise: false, answerOutline: false, dreamSkinEnabled: false, dreamSkinPaused: false, dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath: "" };
+    return { pluginAutoExpand:true, projectMove:true, performanceProtection:true, zedRemoteOpen:true, upstreamWorktreeCreate:true, nativeMenuLocalization:true, pluginMarketplaceUnlock:true, modelWhitelistUnlock:true, sessionDelete:true, markdownExport:true, sessionShare:true, pasteFix:false, typingEffect:"off", threadIdBadge:false, conversationView:false, whaleWidget:false, conversationViewMaxWidth:conversationViewDefaultWidth, threadScrollRestore:true, nativeMenuPlacement:true, serviceTierControls:false, nativeFastUnlock:false, petRealMouseLook:false, activityOverlayRight:false, stepwise:false, answerOutline:false, usageStatusLine:true, capacityAutoRetry:false, capacityAutoRetryMaxAttempts:15, capacityAutoRetryIntervalSeconds:0, dreamSkinEnabled:false, dreamSkinPaused:false, dreamSkinThemeConfig:window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {}, dreamSkinImagePath:"" };
   }
 
   const alunixaXBackendSettingMap = {
@@ -1894,10 +1869,13 @@
     whaleWidget: "codexAppWhaleWidgetEnabled",
     threadScrollRestore: "codexAppThreadScrollRestore",
     nativeMenuPlacement: "codexAppNativeMenuPlacement",
-    serviceTierControls: "codexAppServiceTierControls",
+    nativeFastUnlock: "codexAppNativeFastUnlock",
     petRealMouseLook: "codexAppPetRealMouseLook",
+    activityOverlayRight: "codexAppActivityOverlayRight",
     stepwise: "codexAppStepwiseEnabled",
     answerOutline: "codexAppAnswerOutlineEnabled",
+    usageStatusLine: "codexAppUsageStatusLine",
+    capacityAutoRetry: "codexAppCapacityAutoRetry",
     pasteFix: "codexAppPasteFix",
     typingEffect: "codexAppTypingEffect",
     dreamSkinEnabled: "codexAppDreamSkinEnabled",
@@ -1936,10 +1914,15 @@
         conversationViewMaxWidth: conversationViewDefaultWidth,
         threadScrollRestore: false,
         nativeMenuPlacement: false,
-        serviceTierControls: false,
+        nativeFastUnlock: false,
         petRealMouseLook: false,
+        activityOverlayRight: false,
         stepwise: false,
         answerOutline: false,
+        usageStatusLine: false,
+        capacityAutoRetry: false,
+        capacityAutoRetryMaxAttempts: 15,
+        capacityAutoRetryIntervalSeconds: 0,
         dreamSkinEnabled: false,
         dreamSkinPaused: false,
         dreamSkinThemeConfig: window.__ALUNIXA_X_DREAM_SKIN_THEME__ || {},
@@ -1949,6 +1932,7 @@
     try {
       const settings = { ...defaultCodexPlusSettings(), ...JSON.parse(localStorage.getItem(alunixaXSettingsKey) || "{}"), ...backendCodexPlusSettings() };
       delete settings.customLayout;
+      delete settings.serviceTierControls;
       return settings;
     } catch {
       const settings = { ...defaultCodexPlusSettings(), ...backendCodexPlusSettings() };
@@ -2706,6 +2690,8 @@
         if (key === "stepwise" || key === "answerOutline") {
           Promise.resolve(window.__codexStepwisePanel?.loadSettings?.()).then(() => syncStepwisePanel());
         }
+        // 容量错误自动重试：开关落库后立即启停轮询，不必等下一次心跳。
+        if (key === "capacityAutoRetry") syncCodexPlusCapacityAutoRetry();
       }).catch(() => {
         void loadBackendSettings();
       });
@@ -2729,14 +2715,6 @@
       (window.__codexThreadScrollSyncTimers || []).forEach((timer) => clearTimeout(timer));
       window.__codexThreadScrollSyncTimers = [];
       window.__codexThreadScrollRuntime = null;
-    }
-    if (key === "serviceTierControls") {
-      if (value) {
-        void loadCodexServiceTierState();
-      } else {
-        removeCodexServiceTierBadges();
-        refreshCodexServiceTierControls();
-      }
     }
     if (key === "stepwise") syncStepwisePanel(value);
     renderCodexPlusMenu();

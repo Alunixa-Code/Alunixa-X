@@ -26,7 +26,7 @@ fn typing_effect_modes_round_trip_through_save_and_partial_updates() {
     let store = SettingsStore::new(path.clone());
 
     for mode in ["rainbow", "fireworks", "stars", "off"] {
-        let mut settings = BackendSettings::default();
+        let mut settings = store.load().unwrap();
         settings.codex_app_typing_effect = mode.to_string();
         store.save(&settings).unwrap();
         assert_eq!(store.load().unwrap().codex_app_typing_effect, mode);
@@ -67,7 +67,7 @@ fn invalid_saved_typing_effect_values_load_as_off() {
         assert!(settings.codex_app_thread_id_badge);
     }
 
-    let mut settings = BackendSettings::default();
+    let mut settings = store.load().unwrap();
     settings.codex_app_typing_effect = "unknown".to_string();
     store.save(&settings).unwrap();
     assert_eq!(store.load().unwrap().codex_app_typing_effect, "off");

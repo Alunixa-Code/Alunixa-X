@@ -99,6 +99,7 @@ test("unified enhancements use the master switch and Chinese suggestion labels",
   const whaleWidget = fieldControl(petGroup.parent, "form.codexAppWhaleWidgetEnabled");
   assert.ok(!descendants(enhance).some((node) => ts.isConditionalExpression(node)
     && node.condition.getText(app) === "isWindowsPlatform" && descendants(node.whenTrue).includes(whaleWidget)), "the Codex usage widget must be available on every platform");
+  assert.ok(fieldControl(petGroup.parent, "form.codexAppActivityOverlayRight"), "the native activity overlay mirror belongs with the pet layout settings");
 
   const visibleEnglish = descendants(app).filter((node) => ts.isStringLiteral(node)
     || ts.isNoSubstitutionTemplateLiteral(node) || ts.isJsxText(node)).filter((node) => /Stepwise/.test(node.getText(app)));
@@ -218,4 +219,62 @@ test("enhancement saving is an explicit permanent top action", () => {
   assert.equal(isConditional(saves[0], enhance), false);
   const firstPane = elements(enhance).find((element) => attribute(element, "role") === "tabpanel");
   assert.ok(firstPane && saves[0].pos < firstPane.pos);
+});
+
+test("standalone quota unlock lives in its own group inside the general tab and stays editable when enhancements are off", () => {
+  const enhance = component("EnhanceScreen");
+  const group = component("StandaloneModeGroup");
+  const standalone = fieldControl(group, "form.codexAppStandaloneQuotaUnlock");
+  assert.equal(standalone.tagName.getText(app), "FeatureToggle");
+  assert.equal(attribute(standalone, "title"), 't("官方额度解锁")');
+  assert.equal(attribute(standalone, "disabled"), undefined, "独立模式补丁不能被增强总开关禁用");
+  assert.match(attribute(standalone, "detail") || "", /masterEnabled/, "开关说明要区分增强开启/关闭两种状态");
+  assert.match(appSource, /增强开启时此能力已自动生效；此开关只在关闭增强后生效。/);
+  assert.match(appSource, /官方登录 \+ API 供应商在官方订阅额度耗尽后仍可发送；只改客户端发送状态，不改变真实用量与计费。/);
+  const handler = eventHandlerNodes(group, standalone, "onChange");
+  assert.ok(handler.some((node) => ts.isCallExpression(node) && node.expression.getText(app) === "onFormChange"));
+  assert.ok(handler.some((node) => ts.isPropertyAssignment(node) && node.name.getText(app) === "codexAppStandaloneQuotaUnlock"));
+
+  const featureGroup = elements(group).find((element) => element.tagName.getText(app) === "FeatureGroup");
+  assert.ok(featureGroup);
+  assert.equal(attribute(featureGroup, "title"), 't("独立模式")');
+  assert.equal(attribute(featureGroup, "detail"), 't("增强总开关关闭后仍会生效的补丁。")');
+
+  // EnhanceScreen 只负责按总开关状态换位置：关闭增强时置顶，开启增强时置底。
+  const placements = elements(enhance).filter((element) => element.tagName.getText(app) === "StandaloneModeGroup");
+  assert.equal(placements.length, 2, "独立模式分组要有置顶/置底两个挂载点");
+  const conditions = placements.map((element) => {
+    let parent: ts.Node | undefined = element.parent;
+    while (parent && !ts.isConditionalExpression(parent)) parent = parent.parent;
+    assert.ok(parent && ts.isConditionalExpression(parent));
+    return parent;
+  });
+  for (const condition of conditions) assert.equal(condition.condition.getText(app), "masterEnabled");
+  assert.equal(conditions[0].whenTrue.getText(app), "null", "关闭增强时第一个挂载点生效");
+  assert.equal(conditions[1].whenFalse.getText(app), "null", "开启增强时第二个挂载点生效");
+  const firstFeatureGroup = elements(enhance).find((element) => element.tagName.getText(app) === "FeatureGroup");
+  assert.ok(firstFeatureGroup);
+  assert.ok(placements[0].pos < firstFeatureGroup.pos, "关闭增强时独立模式分组排在最前");
+  const featureGroups = elements(enhance).filter((element) => element.tagName.getText(app) === "FeatureGroup");
+  const lastFeatureGroup = featureGroups[featureGroups.length - 1];
+  assert.ok(lastFeatureGroup && placements[1].pos > lastFeatureGroup.pos, "开启增强时独立模式分组排在最后");
+  const generalPane = elements(enhance).find((element) => attribute(element, "role") === "tabpanel"
+    && attribute(element, "id") === "enhance-pane-general");
+  const dictationPane = elements(enhance).find((element) => attribute(element, "role") === "tabpanel"
+    && attribute(element, "id") === "enhance-pane-dictation");
+  assert.ok(generalPane && dictationPane);
+  for (const placement of placements) assert.ok(placement.pos > generalPane.pos && placement.pos < dictationPane.pos);
+});
+
+test("native Fast unlock is the only Fast enhancement toggle and keeps the provider support notice", () => {
+  const enhance = component("EnhanceScreen");
+  const nativeFast = fieldControl(enhance, "form.codexAppNativeFastUnlock");
+  assert.equal(nativeFast.tagName.getText(app), "FeatureToggle");
+  assert.equal(attribute(nativeFast, "title"), 't("原生 Fast 强制解锁")');
+  assert.equal(attribute(nativeFast, "disabled"), "!masterEnabled");
+  assert.match(attribute(nativeFast, "detail") || "", /纯 API Key.*原生 Fast.*供应商决定/);
+  const handler = eventHandlerNodes(enhance, nativeFast, "onChange");
+  assert.ok(handler.some((node) => ts.isStringLiteral(node) && node.text === "codexAppNativeFastUnlock"));
+  assert.match(appSource, /codexAppNativeFastUnlock: false,/);
+  assert.ok(!elements(enhance).some((element) => attribute(element, "checked") === "form.codexAppServiceTierControls"));
 });

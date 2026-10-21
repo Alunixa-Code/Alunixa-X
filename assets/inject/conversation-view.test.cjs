@@ -4,7 +4,7 @@ const vm = require("node:vm");
 
 const renderer = readFileSync(`${__dirname}/renderer-inject/90-action-groups.js`, "utf8");
 const start = renderer.indexOf("  // 旧版（26.9xx 之前）内容容器类名清单");
-const end = renderer.indexOf("  function codexServiceTierBadgeVisibleElement(", start);
+const end = renderer.indexOf("  function removeLegacyCodexServiceTierBadges(", start);
 assert.ok(start >= 0 && end > start);
 const source = renderer.slice(start, end);
 const restoreStart = renderer.indexOf("  function conversationViewRememberOriginals(");

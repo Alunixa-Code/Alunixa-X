@@ -10,6 +10,10 @@
     if (loaded) syncOfficialUsagePolicy();
     if (loaded) runScanStep(syncCodexPlusTypingEffects);
     if (loaded && typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
+    // typeof 守卫：这两个函数会被 session-share-runtime / typing-effects-settings
+    // 之类的用例切片到不带其它分片的沙箱里执行，缺函数时不能直接 ReferenceError。
+    if (loaded && typeof syncCodexPlusCapacityAutoRetry === "function") runScanStep(syncCodexPlusCapacityAutoRetry);
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
     return loaded;
   }
 
@@ -46,6 +50,8 @@
         syncOfficialUsagePolicy();
         runScanStep(syncCodexPlusTypingEffects);
         if (typeof syncCodexPlusWhaleWidget === "function") runScanStep(syncCodexPlusWhaleWidget);
+        if (typeof syncCodexPlusCapacityAutoRetry === "function") runScanStep(syncCodexPlusCapacityAutoRetry);
+        globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
         renderCodexPlusMenu();
         if (previousConversationView !== !!alunixaXSettings().conversationView) {
           refreshConversationView();
@@ -61,6 +67,7 @@
     const seq = ++alunixaXBackendSettingsSeq;
     alunixaXBackendSettings = { ...alunixaXBackendSettings, [key]: value };
     alunixaXBackendSettingsLoaded = true;
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
     refreshCodexPlusBackendToggles();
     refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
     try {
@@ -69,6 +76,11 @@
         const previousServiceTierControls = !!alunixaXSettings().serviceTierControls;
         alunixaXBackendSettings = { ...alunixaXBackendSettings, ...settings };
         refreshCodexServiceTierStateAfterBackendSync(previousServiceTierControls);
+        globalThis.window?.__alunixaXNativeFastUnlock?.runtime?.update?.({
+          enhancementsEnabled: alunixaXBackendSettings.enhancementsEnabled !== false,
+          codexAppNativeFastUnlock: alunixaXBackendSettings.codexAppNativeFastUnlock === true,
+        });
+        globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
       }
     } finally {
       refreshCodexPlusBackendToggles();
@@ -76,6 +88,8 @@
   }
 
   function refreshCodexPlusBackendToggles() {
+    globalThis.__ALUNIXA_X_ACTIVITY_OVERLAY_SYNC__?.();
+    globalThis.__ALUNIXA_X_USAGE_STATUSLINE_SYNC__?.();
     document.querySelectorAll(".alunixa-x-toggle[data-codex-backend-setting]").forEach((button) => {
       const key = button.getAttribute("data-codex-backend-setting");
       button.dataset.enabled = String(!!alunixaXBackendSettings[key]);
@@ -159,7 +173,6 @@
       sidebarStatus.dataset.status = status;
       sidebarStatus.title = status === "ok" ? "后端已连接" : status === "degraded" ? "后端可达，桥接降级，正在自动修复" : status === "checking" ? "正在检查后端" : "未连接";
     }
-    refreshCodexServiceTierControls();
   }
 
   function withBackendTimeout(request) {
@@ -688,7 +701,8 @@
     if (button) {
       const on = Boolean(active) && entry === "home";
       button.dataset.active = String(on);
-      button.setAttribute("aria-current", on ? "page" : "false");
+      if (on) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
     }
     [
       [alunixaXRailNavId, "home"],
@@ -699,7 +713,8 @@
       if (!railButton) return;
       const on = Boolean(active) && entry === name;
       railButton.dataset.active = String(on);
-      railButton.setAttribute("aria-current", on ? "page" : "false");
+      if (on) railButton.setAttribute("aria-current", "page");
+      else railButton.removeAttribute("aria-current");
       // 原生 rail 按钮的选中色由 data-selected 驱动（且需无 data-suppress-active-style）。
       if (on) railButton.setAttribute("data-selected", "");
       else railButton.removeAttribute("data-selected");
@@ -733,6 +748,7 @@
     if (!overlay?.classList?.contains(alunixaXPageClass)) return;
     const sidebar = document.querySelector("aside.app-shell-left-panel");
     const rect = sidebar?.getBoundingClientRect?.();
+    const main = document.querySelector("main");
     const rail = document.querySelector(alunixaXRailSelector);
     const railRect = rail?.getBoundingClientRect?.();
     // 新版：页面要顶替原生侧边栏——从图标栏右边界起铺满，把宽面板整个盖住，
@@ -790,6 +806,30 @@
       0;
     const layoutRadius = zoom === 1 ? radius : radius / zoom;
     overlay.style.setProperty("--alunixa-x-page-radius", `${layoutRadius}px`);
+    if (window.__alunixaXPageLayoutObserver &&
+        (window.__alunixaXPageLayoutTargets?.main !== main ||
+         window.__alunixaXPageLayoutTargets?.sidebar !== sidebar ||
+         window.__alunixaXPageLayoutTargets?.rail !== rail)) {
+      window.__alunixaXPageLayoutObserver.disconnect();
+      for (const target of new Set([main, sidebar, rail])) {
+        if (target) window.__alunixaXPageLayoutObserver.observe(target);
+      }
+      window.__alunixaXPageLayoutTargets = { main, sidebar, rail };
+    }
+  }
+
+  function observeCodexPlusPageLayout(overlay) {
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    const reposition = () => {
+      if (overlay.isConnected) positionCodexPlusPage(overlay);
+    };
+    window.__alunixaXPageLayoutObserver = new ResizeObserver(reposition);
+    window.__alunixaXPageLayoutTargets = {};
+    window.__alunixaXPageResizeHandler = reposition;
+    window.addEventListener("resize", reposition);
+    positionCodexPlusPage(overlay);
+    syncCodexPlusPageBackButton();
   }
 
   function alunixaXHostUsesLightTheme() {
@@ -1043,7 +1083,7 @@
   function openCodexPlusModal(options = {}) {
     const pageMode = options.page === true;
     const initialTab = alunixaXModalTab(options.tab);
-    closeCodexPlusTypingEffectDropdown();
+    closeCodexPlusPage();
     document.querySelectorAll(".alunixa-x-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll(`.${alunixaXPageClass}, [data-alunixa-x-dialog="true"]`).forEach((node) => node.remove());
     const overlay = document.createElement("div");
@@ -1089,26 +1129,8 @@
               <h2 class="alunixa-x-settings-section-title">模型与服务</h2>
               <div class="alunixa-x-settings-card">
                 <div class="alunixa-x-row">
-                  <div><div class="alunixa-x-row-title">Fast 按钮</div><div class="alunixa-x-row-description">显示服务模式切换按钮；Fast 仅支持 ${codexServiceTierFastModelListLabel()}，其他模型按 Standard 发送。</div></div>
-                  <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="serviceTierControls"><span></span></button>
-                </div>
-                <div class="alunixa-x-row" data-codex-service-tier-controls="true">
-                  <div><div class="alunixa-x-row-title">服务模式</div><div class="alunixa-x-row-description">继承优先读取 Codex 应用内设置，其次读取 config.toml 的 service_tier；全局模式覆盖全部 thread；自定义允许按 thread 覆盖。</div></div>
-                  <div class="alunixa-x-service-tier-control">
-                    <div class="alunixa-x-service-tier-status" data-codex-service-tier-status="true" data-status="loading">正在读取…</div>
-                    <div class="alunixa-x-service-tier-actions">
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-inherit="true">继承</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-standard="true">全局 Standard</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-fast="true">全局 Fast</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-custom="true">自定义</button>
-                    </div>
-                    <div class="alunixa-x-service-tier-actions alunixa-x-service-tier-thread-actions">
-                      <span class="alunixa-x-service-tier-thread-label">当前 thread 覆盖</span>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-inherit="true" title="当前 thread 不单独覆盖，继承 Codex 默认设置">继承</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-standard="true" title="仅当前 thread 使用 Standard，并切到自定义模式">Standard</button>
-                      <button type="button" class="alunixa-x-service-tier-button" data-codex-service-tier-thread-fast="true" title="仅当前 thread 使用 Fast，并切到自定义模式">Fast</button>
-                    </div>
-                  </div>
+                  <div><div class="alunixa-x-row-title">原生 Fast 强制解锁</div><div class="alunixa-x-row-description">纯 API Key 模式恢复原生 Fast 开关；保存后重新启动 Codex 生效，实际支持与计费由供应商决定。</div></div>
+                  <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="nativeFastUnlock"><span></span></button>
                 </div>
               </div>
             </section>
@@ -1122,6 +1144,14 @@
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">悬浮球 · 回答大纲</div><div class="alunixa-x-row-description">整理回答结构。</div></div>
                   <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="answerOutline"><span></span></button>
+                </div>
+                <div class="alunixa-x-row">
+                  <div><div class="alunixa-x-row-title">容量错误自动重试</div><div class="alunixa-x-row-description">模型容量不足时（横幅文案如 “Selected model is at capacity”），自动点「重试」。Codex 原生只会自动重试 4 次，之后只剩手动按钮；开启后由 Alunixa X 立刻接管（原生倒计时也一并接管，前 4 次同样不等它），直到成功或达到次数上限。间隔 0 秒表示失败后立刻重试（内部最小 1 秒，避免连发）。</div></div>
+                  <div class="alunixa-x-width-control">
+                    <input class="alunixa-x-width-input" data-alunixa-x-capacity-retry-interval="true" min="0" max="${capacityAutoRetryIntervalCeilingSeconds}" step="1" type="number" value="${capacityAutoRetryIntervalSeconds()}" title="重试间隔（秒），0 表示立刻重试" aria-label="重试间隔（秒）">
+                    <input class="alunixa-x-width-input" data-alunixa-x-capacity-retry-max-attempts="true" min="1" max="${capacityAutoRetryMaxAttemptsCeiling}" step="1" type="number" value="${capacityAutoRetryMaxAttempts()}" title="最大自动重试次数" aria-label="最大自动重试次数">
+                    <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="capacityAutoRetry"><span></span></button>
+                  </div>
                 </div>
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">会话删除</div><div class="alunixa-x-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
@@ -1278,6 +1308,16 @@
         widthInput.value = String(width || conversationViewWidth());
         setConversationViewWidth(widthInput.value);
       }
+      // 次数/间隔输入只在 change（失焦/回车）时提交：input 事件逐字符提交会把
+      // 用户输入 "15" 的过程保存成 1。
+      const attemptsInput = target?.closest("[data-alunixa-x-capacity-retry-max-attempts]");
+      if (attemptsInput) {
+        attemptsInput.value = String(setCapacityAutoRetryMaxAttempts(attemptsInput.value));
+      }
+      const intervalInput = target?.closest("[data-alunixa-x-capacity-retry-interval]");
+      if (intervalInput) {
+        intervalInput.value = String(setCapacityAutoRetryIntervalSeconds(intervalInput.value));
+      }
     }, true);
     overlay.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
@@ -1349,34 +1389,6 @@
       if (issueButton) {
         const issueUrl = "https://github.com/Alunixa-Code/Alunixa-X/issues";
         window.open(issueUrl, "_blank");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-inherit]")) {
-        setCodexServiceTierControlMode("inherit");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-standard]")) {
-        setCodexServiceTierControlMode("global-standard");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-fast]")) {
-        setCodexServiceTierControlMode("global-fast");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-custom]")) {
-        setCodexServiceTierControlMode("custom");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-inherit]")) {
-        setCodexThreadServiceTierMode("inherit");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-standard]")) {
-        setCodexThreadServiceTierMode("standard");
-        return;
-      }
-      if (target?.closest("[data-codex-service-tier-thread-fast]")) {
-        setCodexThreadServiceTierMode("fast");
         return;
       }
       const userScriptToggle = target?.closest("[data-codex-user-script-key]");
@@ -1454,13 +1466,9 @@
     overlay.addEventListener("error", handleExtensionIconError, true);
     document.body.appendChild(overlay);
     if (pageMode) {
-      positionCodexPlusPage(overlay);
+      observeCodexPlusPageLayout(overlay);
       // 必须在 selectCodexPlusTab 之前建好两栏，否则刷新左面板时找不到容器。
       installCodexPlusPageLayout(overlay, initialTab);
-      if (!window.__alunixaXPageResizeHandler) {
-        window.__alunixaXPageResizeHandler = () => positionCodexPlusPage(document.querySelector(`.${alunixaXPageClass}`));
-        window.addEventListener("resize", window.__alunixaXPageResizeHandler);
-      }
     }
     selectCodexPlusTab(initialTab);
     // 必须在 selectCodexPlusTab 之后：激活态要靠 data-alunixa-x-active-tab
@@ -1469,7 +1477,6 @@
     renderCodexPlusMenu();
     refreshCodexPlusBackendToggles();
     renderBackendStatus();
-    void loadCodexServiceTierState();
     loadUserScripts();
   }
 
@@ -1486,29 +1493,97 @@
   /** 「推荐内容」页面：从弹窗的二级 tab 提出来，成为图标栏上的一级入口。 */
 
   function closeCodexPlusPage() {
+    clearTimeout(window.__alunixaXPageNavigationCloseTimer);
+    window.__alunixaXPageNavigationCloseTimer = null;
     closeCodexPlusTypingEffectDropdown();
+    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    window.__alunixaXPageResizeHandler = null;
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.__alunixaXPageLayoutObserver = null;
+    window.__alunixaXPageLayoutTargets = null;
     document.querySelectorAll(`.${alunixaXPageClass}`).forEach((node) => node.remove());
     setCodexPlusSidebarNavActive(false);
+    restoreCodexPlusPageBackButton();
+  }
+
+  function alunixaXNativeBackButton() {
+    const labels = new Set(["back", "go back", "返回", "后退"]);
+    const selector = selectors.appHeader.split(",").map((header) => `${header.trim()} button`).join(", ");
+    const buttons = Array.from(document.querySelectorAll(selector))
+      .filter((button) => !button.closest(`.${alunixaXPageClass}, [data-alunixa-x-ext]`));
+    // 宿主的前进按钮复用返回箭头并水平翻转；路径识别不依赖界面语言。
+    const backIcon = 'svg:not([class~="-scale-x-100"]) path[d^="M6.96231 2.96214C7.16727 2.7574"]';
+    return buttons.find((button) => button.querySelector(backIcon)) || buttons.find((button) =>
+      labels.has(String(button.getAttribute("aria-label") || button.title || "").trim().toLowerCase())) || null;
+  }
+
+  function restoreCodexPlusPageBackButton() {
+    const state = window.__alunixaXPageBackButtonState;
+    window.__alunixaXPageBackButtonState = null;
+    if (!state) return;
+    for (const [name, value] of state.attributes) {
+      if (value === null) state.button.removeAttribute(name);
+      else state.button.setAttribute(name, value);
+    }
+  }
+
+  function syncCodexPlusPageBackButton() {
+    if (window.__alunixaXPageNavigationCloseTimer != null) return;
+    if (!document.querySelector(`.${alunixaXPageClass}`)) {
+      restoreCodexPlusPageBackButton();
+      return;
+    }
+    const button = alunixaXNativeBackButton();
+    if (!button) return;
+    if (window.__alunixaXPageBackButtonState?.button !== button) {
+      restoreCodexPlusPageBackButton();
+      window.__alunixaXPageBackButtonState = {
+        button,
+        attributes: ["disabled", "aria-disabled", "tabindex", "data-disabled"]
+          .map((name) => [name, button.getAttribute(name)]),
+      };
+    }
+    // 覆盖页自身可返回，即使原生历史尚无上一页也必须能点击。
+    button.removeAttribute("disabled");
+    button.removeAttribute("aria-disabled");
+    button.removeAttribute("data-disabled");
+    if (button.getAttribute("tabindex") === "-1") button.removeAttribute("tabindex");
   }
 
   function closeCodexPlusPageAfterNativeNavigation() {
+    const page = document.querySelector(`.${alunixaXPageClass}`);
+    if (!page) return;
     clearTimeout(window.__alunixaXPageNavigationCloseTimer);
-    window.__alunixaXPageNavigationCloseTimer = setTimeout(() => {
+    // 原生导航前撤销临时属性，避免延迟关闭覆盖导航提交后的返回状态。
+    restoreCodexPlusPageBackButton();
+    const timer = setTimeout(() => {
+      if (window.__alunixaXPageNavigationCloseTimer !== timer) return;
       window.__alunixaXPageNavigationCloseTimer = null;
-      closeCodexPlusPage();
+      if (document.querySelector(`.${alunixaXPageClass}`) === page) closeCodexPlusPage();
     }, 0);
+    window.__alunixaXPageNavigationCloseTimer = timer;
   }
 
   function installCodexPlusPageNavigationCloseHandler() {
+    syncCodexPlusPageBackButton();
     document.removeEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
+    window.removeEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
     window.__alunixaXPageNavigationCloseHandler = (event) => {
       if (!document.querySelector(`.${alunixaXPageClass}`)) return;
       const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      const backButton = alunixaXNativeBackButton();
+      if (backButton && target?.closest("button") === backButton) {
+        // 原生界面仍在覆盖页下方，关闭即可；继续后退会跳过进入前的界面。
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        closeCodexPlusPage();
+        return;
+      }
       if (!target?.closest(selectors.sidebarThread)) return;
       // Let Codex's own click handler update its route before removing our page.
       closeCodexPlusPageAfterNativeNavigation();
     };
-    document.addEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
+    window.addEventListener("click", window.__alunixaXPageNavigationCloseHandler, true);
   }
 
   function installCodexPlusSidebarNavigation() {

@@ -3,7 +3,8 @@ use std::path::Path;
 use alunixa_x_core::dream_skin_library::{
     DreamSkinThemeDraft, DreamSkinThemeKind, create_dream_skin_theme_from_image,
     delete_dream_skin_theme, list_dream_skin_themes, load_stored_dream_skin_theme,
-    prepare_dream_skin_activation, rename_dream_skin_theme, save_dream_skin_theme,
+    prepare_dream_skin_activation, prepare_instance_theme_snapshot, rename_dream_skin_theme,
+    save_dream_skin_theme,
 };
 use alunixa_x_core::settings::{BackendSettings, DreamSkinThemeConfig};
 
@@ -40,6 +41,72 @@ fn stored_test_draft(state_dir: &Path, id: &str, name: &str) -> DreamSkinThemeDr
         image_path: image.to_string_lossy().into_owned(),
         builtin: false,
     }
+}
+
+#[test]
+fn instance_theme_snapshot_remaps_image_css_and_stored_theme_without_sharing() {
+    let source = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let draft = stored_test_draft(source.path(), "selected-theme", "Selected");
+    let activation = prepare_dream_skin_activation(source.path(), &draft).unwrap();
+    let source_css = source.path().join("dream-skin/theme/current.css");
+    let css = "[data-ds-part=\"composer\"] { background-color: #112233; }";
+    std::fs::write(&source_css, css).unwrap();
+    let settings = BackendSettings {
+        codex_app_dream_skin_theme_config: activation.config,
+        codex_app_dream_skin_image_path: activation.active_image_path.clone(),
+        ..Default::default()
+    };
+    let snapshot =
+        prepare_instance_theme_snapshot(source.path(), target.path(), &settings).unwrap();
+    let image = std::path::PathBuf::from(&snapshot.active_image_path);
+    assert!(alunixa_x_core::dream_skin::is_managed_dream_skin_image(
+        &image,
+        target.path()
+    ));
+    assert_eq!(
+        std::fs::read(&image).unwrap(),
+        std::fs::read(&activation.active_image_path).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(image.with_file_name("current.css")).unwrap(),
+        css
+    );
+    let stored = load_stored_dream_skin_theme(target.path(), "selected-theme").unwrap();
+    assert_eq!(stored.config, snapshot.config);
+    std::fs::write(&source_css, "changed").unwrap();
+    std::fs::write(&activation.active_image_path, "changed").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(image.with_file_name("current.css")).unwrap(),
+        css
+    );
+    assert_ne!(std::fs::read(&image).unwrap(), b"changed");
+    assert!(prepare_instance_theme_snapshot(source.path(), target.path(), &settings).is_err());
+    assert_eq!(
+        std::fs::read_to_string(image.with_file_name("current.css")).unwrap(),
+        css
+    );
+}
+
+#[test]
+fn instance_theme_snapshot_rejects_unsafe_css_before_publishing() {
+    let source = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let draft = stored_test_draft(source.path(), "selected-theme", "Selected");
+    let activation = prepare_dream_skin_activation(source.path(), &draft).unwrap();
+    std::fs::write(
+        source.path().join("dream-skin/theme/current.css"),
+        "@import url(https://example.com/evil.css);",
+    )
+    .unwrap();
+    let settings = BackendSettings {
+        codex_app_dream_skin_theme_config: activation.config,
+        codex_app_dream_skin_image_path: activation.active_image_path,
+        ..Default::default()
+    };
+    assert!(prepare_instance_theme_snapshot(source.path(), target.path(), &settings).is_err());
+    assert!(!target.path().join("dream-skin").exists());
+    assert!(prepare_instance_theme_snapshot(source.path(), source.path(), &settings).is_err());
 }
 
 #[test]

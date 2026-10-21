@@ -186,7 +186,7 @@ test("两个导航布局只保留原生插件入口，旧按钮清理、市场�
   const nativeAdapter = readFileSync(`${fragmentRoot}/62-plugin-market-adapter.js`, "utf8");
   const extensionApi = readFileSync(`${fragmentRoot}/91-extension-api.js`, "utf8");
   const manifest = JSON.parse(readFileSync(`${fragmentRoot}/manifest.json`, "utf8"));
-  assert.doesNotMatch(navigation, /id: alunixaXRailPluginMarketId, label: "CodeX 插件市场"/);
+  assert.doesNotMatch(navigation, /id: alunixaXRailPluginMarketId, label: "Codex 插件市场"/);
   assert.doesNotMatch(navigation, /\[alunixaXRailPluginMarketId, "plugin-market"\]/);
   assert.doesNotMatch(navigation, /installCodexPlusPluginMarketSidebarNavigation\(/);
   assert.doesNotMatch(source, /function (?:alunixaXPluginMarketIconMarkup|installCodexPlusPluginMarketSidebarNavigation)\(/);

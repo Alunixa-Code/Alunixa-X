@@ -124,6 +124,8 @@ fn managed_responses_copy_external_catalogs_for_both_identities() {
     let original = json!({
         "models": [{
             "slug": "gpt-5.6-sol",
+            "base_instructions": "You are a coding assistant.",
+            "supports_parallel_tool_calls": true,
             "context_window": 272000,
             "supports_search_tool": true,
             "web_search_tool_type": "text_and_image",
@@ -151,11 +153,18 @@ fn managed_responses_copy_external_catalogs_for_both_identities() {
                     }
                     std::fs::write(temp.path().join("auth.json"), &profile.auth_contents).unwrap();
                     apply(temp.path(), &profile, "").unwrap();
-                    assert_eq!(
-                        config(temp.path())["model_catalog_json"].as_str(),
-                        Some("model-catalogs/identity-catalog.json"),
+                    let applied_config = config(temp.path());
+                    let catalog_path =
+                        Path::new(applied_config["model_catalog_json"].as_str().unwrap());
+                    assert!(
+                        catalog_path.is_absolute(),
                         "{mode:?}, {identity}, {path_name}, live={live_pointer}"
                     );
+                    assert_eq!(
+                        catalog_path,
+                        temp.path().join("model-catalogs").join("identity-catalog.json")
+                    );
+                    assert!(catalog_path.is_file());
                     assert_eq!(catalog(temp.path()), expected);
                     assert_eq!(std::fs::read(&external).unwrap(), original_bytes);
                     assert_auth_and_identity(temp.path(), &profile, identity);

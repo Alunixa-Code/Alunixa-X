@@ -17,6 +17,108 @@ use tempfile::tempdir;
 
 static CODEX_HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+#[test]
+fn pending_full_sync_journal_blocks_both_remote_control_writers_without_changes() {
+    let temp=tempdir().unwrap();let home=temp.path().join("home");fs::create_dir_all(&home).unwrap();write_provider_config(&home,"apigather");
+    let db=home.join("state_5.sqlite");create_state_db_with_providers(&db,&[("thread-1","openai",0)]);
+    let rollout=home.join("sessions/rollout-thread-1.jsonl");write_rollout(&rollout,"openai","thread-1","C:/workspace");
+    let before_db=fs::read(&db).unwrap();let before_rollout=fs::read(&rollout).unwrap();
+    let backup=home.join("backups_state/provider-sync/unfinished");fs::create_dir_all(&backup).unwrap();
+    fs::write(backup.join("metadata.json"),br#"{"version":2,"managedBy":"Alunixa X provider sync","namespace":"provider-sync"}"#).unwrap();
+    let journal=backup.join("recovery-journal.json");fs::write(&journal,br#"{"version":1,"state":"prepared","entries":[]}"#).unwrap();
+    let catalog=run_remote_control_session_catalog_recovery_for_thread_with_target(Some(&home),"thread-1","apigather");
+    let finalization=run_remote_control_session_finalization_for_thread_with_target(Some(&home),"thread-1","apigather");
+    for result in [catalog,finalization] {
+        assert_eq!(result.status,ProviderSyncStatus::PartialFailure);assert_eq!(result.recovery_journal_path.as_ref(),Some(&journal));assert_eq!(result.changed_session_files,0);assert_eq!(result.sqlite_rows_updated,0);
+    }
+    assert!(fs::read(&db).unwrap()==before_db);assert!(fs::read(&rollout).unwrap()==before_rollout);
+    assert_eq!(fs::read_dir(home.join("backups_state/provider-sync")).unwrap().count(),1);
+}
+
+#[test]
+fn cross_database_failure_reports_backup_and_complete_or_conditional_partial_recovery() {
+    for concurrent in [false, true] {
+        let temp = tempdir().unwrap();
+        let home = temp.path().join("home");
+        fs::create_dir_all(home.join("sqlite")).unwrap();
+        write_provider_config(&home, "target");
+        let rollout = home.join("sessions/rollout-thread-1.jsonl");
+        write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+        let a = home.join("sqlite/a.db");
+        let b = home.join("sqlite/b.db");
+        create_state_db_with_providers(&a, &[("thread-1", "openai", 0)]);
+        create_state_db_with_providers(&b, &[("thread-1", "openai", 0)]);
+        Connection::open(&b).unwrap().execute_batch("CREATE TRIGGER fixture_abort BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        let result = run_provider_sync_with_target_and_progress(Some(&home), None, |progress| {
+            if concurrent && progress.phase == ProviderSyncProgressPhase::RollingBack {
+                Connection::open(&a)
+                    .unwrap()
+                    .execute("UPDATE threads SET model_provider='concurrent'", [])
+                    .unwrap();
+            }
+        });
+        assert_eq!(
+            result.status,
+            if concurrent {
+                ProviderSyncStatus::PartialFailure
+            } else {
+                ProviderSyncStatus::Failed
+            },
+            "{result:?}"
+        );
+        assert!(result.backup_dir.as_ref().unwrap().is_dir());
+        assert!(result.recovery_journal_path.as_ref().unwrap().is_file());
+        assert_eq!(
+            Connection::open(&a)
+                .unwrap()
+                .query_row("SELECT model_provider FROM threads LIMIT 1", [], |r| r
+                    .get::<_, String>(
+                    0
+                ))
+                .unwrap(),
+            if concurrent { "concurrent" } else { "openai" }
+        );
+        assert!(fs::read_to_string(&rollout).unwrap().contains("openai"));
+        if concurrent {
+            assert!(result.sqlite_rows_updated > 0);
+            assert!(!result.recovery_errors.is_empty());
+            let blocked = run_provider_sync(Some(&home));
+            assert_eq!(blocked.status, ProviderSyncStatus::PartialFailure);
+            assert_eq!(blocked.recovery_journal_path, result.recovery_journal_path);
+            let first = alunixa_x_data::recover_provider_sync_from_backup(
+                &home,
+                result.backup_dir.as_ref().unwrap(),
+            )
+            .unwrap();
+            assert!(!first.completed);
+            Connection::open(&a)
+                .unwrap()
+                .execute("UPDATE threads SET model_provider='target'", [])
+                .unwrap();
+            let recovered = alunixa_x_data::recover_provider_sync_from_backup(
+                &home,
+                result.backup_dir.as_ref().unwrap(),
+            )
+            .unwrap();
+            assert!(recovered.completed, "{recovered:?}");
+            assert!(alunixa_x_data::pending_recovery_journal(&home).is_none());
+            let journal: serde_json::Value =
+                serde_json::from_slice(&fs::read(recovered.recovery_journal_path).unwrap())
+                    .unwrap();
+            assert_eq!(journal["state"], "rolled_back");
+        } else {
+            assert_eq!(result.sqlite_rows_updated, 0);
+            assert!(result.recovery_errors.is_empty());
+            let recovered = alunixa_x_data::recover_provider_sync_from_backup(
+                &home,
+                result.backup_dir.as_ref().unwrap(),
+            )
+            .unwrap();
+            assert!(recovered.completed);
+        }
+    }
+}
+
 struct CodexHomeEnvGuard {
     previous: Option<OsString>,
 }
@@ -76,6 +178,7 @@ fn write_configured_provider_fixture(home: &Path, current: &str, additional: &[&
     config
 }
 
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
 #[test]
 fn provider_sync_rejects_an_unconfigured_current_provider_before_history_writes() {
     let temp = tempdir().unwrap();
@@ -96,6 +199,29 @@ fn provider_sync_rejects_an_unconfigured_current_provider_before_history_writes(
         fs::read_to_string(home.join("config.toml")).unwrap(),
         config
     );
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+fn catalog_rows_snapshot(path: &Path) -> Vec<(String, String)> {
+    let db = Connection::open(path).unwrap();
+    db.prepare(
+        "SELECT host_id, thread_id FROM local_thread_catalog ORDER BY host_id, thread_id",
+    )
+    .unwrap()
+    .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+    .unwrap()
+    .collect::<rusqlite::Result<Vec<_>>>()
+    .unwrap()
+=======
+fn catalog_rows_snapshot(path: &Path) -> Vec<(String, String)> {
+    let db = Connection::open(path).unwrap();
+    db.prepare("SELECT host_id, thread_id FROM local_thread_catalog ORDER BY host_id, thread_id")
+        .unwrap()
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
 }
 
 fn write_rollout(path: &Path, provider: &str, thread_id: &str, cwd: &str) {
@@ -491,6 +617,438 @@ fn provider_sync_rewrites_all_session_meta_model_providers() {
 }
 
 #[test]
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+fn provider_sync_streams_large_rollout_without_losing_non_meta_content() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/2026/rollout-large.jsonl");
+    fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    let session_meta = json!({
+        "type": "session_meta",
+        "payload": {
+            "id": "large-thread",
+            "model_provider": "openai",
+            "cwd": "C:/workspace"
+        }
+    })
+    .to_string();
+    let large_event = json!({
+        "type": "event_msg",
+        "payload": { "blob": "x".repeat(2 * 1024 * 1024) }
+    })
+    .to_string();
+    let tail_event = json!({"type": "event_msg", "payload": {"type": "user_message"}})
+        .to_string();
+    let original = format!("{session_meta}\n{large_event}\n{tail_event}\n");
+    fs::write(&rollout, &original).unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 1);
+    let next = fs::read_to_string(&rollout).unwrap();
+    let mut lines = next.lines();
+    let rewritten_meta: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!(rewritten_meta["payload"]["model_provider"], "apigather");
+    assert_eq!(lines.next(), Some(large_event.as_str()));
+    assert_eq!(lines.next(), Some(tail_event.as_str()));
+    assert_eq!(lines.next(), None);
+}
+
+#[test]
+fn provider_sync_reports_stream_progress() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    for index in 0..3 {
+        write_rollout(
+            &home.join(format!("sessions/rollout-progress-{index}.jsonl")),
+            "openai",
+            &format!("thread-{index}"),
+            "C:/workspace",
+        );
+    }
+    let mut progress = Vec::new();
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        progress.push(event);
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Scanning
+            && event.total_rollout_files == 3
+            && event.scanned_rollout_files == 3
+    }));
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Planning && event.planned_rewrite_files == 3
+    }));
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Rewriting
+            && event.planned_rewrite_files == 3
+            && event.applied_rewrite_files == 3
+    }));
+    assert_eq!(progress.last().map(|event| &event.phase), Some(&ProviderSyncProgressPhase::Complete));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn provider_sync_reports_rollback_when_rewrite_write_fails() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let first_rollout = home.join("sessions/rollout-a.jsonl");
+    let blocked_rollout = home.join("sessions/rollout-b.jsonl");
+    write_rollout(&first_rollout, "openai", "thread-a", "C:/workspace");
+    write_rollout(&blocked_rollout, "openai", "thread-b", "C:/workspace");
+    let original_first_rollout = fs::read(&first_rollout).unwrap();
+    fs::create_dir(blocked_rollout.with_extension("jsonl.tmp")).unwrap();
+    let mut progress = Vec::new();
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        progress.push(event);
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Skipped);
+    assert_eq!(fs::read(&first_rollout).unwrap(), original_first_rollout);
+    assert!(progress
+        .iter()
+        .any(|event| event.phase == ProviderSyncProgressPhase::RollingBack));
+}
+
+#[test]
+fn provider_sync_continues_rollback_after_a_conflicted_rollout() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let first_rollout = home.join("sessions/rollout-a.jsonl");
+    let conflicted_rollout = home.join("sessions/rollout-b.jsonl");
+    write_rollout(&first_rollout, "openai", "thread-a", "C:/workspace");
+    write_rollout(&conflicted_rollout, "openai", "thread-b", "C:/workspace");
+    let original_first_rollout = fs::read(&first_rollout).unwrap();
+    let external_contents = b"{\"type\":\"event_msg\",\"payload\":{\"changed\":true}}\n";
+    let db = Connection::open(home.join("state_5.sqlite")).unwrap();
+    db.execute(
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER, cwd TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('thread-a', 'old-provider', 0, 0, 'C:/old')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('thread-b', 'old-provider', 0, 0, 'C:/old')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let mut progress = Vec::new();
+    let mut conflicted = false;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if !conflicted && event.phase == ProviderSyncProgressPhase::UpdatingIndexes {
+            fs::write(&conflicted_rollout, external_contents).unwrap();
+            conflicted = true;
+        }
+        progress.push(event);
+    });
+
+    assert!(conflicted);
+    assert_eq!(result.status, ProviderSyncStatus::Skipped);
+    assert_eq!(fs::read(&first_rollout).unwrap(), original_first_rollout);
+    assert_eq!(fs::read(&conflicted_rollout).unwrap(), external_contents);
+    assert!(progress
+        .iter()
+        .any(|event| event.phase == ProviderSyncProgressPhase::RollingBack));
+}
+
+#[cfg(windows)]
+#[test]
+fn provider_sync_skips_rollout_locked_after_planning() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/rollout-locked.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let original_rollout = fs::read(&rollout).unwrap();
+    let mut held_rollout: Option<fs::File> = None;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if held_rollout.is_none() && event.phase == ProviderSyncProgressPhase::Planning {
+            held_rollout = Some(
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&rollout)
+                    .unwrap(),
+            );
+        }
+    });
+
+    assert!(held_rollout.is_some());
+    drop(held_rollout);
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert!(result.skipped_locked_rollout_files.contains(&rollout));
+    assert_eq!(fs::read(&rollout).unwrap(), original_rollout);
+}
+
+#[test]
+fn provider_sync_skips_rollout_changed_after_scanning() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/rollout-changed.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let externally_changed = "{\"type\":\"event_msg\",\"payload\":{\"changed\":true}}\n";
+    let mut changed = false;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if !changed && event.phase == ProviderSyncProgressPhase::Planning {
+            fs::write(&rollout, externally_changed).unwrap();
+            changed = true;
+        }
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 0);
+    assert!(result.skipped_locked_rollout_files.contains(&rollout));
+    assert_eq!(fs::read_to_string(&rollout).unwrap(), externally_changed);
+}
+
+#[test]
+=======
+fn provider_sync_streams_large_rollout_without_losing_non_meta_content() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/2026/rollout-large.jsonl");
+    fs::create_dir_all(rollout.parent().unwrap()).unwrap();
+    let session_meta = json!({
+        "type": "session_meta",
+        "payload": {
+            "id": "large-thread",
+            "model_provider": "openai",
+            "cwd": "C:/workspace"
+        }
+    })
+    .to_string();
+    let large_event = json!({
+        "type": "event_msg",
+        "payload": { "blob": "x".repeat(2 * 1024 * 1024) }
+    })
+    .to_string();
+    let tail_event = json!({"type": "event_msg", "payload": {"type": "user_message"}})
+        .to_string();
+    let original = format!("{session_meta}\n{large_event}\n{tail_event}\n");
+    fs::write(&rollout, &original).unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 1);
+    let next = fs::read_to_string(&rollout).unwrap();
+    let mut lines = next.lines();
+    let rewritten_meta: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+    assert_eq!(rewritten_meta["payload"]["model_provider"], "apigather");
+    assert_eq!(lines.next(), Some(large_event.as_str()));
+    assert_eq!(lines.next(), Some(tail_event.as_str()));
+    assert_eq!(lines.next(), None);
+}
+
+#[test]
+fn provider_sync_reports_stream_progress() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    for index in 0..3 {
+        write_rollout(
+            &home.join(format!("sessions/rollout-progress-{index}.jsonl")),
+            "openai",
+            &format!("thread-{index}"),
+            "C:/workspace",
+        );
+    }
+    let mut progress = Vec::new();
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        progress.push(event);
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Scanning
+            && event.total_rollout_files == 3
+            && event.scanned_rollout_files == 3
+    }));
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Planning && event.planned_rewrite_files == 3
+    }));
+    assert!(progress.iter().any(|event| {
+        event.phase == ProviderSyncProgressPhase::Rewriting
+            && event.planned_rewrite_files == 3
+            && event.applied_rewrite_files == 3
+    }));
+    assert_eq!(progress.last().map(|event| &event.phase), Some(&ProviderSyncProgressPhase::Complete));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn provider_sync_reports_rollback_when_rewrite_write_fails() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let first_rollout = home.join("sessions/rollout-a.jsonl");
+    let blocked_rollout = home.join("sessions/rollout-b.jsonl");
+    write_rollout(&first_rollout, "openai", "thread-a", "C:/workspace");
+    write_rollout(&blocked_rollout, "openai", "thread-b", "C:/workspace");
+    let original_first_rollout = fs::read(&first_rollout).unwrap();
+    fs::create_dir(blocked_rollout.with_extension("jsonl.tmp")).unwrap();
+    let mut progress = Vec::new();
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        progress.push(event);
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Failed);
+    assert_eq!(fs::read(&first_rollout).unwrap(), original_first_rollout);
+    assert!(progress
+        .iter()
+        .any(|event| event.phase == ProviderSyncProgressPhase::RollingBack));
+}
+
+#[test]
+fn provider_sync_continues_rollback_after_a_conflicted_rollout() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let first_rollout = home.join("sessions/rollout-a.jsonl");
+    let conflicted_rollout = home.join("sessions/rollout-b.jsonl");
+    write_rollout(&first_rollout, "openai", "thread-a", "C:/workspace");
+    write_rollout(&conflicted_rollout, "openai", "thread-b", "C:/workspace");
+    let original_first_rollout = fs::read(&first_rollout).unwrap();
+    let external_contents = b"{\"type\":\"event_msg\",\"payload\":{\"changed\":true}}\n";
+    let db = Connection::open(home.join("state_5.sqlite")).unwrap();
+    db.execute(
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER, cwd TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('thread-a', 'old-provider', 0, 0, 'C:/old')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO threads VALUES ('thread-b', 'old-provider', 0, 0, 'C:/old')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END",
+        [],
+    )
+    .unwrap();
+    drop(db);
+    let mut progress = Vec::new();
+    let mut conflicted = false;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if !conflicted && event.phase == ProviderSyncProgressPhase::UpdatingIndexes {
+            fs::write(&conflicted_rollout, external_contents).unwrap();
+            conflicted = true;
+        }
+        progress.push(event);
+    });
+
+    assert!(conflicted);
+    assert_eq!(result.status, ProviderSyncStatus::PartialFailure);
+    assert_eq!(fs::read(&first_rollout).unwrap(), original_first_rollout);
+    assert_eq!(fs::read(&conflicted_rollout).unwrap(), external_contents);
+    assert!(progress
+        .iter()
+        .any(|event| event.phase == ProviderSyncProgressPhase::RollingBack));
+}
+
+#[cfg(windows)]
+#[test]
+fn provider_sync_skips_rollout_locked_after_planning() {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/rollout-locked.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let original_rollout = fs::read(&rollout).unwrap();
+    let mut held_rollout: Option<fs::File> = None;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if held_rollout.is_none() && event.phase == ProviderSyncProgressPhase::Planning {
+            held_rollout = Some(
+                fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(&rollout)
+                    .unwrap(),
+            );
+        }
+    });
+
+    assert!(held_rollout.is_some());
+    drop(held_rollout);
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert!(result.skipped_locked_rollout_files.contains(&rollout));
+    assert_eq!(fs::read(&rollout).unwrap(), original_rollout);
+}
+
+#[test]
+fn provider_sync_skips_rollout_changed_after_scanning() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    let rollout = home.join("sessions/rollout-changed.jsonl");
+    write_rollout(&rollout, "openai", "thread-1", "C:/workspace");
+    let externally_changed = "{\"type\":\"event_msg\",\"payload\":{\"changed\":true}}\n";
+    let mut changed = false;
+
+    let result = run_provider_sync_with_target_and_progress(Some(&home), None, |event| {
+        if !changed && event.phase == ProviderSyncProgressPhase::Planning {
+            fs::write(&rollout, externally_changed).unwrap();
+            changed = true;
+        }
+    });
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 0);
+    assert!(result.skipped_locked_rollout_files.contains(&rollout));
+    assert_eq!(fs::read_to_string(&rollout).unwrap(), externally_changed);
+}
+
+#[test]
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
 fn provider_sync_ignores_spawned_subagent_threads() {
     let tmp = tempdir().unwrap();
     let home = tmp.path().join(".codex");
@@ -558,7 +1116,267 @@ fn provider_sync_target_discovery_reads_all_session_meta_providers() {
     let tmp = tempdir().unwrap();
     let home = tmp.path().join(".codex");
     fs::create_dir(&home).unwrap();
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
     write_configured_provider_fixture(&home, "custom", &[]);
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+    write_provider_config(&home, "apigather");
+
+    let structured_rollout = home.join("sessions/2026/rollout-structured-child.jsonl");
+    let rollout_child = home.join("sessions/2026/rollout-source-child.jsonl");
+    let marked_rollout = home.join("sessions/2026/rollout-marked-child.jsonl");
+    let explicit_user_rollout = home.join("sessions/2026/rollout-explicit-user.jsonl");
+    let guardian_user_rollout = home.join("sessions/2026/rollout-guardian-user.jsonl");
+    write_rollout(
+        &structured_rollout,
+        "openai",
+        "structured-child",
+        "C:/structured-new",
+    );
+    write_subagent_rollout(
+        &rollout_child,
+        "openai",
+        "rollout-child",
+        "C:/rollout-new",
+    );
+    write_rollout(
+        &marked_rollout,
+        "openai",
+        "marked-child",
+        "C:/marked-new",
+    );
+    write_rollout(
+        &explicit_user_rollout,
+        "openai",
+        "explicit-user",
+        "C:/user-new",
+    );
+    write_subagent_rollout(
+        &guardian_user_rollout,
+        "openai",
+        "guardian-user",
+        "C:/guardian-new",
+    );
+
+    let state = home.join("state_5.sqlite");
+    let db = Connection::open(&state).unwrap();
+    db.execute(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, source TEXT, thread_source TEXT
+        )",
+        [],
+    )
+    .unwrap();
+    let structured_source = json!({"subagent": {"thread_spawn": {"depth": 1}}}).to_string();
+    for (id, cwd, source, thread_source) in [
+        (
+            "structured-child",
+            "C:/structured-old",
+            structured_source.as_str(),
+            None,
+        ),
+        ("rollout-child", "C:/rollout-old", "cli", None),
+        ("marked-child", "C:/marked-old", "cli", Some("subagent")),
+        (
+            "explicit-user",
+            "C:/user-old",
+            "subagent_review",
+            Some("user"),
+        ),
+        (
+            "guardian-user",
+            "C:/guardian-old",
+            structured_source.as_str(),
+            Some("user"),
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO threads VALUES (?1, 'openai', 0, 0, ?2, ?3, ?4)",
+            rusqlite::params![id, cwd, source, thread_source],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO thread_spawn_edges VALUES ('parent', 'explicit-user')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 1);
+    for (path, provider) in [
+        (&structured_rollout, "openai"),
+        (&rollout_child, "openai"),
+        (&marked_rollout, "openai"),
+        (&explicit_user_rollout, "apigather"),
+        (&guardian_user_rollout, "openai"),
+    ] {
+        let first: serde_json::Value = serde_json::from_str(
+            fs::read_to_string(path).unwrap().lines().next().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(first["payload"]["model_provider"], provider);
+    }
+
+    let db = Connection::open(state).unwrap();
+    for (id, expected) in [
+        (
+            "structured-child",
+            ("openai", 0_i64, "C:/structured-old"),
+        ),
+        ("rollout-child", ("openai", 0_i64, "C:/rollout-old")),
+        ("marked-child", ("openai", 0_i64, "C:/marked-old")),
+        ("explicit-user", ("apigather", 1_i64, "C:/user-new")),
+        ("guardian-user", ("openai", 0_i64, "C:/guardian-old")),
+    ] {
+        let actual: (String, i64, String) = db
+            .query_row(
+                "SELECT model_provider, has_user_event, cwd FROM threads WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(actual, (expected.0.to_string(), expected.1, expected.2.to_string()));
+    }
+}
+
+#[test]
+fn provider_sync_target_discovery_reads_all_session_meta_providers() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "custom");
+=======
+    write_provider_config(&home, "apigather");
+
+    let structured_rollout = home.join("sessions/2026/rollout-structured-child.jsonl");
+    let rollout_child = home.join("sessions/2026/rollout-source-child.jsonl");
+    let marked_rollout = home.join("sessions/2026/rollout-marked-child.jsonl");
+    let explicit_user_rollout = home.join("sessions/2026/rollout-explicit-user.jsonl");
+    let guardian_user_rollout = home.join("sessions/2026/rollout-guardian-user.jsonl");
+    write_rollout(
+        &structured_rollout,
+        "openai",
+        "structured-child",
+        "C:/structured-new",
+    );
+    write_subagent_rollout(&rollout_child, "openai", "rollout-child", "C:/rollout-new");
+    write_rollout(&marked_rollout, "openai", "marked-child", "C:/marked-new");
+    write_rollout(
+        &explicit_user_rollout,
+        "openai",
+        "explicit-user",
+        "C:/user-new",
+    );
+    write_subagent_rollout(
+        &guardian_user_rollout,
+        "openai",
+        "guardian-user",
+        "C:/guardian-new",
+    );
+
+    let state = home.join("state_5.sqlite");
+    let db = Connection::open(&state).unwrap();
+    db.execute(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, source TEXT, thread_source TEXT
+        )",
+        [],
+    )
+    .unwrap();
+    let structured_source = json!({"subagent": {"thread_spawn": {"depth": 1}}}).to_string();
+    for (id, cwd, source, thread_source) in [
+        (
+            "structured-child",
+            "C:/structured-old",
+            structured_source.as_str(),
+            None,
+        ),
+        ("rollout-child", "C:/rollout-old", "cli", None),
+        ("marked-child", "C:/marked-old", "cli", Some("subagent")),
+        (
+            "explicit-user",
+            "C:/user-old",
+            "subagent_review",
+            Some("user"),
+        ),
+        (
+            "guardian-user",
+            "C:/guardian-old",
+            structured_source.as_str(),
+            Some("user"),
+        ),
+    ] {
+        db.execute(
+            "INSERT INTO threads VALUES (?1, 'openai', 0, 0, ?2, ?3, ?4)",
+            rusqlite::params![id, cwd, source, thread_source],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "CREATE TABLE thread_spawn_edges (parent_thread_id TEXT, child_thread_id TEXT)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO thread_spawn_edges VALUES ('parent', 'explicit-user')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 1);
+    for (path, provider) in [
+        (&structured_rollout, "openai"),
+        (&rollout_child, "openai"),
+        (&marked_rollout, "openai"),
+        (&explicit_user_rollout, "apigather"),
+        (&guardian_user_rollout, "openai"),
+    ] {
+        let first: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(path).unwrap().lines().next().unwrap())
+                .unwrap();
+        assert_eq!(first["payload"]["model_provider"], provider);
+    }
+
+    let db = Connection::open(state).unwrap();
+    for (id, expected) in [
+        ("structured-child", ("openai", 0_i64, "C:/structured-old")),
+        ("rollout-child", ("openai", 0_i64, "C:/rollout-old")),
+        ("marked-child", ("openai", 0_i64, "C:/marked-old")),
+        ("explicit-user", ("apigather", 1_i64, "C:/user-new")),
+        ("guardian-user", ("openai", 0_i64, "C:/guardian-old")),
+    ] {
+        let actual: (String, i64, String) = db
+            .query_row(
+                "SELECT model_provider, has_user_event, cwd FROM threads WHERE id = ?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(actual, (expected.0.to_string(), expected.1, expected.2.to_string()));
+    }
+}
+
+#[test]
+fn provider_sync_target_discovery_reads_all_session_meta_providers() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "custom");
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
     write_rollout_with_providers(
         &home.join("sessions/2026/rollout-multi-meta.jsonl"),
         &["openai", "ccx", "AlunixaX"],
@@ -630,6 +1448,71 @@ fn provider_sync_updates_rollout_sqlite_visibility_and_creates_backup() {
 }
 
 #[test]
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+fn provider_sync_writes_empty_session_meta_manifest_for_index_only_updates() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    write_rollout(
+        &home.join("sessions/rollout-current.jsonl"),
+        "apigather",
+        "thread-1",
+        "C:/workspace",
+    );
+    create_state_db(&home.join("state_5.sqlite"));
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 0);
+    let backup_dir = result.backup_dir.expect("index-only sync still needs a backup");
+    let manifest: Vec<serde_json::Value> =
+        serde_json::from_str(&fs::read_to_string(backup_dir.join("session-meta-backup.json")).unwrap())
+            .unwrap();
+    assert!(manifest.is_empty());
+    let metadata: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(backup_dir.join("metadata.json")).unwrap())
+            .unwrap();
+    assert_eq!(metadata["changedSessionFiles"], 0);
+}
+
+#[test]
+=======
+fn provider_sync_writes_empty_session_meta_manifest_for_index_only_updates() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    fs::create_dir(&home).unwrap();
+    write_provider_config(&home, "apigather");
+    write_rollout(
+        &home.join("sessions/rollout-current.jsonl"),
+        "apigather",
+        "thread-1",
+        "C:/workspace",
+    );
+    create_state_db(&home.join("state_5.sqlite"));
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.changed_session_files, 0);
+    let backup_dir = result
+        .backup_dir
+        .expect("index-only sync still needs a backup");
+    let manifest: Vec<serde_json::Value> = serde_json::from_str(
+        &fs::read_to_string(backup_dir.join("session-meta-backup.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(manifest.is_empty());
+    let metadata: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(backup_dir.join("metadata.json")).unwrap())
+            .unwrap();
+    assert_eq!(metadata["changedSessionFiles"], 0);
+}
+
+#[test]
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
 fn provider_sync_updates_new_codex_sqlite_directory_db() {
     let tmp = tempdir().unwrap();
     let home = tmp.path().join(".codex");
@@ -792,6 +1675,238 @@ fn provider_sync_repairs_missing_local_thread_catalog_rows_from_threads() {
 }
 
 #[test]
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+fn provider_sync_audits_catalog_only_sessions_without_claiming_recovery() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+
+    let state_db = home.join("state_5.sqlite");
+    create_state_db_with_providers(&state_db, &[("canonical", "openai", 0)]);
+    let current_rollout_id = "01a01579-4a5d-77e3-89c0-751d38ad21f8";
+    write_rollout(
+        &home.join("sessions/2026/08/18").join(format!(
+            "rollout-2026-08-18T23-24-25-{current_rollout_id}.jsonl"
+        )),
+        "custom",
+        current_rollout_id,
+        "C:/workspace",
+    );
+
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            (current_rollout_id, "custom"),
+            ("backup-only", "custom"),
+            ("no-source", "custom"),
+            ("agent-only", "custom"),
+        ],
+    );
+    Connection::open(&catalog_db)
+        .unwrap()
+        .execute(
+            "UPDATE local_thread_catalog SET thread_source = 'subagent' WHERE thread_id = 'agent-only'",
+            [],
+        )
+        .unwrap();
+
+    let backup_db = home.join("backups_state/provider-sync/20260818233010/db/state_5.sqlite");
+    fs::create_dir_all(backup_db.parent().unwrap()).unwrap();
+    create_state_db_with_providers(&backup_db, &[("backup-only", "custom", 0)]);
+    fs::write(
+        home.join("backups_state/provider-sync/20260818233010/db/broken.sqlite"),
+        b"not a sqlite database",
+    )
+    .unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.repair_audit.catalog_only_sessions, 3);
+    assert_eq!(result.repair_audit.catalog_only_with_current_rollout, 1);
+    assert_eq!(result.repair_audit.catalog_only_with_backup_database, 1);
+    assert_eq!(result.repair_audit.catalog_only_without_recovery_source, 1);
+    assert!(result.message.contains("未自动重建缺失的 canonical 会话"));
+}
+
+#[test]
+fn provider_sync_continues_when_repair_audit_backup_root_is_not_directory() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+    create_state_db_with_providers(&home.join("state_5.sqlite"), &[]);
+    create_local_thread_catalog_db(
+        &sqlite_dir.join("codex-dev.db"),
+        &[("catalog-only", "apigather")],
+    );
+
+    let backup_root = home.join("backups_state/provider-sync");
+    fs::create_dir_all(backup_root.parent().unwrap()).unwrap();
+    fs::write(&backup_root, b"unreadable backup root").unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(
+        result.status,
+        ProviderSyncStatus::Synced,
+        "{}",
+        result.message
+    );
+    assert_eq!(result.sqlite_rows_updated, 0);
+    assert_eq!(result.repair_audit.catalog_only_sessions, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_sync_repair_audit_skips_cyclic_backup_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+    create_state_db_with_providers(&home.join("state_5.sqlite"), &[]);
+    create_local_thread_catalog_db(
+        &sqlite_dir.join("codex-dev.db"),
+        &[("catalog-only", "apigather")],
+    );
+
+    let backup_root = home.join("backups_state/provider-sync");
+    let cycle = backup_root.join("cycle");
+    fs::create_dir_all(&backup_root).unwrap();
+    symlink(&backup_root, &cycle).unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.sqlite_rows_updated, 0);
+}
+
+#[test]
+=======
+fn provider_sync_audits_catalog_only_sessions_without_claiming_recovery() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+
+    let state_db = home.join("state_5.sqlite");
+    create_state_db_with_providers(&state_db, &[("canonical", "openai", 0)]);
+    let current_rollout_id = "01a01579-4a5d-77e3-89c0-751d38ad21f8";
+    write_rollout(
+        &home.join("sessions/2026/08/18").join(format!(
+            "rollout-2026-08-18T23-24-25-{current_rollout_id}.jsonl"
+        )),
+        "custom",
+        current_rollout_id,
+        "C:/workspace",
+    );
+
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            (current_rollout_id, "custom"),
+            ("backup-only", "custom"),
+            ("no-source", "custom"),
+            ("agent-only", "custom"),
+        ],
+    );
+    Connection::open(&catalog_db)
+        .unwrap()
+        .execute(
+            "UPDATE local_thread_catalog SET thread_source = 'subagent' WHERE thread_id = 'agent-only'",
+            [],
+        )
+        .unwrap();
+
+    let backup_db = home.join("backups_state/provider-sync/20260818233010/db/state_5.sqlite");
+    fs::create_dir_all(backup_db.parent().unwrap()).unwrap();
+    create_state_db_with_providers(&backup_db, &[("backup-only", "custom", 0)]);
+    fs::write(
+        home.join("backups_state/provider-sync/20260818233010/db/broken.sqlite"),
+        b"not a sqlite database",
+    )
+    .unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.repair_audit.catalog_only_sessions, 3);
+    assert_eq!(result.repair_audit.catalog_only_with_current_rollout, 1);
+    assert_eq!(result.repair_audit.catalog_only_with_backup_database, 1);
+    assert_eq!(result.repair_audit.catalog_only_without_recovery_source, 1);
+    assert!(result.message.contains("未自动重建缺失的 canonical 会话"));
+}
+
+#[test]
+fn provider_sync_blocks_when_recovery_namespace_is_not_directory() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+    create_state_db_with_providers(&home.join("state_5.sqlite"), &[]);
+    create_local_thread_catalog_db(
+        &sqlite_dir.join("codex-dev.db"),
+        &[("catalog-only", "apigather")],
+    );
+
+    let backup_root = home.join("backups_state/provider-sync");
+    fs::create_dir_all(backup_root.parent().unwrap()).unwrap();
+    fs::write(&backup_root, b"unreadable backup root").unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(
+        result.status,
+        ProviderSyncStatus::PartialFailure,
+        "{}",
+        result.message
+    );
+    assert_eq!(result.recovery_journal_path, Some(backup_root));
+    assert_eq!(result.changed_session_files,0);
+    assert_eq!(result.sqlite_rows_updated, 0);
+    assert_eq!(result.repair_audit.catalog_only_sessions, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn provider_sync_repair_audit_skips_cyclic_backup_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+    create_state_db_with_providers(&home.join("state_5.sqlite"), &[]);
+    create_local_thread_catalog_db(
+        &sqlite_dir.join("codex-dev.db"),
+        &[("catalog-only", "apigather")],
+    );
+
+    let backup_root = home.join("backups_state/provider-sync");
+    let cycle = backup_root.join("cycle");
+    fs::create_dir_all(&backup_root).unwrap();
+    symlink(&backup_root, &cycle).unwrap();
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.sqlite_rows_updated, 0);
+}
+
+#[test]
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
 fn provider_sync_catalogs_user_threads_but_skips_subagents() {
     let tmp = tempdir().unwrap();
     let home = tmp.path().join(".codex");
@@ -969,7 +2084,689 @@ fn provider_sync_catalogs_user_threads_but_skips_subagents() {
 }
 
 #[test]
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
 fn provider_sync_prunes_existing_local_subagent_catalog_rows() {
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+fn provider_sync_prunes_existing_local_subagent_catalog_rows() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+
+    let state_db = home.join("state_5.sqlite");
+    let db = Connection::open(&state_db).unwrap();
+    db.execute(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, title TEXT, rollout_path TEXT, source TEXT, created_at_ms INTEGER,
+            updated_at_ms INTEGER, thread_source TEXT, git_branch TEXT
+        )",
+        [],
+    )
+    .unwrap();
+    let rollout_dir = home.join("sessions/catalog-pruning");
+    for (id, thread_source) in [("root", "user"), ("child", "subagent")] {
+        let rollout_path = rollout_dir.join(format!("{id}.jsonl"));
+        write_catalog_rollout(&rollout_path);
+        db.execute(
+            "INSERT INTO threads VALUES (
+                ?1, 'apigather', 0, 1, 'C:/workspace', ?1,
+                ?2, 'vscode', 100000, 200000, ?3, 'main'
+            )",
+            rusqlite::params![
+                id,
+                rollout_path.to_string_lossy().to_string(),
+                thread_source
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            ("root", "apigather"),
+            ("child", "apigather"),
+            ("orphan", "apigather"),
+            ("stale-child", "apigather"),
+        ],
+    );
+    let secondary_catalog_db = sqlite_dir.join("state_5.sqlite");
+    create_local_thread_catalog_db(
+        &secondary_catalog_db,
+        &[("root", "apigather"), ("stale-child", "apigather")],
+    );
+    let db = Connection::open(&catalog_db).unwrap();
+    db.execute(
+        "UPDATE local_thread_catalog SET source_kind = 'subagent_review', thread_source = 'subagent' WHERE thread_id = 'stale-child'",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO local_thread_catalog_hosts VALUES ('remote', 'ssh')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO local_thread_catalog (
+            host_id, thread_id, display_title, source_created_at, source_updated_at, cwd,
+            source_kind, source_detail, model_provider, git_branch, observation_sequence,
+            missing_candidate, thread_source
+        ) VALUES ('remote', 'child', 'Remote child', 100, 100, '/remote', 'cli', '',
+            'apigather', NULL, 1, 0, 'subagent')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.sqlite_catalog_rows_inserted, 0);
+    assert_eq!(result.sqlite_catalog_rows_removed, 2);
+    assert_eq!(result.sqlite_rows_updated, 2);
+    let backup_dir = result.backup_dir.unwrap();
+    assert!(backup_dir.join("db/sqlite/codex-dev.db").exists());
+
+    let db = Connection::open(&catalog_db).unwrap();
+    let mut stmt = db
+        .prepare(
+            "SELECT host_id, thread_id FROM local_thread_catalog ORDER BY host_id, thread_id",
+        )
+        .unwrap();
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("local".to_string(), "orphan".to_string()),
+            ("local".to_string(), "root".to_string()),
+            ("remote".to_string(), "child".to_string()),
+        ]
+    );
+    let revision = db
+        .query_row(
+            "SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(revision, 2);
+    let sync_state = db
+        .query_row(
+            "SELECT watermark_updated_at, initial_build_complete, observation_sequence FROM local_thread_catalog_sync_state WHERE host_id = 'local'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, f64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(sync_state, (100.0, 1, 4));
+    drop(stmt);
+    drop(db);
+    let secondary = Connection::open(&secondary_catalog_db).unwrap();
+    let secondary_stale_row = secondary
+        .query_row(
+            "SELECT thread_source FROM local_thread_catalog WHERE thread_id = 'stale-child'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    assert_eq!(secondary_stale_row, "user");
+    let secondary_rows = secondary
+        .prepare("SELECT thread_id FROM local_thread_catalog ORDER BY thread_id")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(secondary_rows, vec!["root", "stale-child"]);
+    let secondary_revision = secondary
+        .query_row(
+            "SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(secondary_revision, 0);
+    let secondary_sync_state = secondary
+        .query_row(
+            "SELECT watermark_updated_at, initial_build_complete, observation_sequence FROM local_thread_catalog_sync_state WHERE host_id = 'local'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, f64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(secondary_sync_state, (100.0, 1, 0));
+    drop(secondary);
+
+    let second = run_provider_sync(Some(&home));
+    assert_eq!(second.status, ProviderSyncStatus::Synced);
+    assert_eq!(second.sqlite_catalog_rows_inserted, 0);
+    assert_eq!(second.sqlite_catalog_rows_removed, 0);
+    assert_eq!(second.sqlite_rows_updated, 0);
+    assert!(second.backup_dir.is_none());
+}
+
+#[test]
+fn provider_sync_catalog_uses_preview_on_modern_schema_without_rewriting_history() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "custom");
+    let global_state = json!({
+        "thread-project-assignments": {"missing": {"projectId":"project","projectKind":"local"}},
+        "projectless-thread-ids": ["projectless"]
+    })
+    .to_string();
+    fs::write(home.join(".codex-global-state.json"), &global_state).unwrap();
+    let state_db = home.join("state_5.sqlite");
+    let db = Connection::open(&state_db).unwrap();
+    db.execute_batch(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, title TEXT, rollout_path TEXT, source TEXT, created_at_ms INTEGER,
+            updated_at_ms INTEGER, thread_source TEXT, git_branch TEXT, agent_role TEXT,
+            preview TEXT, history_mode TEXT, project_id TEXT
+        );",
+    )
+    .unwrap();
+    let rollout_dir = home.join("sessions");
+    for (id, preview, user_event, archived, source, thread_source, role) in [
+        ("retained", Some("User message"), 0, 0, "vscode", "user", ""),
+        ("missing", Some("User message"), 0, 0, "vscode", "user", ""),
+        ("projectless", Some("User message"), 0, 0, "cli", "user", ""),
+        ("empty", Some(""), 1, 0, "vscode", "user", ""),
+        ("null", None, 1, 0, "vscode", "user", ""),
+        ("archived", Some("User message"), 0, 1, "vscode", "user", ""),
+        (
+            "child",
+            Some("User message"),
+            0,
+            0,
+            "subagent",
+            "subagent",
+            "",
+        ),
+        (
+            "role",
+            Some("User message"),
+            0,
+            0,
+            "vscode",
+            "user",
+            "reviewer",
+        ),
+        (
+            "ambient",
+            Some("User message"),
+            0,
+            0,
+            "vscode",
+            "ambient_suggestions",
+            "",
+        ),
+        ("exec", Some("User message"), 0, 0, "exec", "user", ""),
+    ] {
+        let path = rollout_dir.join(format!("{id}.jsonl"));
+        fs::create_dir_all(&rollout_dir).unwrap();
+        // Paginated history has no legacy event_msg/user_message record.
+        let meta = json!({"type":"session_meta","payload":{"id":id,"model_provider":"custom"}});
+        let message = json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"input_text","text":"User message"}]
+        }});
+        fs::write(&path, format!("{meta}\n{message}\n")).unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (
+                ?1, 'custom', ?2, ?3, ?4, ?1, ?5, ?6, 100000, 300000, ?7,
+                'main', ?8, ?9, 'paginated', NULL
+            )",
+            rusqlite::params![
+                id,
+                archived,
+                user_event,
+                if id == "projectless" {
+                    "C:/original-output"
+                } else {
+                    "E:/project"
+                },
+                path.to_string_lossy(),
+                source,
+                thread_source,
+                role,
+                preview
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let threads_before = catalog_eligibility_thread_snapshot(&state_db);
+    let rollouts_before = rollout_files_snapshot(&rollout_dir);
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            ("retained", "custom"),
+            ("empty", "custom"),
+            ("null", "custom"),
+            ("archived", "custom"),
+            ("child", "custom"),
+            ("role", "custom"),
+            ("ambient", "custom"),
+            ("exec", "custom"),
+        ],
+    );
+
+    let result = run_provider_sync(Some(&home));
+    assert_eq!(result.status, ProviderSyncStatus::Synced, "{result:?}");
+    assert!(
+        catalog_rows_snapshot(&catalog_db).contains(&("local".into(), "retained".into())),
+        "a visible paginated user thread must not be deleted from the sidebar catalog"
+    );
+    assert_eq!(result.sqlite_catalog_rows_inserted, 2);
+    assert_eq!(result.sqlite_catalog_rows_removed, 7);
+    assert_eq!(
+        catalog_rows_snapshot(&catalog_db),
+        vec![
+            ("local".into(), "missing".into()),
+            ("local".into(), "projectless".into()),
+            ("local".into(), "retained".into()),
+        ]
+    );
+    assert_eq!(
+        catalog_eligibility_thread_snapshot(&state_db),
+        threads_before
+    );
+    assert_eq!(rollout_files_snapshot(&rollout_dir), rollouts_before);
+    assert_eq!(
+        fs::read_to_string(home.join(".codex-global-state.json")).unwrap(),
+        global_state
+    );
+
+    let second = run_provider_sync(Some(&home));
+    assert_eq!(second.status, ProviderSyncStatus::Synced);
+    assert_eq!(second.sqlite_rows_updated, 0);
+    assert!(second.backup_dir.is_none());
+
+    // A future schema may remove the deprecated flag entirely.
+    Connection::open(&state_db)
+        .unwrap()
+        .execute("ALTER TABLE threads DROP COLUMN has_user_event", [])
+        .unwrap();
+    Connection::open(&catalog_db)
+        .unwrap()
+        .execute(
+            "DELETE FROM local_thread_catalog WHERE thread_id = 'missing'",
+            [],
+        )
+        .unwrap();
+    let without_legacy_flag = run_provider_sync(Some(&home));
+    assert_eq!(without_legacy_flag.status, ProviderSyncStatus::Synced);
+    assert_eq!(without_legacy_flag.sqlite_catalog_rows_inserted, 1);
+    assert_eq!(without_legacy_flag.sqlite_catalog_rows_removed, 0);
+    assert_eq!(rollout_files_snapshot(&rollout_dir), rollouts_before);
+}
+
+#[test]
+fn provider_sync_prunes_archived_and_ineligible_catalog_rows() {
+=======
+fn provider_sync_prunes_existing_local_subagent_catalog_rows() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "apigather");
+
+    let state_db = home.join("state_5.sqlite");
+    let db = Connection::open(&state_db).unwrap();
+    db.execute(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, title TEXT, rollout_path TEXT, source TEXT, created_at_ms INTEGER,
+            updated_at_ms INTEGER, thread_source TEXT, git_branch TEXT
+        )",
+        [],
+    )
+    .unwrap();
+    let rollout_dir = home.join("sessions/catalog-pruning");
+    for (id, thread_source) in [("root", "user"), ("child", "subagent")] {
+        let rollout_path = rollout_dir.join(format!("{id}.jsonl"));
+        write_catalog_rollout(&rollout_path);
+        db.execute(
+            "INSERT INTO threads VALUES (
+                ?1, 'apigather', 0, 1, 'C:/workspace', ?1,
+                ?2, 'vscode', 100000, 200000, ?3, 'main'
+            )",
+            rusqlite::params![
+                id,
+                rollout_path.to_string_lossy().to_string(),
+                thread_source
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            ("root", "apigather"),
+            ("child", "apigather"),
+            ("orphan", "apigather"),
+            ("stale-child", "apigather"),
+        ],
+    );
+    let secondary_catalog_db = sqlite_dir.join("state_5.sqlite");
+    create_local_thread_catalog_db(
+        &secondary_catalog_db,
+        &[("root", "apigather"), ("stale-child", "apigather")],
+    );
+    let db = Connection::open(&catalog_db).unwrap();
+    db.execute(
+        "UPDATE local_thread_catalog SET source_kind = 'subagent_review', thread_source = 'subagent' WHERE thread_id = 'stale-child'",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO local_thread_catalog_hosts VALUES ('remote', 'ssh')",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO local_thread_catalog (
+            host_id, thread_id, display_title, source_created_at, source_updated_at, cwd,
+            source_kind, source_detail, model_provider, git_branch, observation_sequence,
+            missing_candidate, thread_source
+        ) VALUES ('remote', 'child', 'Remote child', 100, 100, '/remote', 'cli', '',
+            'apigather', NULL, 1, 0, 'subagent')",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let result = run_provider_sync(Some(&home));
+
+    assert_eq!(result.status, ProviderSyncStatus::Synced);
+    assert_eq!(result.sqlite_catalog_rows_inserted, 0);
+    assert_eq!(result.sqlite_catalog_rows_removed, 2);
+    assert_eq!(result.sqlite_rows_updated, 2);
+    let backup_dir = result.backup_dir.unwrap();
+    assert!(backup_dir.join("db/sqlite/codex-dev.db").exists());
+
+    let db = Connection::open(&catalog_db).unwrap();
+    let mut stmt = db
+        .prepare("SELECT host_id, thread_id FROM local_thread_catalog ORDER BY host_id, thread_id")
+        .unwrap();
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("local".to_string(), "orphan".to_string()),
+            ("local".to_string(), "root".to_string()),
+            ("remote".to_string(), "child".to_string()),
+        ]
+    );
+    let revision = db
+        .query_row(
+            "SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(revision, 2);
+    let sync_state = db
+        .query_row(
+            "SELECT watermark_updated_at, initial_build_complete, observation_sequence FROM local_thread_catalog_sync_state WHERE host_id = 'local'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, f64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(sync_state, (100.0, 1, 4));
+    drop(stmt);
+    drop(db);
+    let secondary = Connection::open(&secondary_catalog_db).unwrap();
+    let secondary_stale_row = secondary
+        .query_row(
+            "SELECT thread_source FROM local_thread_catalog WHERE thread_id = 'stale-child'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap();
+    assert_eq!(secondary_stale_row, "user");
+    let secondary_rows = secondary
+        .prepare("SELECT thread_id FROM local_thread_catalog ORDER BY thread_id")
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(secondary_rows, vec!["root", "stale-child"]);
+    let secondary_revision = secondary
+        .query_row(
+            "SELECT catalog_revision FROM local_thread_catalog_metadata WHERE id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap();
+    assert_eq!(secondary_revision, 0);
+    let secondary_sync_state = secondary
+        .query_row(
+            "SELECT watermark_updated_at, initial_build_complete, observation_sequence FROM local_thread_catalog_sync_state WHERE host_id = 'local'",
+            [],
+            |row| {
+                Ok((
+                    row.get::<_, f64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(secondary_sync_state, (100.0, 1, 0));
+    drop(secondary);
+
+    let second = run_provider_sync(Some(&home));
+    assert_eq!(second.status, ProviderSyncStatus::Synced);
+    assert_eq!(second.sqlite_catalog_rows_inserted, 0);
+    assert_eq!(second.sqlite_catalog_rows_removed, 0);
+    assert_eq!(second.sqlite_rows_updated, 0);
+    assert!(second.backup_dir.is_none());
+}
+
+#[test]
+fn provider_sync_catalog_uses_preview_on_modern_schema_without_rewriting_history() {
+    let tmp = tempdir().unwrap();
+    let home = tmp.path().join(".codex");
+    let sqlite_dir = home.join("sqlite");
+    fs::create_dir_all(&sqlite_dir).unwrap();
+    write_provider_config(&home, "custom");
+    let global_state = json!({
+        "thread-project-assignments": {"missing": {"projectId":"project","projectKind":"local"}},
+        "projectless-thread-ids": ["projectless"]
+    })
+    .to_string();
+    fs::write(home.join(".codex-global-state.json"), &global_state).unwrap();
+    let state_db = home.join("state_5.sqlite");
+    let db = Connection::open(&state_db).unwrap();
+    db.execute_batch(
+        "CREATE TABLE threads (
+            id TEXT PRIMARY KEY, model_provider TEXT, archived INTEGER, has_user_event INTEGER,
+            cwd TEXT, title TEXT, rollout_path TEXT, source TEXT, created_at_ms INTEGER,
+            updated_at_ms INTEGER, thread_source TEXT, git_branch TEXT, agent_role TEXT,
+            preview TEXT, history_mode TEXT, project_id TEXT
+        );",
+    )
+    .unwrap();
+    let rollout_dir = home.join("sessions");
+    for (id, preview, user_event, archived, source, thread_source, role) in [
+        ("retained", Some("User message"), 0, 0, "vscode", "user", ""),
+        ("missing", Some("User message"), 0, 0, "vscode", "user", ""),
+        ("projectless", Some("User message"), 0, 0, "cli", "user", ""),
+        ("empty", Some(""), 1, 0, "vscode", "user", ""),
+        ("null", None, 1, 0, "vscode", "user", ""),
+        ("archived", Some("User message"), 0, 1, "vscode", "user", ""),
+        (
+            "child",
+            Some("User message"),
+            0,
+            0,
+            "subagent",
+            "subagent",
+            "",
+        ),
+        (
+            "role",
+            Some("User message"),
+            0,
+            0,
+            "vscode",
+            "user",
+            "reviewer",
+        ),
+        (
+            "ambient",
+            Some("User message"),
+            0,
+            0,
+            "vscode",
+            "ambient_suggestions",
+            "",
+        ),
+        ("exec", Some("User message"), 0, 0, "exec", "user", ""),
+    ] {
+        let path = rollout_dir.join(format!("{id}.jsonl"));
+        fs::create_dir_all(&rollout_dir).unwrap();
+        // Paginated history has no legacy event_msg/user_message record.
+        let meta = json!({"type":"session_meta","payload":{"id":id,"model_provider":"custom"}});
+        let message = json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"input_text","text":"User message"}]
+        }});
+        fs::write(&path, format!("{meta}\n{message}\n")).unwrap();
+        db.execute(
+            "INSERT INTO threads VALUES (
+                ?1, 'custom', ?2, ?3, ?4, ?1, ?5, ?6, 100000, 300000, ?7,
+                'main', ?8, ?9, 'paginated', NULL
+            )",
+            rusqlite::params![
+                id,
+                archived,
+                user_event,
+                if id == "projectless" {
+                    "C:/original-output"
+                } else {
+                    "E:/project"
+                },
+                path.to_string_lossy(),
+                source,
+                thread_source,
+                role,
+                preview
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let threads_before = catalog_eligibility_thread_snapshot(&state_db);
+    let rollouts_before = rollout_files_snapshot(&rollout_dir);
+    let catalog_db = sqlite_dir.join("codex-dev.db");
+    create_local_thread_catalog_db(
+        &catalog_db,
+        &[
+            ("retained", "custom"),
+            ("empty", "custom"),
+            ("null", "custom"),
+            ("archived", "custom"),
+            ("child", "custom"),
+            ("role", "custom"),
+            ("ambient", "custom"),
+            ("exec", "custom"),
+        ],
+    );
+
+    let result = run_provider_sync(Some(&home));
+    assert_eq!(result.status, ProviderSyncStatus::Synced, "{result:?}");
+    assert!(
+        catalog_rows_snapshot(&catalog_db).contains(&("local".into(), "retained".into())),
+        "a visible paginated user thread must not be deleted from the sidebar catalog"
+    );
+    assert_eq!(result.sqlite_catalog_rows_inserted, 2);
+    assert_eq!(result.sqlite_catalog_rows_removed, 7);
+    assert_eq!(
+        catalog_rows_snapshot(&catalog_db),
+        vec![
+            ("local".into(), "missing".into()),
+            ("local".into(), "projectless".into()),
+            ("local".into(), "retained".into()),
+        ]
+    );
+    assert_eq!(
+        catalog_eligibility_thread_snapshot(&state_db),
+        threads_before
+    );
+    assert_eq!(rollout_files_snapshot(&rollout_dir), rollouts_before);
+    assert_eq!(
+        fs::read_to_string(home.join(".codex-global-state.json")).unwrap(),
+        global_state
+    );
+
+    let second = run_provider_sync(Some(&home));
+    assert_eq!(second.status, ProviderSyncStatus::Synced);
+    assert_eq!(second.sqlite_rows_updated, 0);
+    assert!(second.backup_dir.is_none());
+
+    // A future schema may remove the deprecated flag entirely.
+    Connection::open(&state_db)
+        .unwrap()
+        .execute("ALTER TABLE threads DROP COLUMN has_user_event", [])
+        .unwrap();
+    Connection::open(&catalog_db)
+        .unwrap()
+        .execute(
+            "DELETE FROM local_thread_catalog WHERE thread_id = 'missing'",
+            [],
+        )
+        .unwrap();
+    let without_legacy_flag = run_provider_sync(Some(&home));
+    assert_eq!(without_legacy_flag.status, ProviderSyncStatus::Synced);
+    assert_eq!(without_legacy_flag.sqlite_catalog_rows_inserted, 1);
+    assert_eq!(without_legacy_flag.sqlite_catalog_rows_removed, 0);
+    assert_eq!(rollout_files_snapshot(&rollout_dir), rollouts_before);
+}
+
+#[test]
+fn provider_sync_prunes_archived_and_ineligible_catalog_rows() {
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
     let tmp = tempdir().unwrap();
     let home = tmp.path().join(".codex");
     let sqlite_dir = home.join("sqlite");
@@ -1698,7 +3495,7 @@ fn provider_sync_backup_metadata_contains_reference_fields_and_managed_marker() 
     let metadata: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(backup_dir.join("metadata.json")).unwrap())
             .unwrap();
-    assert_eq!(metadata["version"], 1);
+    assert_eq!(metadata["version"], 2);
     assert_eq!(metadata["namespace"], "provider-sync");
     assert_eq!(metadata["codexHome"], home.to_string_lossy().to_string());
     assert_eq!(metadata["targetProvider"], "apigather");
@@ -1936,6 +3733,7 @@ fn provider_sync_restores_rollout_first_line_when_later_step_fails() {
 
     let result = run_provider_sync(Some(&home));
 
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\ours
     assert_eq!(result.status, ProviderSyncStatus::Skipped);
     assert!(result.message.contains("Provider sync skipped"));
     let restored_first_line = fs::read_to_string(&rollout)
@@ -1945,6 +3743,15 @@ fn provider_sync_restores_rollout_first_line_when_later_step_fails() {
         .unwrap()
         .to_string();
     assert_eq!(restored_first_line, original_first_line);
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\base
+    assert_eq!(result.status, ProviderSyncStatus::Skipped);
+    assert!(result.message.contains("Provider sync skipped"));
+    assert_eq!(fs::read(&rollout).unwrap(), original_rollout);
+=======
+    assert_eq!(result.status, ProviderSyncStatus::Failed);
+    assert!(result.message.contains("Provider sync failed"));
+    assert_eq!(fs::read(&rollout).unwrap(), original_rollout);
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-data\tests\provider_sync.rs\theirs
 }
 
 #[test]
@@ -1979,7 +3786,7 @@ fn provider_sync_rolls_back_sqlite_provider_update_when_later_update_fails() {
 
     let result = run_provider_sync(Some(&home));
 
-    assert_eq!(result.status, ProviderSyncStatus::Skipped);
+    assert_eq!(result.status, ProviderSyncStatus::Failed);
     let db = Connection::open(home.join("state_5.sqlite")).unwrap();
     let row = db
         .query_row(

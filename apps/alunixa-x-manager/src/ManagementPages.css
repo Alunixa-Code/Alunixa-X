@@ -3,3 +3,153 @@
 /* Alunixa X 自有视觉层：沿用管理页信息架构，但避免与参考产品的中性平面样式重合。 */
 .mg-page{background:radial-gradient(900px 360px at 90% -10%,hsl(var(--brand-accent)/.12),transparent 62%),hsl(var(--background))}.mg-header{height:60px;min-height:60px;padding-inline:26px;border-bottom-color:hsl(var(--brand-accent)/.2)}.mg-header-title{gap:12px}.mg-header-title>svg{color:hsl(var(--brand-accent));filter:drop-shadow(0 0 8px hsl(var(--brand-accent)/.28))}.mg-header-title h1{font-size:18px;letter-spacing:-.02em}.mg-button,.mg-icon-button{border-radius:9px}.mg-primary{background:linear-gradient(135deg,hsl(var(--brand-accent)),hsl(var(--brand-accent-2)));border-color:transparent;box-shadow:0 5px 16px hsl(var(--brand-accent)/.22)}.mg-toolbar,.mg-session-controls,.mg-tabs-bar{min-height:60px;padding-inline:26px}.mg-search{width:340px;min-width:240px;border-radius:10px;background:hsl(var(--surface-sunken)/.38)}.mg-matrix,.mg-skill-list,.mg-session-list{border-radius:14px;box-shadow:var(--shadow-sm);overflow:hidden}.mg-matrix-head,.mg-skill-head{background:linear-gradient(90deg,hsl(var(--surface-raised)),hsl(var(--muted)/.72));letter-spacing:.01em}.mg-matrix-row,.mg-skill-row{min-height:64px;transition:background-color var(--motion-fast) var(--motion-ease),transform var(--motion-fast) var(--motion-ease)}.mg-matrix-row:hover,.mg-skill-row:hover,.mg-session-row:hover{background:hsl(var(--brand-accent)/.055)}.mg-row-main strong,.mg-skill-name strong,.mg-session-main strong{letter-spacing:-.012em}.mg-badge{border-radius:6px}.mg-cell>span[data-on="true"]{background:linear-gradient(135deg,hsl(var(--brand-accent)),hsl(var(--brand-accent-2)));border-color:transparent;box-shadow:0 2px 8px hsl(var(--brand-accent)/.25)}.mg-switch.is-on{background:linear-gradient(90deg,hsl(var(--brand-accent)),hsl(var(--brand-accent-2)))}.mg-segmented,.mg-tabs{border:1px solid hsl(var(--brand-accent)/.18);background:hsl(var(--brand-accent)/.06);border-radius:10px}.mg-segmented button[data-active="true"],.mg-tabs button[data-active="true"]{color:hsl(var(--brand-accent));box-shadow:0 2px 10px hsl(var(--brand-accent)/.14)}.mg-group-head{border-inline-start:3px solid hsl(var(--brand-accent));background:linear-gradient(90deg,hsl(var(--brand-accent)/.1),hsl(var(--muted)/.5))}.mg-drawer{width:min(600px,100vw);background:hsl(var(--surface-raised))}.mg-drawer>header{height:64px;min-height:64px;background:linear-gradient(90deg,hsl(var(--brand-accent)/.08),transparent 72%)}.mg-drawer h2{letter-spacing:-.02em}@media (max-width:760px){.mg-header,.mg-toolbar,.mg-session-controls,.mg-tabs-bar,.mg-content{padding-inline:16px}.mg-search{width:100%}}
 .mg-matrix-head,.mg-matrix-row{grid-template-columns:minmax(0,1fr) 210px}.mg-actions-label{display:flex;justify-content:flex-end;padding-right:8px}.mg-inline-action{height:27px;border:1px solid hsl(var(--brand-accent)/.35);border-radius:7px;background:hsl(var(--brand-accent)/.08);color:hsl(var(--brand-accent));padding:0 9px;font:inherit;cursor:pointer}.mg-inline-action:hover{background:hsl(var(--brand-accent)/.16)}.mg-inline-action:disabled{opacity:.45;cursor:not-allowed}.mg-write-to{flex-wrap:wrap}.mg-write-to small{flex-basis:100%;color:hsl(var(--muted-foreground))}
+
+/* 会话列表需要在固定的管理页内容区内滚动，避免被外层 overflow:hidden 裁掉。 */
+.mg-session-page{min-height:0}
+.mg-session-page>.mg-content{min-height:0;overflow:hidden}
+.mg-session-page .mg-session-list{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto}
+
+/* 管理页需要占满 screen 的剩余高度，列表再在自己的内容区滚动。 */
+.screen.management-screen{display:flex;flex-direction:column;align-items:stretch;align-content:normal}
+.screen.management-screen>.mg-page{flex:1 1 auto;width:min(100%,1240px);min-height:0}
+.screen.management-screen .mg-page>.mg-content>.mg-matrix,
+.screen.management-screen .mg-page>.mg-content>.mg-skill-list,
+.screen.management-screen .mg-page>.mg-content>.mg-session-list{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto}
+/* Skill repository inventory */
+.mg-repo-panel{margin-top:12px;border:1px solid hsl(var(--border));border-radius:9px;background:hsl(var(--card));overflow:hidden}.mg-repo-panel-head,.mg-repo-row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid hsl(var(--border))}.mg-repo-panel-head{background:hsl(var(--muted));font-size:12px}.mg-repo-panel-head span{margin-left:auto;color:hsl(var(--muted-foreground))}.mg-repo-row>div{min-width:0;flex:1;display:flex;flex-direction:column;gap:3px}.mg-repo-row small{color:hsl(var(--muted-foreground));font-size:11px}.mg-repo-row:last-child{border-bottom:0}
+
+/* Skills: fixed two-line rows, with status split into toggle and state. */
+.mg-skill-head,.mg-skill-row{grid-template-columns:minmax(0,1fr) minmax(110px,180px) 124px 116px}
+.mg-skill-row{min-height:68px;height:68px}
+.mg-skill-name{min-width:0;width:100%;height:48px;display:flex;flex-direction:column;flex-wrap:nowrap;align-items:flex-start;justify-content:center;gap:3px;border:0;background:transparent;color:inherit;text-align:left;overflow:hidden;cursor:pointer}
+.mg-skill-name strong,.mg-skill-name small{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mg-skill-name strong{width:100%;flex:0 0 auto;line-height:20px}
+.mg-skill-name small{width:100%;flex:0 0 auto;font-size:11px;line-height:16px;color:hsl(var(--muted-foreground))}
+.mg-skill-source{padding-left:4px}
+.mg-skill-status{display:flex;align-items:center;gap:10px;min-width:0}
+.mg-status-toggle{width:48px;display:flex;align-items:center;justify-content:flex-start}
+.mg-skill-status .mg-badge{max-width:110px;overflow:hidden;text-overflow:ellipsis}
+.mg-skill-row .mg-row-actions{gap:5px}
+.mg-repo-manager{border:1px solid hsl(var(--border));border-radius:9px;overflow:hidden;background:hsl(var(--card))}
+.mg-repo-manager-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;background:hsl(var(--muted));font-size:12px}
+.mg-repo-manager-head span{color:hsl(var(--muted-foreground))}
+.mg-repo-manager .mg-repo-row{padding:10px 12px}
+.mg-repo-form{display:flex;flex-direction:column;gap:10px;padding-top:4px}
+.mg-repo-form h3{margin:0;font-size:14px}
+.mg-repo-quick{display:flex;gap:7px}
+.mg-repo-quick input{min-width:0;flex:1;font:inherit;color:hsl(var(--foreground));background:hsl(var(--input)/.35);border:1px solid hsl(var(--input));border-radius:6px;padding:7px 9px;outline:0}
+.mg-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mg-muted{margin:0;color:hsl(var(--muted-foreground));font-size:11px}
+.mg-form-error{margin:0;color:hsl(var(--status-warning));font-size:12px}
+.mg-link-button{display:inline-flex;align-items:center;gap:5px;padding:0;border:0;background:transparent;color:hsl(var(--brand-accent));font:inherit;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.mg-skills-page .mg-drawer h2{min-width:0;overflow-wrap:anywhere}
+.mg-skills-page .mg-drawer>header{height:auto;min-height:64px;gap:12px;padding-block:12px}
+.mg-skills-page .mg-drawer>header>.mg-icon-button{flex-shrink:0}
+@media (max-width:900px){.mg-skill-head,.mg-skill-row{grid-template-columns:minmax(0,1fr) 110px 124px 116px;gap:8px}}
+@media (max-width:680px){.mg-skill-head,.mg-skill-row{grid-template-columns:minmax(0,1fr) 80px 104px 105px;gap:6px;padding-inline:8px}.mg-form-grid{grid-template-columns:1fr}.mg-skill-row .mg-button{padding-inline:6px}.mg-status-toggle{width:36px}.mg-skill-status{gap:5px}}
+/* 仓库管理占满窗口；列表、目录和底部编辑区各自拥有滚动边界。 */
+.mg-skills-page {
+  --mg-divider: color-mix(in srgb, hsl(var(--border)), hsl(var(--foreground)) 17%);
+  --mg-accent-ink: color-mix(in srgb, hsl(var(--brand-accent)), hsl(var(--foreground)) 28%);
+  background:hsl(var(--background));
+}
+.dark .mg-skills-page {
+  --background:228 8% 11%;
+  --surface-raised:228 7% 15%;
+  --surface-sunken:228 8% 9%;
+  --muted:228 7% 17%;
+}
+.mg-skills-page :is(.mg-skill-list,.mg-skill-head,.mg-skill-row,.mg-drawer,.mg-drawer>header,.mg-drawer>footer) { border-color:var(--mg-divider); }
+.mg-skills-page :is(.mg-header-title h1,.mg-drawer h2,.mg-skill-name strong) { letter-spacing:0; }
+.mg-skills-page .mg-skill-list { border-radius:8px; box-shadow:none; }
+.mg-skills-page :is(.mg-button,.mg-icon-button) { font-size:12px; font-weight:500; height:32px; white-space:nowrap; box-sizing:border-box; transition:background-color .14s,border-color .14s; }
+.mg-skills-page .mg-button { border-color:var(--mg-divider); box-shadow:none; }
+.mg-skills-page .mg-primary { background:hsl(232 76% 54%); color:#fff; border-color:transparent; }
+.mg-skills-page .mg-primary:hover { filter:brightness(1.1); }
+.mg-skills-page :is(button,input):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
+.mg-skills-page .mg-link-button { color:var(--mg-accent-ink); }
+.mg-drawer.mg-drawer-wide { width:100vw; max-width:none; height:100dvh; border:0; box-shadow:none; }
+.mg-drawer-wide .mg-drawer-body { flex:1; min-height:0; padding:0; overflow:hidden; }
+.mg-drawer-wide>header { flex-shrink:0; padding-inline:22px; background:hsl(var(--surface-raised)); }
+.mg-drawer-wide>footer { flex-shrink:0; padding:10px 22px; background:hsl(var(--background)); }
+.mg-repo-workspace { display:grid; grid-template-columns:340px minmax(0,1fr); grid-template-rows:minmax(0,1fr); flex:1; min-height:0; }
+.mg-repo-workspace[data-editing=true] { grid-template-rows:minmax(0,1fr) auto; }
+.mg-repo-sidebar { min-width:0; min-height:0; padding:0 10px 12px; overflow:auto; border-right:1px solid var(--mg-divider); background:hsl(var(--surface-sunken)/.55); }
+.mg-repo-sidebar .mg-repo-manager { border:0; border-radius:0; background:transparent; overflow:visible; }
+.mg-repo-sidebar .mg-repo-manager-head { position:sticky; top:0; z-index:1; min-height:54px; padding:10px 8px; gap:8px; background:hsl(var(--background)); border-bottom:1px solid var(--mg-divider); }
+.mg-repo-manager-head>strong { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:600; }
+.mg-repo-total { min-width:22px; padding:2px 6px; border:1px solid var(--mg-divider); border-radius:5px; font-size:10px; font-variant-numeric:tabular-nums; text-align:center; }
+.mg-repo-sidebar .mg-repo-row { display:grid; grid-template-columns:minmax(0,1fr) auto; min-height:64px; padding:8px; gap:8px; border-bottom:1px solid var(--mg-divider); border-radius:0; }
+.mg-repo-row:hover { background:hsl(var(--foreground)/.035); }
+.mg-repo-row[data-selected=true] { background:hsl(var(--brand-accent)/.1); box-shadow:inset 2px 0 hsl(var(--brand-accent)); }
+.mg-repo-select { display:flex; flex-direction:column; justify-content:center; align-items:stretch; gap:5px; min-width:0; border:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; padding:0 2px; }
+.mg-repo-select strong,.mg-repo-select small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mg-repo-select strong { font-size:12px; font-weight:600; line-height:18px; }
+.mg-repo-select small { font-size:10px; line-height:16px; }
+.mg-repo-select small>span { margin-left:8px; color:var(--mg-accent-ink); }
+.mg-repo-row>.mg-repo-row-actions { flex:none; display:flex; flex-direction:row; align-items:center; gap:2px; }
+.mg-repo-row-actions .mg-switch { flex-shrink:0; margin-right:4px; cursor:pointer; }
+.mg-repo-row-actions .mg-icon-button { height:26px; width:26px; color:hsl(var(--muted-foreground)); }
+.mg-repo-row-actions .mg-icon-button:hover { color:hsl(var(--foreground)); }
+.mg-repo-browser { min-width:0; min-height:0; display:flex; flex-direction:column; gap:14px; padding:22px 26px 0; overflow:hidden; background:hsl(var(--background)); }
+.mg-repo-browser> :not(.mg-repo-results) { flex-shrink:0; }
+.mg-repo-detail-head { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.mg-repo-detail-head h3 { font-size:17px; font-weight:600; margin:0; overflow-wrap:anywhere; letter-spacing:0; }
+.mg-repo-detail-head .mg-row-actions { gap:8px; }
+.mg-repo-browser .mg-detail { grid-template-columns:72px minmax(0,1fr); gap:7px 14px; padding:0 0 14px; border-bottom:1px solid var(--mg-divider); }
+.mg-repo-count { font-variant-numeric:tabular-nums; }
+.mg-repo-browser .mg-search { width:100%; min-width:0; height:34px; box-sizing:border-box; border-color:var(--mg-divider); background:hsl(var(--surface-raised)/.6); border-radius:8px; }
+.mg-repo-browser .mg-notice { margin:0; font-size:12px; overflow-wrap:anywhere; border-color:var(--mg-divider); }
+.mg-repo-results { min-height:0; flex:1; overflow:auto; border-top:1px solid var(--mg-divider); scrollbar-gutter:stable; }
+.mg-repo-results>.mg-muted { padding-block:20px; }
+.mg-repo-skill { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:16px; height:64px; min-height:64px; box-sizing:border-box; border-bottom:1px solid var(--mg-divider); }
+.mg-repo-skill:hover { background:hsl(var(--brand-accent)/.035); }
+.mg-repo-skill .mg-skill-name { min-width:0; padding:0 6px; }
+.mg-repo-skill .mg-skill-name strong { font-size:13px; font-weight:550; }
+.mg-repo-skill-actions { display:grid; grid-template-columns:64px 76px; align-items:center; gap:8px; padding-right:6px; }
+.mg-repo-skill-actions .mg-button { width:100%; margin:0; padding-inline:8px; border-radius:7px; }
+.mg-repo-install-slot { min-width:0; min-height:32px; display:flex; align-items:center; }
+.mg-repo-install-state { display:inline-flex; align-items:center; justify-content:center; width:100%; height:32px; box-sizing:border-box; border:1px solid hsl(var(--status-success)/.3); background:hsl(var(--status-success)/.08); color:hsl(var(--status-success)); border-radius:7px; font-size:12px; font-weight:500; white-space:nowrap; }
+.mg-skill-source .mg-link-button { display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mg-repo-workspace>.mg-repo-form { grid-column:1/-1; display:flex; flex-direction:column; min-height:0; max-height:52dvh; gap:0; padding:0; border-top:1px solid var(--mg-divider); background:hsl(var(--surface-raised)); box-shadow:0 -8px 24px hsl(var(--shadow-color)/.08); }
+.mg-repo-form>.mg-repo-manager-head { flex-shrink:0; padding:8px 22px; min-height:44px; background:transparent; }
+.mg-repo-form h3 { display:flex; align-items:center; gap:8px; font-size:13px; }
+.mg-repo-form h3 svg { color:var(--mg-accent-ink); }
+.mg-repo-form-content { display:flex; flex-direction:column; gap:12px; min-height:0; overflow:auto; padding:0 22px 14px; }
+.mg-repo-quick { gap:8px; }
+.mg-repo-form .mg-form-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.mg-repo-form fieldset { border:0; padding:0; margin:0; min-width:0; }
+.mg-repo-form .mg-field { min-width:0; gap:5px; font-size:11px; }
+.mg-repo-form :is(input,select) { min-width:0; border-color:var(--mg-divider); background:hsl(var(--background)); border-radius:7px; }
+.mg-repo-form input { height:32px; box-sizing:border-box; }
+.mg-repo-form-footer { flex-shrink:0; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 22px; border-top:1px solid var(--mg-divider); }
+.mg-repo-form-footer .mg-check-line { font-size:12px; white-space:nowrap; }
+.mg-repo-form-footer input[type=checkbox] { width:14px; height:14px; accent-color:hsl(var(--primary)); }
+.mg-repo-form-footer .mg-row-actions { gap:8px; }
+@media(max-width:1000px) {
+  .mg-repo-workspace { grid-template-columns:300px minmax(0,1fr); }
+  .mg-repo-browser { padding:18px 18px 0; }
+}
+@media(max-width:760px) {
+  .mg-repo-workspace { grid-template-columns:250px minmax(0,1fr); }
+  .mg-repo-sidebar { padding-inline:6px; }
+  .mg-repo-sidebar .mg-repo-row { grid-template-columns:minmax(0,1fr); gap:2px; min-height:70px; padding:7px 8px; }
+  .mg-repo-row>.mg-repo-row-actions { justify-content:flex-end; }
+  .mg-repo-browser { padding:16px 12px 0; }
+  .mg-repo-detail-head h3 { font-size:14px; }
+  .mg-repo-detail-head .mg-row-actions { flex-wrap:wrap; gap:5px; }
+  .mg-repo-skill { gap:6px; }
+  .mg-repo-skill-actions { grid-template-columns:52px 64px; gap:6px; }
+  .mg-repo-form .mg-form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:540px) {
+  .mg-repo-workspace { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(100px,28%) minmax(0,1fr); }
+  .mg-repo-workspace[data-editing=true] { grid-template-rows:minmax(72px,18%) minmax(0,1fr) auto; }
+  .mg-repo-sidebar { border-right:0; border-bottom:1px solid var(--mg-divider); }
+  .mg-repo-sidebar .mg-repo-row { grid-template-columns:minmax(0,1fr) auto; min-height:60px; }
+  .mg-repo-browser { gap:10px; }
+  .mg-repo-browser .mg-detail { display:none; }
+  .mg-repo-detail-head { gap:6px; }
+  .mg-repo-form-footer { padding-inline:12px; gap:8px; }
+  .mg-repo-form-footer .mg-row-actions { gap:5px; }
+}

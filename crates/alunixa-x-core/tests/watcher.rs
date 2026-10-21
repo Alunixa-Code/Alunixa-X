@@ -1,8 +1,10 @@
 use alunixa_x_core::watcher::{
-    build_spawn_launcher_command, build_watcher_install_plan, cdp_listening, codex_process_ids,
-    disable_watcher_at, enable_watcher_at, filter_killable_launcher_processes,
-    macos_launcher_process_names, process_id_is_running, process_ids_still_running,
-    should_recover_stale_launcher, watcher_disabled_flag,
+    MACOS_WATCHER_LABEL, build_spawn_launcher_command, build_watcher_install_plan, cdp_listening,
+    codex_process_ids, disable_watcher_at, enable_watcher_at, filter_killable_launcher_processes,
+    macos_launcher_process_names, macos_launch_agent_installed_at, macos_launch_agent_path_at,
+    macos_launch_agent_plist, process_id_is_running, process_ids_still_running,
+    remove_macos_launch_agent_at, should_recover_stale_launcher, watcher_disabled_flag,
+    write_macos_launch_agent_at,
 };
 
 #[cfg(windows)]
@@ -47,6 +49,50 @@ fn watcher_enable_and_disable_toggle_flag() {
 
     enable_watcher_at(dir.path()).unwrap();
     assert!(!flag.exists());
+}
+
+#[test]
+fn macos_launch_agent_registers_the_gui_at_login() {
+    let home = tempfile::tempdir().unwrap();
+    let launcher = home
+        .path()
+        .join("Alunixa X.app/Contents/MacOS/AlunixaX");
+    assert!(!macos_launch_agent_installed_at(home.path()));
+
+    let path = write_macos_launch_agent_at(home.path(), &launcher).unwrap();
+
+    assert_eq!(path, macos_launch_agent_path_at(home.path()));
+    assert_eq!(
+        path.file_name().unwrap().to_string_lossy(),
+        format!("{MACOS_WATCHER_LABEL}.plist")
+    );
+    assert!(
+        path.parent()
+            .unwrap()
+            .ends_with(std::path::Path::new("Library").join("LaunchAgents"))
+    );
+    assert!(macos_launch_agent_installed_at(home.path()));
+
+    let plist = std::fs::read_to_string(&path).unwrap();
+    assert!(plist.contains(&format!("<string>{MACOS_WATCHER_LABEL}</string>")));
+    assert!(plist.contains(&launcher.to_string_lossy().to_string()));
+    assert!(plist.contains("<string>--autostart</string>"));
+    assert!(plist.contains("<key>RunAtLoad</key>\n  <true/>"));
+
+    remove_macos_launch_agent_at(home.path()).unwrap();
+    assert!(!macos_launch_agent_installed_at(home.path()));
+    // 重复移除是幂等的：界面关掉开关时不会因为文件已不存在而报错。
+    remove_macos_launch_agent_at(home.path()).unwrap();
+}
+
+#[test]
+fn macos_launch_agent_plist_escapes_the_executable_path() {
+    let plist = macos_launch_agent_plist(std::path::Path::new(
+        "/Applications/A&B <x>.app/Contents/MacOS/AlunixaX",
+    ));
+
+    assert!(plist.contains("/Applications/A&amp;B &lt;x&gt;.app/Contents/MacOS/AlunixaX"));
+    assert!(!plist.contains("A&B <x>"));
 }
 
 #[test]
@@ -111,6 +157,26 @@ fn codex_process_filter_keeps_chatgpt_desktop_package_processes() {
     ];
 
     assert_eq!(codex_process_ids(processes), vec![21, 22]);
+}
+
+#[test]
+fn codex_process_filter_recognizes_beta_desktop_without_matching_cli_or_other_apps() {
+    let processes = [
+        (
+            31,
+            r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+        ),
+        (
+            32,
+            r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\resources\codex.exe",
+        ),
+        (
+            33,
+            r"C:\Program Files\WindowsApps\Other.App_1.0_x64__abc\app\ChatGPT (Beta).exe",
+        ),
+        (34, r"D:\Portable\ChatGPT (Beta).exe"),
+    ];
+    assert_eq!(codex_process_ids(processes), vec![31]);
 }
 
 #[test]
@@ -281,6 +347,34 @@ fn session_index_cleanup_process_guard_blocks_desktop_apps_but_not_cli() {
         vec![11, 12, 13]
     );
     assert_eq!(find_codex_processes_from_snapshot(&processes), vec![11, 13]);
+}
+
+#[cfg(windows)]
+#[test]
+fn beta_desktop_is_included_in_watcher_and_session_cleanup_guard() {
+    let processes = [
+        WindowsProcessInfo {
+            process_id: 61,
+            parent_process_id: 0,
+            exe_file: "ChatGPT (Beta).exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\ChatGPT (Beta).exe",
+            )),
+        },
+        WindowsProcessInfo {
+            process_id: 62,
+            parent_process_id: 0,
+            exe_file: "codex.exe".to_string(),
+            executable_path: Some(std::path::PathBuf::from(
+                r"C:\Program Files\WindowsApps\OpenAI.CodexBeta_26.727.4816.0_x64__abc\app\resources\codex.exe",
+            )),
+        },
+    ];
+    assert_eq!(find_codex_processes_from_snapshot(&processes), vec![61]);
+    assert_eq!(
+        find_session_index_cleanup_blocking_processes_from_snapshot(&processes),
+        vec![61]
+    );
 }
 
 #[cfg(windows)]

@@ -70,8 +70,13 @@
     "VLM 仅支持 Chat Completions 协议和聚合模式",
     "VLM 配置不完整：API Key、Model 和 Base URL 为必填项，否则 VLM 不会生效。",
     "Vision Analysis Provider",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "Wallpaper Engine 场景支持已移除，不会再启动引擎窗口。",
     "Watcher 操作",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "Watcher 操作",
+=======
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "Watcher 状态",
     "Windows 使用亮暗模式、图片取色和可选强调色；完整色板仅在 macOS 生效。",
     "cc-switch 导入",
@@ -225,6 +230,7 @@
     "保存目标",
     "保存设置",
     "保存路径",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "保存路径并刷新",
     "保留官方 Claude.app 原样，通过受管副本动态应用中文界面",
     "保留自定义字段，保存时由 Codex 配置解析器校验。",
@@ -234,6 +240,10 @@
     "修复历史会话",
     "修复对话配置",
     "修复已中止：",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "修复入口",
+=======
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "修复快捷方式",
     "修复警告：",
     "值",
@@ -244,6 +254,7 @@
     "允许修改工作目录",
     "允许的微信用户 ID",
     "先添加至少 1 个已填写 Base URL / Key 的 API 供应商，再创建聚合供应商。",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "免安装版或解包版只需要选择一次，之后从界面启动会自动复用",
     "入口卸载",
     "入口安装",
@@ -251,6 +262,16 @@
     "入口管理",
     "全局端点",
     "全局管理",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "免安装版或解包版只需要选择一次，之后静默启动会自动复用",
+    "入口卸载",
+    "入口安装",
+    "入口安装、修复、Watcher 与手动启动",
+    "入口管理",
+=======
+    "免安装版或解包版只需要选择一次，之后静默启动会自动复用",
+    "入口检查与修复、开机启动与应用路径",
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "全选当前列表",
     "全部插件",
     "全部选择",
@@ -326,11 +347,21 @@
     "包含版本、路径、设置和平台信息",
     "匹配模型",
     "协议",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "单模型协议转换",
     "单模型协议转换需要填写模型名称和目标供应商。",
     "卸载",
     "卸载入口",
     "卸载时移除 Alunixa X 托管数据",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "单模型路由",
+    "单模型路由需要填写模型名称和目标供应商。",
+    "卸载入口",
+    "卸载时移除 Alunixa X 托管数据",
+=======
+    "单模型路由",
+    "单模型路由需要填写模型名称和目标供应商。",
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "历史会话修复",
     "历史会话修复失败，请查看错误提示后重试。",
     "历史会话修复进度",
@@ -445,8 +476,15 @@
     "安全提示：网页链接中的自定义 config.toml 和 auth.json 不会执行；管理工具只会使用上方字段生成受管配置。",
     "安全边界",
     "安装",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "安装中…",
     "安装入口",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "安装 watcher",
+    "安装入口",
+=======
+    "安装 watcher",
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "安装包更新失败，请查看错误提示后重试。",
     "安装包更新进度",
     "安装维护",
@@ -548,8 +586,15 @@
     "应用路径覆盖",
     "建议直接发送",
     "开启",
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\ours
     "开启本地拓展",
     "开机打开 Alunixa X",
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\base
+    "开启后，通过 Alunixa X 启动 Codex 前自动整理一次旧对话的归属标记。",
+=======
+    "开启后注册系统登录项，关闭时移除；Codex 仍需你手动点击启动。",
+    "开启后，通过 Alunixa X 启动 Codex 前自动整理一次旧对话的归属标记。",
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\tools\i18n-keys.json\theirs
     "异常",
     "引用文字",
     "弱化文字色",
@@ -591,7 +636,6 @@
     "微信连接",
     "微信连接未启动。",
     "快捷方式修复",
-    "快捷方式写入系统实际桌面位置，不使用写死桌面路径",
     "总权重",
     "恢复 Codex 外观",
     "恢复 Codex 默认配色",
@@ -986,6 +1030,7 @@
     "留空时使用 Codex 当前默认模型",
     "留空自动识别，例如 zh 或 en",
     "登录凭据",
+    "登录时自动打开",
     "登录状态",
     "登录系统后打开 Alunixa X 界面，Codex 仍需点击启动",
     "皮肤未启用",

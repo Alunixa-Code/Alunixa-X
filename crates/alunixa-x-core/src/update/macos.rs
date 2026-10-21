@@ -1305,12 +1305,15 @@ mod tests {
 
     #[test]
     fn macos_update_accepts_unified_installation_and_requests_manual_legacy_migration() {
+        // 按宿主平台构造路径，Windows 也会执行这组布局策略测试。
+        let root = PathBuf::from("/Applications");
+        let executable_path = |bundle: &str, executable: &str| {
+            root.join(bundle).join("Contents/MacOS").join(executable)
+        };
         assert_eq!(
-            installed_root_from_executable(Path::new(
-                "/Applications/Alunixa X.app/Contents/MacOS/AlunixaX"
-            ))
-            .unwrap(),
-            PathBuf::from("/Applications")
+            installed_root_from_executable(&executable_path("Alunixa X.app", "AlunixaX"))
+                .unwrap(),
+            root
         );
         for executable in [
             "/Applications/Alunixa X 管理工具.app/Contents/MacOS/AlunixaXManager",
@@ -1332,8 +1335,9 @@ mod tests {
         ] {
             assert!(installed_root_from_executable(Path::new(executable)).is_err());
         }
-        let renamed = installed_root_from_executable(Path::new(
-            "/Applications/Alunixa X 2.app/Contents/MacOS/AlunixaX",
+        let renamed = installed_root_from_executable(&executable_path(
+            "Alunixa X 2.app",
+            "AlunixaX",
         ))
         .unwrap_err();
         assert!(renamed.to_string().contains("标准应用目录"));

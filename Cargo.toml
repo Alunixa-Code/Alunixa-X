@@ -20,8 +20,10 @@ base64 = "0.22"
 directories = "6"
 fs2 = "0.4"
 futures-util = "0.3"
+http = "1"
+httpdate = "1"
 reqwest = { version = "0.12", features = ["json", "multipart", "stream", "rustls-tls", "system-proxy"], default-features = false }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

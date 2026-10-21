@@ -145,11 +145,16 @@
   /* 焦点圈 */
   --focus-ring: 0 0 0 3px hsl(var(--brand-accent) / 0.28);
 
-  font-family:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", system-ui, sans-serif;
+  /* 界面字体：对齐 DSH（纯系统字体栈，不打包 Web 字体） */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
+    sans-serif;
+  /* 等宽字体：对齐 DSH 的代码字体栈（SF Mono 优先，回退打包的 JetBrains Mono） */
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
+
+  font-family: var(--font-sans);
   font-size: 13.5px;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -602,7 +607,7 @@ body {
   min-height: 48px;
   overflow-wrap: anywhere;
   color: hsl(var(--muted-foreground));
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.35;
   padding: 0 14px 14px;
@@ -632,7 +637,7 @@ body {
   min-width: 0;
   overflow-wrap: anywhere;
   color: hsl(var(--muted-foreground));
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -742,6 +747,10 @@ body {
   display: grid;
   gap: 6px;
   min-width: 260px;
+  /* 视口内兜底：菜单改 fixed 定位后也不允许超出窗口，超高时内部滚动。 */
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--popover));
@@ -836,14 +845,14 @@ body {
   border-radius: 999px;
   background: hsl(var(--background) / 0.6);
   color: hsl(var(--foreground));
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   padding: 4px 8px;
 }
 
 .env-conflict-tags small {
   color: hsl(var(--muted-foreground));
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 .relay-master-switch {
@@ -1007,13 +1016,68 @@ body {
   pointer-events: auto;
 }
 
+.multi-launch-running-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.multi-launch-instance-list {
+  display: grid;
+  gap: 8px;
+}
+
+.multi-launch-instance-card {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--surface-raised));
+  padding: 11px 12px;
+}
+
+.multi-launch-instance-card .relay-card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.multi-launch-instance-card .multi-launch-instance-status {
+  white-space: nowrap;
+}
+
+/* 启动失败时允许换行并高亮，避免失败原因被单行省略号截断。 */
+.multi-launch-instance-card .relay-summary small[data-failed="true"] {
+  color: hsl(var(--destructive, 0 72% 51%));
+  white-space: normal;
+}
+
+@media (max-width: 760px) {
+  .multi-launch-running-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .multi-launch-instance-card {
+    grid-template-columns: 32px minmax(0, 1fr);
+  }
+
+  .multi-launch-instance-card > .multi-launch-instance-status,
+  .multi-launch-instance-card > .relay-card-actions {
+    grid-column: 2;
+  }
+}
+
 .relay-profile-card:hover .relay-card-actions,
 .relay-profile-card:focus-within .relay-card-actions {
   opacity: 1;
   pointer-events: auto;
 }
 
-/* 标题栏固定 / 中段滚动 / 底部操作栏固定，参考 cc-switch 的编辑页布局 */
+/* 标题栏固定 / 中段滚动 / 底部操作栏固定 */
 .relay-detail-page {
   position: absolute;
   inset: 0;
@@ -1120,6 +1184,13 @@ body {
   min-width: 0;
 }
 
+/* 头部就地显示「为什么存不了」：保存按钮不再禁用，原因要看得见。 */
+.relay-editor-validation {
+  color: hsl(var(--destructive));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .relay-editor-heading-copy strong {
   overflow: hidden;
   font-size: 15px;
@@ -1174,6 +1245,178 @@ body {
 
 .relay-basic-fields > .relay-field-config-model {
   grid-column: 1 / -1;
+}
+
+.relay-basic-fields > .relay-field-name {
+  grid-column: 1 / -1;
+  max-width: 620px;
+}
+
+/* 接入方式、凭据和协议放在同一张卡片里，避免用户在表单上下跳转。 */
+.relay-basic-section {
+  gap: 14px;
+}
+
+.relay-mode-block {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 10px;
+  min-width: 0;
+  border-top: 1px solid hsl(var(--border) / 0.7);
+  padding-top: 14px;
+}
+
+.relay-mode-block-head,
+.relay-inline-connection-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.relay-mode-block-head > div,
+.relay-inline-connection-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.relay-mode-block-head strong,
+.relay-inline-connection-head strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.relay-mode-block-head span,
+.relay-inline-connection-head span {
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.relay-mode-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.relay-mode-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  min-height: 86px;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-sunken) / 0.34);
+  color: hsl(var(--foreground));
+  padding: 12px;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) var(--motion-ease),
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+}
+
+.relay-mode-option:hover {
+  border-color: hsl(var(--brand-accent) / 0.55);
+  background: hsl(var(--brand-accent) / 0.06);
+  transform: translateY(-1px);
+}
+
+.relay-mode-option:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+.relay-mode-option.active {
+  border-color: hsl(var(--brand-accent) / 0.72);
+  background: linear-gradient(135deg, hsl(var(--brand-accent) / 0.13), hsl(var(--brand-accent-2) / 0.07));
+  box-shadow: inset 0 0 0 1px hsl(var(--brand-accent) / 0.14);
+}
+
+.relay-mode-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid hsl(var(--brand-accent) / 0.3);
+  border-radius: 8px;
+  background: hsl(var(--brand-accent) / 0.08);
+  color: hsl(var(--brand-accent));
+}
+
+.relay-mode-option-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.relay-mode-option-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.relay-mode-option-copy small {
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.relay-mode-option-indicator {
+  align-self: start;
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border: 1px solid hsl(var(--muted-foreground) / 0.55);
+  border-radius: 50%;
+}
+
+.relay-mode-option.active .relay-mode-option-indicator {
+  border: 3px solid hsl(var(--brand-accent));
+  background: hsl(var(--card));
+}
+
+.relay-inline-connection {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid hsl(var(--brand-accent) / 0.28);
+  border-radius: var(--radius-md);
+  background: hsl(var(--brand-accent) / 0.045);
+  padding: 12px;
+}
+
+.relay-inline-connection .relay-api-fields {
+  padding: 0;
+  animation: none;
+}
+
+.relay-mode-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid hsl(var(--border) / 0.75);
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-sunken) / 0.42);
+  padding: 10px 12px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.relay-mode-note svg {
+  flex: none;
+  margin-top: 1px;
+  color: hsl(var(--brand-accent));
 }
 
 .relay-connection-section {
@@ -1232,6 +1475,14 @@ body {
 .relay-api-fields {
   grid-column: 1 / -1;
   align-items: start;
+}
+
+/* 左侧端点与协议独立排列，不随右侧 Key 列表的高度拉开间距。 */
+.relay-api-connection-fields {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
 }
 
 /* 已在 .relay-advanced-block 里，不再需要跨列。左右内边距由自己负责：
@@ -1620,6 +1871,11 @@ body {
   margin-top: 0;
 }
 
+/* 模型聚合模式没有「聚合方式」字段（模式固定，不再展示），名称独占整行。 */
+.aggregate-editor[data-aggregate-mode="model"] .relay-field-name {
+  grid-column: 1 / -1;
+}
+
 .relay-field-name,
 .relay-field-mode,
 .relay-field-session-provider,
@@ -1632,6 +1888,94 @@ body {
 .relay-field-key,
 .relay-field-protocol {
   grid-column: auto;
+}
+
+.relay-field-key {
+  grid-column: 1 / -1;
+}
+
+.relay-api-key-list {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  container-type: inline-size;
+  container-name: relay-api-keys;
+}
+
+.relay-api-key-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 0.55fr) minmax(0, 1.45fr) 36px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid hsl(var(--border) / 0.8);
+  border-radius: var(--radius-md);
+  background: hsl(var(--surface-raised) / 0.35);
+}
+
+.relay-api-key-row > input {
+  min-width: 0;
+}
+
+/* Key 区可能只占表单半列，按它自身的宽度换行，避免宽窗口内仍挤出边框。 */
+@container relay-api-keys (max-width: 440px) {
+  .relay-api-key-row {
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+  }
+
+  .relay-api-key-select {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .relay-api-key-row > input:not([type="password"]) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .relay-api-key-row > input[type="password"] {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .relay-api-key-row > button:last-child {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}
+
+.relay-api-key-row.active {
+  border-color: hsl(var(--brand-accent) / 0.55);
+  background: hsl(var(--brand-accent) / 0.07);
+}
+
+.relay-api-key-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+}
+
+.relay-api-key-select:hover,
+.relay-api-key-select:focus-visible {
+  background: hsl(var(--surface-raised));
+  color: hsl(var(--foreground));
+  outline: none;
+}
+
+.relay-api-key-row.active .relay-api-key-select {
+  color: hsl(var(--brand-accent));
+}
+
+.relay-api-key-add {
+  justify-self: start;
 }
 
 /* 折叠式高级区：整块描边，标题行自带箭头，收起时用一行提示说明里面有什么 */
@@ -1703,134 +2047,6 @@ body {
   border-radius: var(--radius-lg);
   background: hsl(var(--surface-raised) / 0.45);
   padding: 14px;
-}
-
-/* 渠道保护默认折叠：details 复用 .relay-config-section 的外观，
-   summary 直接当区块标题用。 */
-details.relay-config-section > summary.relay-config-section-head {
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  cursor: pointer;
-  list-style: none;
-}
-
-details.relay-config-section > summary.relay-config-section-head::-webkit-details-marker {
-  display: none;
-}
-
-details.relay-config-section > summary.relay-config-section-head::after {
-  content: "\25BE";
-  flex-shrink: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: 11px;
-  transition: transform var(--motion-fast) var(--motion-ease);
-}
-
-details.relay-config-section[open] > summary.relay-config-section-head::after {
-  transform: rotate(180deg);
-}
-
-details.relay-channel-protection > summary.relay-config-section-head::after {
-  content: none;
-}
-
-details.relay-channel-protection > summary.relay-config-section-head > div:first-child {
-  gap: 6px;
-}
-
-details.relay-channel-protection[open] > summary .relay-advanced-chevron {
-  transform: rotate(0deg);
-}
-
-/* 开关和对应参数放在同一卡片内；关闭开关时仍保留字段的编辑能力。 */
-.relay-channel-protection .relay-protection-body {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  min-width: 0;
-  padding-top: 0;
-}
-
-.relay-protection-option {
-  display: grid;
-  align-content: start;
-  gap: 12px;
-  min-width: 0;
-  border: 1px solid hsl(var(--border) / 0.8);
-  border-radius: var(--radius-md);
-  background: hsl(var(--card) / 0.7);
-  padding: 14px;
-}
-
-.relay-protection-option .relay-protection-toggle,
-.relay-protection-option .relay-protection-toggle:hover {
-  min-height: 24px;
-  gap: 12px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-  margin: 0;
-  box-shadow: none;
-}
-
-.relay-protection-toggle strong {
-  grid-column: 1;
-  grid-row: 1;
-  min-width: 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.relay-protection-description,
-.relay-protection-note {
-  margin: 0;
-  color: hsl(var(--muted-foreground));
-  font-size: 11.5px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-
-.relay-protection-description {
-  margin-top: -5px;
-}
-
-.relay-protection-note {
-  border-top: 1px solid hsl(var(--border) / 0.7);
-  padding-top: 10px;
-}
-
-.relay-protection-option > .field,
-.relay-protection-option .channel-status-editor {
-  min-width: 0;
-}
-
-.relay-protection-option input[type="number"] {
-  width: min(100%, 220px);
-}
-
-.relay-protection-option .channel-status-list {
-  align-items: center;
-  min-height: 0;
-  gap: 6px;
-}
-
-.relay-protection-option .channel-status-list:empty {
-  display: none;
-}
-
-.relay-protection-option .channel-status-chip {
-  flex: 0 0 auto;
-  min-height: 28px;
-  padding: 4px 9px;
-  font-size: 12px;
-}
-
-.relay-protection-option .channel-status-chip:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
 }
 
 /* 通用配置默认折叠为一行文字：summary 复用 .relay-file-head 的排版，
@@ -1986,8 +2202,7 @@ details.relay-fold[open] > .relay-fold-body {
   min-width: 0;
 }
 
-.relay-options-grid > .relay-field-config-model,
-.relay-connection-section .relay-api-fields > .relay-field-protocol {
+.relay-options-grid > .relay-field-config-model {
   grid-column: 1 / -1;
 }
 
@@ -2236,7 +2451,8 @@ details.relay-fold[open] > .relay-fold-body {
 }
 
 .app-select.text-xs .app-select-trigger,
-.app-select.text-xs .app-select-option {
+.app-select.text-xs .app-select-option,
+.app-select-menu.text-xs .app-select-option {
   font-size: 12px;
 }
 
@@ -2487,7 +2703,7 @@ details.relay-fold[open] > .relay-fold-body {
 
 .context-editor-textarea {
   min-height: 160px;
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -2569,7 +2785,7 @@ details.relay-fold[open] > .relay-fold-body {
   overflow: auto;
   border-width: 1px;
   border-style: solid;
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   tab-size: 2;
@@ -2841,6 +3057,57 @@ details.relay-fold[open] > .relay-fold-body {
   min-height: 118px;
 }
 
+.aggregate-mode-chooser {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 12px;
+  background: hsl(var(--secondary) / 0.2);
+}
+
+.aggregate-mode-chooser-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.aggregate-mode-chooser-copy h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.aggregate-mode-chooser-copy p {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 13px;
+}
+
+.aggregate-mode-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.aggregate-mode-choice {
+  min-height: 132px;
+}
+
+.aggregate-model-mode-hint {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid hsl(var(--primary) / 0.35);
+  border-radius: 8px;
+  background: hsl(var(--primary) / 0.08);
+}
+
+.aggregate-model-mode-hint span,
+.aggregate-member-models {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .aggregate-members {
   display: grid;
   gap: 10px;
@@ -2870,6 +3137,29 @@ details.relay-fold[open] > .relay-fold-body {
   color: hsl(var(--muted-foreground));
   font-size: 12px;
   line-height: 1.35;
+}
+
+.aggregate-member-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.aggregate-member-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aggregate-default-provider {
+  display: grid;
+  gap: 10px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  background: hsl(var(--secondary) / 0.22);
+  padding: 12px;
 }
 
 .aggregate-member-list {
@@ -2905,6 +3195,70 @@ details.relay-fold[open] > .relay-fold-body {
 
 .aggregate-weight-box input {
   min-height: 34px;
+}
+
+.aggregate-member-models {
+  min-width: 0;
+  /* 数量靠左、默认控件靠右：各行的「设为默认」/「默认」都落在同一条右边缘上。
+     完整模型名单放 title，不再撑高卡片（各卡片等高）。 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: normal;
+  overflow: hidden;
+}
+
+.aggregate-member-models-count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 「设为默认」是次要动作：做成轻量文字按钮，别和主按钮抢视觉、也别把行撑高。 */
+.aggregate-member-default-action {
+  height: 22px;
+  flex: none;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: hsl(var(--primary));
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.aggregate-member-default-action:hover {
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+.aggregate-member-default-badge {
+  flex: none;
+  font-size: 11px;
+}
+
+.aggregate-default-hint {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aggregate-editor[data-aggregate-mode="model"] .aggregate-member-row {
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 1fr);
+}
+
+@media (max-width: 760px) {
+  .aggregate-mode-choice-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aggregate-editor[data-aggregate-mode="model"] .aggregate-member-row {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .aggregate-member-models {
+    grid-column: 2;
+  }
 }
 
 .aggregate-routes {
@@ -3046,6 +3400,9 @@ details.relay-fold[open] > .relay-fold-body {
 .feature-switch-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 每张卡按自身内容取高：同一行的可展开区块（如「API 余额（可选）」）撑高时，
+     不会再把相邻的功能开关卡一起拉高。 */
+  align-items: start;
   gap: 8px;
   margin: 12px 0;
   min-width: 0;
@@ -3359,6 +3716,20 @@ details.relay-fold[open] > .relay-fold-body {
   border-radius: inherit;
   background: hsl(var(--brand-accent));
   transition: width 220ms var(--motion-ease);
+}
+
+.provider-sync-progress-bar[data-indeterminate="true"] .provider-sync-progress-fill {
+  width: 32%;
+  animation: task-progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes task-progress-indeterminate {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
 }
 
 .task-progress {
@@ -4314,7 +4685,7 @@ input[type="range"]:disabled {
 .log-view {
   min-height: 180px;
   margin-top: 10px;
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre;
@@ -4322,7 +4693,7 @@ input[type="range"]:disabled {
 
 .launch-args-input {
   min-height: 112px;
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -4339,7 +4710,7 @@ input[type="range"]:disabled {
   border: 1px solid hsl(var(--border));
   border-radius: 8px;
   background: hsl(var(--background));
-  font-family: Consolas, "SFMono-Regular", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -5327,14 +5698,16 @@ input[type="range"]:disabled {
   display: grid;
   min-width: 0;
   gap: 8px;
+  /* 一行一个模型：容器再窄也不改成多行卡片，横向滚动兜底。 */
+  overflow-x: auto;
 }
 
 .relay-model-row {
   display: grid;
   min-width: 0;
-  grid-template-columns: 32px minmax(220px, 1.6fr) minmax(130px, 0.7fr) minmax(110px, 0.6fr) minmax(180px, 1fr) 40px 40px;
+  grid-template-columns: 28px minmax(108px, 1.4fr) minmax(64px, 0.55fr) minmax(84px, 0.7fr) minmax(104px, 0.9fr) minmax(116px, 1fr) 30px 30px;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-height: var(--relay-control-height);
 }
 
@@ -5349,7 +5722,15 @@ input[type="range"]:disabled {
 
 .relay-model-row input {
   min-width: 0;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-mono);
+}
+
+/* 模型行内的下拉收紧内边距与图标间距，把宽度让给文字：
+   避免「90%」只显示成「9…」、「low → ultra」显示成「low → …」。 */
+.relay-model-row .app-select-trigger {
+  gap: 6px;
+  padding: 0 8px;
+  font-size: 12px;
 }
 
 .relay-model-cell {
@@ -5367,6 +5748,82 @@ input[type="range"]:disabled {
   color: hsl(var(--muted-foreground));
   font-size: 11.5px;
   line-height: 1.4;
+}
+
+/* 思考等级：多选面板的触发器沿用 app-select 外观，继承内置声明时弱化文字。
+   菜单 portal 到 body 后已不在单元格里，字体规则改挂菜单自身类名。 */
+.relay-model-cell-reasoning .app-select-trigger,
+.relay-reasoning-menu .app-select-option {
+  font-size: 12px;
+}
+
+.relay-reasoning.inherited .app-select-trigger > span:first-child,
+.relay-reasoning .app-select-trigger > span.relay-reasoning-empty {
+  color: hsl(var(--muted-foreground));
+}
+
+/* 定位/宽度/限高改由 usePopoverLayer 内联给出（fixed 到 body，父级 overflow 不再裁剪）。 */
+.relay-reasoning-menu {
+  min-width: 0;
+  max-width: min(240px, calc(100vw - 48px));
+}
+
+/* portal 弹层：坐标与宽度是内联样式，这里只兜层级、视口边界与最小宽度。
+   放在 .relay-reasoning-menu 之后，确保 min-width: 0 不被它盖回去。 */
+.app-select-menu-portal,
+.weixin-search-menu-portal {
+  position: fixed;
+  z-index: 240;
+  min-width: 0;
+  max-width: calc(100vw - 16px);
+}
+
+.relay-reasoning-default {
+  display: grid;
+  gap: 6px;
+  margin-top: 5px;
+  border-top: 1px solid hsl(var(--border) / 0.7);
+  padding: 8px 9px 2px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.relay-reasoning-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.relay-reasoning-chips button {
+  min-height: 24px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--surface-raised));
+  color: hsl(var(--foreground));
+  padding: 0 8px;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.relay-reasoning-chips button:hover {
+  border-color: hsl(var(--brand-accent) / 0.72);
+}
+
+.relay-reasoning-chips button.selected {
+  border-color: hsl(var(--brand-accent));
+  background: hsl(var(--brand-accent) / 0.16);
+  color: hsl(var(--brand-accent));
+}
+
+.relay-reasoning-hint {
+  margin: 4px 0 3px;
+  padding: 0 9px;
+  color: hsl(var(--muted-foreground));
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .relay-model-drag {
@@ -5422,7 +5879,7 @@ input[type="range"]:disabled {
 
 .relay-model-import-workbench textarea {
   min-height: 150px;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .relay-model-metadata-import-error,
@@ -5530,7 +5987,7 @@ input[type="range"]:disabled {
 
 .relay-model-route-row input {
   min-width: 0;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -6212,7 +6669,7 @@ select {
 .log-view,
 .launch-args-input,
 .log-lines {
-  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* ── 列表行 ─────────────────────────────────────────────────── */
@@ -6818,6 +7275,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .relay-mode-options {
+    grid-template-columns: 1fr;
+  }
+
   .relay-config-section-head {
     align-items: stretch;
     flex-direction: column;
@@ -6828,14 +7289,10 @@ select {
   }
 }
 
-@container relay-editor (max-width: 700px) {
-  .relay-channel-protection .relay-protection-body {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* 模型表按编辑区实际宽度切换，避免侧栏与面板占用宽度后横向溢出。 */
-@container relay-editor (max-width: 900px) {
+/* 模型表保持「一行一个模型」：字段压缩到最小宽度，容器更窄时横向滚动（见
+   .relay-model-row-editor）。只有窄到手机宽度（≤560px）才切换成带字段标签的
+   多行卡片布局。 */
+@container relay-editor (max-width: 560px) {
   .relay-model-row-head {
     display: none;
   }
@@ -6874,6 +7331,11 @@ select {
     grid-row: 2;
   }
 
+  .relay-model-cell-reasoning {
+    grid-column: 2 / -1;
+    grid-row: 3;
+  }
+
   .relay-model-row > .relay-model-drag {
     grid-column: 1;
     grid-row: 1;
@@ -6900,6 +7362,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .relay-mode-options {
+    grid-template-columns: 1fr;
+  }
+
   .relay-model-row:not(.relay-model-row-head) {
     grid-template-columns: repeat(6, minmax(0, 1fr));
   }
@@ -6915,6 +7381,11 @@ select {
   .relay-model-cell-image {
     grid-column: 1 / -1;
     grid-row: 3;
+  }
+
+  .relay-model-cell-reasoning {
+    grid-column: 1 / -1;
+    grid-row: 4;
   }
 
   .relay-custom-header-row {
@@ -6959,7 +7430,8 @@ select {
 
   .relay-model-cell-window,
   .relay-model-cell-compact,
-  .relay-model-cell-image {
+  .relay-model-cell-image,
+  .relay-model-cell-reasoning {
     grid-column: 1 / -1;
   }
 
@@ -6969,6 +7441,10 @@ select {
 
   .relay-model-cell-image {
     grid-row: 4;
+  }
+
+  .relay-model-cell-reasoning {
+    grid-row: 5;
   }
 }
 
@@ -7229,6 +7705,18 @@ select {
   font-size: 10px;
   line-height: 1.2;
   text-align: center;
+}
+
+/* 加载中的 tab 计数：显示转圈而不是 0，避免误读为空列表 */
+.dream-skin-view-tabs button > span.is-loading {
+  display: inline-grid;
+  place-items: center;
+}
+
+.dream-skin-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .dream-skin-market {
@@ -8087,7 +8575,7 @@ select {
 
 .dream-skin-verification-meta code {
   margin-top: 3px;
-  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -8219,7 +8707,7 @@ select {
   min-width: 0;
   overflow: hidden;
   color: hsl(var(--foreground));
-  font-family: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.4;
   text-overflow: ellipsis;
@@ -8500,6 +8988,12 @@ select {
 
 .enhance-feature-groups .feature-group:first-child .feature-switch-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* 可展开的配置块（如「API 余额（可选）」）独占一整行：展开只往下长，
+   不会拉高或顶开同一行里的功能开关卡。 */
+.enhance-feature-groups .feature-switch-grid > .settings-block {
+  grid-column: 1 / -1;
 }
 
 .enhance-feature-groups .feature-toggle,
@@ -8961,32 +9455,6 @@ select {
   color: hsl(var(--muted-foreground));
   font-size: 12px;
   line-height: 1.45;
-}
-
-.channel-status-editor {
-  display: grid;
-  gap: 8px;
-}
-
-.channel-status-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-height: 24px;
-}
-
-.channel-status-chip {
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  background: hsl(var(--muted));
-  color: hsl(var(--foreground));
-  cursor: pointer;
-  font: inherit;
-  padding: 3px 8px;
-}
-
-.channel-status-chip:hover {
-  border-color: hsl(var(--primary));
 }
 
 .settings-content .stepwise-settings-block {
@@ -9848,9 +10316,12 @@ select {
 .provider-view-tabs button:hover{background:hsl(var(--primary)/.12);color:hsl(var(--primary))}
 .provider-view-tabs button.active{background:hsl(var(--primary));color:hsl(var(--primary-foreground));box-shadow:none}
 .provider-view-tabs button.active svg{color:currentColor}
+.provider-view-tabs .provider-view-help{margin-left:-3px;opacity:.62}
+.provider-view-tabs button.active .provider-view-help{opacity:.85}
 .provider-aggregate-empty{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:18px;border:1px dashed hsl(var(--brand-accent)/.45);border-radius:12px;background:hsl(var(--brand-accent)/.05)}
 .provider-aggregate-empty strong{font-size:14px;white-space:nowrap}
 .provider-aggregate-empty span{flex:1;color:hsl(var(--muted-foreground));font-size:13px}
+.provider-aggregate-toolbar{display:flex;justify-content:flex-end;margin:0 0 10px}
 @media(max-width:760px){.provider-view-tabs{width:100%}.provider-view-tabs button{flex:1;justify-content:center}.provider-aggregate-empty{align-items:flex-start;flex-direction:column}}
 
 .claude-localization-page { display: grid; gap: 14px; max-width: 900px; }
@@ -9890,4 +10361,130 @@ select {
 @media (max-width: 760px) {
   .custom-model-fields { grid-template-columns: minmax(0, 1fr); }
   .custom-model-block { padding: 12px; }
+}
+/* 左栏是增强项，右栏是它们共同依赖的受管副本（前置条件）。 */
+.claude-localization-page {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 14px; align-items: start; max-width: 1180px;
+}
+.claude-l10n-column { display: grid; gap: 14px; align-content: start; }
+/* 左栏里每项增强都是一个开关行，两者之间用分隔线断开。 */
+.claude-l10n-column .switch-row + .switch-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid hsl(var(--border)); }
+.claude-l10n-column .switch-row strong { font-size: 14px; }
+.claude-l10n-column .switch-row small { margin-top: 5px; line-height: 1.6; }
+/* 左栏卡片比右栏窄：标题与说明改竖排，否则说明会被挤成右对齐的两行。 */
+.claude-l10n-column .panel-head { display: grid; gap: 6px; align-items: start; }
+/* 上手步骤：带编号，完成的一步打勾，当前该做的那一步高亮。 */
+.claude-l10n-steps {
+  display: grid; gap: 12px; margin-top: 14px;
+  padding: 16px 18px; border: 1px solid hsl(var(--brand-accent) / 0.35); border-radius: 12px;
+  background: hsl(var(--brand-accent) / 0.05);
+}
+.claude-l10n-step { display: flex; align-items: flex-start; gap: 12px; }
+.claude-l10n-step-no {
+  width: 22px; height: 22px; flex: none; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600;
+  border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground));
+}
+.claude-l10n-step[data-done="true"] .claude-l10n-step-no {
+  border-color: hsl(var(--status-success) / 0.5);
+  background: hsl(var(--status-success) / 0.12);
+  color: hsl(var(--status-success));
+}
+.claude-l10n-step[data-done="false"] .claude-l10n-step-no {
+  border-color: hsl(var(--brand-accent) / 0.6);
+  color: hsl(var(--brand-accent));
+}
+.claude-l10n-step-body strong { display: block; font-size: 13.5px; }
+.claude-l10n-step[data-done="false"] .claude-l10n-step-body strong { color: hsl(var(--brand-accent)); }
+.claude-l10n-step-body small { display: block; margin-top: 4px; color: hsl(var(--muted-foreground)); font-size: 12.5px; line-height: 1.6; }
+.claude-l10n-hint { margin: 14px 0 0; padding-top: 14px; border-top: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); font-size: 12.5px; line-height: 1.7; }
+@media (max-width: 1040px) { .claude-localization-page { grid-template-columns: minmax(0, 1fr); } }
+
+/* 概览卡：标题 + 状态徽标、四项数据卡、提示条与操作区。 */
+.claude-l10n-hero .card-content { display: grid; gap: 24px; padding: 24px 28px; }
+.claude-l10n-hero-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.claude-l10n-hero-title { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.claude-l10n-hero-icon {
+  width: 44px; height: 44px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 13px; color: hsl(var(--primary-foreground));
+  background: linear-gradient(135deg, hsl(var(--brand-accent)), hsl(var(--brand-accent-2)));
+  box-shadow: 0 6px 16px hsl(var(--brand-accent) / 0.25);
+}
+.claude-l10n-hero-title strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
+.claude-l10n-hero-subtitle { display: block; margin-top: 6px; color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 1.6; }
+
+.claude-l10n-status {
+  display: inline-flex; align-items: center; gap: 7px; flex: none;
+  padding: 6px 12px; border: 1px solid hsl(var(--border)); border-radius: 999px;
+  font-size: 12.5px; white-space: nowrap; color: hsl(var(--muted-foreground));
+}
+.claude-l10n-status i { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--muted-foreground)); }
+.claude-l10n-status-ok { color: hsl(var(--status-success)); border-color: hsl(var(--status-success) / 0.4); background: hsl(var(--status-success) / 0.08); }
+.claude-l10n-status-ok i { background: hsl(var(--status-success)); box-shadow: 0 0 8px hsl(var(--status-success) / 0.6); }
+.claude-l10n-status-warn { color: hsl(var(--status-warning)); border-color: hsl(var(--status-warning) / 0.4); background: hsl(var(--status-warning) / 0.08); }
+.claude-l10n-status-warn i { background: hsl(var(--status-warning)); }
+
+/* 数据卡：按可用宽度自动折行（右栏变窄时从四列退到三列、两列），数值不再被省略号截断。 */
+.claude-l10n-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 12px; margin-top: 14px; }
+.claude-l10n-stat {
+  display: grid; gap: 6px; min-width: 0;
+  padding: 14px 16px; border: 1px solid hsl(var(--border)); border-radius: 12px;
+  background: hsl(var(--surface-sunken) / 0.45);
+}
+.claude-l10n-stat span { color: hsl(var(--muted-foreground)); font-size: 12px; }
+.claude-l10n-stat strong { font-size: 14.5px; letter-spacing: -0.01em; word-break: break-word; }
+
+.claude-l10n-note {
+  display: flex; align-items: flex-start; gap: 11px;
+  margin-top: 14px;
+  padding: 16px 18px; border: 1px dashed hsl(var(--brand-accent) / 0.4); border-radius: 12px;
+  background: hsl(var(--brand-accent) / 0.05);
+  color: hsl(var(--muted-foreground)); font-size: 13px; line-height: 1.7;
+}
+.claude-l10n-note svg { flex: none; margin-top: 2px; color: hsl(var(--brand-accent)); }
+
+.claude-l10n-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-top: 20px; border-top: 1px solid hsl(var(--border)); }
+.claude-l10n-actions-secondary { display: inline-flex; gap: 10px; margin-left: auto; }
+
+@media (max-width: 860px) { .claude-l10n-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) {
+  .claude-l10n-hero-head { flex-direction: column; }
+  .claude-l10n-actions-secondary { margin-left: 0; }
+}
+
+/* 聚合「默认成员登录同步」开关：跟默认供应商提示同处一块，但要能一眼看出是可选项。 */
+.aggregate-default-login-sync {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  cursor: pointer;
+}
+
+.aggregate-default-login-sync > input {
+  margin-top: 2px;
+  width: 15px;
+  height: 15px;
+  accent-color: hsl(var(--primary));
+  cursor: pointer;
+}
+
+.aggregate-default-login-sync > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.aggregate-default-login-sync small,
+.aggregate-default-login-note {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.aggregate-default-login-note {
+  display: block;
 }

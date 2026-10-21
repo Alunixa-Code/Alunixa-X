@@ -1,0 +1,9 @@
+/* 原生 utilities 的 important 背景会胜过未分层的主题 important。
+   使用原生 theme 层，仅清理图片模式中已确认的全尺寸 shell 容器。 */
+@layer theme {
+  html[data-dream-skin="active"][data-dream-art-wide="true"]:is([data-dream-task-mode="ambient"], [data-dream-task-mode="full"])
+    main:is(.main-surface, [data-app-shell-main-surface], [class*="_MainContentSurface_"])
+    :is([data-app-shell-page-surface="true"], [class*="_ApplicationMenuPageSurfaceLayout_"], [class~="bg-token-main-surface-primary"][class~="h-full"][class~="w-full"]):not([data-codex-composer-root], [data-codex-composer-root] *, [role="dialog"], [role="dialog"] *, [role="menu"], [role="menu"] *, [data-slot="popover-content"], [data-slot="popover-content"] *) {
+    background: transparent !important;
+  }
+}

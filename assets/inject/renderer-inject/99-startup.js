@@ -59,6 +59,7 @@
     }
   }
 
+  installCodexConfigReadDeadline();
   runScanStep(scheduleAlunixaXImageOverlay);
   if (window.__ALUNIXA_X_FORCE_CHINESE_LOCALE__?.enabled === true) {
     runScanStep(installAlunixaXForceChineseLocale);
@@ -76,11 +77,7 @@
   window.__alunixaXResizeHandler = () => {
     cancelAnimationFrame(alunixaXResizeRafId);
     alunixaXResizeRafId = requestAnimationFrame(() => {
-      sessionRows().forEach((row) => {
-        const group = actionGroupFromRow(row);
-        if (group) delete group.dataset.codexActionLayoutStable;
-      });
-      syncActionGroupsLayout();
+      syncActionGroupsLayout(true);
       runScanStep(refreshConversationView);
     });
   };

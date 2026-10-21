@@ -388,6 +388,40 @@
     return button;
   }
 
+  /**
+   * 空闲态的麦克风图标。
+   *
+   * 之前空闲态是一个带边框的「语音输入」文字按钮，在 composer 底栏里比原生图标按钮宽
+   * 一倍多，把「完全访问」和模型选择器挤得很开。改成和原生同规格的图标按钮，文字降级
+   * 成 aria-label / title。录音、转写这些状态仍然保留文字——那些状态要传达信息，
+   * 光靠图标说不清。
+   */
+  function alunixaXDictationMicIcon() {
+    const ns = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(ns, "svg");
+    svg.setAttribute("viewBox", "0 0 16 16");
+    svg.setAttribute("width", "16"); svg.setAttribute("height", "16");
+    svg.setAttribute("fill", "none"); svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "1.4"); svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round"); svg.setAttribute("aria-hidden", "true");
+    ["M8 2.4a2.2 2.2 0 0 1 2.2 2.2v3.4a2.2 2.2 0 0 1-4.4 0V4.6A2.2 2.2 0 0 1 8 2.4Z",
+      "M3.9 7.3a4.1 4.1 0 0 0 8.2 0", "M8 11.4v1.7", "M5.9 13.4h4.2"].forEach((d) => {
+      const path = document.createElementNS(ns, "path");
+      path.setAttribute("d", d);
+      svg.appendChild(path);
+    });
+    return svg;
+  }
+
+  function alunixaXDictationMicButton(disabled) {
+    const button = alunixaXDictationControl("start", "", disabled);
+    button.className = "alunixa-x-dictation-mic";
+    button.setAttribute("aria-label", "语音输入");
+    button.setAttribute("title", "语音输入");
+    button.append(alunixaXDictationMicIcon());
+    return button;
+  }
+
   function renderCodexPlusDictation() {
     const state = alunixaXDictation;
     document.querySelectorAll('[data-alunixa-x-ext="builtin-dictation"][data-dictation-controls]').forEach((root) => {
@@ -401,7 +435,7 @@
         return;
       }
       root.dataset.renderKey = key; root.replaceChildren();
-      if (!active) { root.append(alunixaXDictationControl("start", "语音输入", state.phase !== "idle")); return; }
+      if (!active) { root.append(alunixaXDictationMicButton(state.phase !== "idle")); return; }
       const status = document.createElement("span"); status.setAttribute("role", "status");
       if (state.phase === "recording") status.setAttribute("aria-live", "off");
       status.textContent = state.phase === "requesting" ? "正在请求麦克风…"
@@ -457,6 +491,18 @@
     return root;
   }
 
+  function alunixaXDictationFooterScore(footer, editor) {
+    let score = footer.contains(editor) ? 4 : 0;
+    const send = alunixaXDictationSendButton(editor);
+    if (send && footer.contains(send)) score += 2;
+    return score;
+  }
+
+  function alunixaXDictationFooterControls(footer) {
+    const node = footer.querySelector('[data-dictation-controls]');
+    return node && node.closest(".composer-footer, [data-composer-footer-responsive]") === footer ? node : null;
+  }
+
   function installCodexPlusDictation() {
     if (!alunixaXDictationEnabled()) {
       if (alunixaXDictation.phase !== "idle" || alunixaXDictation.pendingSend) cancelCodexPlusDictation();
@@ -469,20 +515,44 @@
       style.textContent = `.alunixa-x-dictation-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-inline:6px;font-size:12px;max-width:100%}
         .alunixa-x-dictation-controls button{border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:8px;padding:5px 8px;background:transparent;color:inherit;cursor:pointer;white-space:nowrap}
         .alunixa-x-dictation-controls button:disabled{opacity:.5;cursor:default}.alunixa-x-dictation-controls button:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+        /* 颜色取主文字色而不是继承 footer 的弱化文字：图标按钮没有边框和标签，
+           再叠一层弱化会被误读成禁用态。 */
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--color-token-text-primary,currentColor);opacity:.9;cursor:pointer}
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic:hover{background:color-mix(in srgb,currentColor 12%,transparent);opacity:1}
+        .alunixa-x-dictation-controls .alunixa-x-dictation-mic:disabled{opacity:.4;cursor:default;background:transparent}
         #alunixa-x-dictation-recovery{position:fixed;bottom:24px;right:24px;z-index:2147483000;padding:12px;border-radius:12px;background:var(--background,#252525);color:var(--foreground,#eee);box-shadow:0 4px 24px #0006;max-width:480px}
         #alunixa-x-dictation-recovery textarea{width:100%;min-height:80px;color:inherit;background:transparent}`;
       document.head.append(style);
     }
+    // 同一输入框可能同时命中多个 footer（例如新版首页的顶部上下文栏和底部
+    // 控制行都带 data-composer-footer-responsive），一个输入框只挂一个入口，
+    // 否则会出现两个「语音输入」。优先挂在包含输入框的 footer 上，其次是
+    // 包含发送按钮的；同分时取文档中更靠后的（更内层）候选项。
+    const candidates = [];
     document.querySelectorAll(".composer-footer, [data-composer-footer-responsive]").forEach((footer) => {
       if (!visibleElement(footer) || isExtensionUiNode(footer)) return;
       const scope = alunixaXDictationScope(footer);
       const editor = scope && alunixaXDictationEditor(scope);
       if (!editor) return;
-      let controls = footer.querySelector('[data-dictation-controls]');
-      if (!controls) { controls = createCodexPlusDictationControls(); footer.append(controls); }
-      const target = editor.dataset.alunixaXDictationTarget || editor.closest('[data-alunixa-x-dictation-root]')?.dataset.alunixaXDictationRoot || "";
-      if (controls.dataset.dictationTarget !== target) { controls.dataset.dictationTarget = target; delete controls.dataset.renderKey; }
+      candidates.push({ footer, editor, score: alunixaXDictationFooterScore(footer, editor) });
     });
+    const hosts = new Map();
+    for (const item of candidates) {
+      const current = hosts.get(item.editor);
+      if (!current || item.score >= current.score) hosts.set(item.editor, item);
+    }
+    const hostFooters = new Set([...hosts.values()].map((item) => item.footer));
+    document.querySelectorAll('[data-alunixa-x-ext="builtin-dictation"][data-dictation-controls]').forEach((node) => {
+      if (node.dataset.floating === "true") return;
+      const owner = node.closest(".composer-footer, [data-composer-footer-responsive]");
+      if (owner && !hostFooters.has(owner)) node.remove();
+    });
+    for (const item of hosts.values()) {
+      let controls = alunixaXDictationFooterControls(item.footer);
+      if (!controls) { controls = createCodexPlusDictationControls(); item.footer.append(controls); }
+      const target = item.editor.dataset.alunixaXDictationTarget || item.editor.closest('[data-alunixa-x-dictation-root]')?.dataset.alunixaXDictationRoot || "";
+      if (controls.dataset.dictationTarget !== target) { controls.dataset.dictationTarget = target; delete controls.dataset.renderKey; }
+    }
     renderCodexPlusDictation();
   }
 

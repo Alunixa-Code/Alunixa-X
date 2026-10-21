@@ -313,8 +313,8 @@ fn relay_settings_keeps_profile_config_and_auth_files_isolated() {
     assert!(app_tsx.contains("function relayProfileSwitchCommand"));
     assert!(app_tsx.contains("return \"apply_pure_api_injection\""));
     assert!(app_tsx.contains("return \"apply_relay_injection\""));
-    assert!(app_tsx.contains("const createNewAggregateProfile = () =>"));
-    assert!(app_tsx.contains("onClick={createNewAggregateProfile}"));
+    assert!(app_tsx.contains("const createNewAggregateProfile = (mode: AggregateMode)"));
+    assert!(app_tsx.contains("onClick={() => createNewAggregateProfile("));
     assert!(app_tsx.contains("已打开聚合供应商详情"));
     assert!(app_tsx.contains(
         "buildRelayConfigToml(profile, { includeBearerToken: !profile.noAuth, requiresOpenAiAuth: false })"
@@ -474,6 +474,10 @@ fn manager_update_install_keeps_visible_progress_bar() {
     assert!(app_tsx.contains("安装包更新进度"));
     assert!(app_tsx.contains("completedTitle={t(\"上次更新结果\")}"));
     assert!(app_tsx.contains("progress={updateInstallProgress}"));
-    assert!(app_tsx.contains("current.percent + 0.2"));
-    assert!(app_tsx.contains("下载或启动耗时较长"));
+    assert!(app_tsx.contains("listen<UpdateProgressEvent>(\"update-progress\""));
+    assert!(app_tsx.contains("data-indeterminate"));
+    assert!(app_tsx.contains("正在写入安装包并准备安装"));
+    assert!(app_tsx.contains("正在启动安装器"));
+    assert!(!app_tsx.contains("current.percent + 0.2"));
+    assert!(!app_tsx.contains("下载或启动耗时较长"));
 }

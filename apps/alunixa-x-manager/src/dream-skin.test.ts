@@ -140,7 +140,9 @@ describe("dream skin theme helpers", () => {
     assert.match(compatibility, /shellMain\.classList\.add\("main-surface"\)/);
     assert.match(compatibility, /data-alunixa-x-dream-skin-main-surface/);
     assert.match(compatibility, /clearDreamSkinMainSurfaceCompatibility\(\)/);
-    assert.match(assets, /DREAM_SKIN_RENDERER_REVISION: &str = "24-home-composer-rounded"/);
+    assert.match(assets, /DREAM_SKIN_RENDERER_REVISION: &str = "26-dream-skin-1.5.20"/);
+    assert.match(assets, /DREAM_SKIN_COMMUNITY_COMPAT_CSS/);
+    assert.match(assets, /format!\("\{compiled\}\\n\{DREAM_SKIN_COMMUNITY_COMPAT_CSS\}"\)/);
   });
 
   it("covers the current shell, composer, message, and top-fade contracts", async () => {
@@ -348,6 +350,26 @@ describe("dream skin theme helpers", () => {
     assert.match(app, /onInstalled=\{\(\) => setThemeView\("local"\)\}/);
     assert.match(css, /\.dream-skin-market-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/s);
     assert.match(css, /\.dream-skin-market-preview\s*\{[^}]*aspect-ratio:\s*16 \/ 9/s);
+  });
+
+  it("shows a loading spinner instead of 0 while theme lists are loading", async () => {
+    const app = await readFile(new URL("./App.tsx", import.meta.url), "utf8");
+    const css = await readFile(new URL("./styles.css", import.meta.url), "utf8");
+
+    assert.match(app, /dreamSkinLibraryLoading/);
+    assert.match(app, /dreamSkinMarketLoading/);
+    assert.match(app, /dreamSkinCommunityLoading/);
+    // tab 计数在加载中渲染转圈图标，而不是渲染 0
+    assert.match(app, /libraryPending \? <Loader2[^/]*className="h-3 w-3 animate-spin" \/> : libraryCount/);
+    assert.match(app, /communityPending \? <Loader2[^/]*className="h-3 w-3 animate-spin" \/> : communityCount/);
+    assert.match(app, /marketPending \? <Loader2[^/]*className="h-3 w-3 animate-spin" \/> : marketCount/);
+    assert.doesNotMatch(app, /<span>\{library\?\.themes\.length \?\? 0\}<\/span>/);
+    assert.doesNotMatch(app, /<span>\{community\?\.items\.length \?\? 0\}<\/span>/);
+    assert.doesNotMatch(app, /<span>\{market\?\.themes\.length \?\? 0\}<\/span>/);
+    // 各区块的加载文案也带转圈
+    assert.match(app, /className="dream-skin-loading" role="status"/);
+    assert.match(css, /\.dream-skin-view-tabs button > span\.is-loading/);
+    assert.match(css, /\.dream-skin-loading\s*\{/);
   });
 
   it("allows the webview to load managed theme images only", async () => {

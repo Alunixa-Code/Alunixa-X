@@ -225,8 +225,8 @@
     applyCodexPlusTheme(overlay);
     applyCodexPlusZoom(overlay);
     const state = alunixaXPluginMarketState;
-    overlay.innerHTML = `<div class="alunixa-x-modal-content" role="region" aria-label="CodeX 插件市场" data-alunixa-x-active-tab="${alunixaXPluginMarketTab}">
-      <div class="alunixa-x-modal-header"><div class="alunixa-x-modal-title">CodeX 插件市场</div></div>
+    overlay.innerHTML = `<div class="alunixa-x-modal-content" role="region" aria-label="Codex 插件市场" data-alunixa-x-active-tab="${alunixaXPluginMarketTab}">
+      <div class="alunixa-x-modal-header"><div class="alunixa-x-modal-title">Codex 插件市场</div></div>
       <div class="alunixa-x-modal-body"><div class="alunixa-x-panel alunixa-x-plugin-market-panel" data-codex-plugin-market-panel="true">
         <p class="alunixa-x-plugin-intro">检索插件目录，选中后下载并安装。目录浏览仅获取索引，插件文件按需下载。</p>
         <div class="alunixa-x-plugin-toolbar">

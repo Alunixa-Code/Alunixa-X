@@ -42,7 +42,7 @@ function Menu({ label = t("更多操作"), children }: { label?: string; childre
 function MenuItem({ children, onClick, disabled, danger }: { children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean }) {
   return <button type="button" role="menuitem" className={danger ? "mg-danger" : ""} disabled={disabled} onClick={onClick}>{children}</button>;
 }
-export function ManagementDrawer({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function ManagementDrawer({ title, onClose, children, footer, wide = false, dismissOnBackdrop = true }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean; dismissOnBackdrop?: boolean }) {
   const ref = useRef<HTMLElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
@@ -50,6 +50,9 @@ export function ManagementDrawer({ title, onClose, children, footer }: { title: 
     const root = ref.current;
     root?.querySelector<HTMLElement>("button, input, textarea, select")?.focus();
     const keyboard = (e: KeyboardEvent) => {
+      // 多层抽屉只让最上层处理 Escape/Tab，保留下层页面的状态。
+      const layers = document.querySelectorAll(".mg-drawer-backdrop");
+      if (e.defaultPrevented || layers.item(layers.length - 1) !== root?.parentElement) return;
       if (e.key === "Escape") { e.preventDefault(); closeRef.current(); }
       if (e.key !== "Tab" || !root) return;
       const nodes = [...root.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]')];
@@ -58,9 +61,9 @@ export function ManagementDrawer({ title, onClose, children, footer }: { title: 
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
     };
     document.addEventListener("keydown", keyboard);
-    return () => { document.removeEventListener("keydown", keyboard); previous?.focus(); };
+    return () => { document.removeEventListener("keydown", keyboard); previous?.focus({ preventScroll: true }); };
   }, []);
-  return <div className="mg-drawer-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><section className="mg-drawer" role="dialog" aria-modal="true" aria-label={title} ref={ref}><header><h2>{title}</h2><IconAction label={t("关闭窗口")} onClick={onClose}><X size={18} /></IconAction></header><div className="mg-drawer-body">{children}</div>{footer && <footer>{footer}</footer>}</section></div>;
+  return <div className="mg-drawer-backdrop" onMouseDown={(e) => { if (dismissOnBackdrop && e.target === e.currentTarget) onClose(); }}><section className={"mg-drawer" + (wide ? " mg-drawer-wide" : "")} role="dialog" aria-modal="true" aria-label={title} ref={ref}><header><h2>{title}</h2><IconAction label={t("关闭窗口")} onClick={onClose}><X size={18} /></IconAction></header><div className="mg-drawer-body">{children}</div>{footer && <footer>{footer}</footer>}</section></div>;
 }
 function Empty({ title, detail, children }: { title: string; detail?: string; children?: ReactNode }) {
   return <div className="mg-empty"><h2>{title}</h2>{detail && <p>{detail}</p>}<div>{children}</div></div>;

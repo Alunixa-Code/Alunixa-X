@@ -2,6 +2,13 @@
 
 fn main() {
     let os_args: Vec<_> = std::env::args_os().collect();
+    if os_args.get(1).is_some_and(|arg| arg == "--alunixa-x-agent-mcp") {
+        if let Err(error) = alunixa_x_manager_lib::run_agent_collaboration_mcp(&os_args[2..]) {
+            eprintln!("Agent collaboration MCP failed: {error:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Some(options_path) = os_args
         .windows(2)
         .find(|window| window[0] == "--alunixa-x-multi-worker")

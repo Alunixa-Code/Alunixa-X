@@ -10,7 +10,7 @@ use alunixa_x_core::models::{DeleteResult, SessionRef};
 use alunixa_x_core::relay_environment::RelayEnvironmentReport;
 use alunixa_x_core::script_market::{self, MarketScript, ScriptMarketManifest};
 use alunixa_x_core::settings::{
-    BackendSettings, RelayProfile, RelaySessionProvider, SettingsStore,
+    BackendSettings, RelayMode, RelayProfile, RelaySessionProvider, SettingsStore,
 };
 use alunixa_x_core::status::{LaunchStatus, StatusStore};
 use alunixa_x_core::user_scripts::UserScriptManager;
@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use tauri::Emitter;
 use tauri::Manager;
 
-use crate::install::{self, InstallActionResult, InstallOptions};
+use crate::install::{self, InstallActionResult};
 
 // 扫描快照仅驻留后端内存，不接受前端指定磁盘路径，不开放给扩展路由。
 static AGENT_CACHE_PLAN: OnceLock<Mutex<Option<alunixa_x_core::agent_cache::CachePlan>>> =
@@ -40,12 +40,12 @@ pub async fn download_dictation_local_model() -> CommandResult<Value> {
 }
 
 #[tauri::command]
-pub fn claude_localization_status()
--> CommandResult<alunixa_x_core::claude_localization::ClaudeLocalizationStatus> {
-    ok(
-        "Claude 汉化状态已读取。",
-        alunixa_x_core::claude_localization::status(),
-    )
+pub async fn claude_localization_status() -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(alunixa_x_core::claude_localization::status).await {
+        Ok(Ok(status)) => ok("Claude 增强状态已读取。", serde_json::to_value(status).unwrap_or_else(|_| json!({}))),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("Claude 检测失败：{error}"), json!({})),
+    }
 }
 
 #[tauri::command]
@@ -60,7 +60,35 @@ pub async fn claude_localization_action(action: String) -> CommandResult<Value> 
             serde_json::to_value(payload.status).unwrap_or_else(|_| json!({})),
         ),
         Ok(Err(error)) => failed(&error.to_string(), json!({})),
-        Err(error) => failed(&format!("Claude 汉化操作失败：{error}"), json!({})),
+        Err(error) => failed(&format!("Claude 增强操作失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn claude_localization_set_voice_input(enabled: bool) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_core::claude_localization::set_voice_input(enabled)
+    }).await {
+        Ok(Ok(status)) => ok(
+            if enabled { "语音输入已开启。" } else { "语音输入已关闭。" },
+            serde_json::to_value(status).unwrap_or_else(|_| json!({})),
+        ),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("Claude 设置失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
+pub async fn claude_localization_set_localization(enabled: bool) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        alunixa_x_core::claude_localization::set_localization(enabled)
+    }).await {
+        Ok(Ok(status)) => ok(
+            if enabled { "界面汉化已开启。" } else { "界面汉化已关闭。" },
+            serde_json::to_value(status).unwrap_or_else(|_| json!({})),
+        ),
+        Ok(Err(error)) => failed(&error.to_string(), json!({})),
+        Err(error) => failed(&format!("Claude 设置失败：{error}"), json!({})),
     }
 }
 
@@ -359,6 +387,8 @@ pub struct RelayProfileTestPayload {
     pub http_status: u16,
     pub endpoint: String,
     pub response_preview: String,
+    pub protocol_valid: bool,
+    pub completion_status: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -514,9 +544,95 @@ pub struct CodexMultiLaunchRequest {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexMultiWorkerOptions {
+    #[serde(default)]
+    pub instance_id: String,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default)]
+    pub user_data_dir: String,
     pub app_path: String,
     pub debug_port: u16,
     pub helper_port: u16,
+    /// 实例自己的 Alunixa X 状态目录。
+    ///
+    /// 多开隔离原先靠给 worker 换 `HOME`，但这只在 Unix 成立：`directories` 在
+    /// Windows 上用 `SHGetKnownFolderPath(FOLDERID_Profile)`，完全不读 `HOME`，
+    /// 于是 worker 会读写主实例的 `settings.json` / `latest-status.json`，
+    /// 多开专用设置（含 `--user-data-dir`）从未被读取。这里改成 worker 自己以
+    /// 显式路径为准（同时仍设置 `ALUNIXA_X_STATE_DIR` 覆盖子进程）。
+    #[serde(default)]
+    pub state_dir: String,
+}
+
+/// 一个已经由「Codex 多开」创建过的实例。记录文件放在实例自己的隔离目录，
+/// 因此管理器重启后仍然可以找回它，不依赖当前进程内存。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiInstance {
+    pub instance_id: String,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<alunixa_x_core::multi_worker::CodexInstanceIdentity>,
+    pub profile_id: String,
+    pub profile_name: String,
+    pub pid: Option<u32>,
+    /// Windows worker 的进程创建身份；旧清单缺失时不按 PID 强制终止。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_birth_id: Option<u64>,
+    pub debug_port: u16,
+    pub helper_port: u16,
+    pub status: String,
+    pub running: bool,
+    pub started_at_ms: u64,
+    pub is_main: bool,
+    pub app_path: Option<String>,
+    pub codex_home: Option<String>,
+    pub sqlite_home: Option<String>,
+    pub user_data_dir: Option<String>,
+    /// worker 写入的启动结果，用于把「起不来」如实反映到界面。
+    ///
+    /// 旧版 manifest 没有这个字段，`serde(default)` 保证升级后仍能读出来。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_result: Option<CodexMultiLaunchResult>,
+}
+
+/// 多开 worker 的启动结果（落盘在实例目录，父进程按需读取）。
+///
+/// 多开的 worker 是独立进程，stdout/stderr 被丢弃，父进程只能靠这个文件知道
+/// 「实例到底起没起来」，否则界面会在窗口根本没出现时显示「运行中」。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiLaunchResult {
+    #[serde(default)]
+    pub instance_id: String,
+    #[serde(default)]
+    pub generation: u64,
+    #[serde(default)]
+    pub helper_port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<alunixa_x_core::multi_worker::CodexInstanceIdentity>,
+    /// 成功或失败都写一条；`failed` 表示激活/就绪校验没过。
+    pub status: String,
+    pub message: String,
+    #[serde(default)]
+    pub finished_at_ms: u64,
+    #[serde(default)]
+    pub debug_port: Option<u16>,
+    #[serde(default)]
+    pub pid: Option<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiInstancesPayload {
+    pub instances: Vec<CodexMultiInstance>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexMultiInstanceRequest {
+    pub instance_id: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -569,6 +685,8 @@ pub struct ScriptMarketPayload {
 pub struct SkillsPayload {
     pub skills: Vec<alunixa_x_core::skills::SkillEntry>,
     pub repos: Vec<alunixa_x_core::skills::SkillRepo>,
+    pub repository_skills: Vec<alunixa_x_core::skills::SkillEntry>,
+    pub repo_counts: std::collections::BTreeMap<String, usize>,
     pub backups: Vec<alunixa_x_core::skills::SkillBackup>,
     /// 单个仓库拉取失败不该让整块面板空掉，把错误单独带回前端提示。
     pub repo_errors: Vec<String>,
@@ -913,6 +1031,9 @@ pub async fn launch_codex_multi_instance(request: CodexMultiLaunchRequest) -> Co
 }
 
 fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> CommandResult<Value> {
+    let _operation = multi_instance_mutation_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let stored_settings = match SettingsStore::default().load() {
         Ok(settings) => settings,
         Err(error) => return failed(&format!("读取供应商设置失败：{error}"), json!({})),
@@ -971,9 +1092,69 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
         request.instance_id.trim().to_string()
     };
     let slug = multi_instance_slug(&instance_id);
-    let root = alunixa_x_core::paths::default_app_state_dir()
-        .join("codex-multi")
-        .join(&slug);
+    let root = multi_instance_root(&slug);
+    let previous = load_multi_instance_manifest(&root).ok();
+    if previous
+        .as_ref()
+        .is_some_and(|previous| previous.instance_id != instance_id)
+    {
+        return failed(
+            "该实例目录已属于另一个身份，请使用不同的实例名称。",
+            json!({"instanceId": instance_id}),
+        );
+    }
+    if previous.as_ref().is_some_and(|previous| {
+        !multi_instance_is_running(previous)
+            && previous.pid.is_some_and(|pid| {
+                matches!(
+                    alunixa_x_core::watcher::inspect_process_instance(pid),
+                    alunixa_x_core::watcher::ProcessInstanceState::Running { .. }
+                )
+            })
+    }) {
+        return failed(
+            "已有多开 worker 尚未退出，请等待其退出后重试。",
+            json!({"instanceId": instance_id}),
+        );
+    }
+    if previous.as_ref().is_some_and(|instance| {
+        instance.identity.is_none()
+            && (alunixa_x_core::cdp::endpoint_available(instance.debug_port)
+                || instance.pid.is_some_and(|pid| {
+                    matches!(
+                        alunixa_x_core::watcher::inspect_process_instance(pid),
+                        alunixa_x_core::watcher::ProcessInstanceState::Running { .. }
+                    )
+                }))
+    }) {
+        return failed(
+            "旧多开清单无法确认进程身份，请手动关闭该实例后重新启动。",
+            json!({"instanceId": instance_id}),
+        );
+    }
+    let generation = current_timestamp_ms().max(
+        previous
+            .as_ref()
+            .map_or(1, |instance| instance.generation.saturating_add(1)),
+    );
+    if let Ok(existing) = load_multi_instance_manifest(&root)
+        && multi_instance_is_running(&existing)
+    {
+        return ok(
+            "Codex 多开实例已经在运行。",
+            json!({
+                "instanceId": existing.instance_id,
+                "profileId": existing.profile_id,
+                "pid": existing.pid,
+                "debugPort": existing.debug_port,
+                "helperPort": existing.helper_port,
+                "codexHome": existing.codex_home,
+                "sqliteHome": existing.sqlite_home,
+                "userDataDir": existing.user_data_dir,
+                "appPath": existing.app_path
+            }),
+        );
+    }
     // 先分配端口，再生成 config.toml。Chat Completions 通过实例专属协议代理
     // 转换，配置里的本地 base_url 必须与这个 helper 端口一致。
     let debug_port = select_multi_instance_port(request.debug_port, &instance_id);
@@ -1012,14 +1193,13 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
     } else {
         ""
     };
-    if let Err(error) =
-        alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules_and_proxy_port(
-            &codex_home,
-            &profile,
-            common_config,
-            helper_port,
-        )
-    {
+    if let Err(error) = alunixa_x_core::relay_config::apply_relay_profile_with_preservation(
+        &codex_home,
+        &profile,
+        common_config,
+        helper_port,
+        settings.relay_preserve_nonprovider_settings,
+    ) {
         return failed(
             &format!("应用供应商到多开实例失败：{error}"),
             json!({
@@ -1055,7 +1235,10 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
         return failed("未找到 Codex Desktop，请先设置应用路径。", json!({}));
     };
     let executable = alunixa_x_core::app_paths::build_codex_executable(&app_dir);
-    if !executable.is_file() {
+    // Windows 上包内 exe 的 `is_file()` 可能因 WindowsApps 的 ACL 返回假
+    // （仓库在 app_paths.rs 里记录过「常因 ACL 无法枚举」）。目录在就不要误报
+    // 「可执行文件不存在」——真正的结论交给启动后的就绪校验。
+    if !executable.is_file() && !app_dir.is_dir() {
         return failed(
             &format!("Codex 可执行文件不存在：{}", executable.display()),
             json!({ "appPath": app_dir.to_string_lossy() }),
@@ -1072,6 +1255,55 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
     }
     let worker_settings_path = worker_state_dir.join("settings.json");
     let mut worker_settings = settings.clone();
+    let worker_store = SettingsStore::new(worker_settings_path);
+    let previous_worker_settings = match worker_store.load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            return failed(
+                &format!("读取多开独立设置失败：{error}"),
+                json!({"instanceId": instance_id}),
+            );
+        }
+    };
+    worker_settings.settings_revision = previous_worker_settings.settings_revision.clone();
+    if previous.is_some()
+        && (previous_worker_settings
+            .codex_app_dream_skin_image_path
+            .trim()
+            .is_empty()
+            || alunixa_x_core::dream_skin::is_managed_dream_skin_image(
+                Path::new(&previous_worker_settings.codex_app_dream_skin_image_path),
+                &worker_state_dir,
+            ))
+    {
+        worker_settings.codex_app_dream_skin_enabled =
+            previous_worker_settings.codex_app_dream_skin_enabled;
+        worker_settings.codex_app_dream_skin_paused =
+            previous_worker_settings.codex_app_dream_skin_paused;
+        worker_settings.codex_app_dream_skin_theme =
+            previous_worker_settings.codex_app_dream_skin_theme;
+        worker_settings.codex_app_dream_skin_theme_config =
+            previous_worker_settings.codex_app_dream_skin_theme_config;
+        worker_settings.codex_app_dream_skin_image_path =
+            previous_worker_settings.codex_app_dream_skin_image_path;
+    } else {
+        match alunixa_x_core::dream_skin_library::prepare_instance_theme_snapshot(
+            &alunixa_x_core::paths::default_app_state_dir(),
+            &worker_state_dir,
+            &settings,
+        ) {
+            Ok(snapshot) => {
+                worker_settings.codex_app_dream_skin_theme_config = snapshot.config;
+                worker_settings.codex_app_dream_skin_image_path = snapshot.active_image_path;
+            }
+            Err(error) => {
+                return failed(
+                    &format!("复制实例主题快照失败：{error}"),
+                    json!({"instanceId": instance_id}),
+                );
+            }
+        }
+    }
     worker_settings.codex_app_path = app_dir.to_string_lossy().to_string();
     worker_settings.active_relay_id = profile.id.clone();
     worker_settings.relay_profiles = vec![profile.clone()];
@@ -1092,7 +1324,7 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
     worker_settings
         .codex_extra_args
         .push(format!("--user-data-dir={}", user_data_dir.display()));
-    if let Err(error) = SettingsStore::new(worker_settings_path).save(&worker_settings) {
+    if let Err(error) = worker_store.save(&worker_settings) {
         return failed(
             &format!("保存多开 launcher 设置失败：{error}"),
             json!({ "instanceId": instance_id }),
@@ -1100,9 +1332,13 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
     }
     let worker_options_path = root.join("worker-options.json");
     let worker_options = CodexMultiWorkerOptions {
+        instance_id: instance_id.clone(),
+        generation,
+        user_data_dir: user_data_dir.to_string_lossy().into_owned(),
         app_path: app_dir.to_string_lossy().to_string(),
         debug_port,
         helper_port,
+        state_dir: worker_state_dir.to_string_lossy().to_string(),
     };
     let worker_options_bytes = match serde_json::to_vec_pretty(&worker_options) {
         Ok(bytes) => bytes,
@@ -1150,6 +1386,10 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
         )
         .env("ALUNIXA_X_PROTOCOL_PROXY_PORT", helper_port.to_string())
         .env("XDG_CONFIG_HOME", &shared_config_home)
+        .env(
+            alunixa_x_core::paths::STATE_DIR_ENV,
+            worker_state_dir.as_os_str(),
+        )
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
@@ -1158,6 +1398,7 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
         use std::os::windows::process::CommandExt;
         command.creation_flags(alunixa_x_core::windows_create_no_window());
     }
+    // 回执按 generation 过滤，保留旧结果也不会混淆新启动。
     let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
@@ -1168,6 +1409,36 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
         }
     };
     let pid = child.id();
+    let worker_birth_id = alunixa_x_core::multi_worker::worker_birth_id(&child);
+    let instance = CodexMultiInstance {
+        instance_id: instance_id.clone(),
+        generation,
+        identity: None,
+        profile_id: profile_id.clone(),
+        profile_name: profile.name.clone(),
+        pid: Some(pid),
+        worker_birth_id,
+        debug_port,
+        helper_port,
+        status: "starting".to_string(),
+        // 这里只说「worker 已拉起」。真正的可用性由调试端口与启动结果文件决定，
+        // 否则 Windows 上起不来时界面会一直显示「运行中」。
+        running: false,
+        started_at_ms: current_timestamp_ms(),
+        is_main: false,
+        app_path: Some(app_dir.to_string_lossy().to_string()),
+        codex_home: Some(codex_home.to_string_lossy().to_string()),
+        sqlite_home: Some(sqlite_home.to_string_lossy().to_string()),
+        user_data_dir: Some(user_data_dir.to_string_lossy().to_string()),
+        launch_result: None,
+    };
+    if let Err(error) = save_multi_instance_manifest(&root, &instance) {
+        let _ = terminate_multi_worker(pid, &worker_options_path, worker_birth_id);
+        return failed(
+            &format!("保存 Codex 多开实例信息失败：{error}"),
+            json!({ "instanceId": instance_id }),
+        );
+    }
     // Child drop 不会终止 Unix 子进程；Codex Desktop 自己持有生命周期。
     drop(child);
     let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
@@ -1199,10 +1470,406 @@ fn launch_codex_multi_instance_blocking(request: CodexMultiLaunchRequest) -> Com
     )
 }
 
+#[tauri::command]
+pub async fn list_codex_multi_instances() -> CommandResult<CodexMultiInstancesPayload> {
+    match tauri::async_runtime::spawn_blocking(list_codex_multi_instances_blocking).await {
+        Ok(result) => result,
+        Err(error) => failed(
+            &format!("读取 Codex 运行实例失败：{error}"),
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        ),
+    }
+}
+
+fn list_codex_multi_instances_blocking() -> CommandResult<CodexMultiInstancesPayload> {
+    let _operation = multi_instance_mutation_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let mut instances = Vec::new();
+    if let Ok(settings) = SettingsStore::default().load()
+        && let Ok(Some(latest)) = StatusStore::default().load_latest()
+    {
+        let debug_port = latest.debug_port.unwrap_or(default_debug_port());
+        // 主实例同样以端口为准：`find_codex_processes_for_debug_port` 在 Windows 上
+        // 不区分端口，用它会让主实例行在任何 Codex 进程存在时都显示运行中。
+        let running = alunixa_x_core::cdp::endpoint_available(debug_port);
+        if running {
+            let profile = settings
+                .relay_profiles
+                .iter()
+                .find(|profile| profile.id == settings.active_relay_id);
+            instances.push(CodexMultiInstance {
+                instance_id: "main".to_string(),
+                generation: 0,
+                identity: None,
+                profile_id: settings.active_relay_id.clone(),
+                profile_name: profile
+                    .map(|profile| profile.name.clone())
+                    .unwrap_or_else(|| "主进程".to_string()),
+                pid: None,
+                worker_birth_id: None,
+                debug_port,
+                helper_port: latest.helper_port.unwrap_or(default_helper_port()),
+                status: latest.status,
+                running: true,
+                started_at_ms: latest.started_at_ms,
+                is_main: true,
+                app_path: latest.codex_app,
+                codex_home: Some(
+                    alunixa_x_core::relay_config::default_codex_home_dir()
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+                sqlite_home: None,
+                user_data_dir: None,
+                launch_result: None,
+            });
+        }
+    }
+
+    let root = alunixa_x_core::paths::default_app_state_dir().join("codex-multi");
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(instance) = load_multi_instance_manifest(&path) else {
+                continue;
+            };
+            let running = multi_instance_is_running(&instance);
+            let mut current = instance;
+            current.running = running;
+            current.status =
+                multi_instance_status(running, current.launch_result.as_ref()).to_string();
+            if !running {
+                current.pid = None;
+            }
+            instances.push(current);
+        }
+    }
+    instances.sort_by(|left, right| {
+        left.is_main
+            .cmp(&right.is_main)
+            .reverse()
+            .then_with(|| left.profile_name.cmp(&right.profile_name))
+    });
+    ok(
+        "Codex 运行实例已加载。",
+        CodexMultiInstancesPayload { instances },
+    )
+}
+
+#[tauri::command]
+pub async fn stop_codex_multi_instance(
+    request: CodexMultiInstanceRequest,
+) -> CommandResult<CodexMultiInstancesPayload> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        stop_codex_multi_instance_blocking(&request.instance_id)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => failed(
+            &format!("结束 Codex 多开实例失败：{error}"),
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        ),
+    }
+}
+
+fn stop_codex_multi_instance_blocking(
+    instance_id: &str,
+) -> CommandResult<CodexMultiInstancesPayload> {
+    let operation = multi_instance_mutation_lock()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if instance_id.trim() == "main" {
+        return failed(
+            "主进程请使用重启 Codex 或退出管理器来结束。",
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        );
+    }
+    let path = multi_instance_root(&multi_instance_slug(instance_id));
+    let Some(instance) = load_multi_instance_manifest(&path).ok() else {
+        return failed(
+            &format!("运行实例不存在：{instance_id}"),
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        );
+    };
+    if instance.instance_id != instance_id {
+        return failed(
+            "实例目录身份与请求不一致，未结束任何进程。",
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        );
+    }
+    let Some(identity) = instance
+        .identity
+        .as_ref()
+        .filter(|identity| multi_manifest_identity_matches(&instance, identity))
+    else {
+        return failed(
+            "该清单缺少可验证的实例身份，已拒绝结束进程；请手动关闭旧实例后重新启动。",
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        );
+    };
+    if !multi_instance_is_running(&instance)
+        && !matches!(
+            alunixa_x_core::watcher::inspect_process_instance(identity.process_id),
+            alunixa_x_core::watcher::ProcessInstanceState::NotRunning
+        )
+    {
+        return failed(
+            "无法重新确认该实例的完整身份，已拒绝结束进程。",
+            CodexMultiInstancesPayload {
+                instances: Vec::new(),
+            },
+        );
+    }
+    if multi_instance_is_running(&instance) {
+        match tauri::async_runtime::block_on(
+            alunixa_x_core::multi_worker::terminate_verified_codex_instance(identity),
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                return failed(
+                    "实例身份在停止前已改变，未结束任何进程。",
+                    CodexMultiInstancesPayload {
+                        instances: Vec::new(),
+                    },
+                );
+            }
+            Err(error) => {
+                return failed(
+                    &format!("安全停止实例失败：{error}"),
+                    CodexMultiInstancesPayload {
+                        instances: Vec::new(),
+                    },
+                );
+            }
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while multi_instance_is_running(&instance) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if multi_instance_is_running(&instance) {
+            return failed(
+                "实例仍未退出，请稍后重试。",
+                CodexMultiInstancesPayload {
+                    instances: Vec::new(),
+                },
+            );
+        }
+    }
+    // 保留该代结果作为身份记录，下次启动用新 generation 排除旧结果。
+    if let Some(pid) = instance.pid {
+        let options_path = path.join("worker-options.json");
+        let _ = terminate_multi_worker(pid, &options_path, instance.worker_birth_id);
+    }
+    let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+        "manager.multi_instance_stopped",
+        json!({ "instance_id": instance.instance_id, "debug_port": instance.debug_port }),
+    );
+    drop(operation);
+    list_codex_multi_instances_blocking()
+}
+
+#[tauri::command]
+pub async fn restart_codex_multi_instance(
+    request: CodexMultiInstanceRequest,
+) -> CommandResult<Value> {
+    match tauri::async_runtime::spawn_blocking(move || {
+        restart_codex_multi_instance_blocking(&request.instance_id)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => failed(&format!("重启 Codex 多开实例失败：{error}"), json!({})),
+    }
+}
+
+fn restart_codex_multi_instance_blocking(instance_id: &str) -> CommandResult<Value> {
+    if instance_id.trim() == "main" {
+        return failed(
+            "主进程请使用顶部的重启 Codex。",
+            json!({ "instanceId": "main" }),
+        );
+    }
+    let path = multi_instance_root(&multi_instance_slug(instance_id));
+    let Some(instance) = load_multi_instance_manifest(&path).ok() else {
+        return failed(
+            &format!("运行实例不存在：{instance_id}"),
+            json!({ "instanceId": instance_id }),
+        );
+    };
+    let stop = stop_codex_multi_instance_blocking(instance_id);
+    if stop.status == "failed" {
+        return failed(&stop.message, json!({ "instanceId": instance_id }));
+    }
+    launch_codex_multi_instance_blocking(CodexMultiLaunchRequest {
+        settings: None,
+        profile_id: instance.profile_id,
+        instance_id: instance.instance_id,
+        app_path: instance.app_path.unwrap_or_default(),
+        debug_port: instance.debug_port,
+    })
+}
+
+fn multi_instance_root(slug: &str) -> PathBuf {
+    alunixa_x_core::paths::default_app_state_dir()
+        .join("codex-multi")
+        .join(slug)
+}
+
+fn multi_instance_manifest_path(root: &Path) -> PathBuf {
+    root.join("instance.json")
+}
+
+fn save_multi_instance_manifest(root: &Path, instance: &CodexMultiInstance) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec_pretty(instance)?;
+    alunixa_x_core::settings::atomic_write(&multi_instance_manifest_path(root), &bytes)
+}
+
+fn multi_instance_mutation_lock() -> &'static Mutex<()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    &LOCK
+}
+
+fn multi_manifest_identity_matches(
+    instance: &CodexMultiInstance,
+    identity: &alunixa_x_core::multi_worker::CodexInstanceIdentity,
+) -> bool {
+    instance.generation != 0
+        && identity.instance_id == instance.instance_id
+        && identity.generation == instance.generation
+        && identity.debug_port == instance.debug_port
+        && identity.helper_port == instance.helper_port
+        && instance
+            .user_data_dir
+            .as_ref()
+            .and_then(|path| Path::new(path).canonicalize().ok())
+            .as_ref()
+            == Some(&identity.user_data_dir)
+        && instance
+            .app_path
+            .as_ref()
+            .map(|path| alunixa_x_core::app_paths::build_codex_executable(Path::new(path)))
+            .map(|path| path.canonicalize().unwrap_or(path))
+            .as_ref()
+            == Some(&identity.executable)
+}
+
+fn load_multi_instance_manifest(root: &Path) -> anyhow::Result<CodexMultiInstance> {
+    let mut instance: CodexMultiInstance =
+        serde_json::from_slice(&std::fs::read(multi_instance_manifest_path(root))?)?;
+    if let Some(result) = load_multi_launch_result(root).filter(|result| {
+        result.generation != 0
+            && result.generation == instance.generation
+            && result.instance_id == instance.instance_id
+    }) {
+        if let Some(identity) = &result.identity {
+            let mut updated = instance.clone();
+            updated.debug_port = result.debug_port.unwrap_or(0);
+            updated.helper_port = result.helper_port.unwrap_or(0);
+            if multi_manifest_identity_matches(&updated, identity) {
+                updated.identity = Some(identity.clone());
+                updated.launch_result = Some(result.clone());
+                // 同一代启动回执才可更新清单；读列表不会把旧结果提升为新实例。
+                if instance.identity.as_ref() != Some(identity)
+                    || instance.debug_port != updated.debug_port
+                    || instance.helper_port != updated.helper_port
+                {
+                    save_multi_instance_manifest(root, &updated)?;
+                }
+                instance = updated;
+            }
+        }
+        instance.launch_result = Some(result);
+    }
+    Ok(instance)
+}
+
+fn multi_instance_is_running(instance: &CodexMultiInstance) -> bool {
+    let Some(identity) = instance
+        .identity
+        .as_ref()
+        .filter(|identity| multi_manifest_identity_matches(instance, identity))
+    else {
+        return false;
+    };
+    tauri::async_runtime::block_on(
+        alunixa_x_core::multi_worker::codex_instance_identity_matches(identity),
+    )
+    .unwrap_or(false)
+}
+
+/// 列表里显示的状态：能跑就是运行中；跑不起来且 worker 明确报了失败才是失败，
+/// 否则只是没在运行（例如用户自己关掉了窗口）。
+fn multi_instance_status(running: bool, result: Option<&CodexMultiLaunchResult>) -> &'static str {
+    if running {
+        if result.is_some_and(|result| result.status == "ready_degraded") {
+            return "running_degraded";
+        }
+        return "running";
+    }
+    match result.map(|result| result.status.as_str()) {
+        Some("failed") => "failed",
+        _ => "stopped",
+    }
+}
+
+fn terminate_multi_worker(
+    pid: u32,
+    options_path: &Path,
+    worker_birth_id: Option<u64>,
+) -> anyhow::Result<()> {
+    if pid == std::process::id() {
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        // macOS 没有 Windows 同等的可持有终止句柄。即使先验证 argv/birth，
+        // 再按 PID kill 仍有复用竞争；让 worker 观察其 Browser 身份失配后自行 shutdown。
+        let _ = (options_path, worker_birth_id);
+    }
+    #[cfg(windows)]
+    {
+        // 创建身份、精确参数与 exe 均验证后，使用同一句柄终止，不再按 PID taskkill。
+        let terminated = alunixa_x_core::multi_worker::terminate_verified_worker(
+            pid,
+            options_path,
+            worker_birth_id,
+        )?;
+        if !terminated {
+            let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                "manager.multi_worker_stop_skipped",
+                json!({ "pid": pid, "reason": "identity_unverified" }),
+            );
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    let _ = (pid, options_path, worker_birth_id);
+    Ok(())
+}
+
 /// Hidden child process used by Codex multi-launch. Its environment is isolated
 /// before this function is called, so the normal launcher can safely use its
 /// existing default-home/settings/helper/bridge code without touching the main
 /// Alunixa X instance.
+///
+/// 就绪校验（issue：多开在 Windows 上静默失败）：
+/// launcher 的 `start` 只保证「激活流程走完」，不代表 Codex 真的起来了。
+/// 在 Windows 上按路径启动 MSIX 包内 exe 会丢包身份，进程秒退、CDP 端口永不监听，
+/// 而父进程看不到任何失败信号。这里显式确认调试端口可用，并把结论落盘给父进程，
+/// 让界面显示「启动失败」而不是「运行中」。
 pub fn run_codex_multi_worker(options_path: &Path) -> anyhow::Result<()> {
     let expected_state = options_path
         .parent()
@@ -1213,17 +1880,165 @@ pub fn run_codex_multi_worker(options_path: &Path) -> anyhow::Result<()> {
         "multi_state_home_mismatch"
     );
     let options: CodexMultiWorkerOptions = serde_json::from_slice(&std::fs::read(options_path)?)?;
+
+    // 状态目录以 worker 自己的 options 为准，并且**不用** `set_var` 改进程环境：
+    // 多开 worker 复用管理器进程，启动时已是多线程，edition 2024 下 `set_var` 属未定义
+    // 行为。早先只靠父进程设置 HOME 来隔离也不成立——Windows 上 `directories` 走
+    // SHGetKnownFolderPath、不读 HOME，worker 会读写主实例的状态文件。
+    let instance_state_dir = PathBuf::from(options.state_dir.trim());
+    // 真正生效的等待端口：父进程注入的 `ALUNIXA_X_PROTOCOL_PROXY_PORT` 优先于 options。
+    let effective_helper_port = std::env::var("ALUNIXA_X_PROTOCOL_PROXY_PORT")
+        .ok()
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|port| *port != 0)
+        .unwrap_or(options.helper_port);
+
+    let result_path = options_path
+        .parent()
+        .map(|root| root.join(MULTI_LAUNCH_RESULT_FILE))
+        .unwrap_or_else(|| PathBuf::from(MULTI_LAUNCH_RESULT_FILE));
+    // 状态文件也显式指向实例目录：`StatusStore::default()` 会解析主实例路径，
+    // worker 只应写自己那份 latest-status.json。
+    let instance_status_store = StatusStore::new(instance_state_dir.join("latest-status.json"));
     let launch_options = alunixa_x_launcher::LaunchOptions {
-        app_dir: Some(PathBuf::from(options.app_path)),
+        app_dir: Some(PathBuf::from(&options.app_path)),
         debug_port: options.debug_port,
         helper_port: options.helper_port,
-        status_store: StatusStore::default(),
+        status_store: instance_status_store.clone(),
+        state_dir: Some(instance_state_dir.clone()),
+        codex_home: std::env::var_os("CODEX_HOME").map(PathBuf::from),
+        sqlite_home: std::env::var_os("CODEX_SQLITE_HOME").map(PathBuf::from),
     };
-    alunixa_x_launcher::start(launch_options)?;
-    while alunixa_x_core::cdp::endpoint_available(options.debug_port) {
+    let receipt = match alunixa_x_launcher::start_with_receipt(launch_options) {
+        Ok(receipt) => receipt,
+        Err(error) => {
+            let _ = write_multi_launch_result(
+                &result_path,
+                &CodexMultiLaunchResult {
+                    instance_id: options.instance_id.clone(),
+                    generation: options.generation,
+                    helper_port: Some(effective_helper_port),
+                    identity: None,
+                    status: "failed".into(),
+                    message: format!("启动 Codex 失败：{error:#}"),
+                    finished_at_ms: current_timestamp_ms(),
+                    debug_port: Some(options.debug_port),
+                    pid: None,
+                },
+            );
+            return Ok(());
+        }
+    };
+    let endpoint_ready =
+        wait_for_multi_instance_ready(receipt.debug_port, MULTI_LAUNCH_READY_TIMEOUT);
+    let captured = if endpoint_ready {
+        tauri::async_runtime::block_on(
+            alunixa_x_core::multi_worker::capture_codex_instance_identity(
+                &options.instance_id,
+                options.generation,
+                receipt.debug_port,
+                receipt.helper_port,
+                Path::new(&options.user_data_dir),
+                &alunixa_x_core::app_paths::build_codex_executable(&receipt.app_dir),
+            ),
+        )
+    } else {
+        Err(anyhow::anyhow!("调试端口未就绪"))
+    };
+    let latest = instance_status_store.load_latest().ok().flatten();
+    let ready = captured.is_ok();
+    let injection_degraded = latest
+        .as_ref()
+        .is_some_and(|status| status.status == "running_degraded");
+    let mut message = multi_launch_result_message(ready, receipt.debug_port, latest.as_ref());
+    if let Err(error) = &captured {
+        message.push_str(&format!(" 实例身份验证失败：{error:#}"));
+    }
+    let identity = captured.ok();
+    let _ = write_multi_launch_result(
+        &result_path,
+        &CodexMultiLaunchResult {
+            instance_id: options.instance_id.clone(),
+            generation: options.generation,
+            helper_port: Some(receipt.helper_port),
+            identity: identity.clone(),
+            status: if !ready {
+                "failed"
+            } else if injection_degraded {
+                "ready_degraded"
+            } else {
+                "ready"
+            }
+            .into(),
+            message,
+            finished_at_ms: current_timestamp_ms(),
+            debug_port: Some(receipt.debug_port),
+            pid: identity.as_ref().map(|identity| identity.process_id),
+        },
+    );
+    let Some(identity) = identity else {
+        let _ = alunixa_x_launcher::shutdown();
+        return Ok(());
+    };
+    while tauri::async_runtime::block_on(
+        alunixa_x_core::multi_worker::codex_instance_identity_matches(&identity),
+    )
+    .unwrap_or(false)
+    {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     alunixa_x_launcher::shutdown()
+}
+
+/// 多开实例启动结果文件名（与 `worker-options.json` 同目录）。
+pub const MULTI_LAUNCH_RESULT_FILE: &str = "launch-result.json";
+
+/// 等待多开实例的 CDP 端口就绪；窗口已出现但注入失败同样算未就绪。
+pub fn wait_for_multi_instance_ready(debug_port: u16, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if alunixa_x_core::cdp::endpoint_available(debug_port) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+pub const MULTI_LAUNCH_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// 就绪失败时的用户可读文案：区分「端口没起来」与「launcher 已记下失败原因」。
+fn multi_launch_result_message(
+    ready: bool,
+    debug_port: u16,
+    latest: Option<&alunixa_x_core::status::LaunchStatus>,
+) -> String {
+    if ready {
+        return "Codex 多开实例已就绪。".to_string();
+    }
+    let detail = latest
+        .map(|status| status.message.trim())
+        .filter(|message| !message.is_empty());
+    match detail {
+        Some(detail) => format!(
+            "Codex 多开实例启动后调试端口 {debug_port} 未就绪（{detail}）。\
+             若 Codex 是 Microsoft Store 安装版，请改用包上下文启动或改用非打包版本。"
+        ),
+        None => format!("Codex 多开实例启动后调试端口 {debug_port} 未就绪，Codex 可能已退出。"),
+    }
+}
+
+fn write_multi_launch_result(path: &Path, result: &CodexMultiLaunchResult) -> anyhow::Result<()> {
+    let bytes = serde_json::to_vec_pretty(result)?;
+    alunixa_x_core::settings::atomic_write(path, &bytes)
+}
+
+/// 读取实例的启动结果；文件不存在或不是合法 JSON 时返回 `None`。
+fn load_multi_launch_result(root: &Path) -> Option<CodexMultiLaunchResult> {
+    let contents = std::fs::read_to_string(root.join(MULTI_LAUNCH_RESULT_FILE)).ok()?;
+    serde_json::from_str(&contents).ok()
 }
 
 fn multi_instance_slug(value: &str) -> String {
@@ -1400,6 +2215,61 @@ fn try_acquire_launch_guard() -> Result<LaunchGuard, &'static str> {
         .map_err(|_| "启动或重启正在进行，请等待本次操作完成。")
 }
 
+/// 供自动接管守护线程复用同一把串行锁：它与用户点「启动/重启」必须互斥，
+/// 否则会出现两套 launcher 会话抢同一个官方 App。
+pub fn try_acquire_launch_guard_for_takeover() -> Result<impl Drop, &'static str> {
+    try_acquire_launch_guard()
+}
+
+/// 是否有启动/重启在途（判据用，只读）。
+pub fn launch_in_progress() -> bool {
+    LAUNCH_IN_PROGRESS.load(Ordering::Acquire)
+}
+
+/// 自动接管发起的启动：走与「点启动」完全相同的 launcher 链路。
+///
+/// 与 `start_embedded_launcher` 的唯一区别是入参由守护线程解析，不接受前端传来的
+/// 临时状态。
+pub fn run_auto_takeover_launch(request: LaunchRequest) -> Result<(), String> {
+    if crate::app_is_exiting() {
+        return Err("Alunixa X 正在退出，未启动 Codex".to_string());
+    }
+    let launch_options = alunixa_x_launcher::LaunchOptions {
+        app_dir: (!request.app_path.trim().is_empty())
+            .then(|| PathBuf::from(request.app_path.trim())),
+        debug_port: request.debug_port,
+        helper_port: request.helper_port,
+        status_store: StatusStore::default(),
+        ..Default::default()
+    };
+    alunixa_x_launcher::start(launch_options).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn load_auto_takeover_state() -> CommandResult<crate::auto_takeover::AutoTakeoverPayload> {
+    ok("自动接管状态已加载。", crate::auto_takeover::payload())
+}
+
+#[tauri::command]
+pub fn take_over_codex_now() -> CommandResult<crate::auto_takeover::AutoTakeoverPayload> {
+    match crate::auto_takeover::take_over_now() {
+        Ok(()) => ok("已发起接管。", crate::auto_takeover::payload()),
+        Err(message) => failed(&message, crate::auto_takeover::payload()),
+    }
+}
+
+#[tauri::command]
+pub fn pause_auto_takeover_for_instance() -> CommandResult<crate::auto_takeover::AutoTakeoverPayload>
+{
+    match crate::auto_takeover::pause_until_next_instance() {
+        Ok(()) => ok(
+            "本次不再自动接管，重启官方 App 后恢复。",
+            crate::auto_takeover::payload(),
+        ),
+        Err(message) => failed(&message, crate::auto_takeover::payload()),
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum RestartDisposition {
     LaunchOnly,
@@ -1420,10 +2290,11 @@ fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
         Err(message) => return failed(message, json!({})),
     };
     let request = normalize_launch_request(request);
-    // macOS scopes by debug port; other platforms detect all Codex desktop processes.
-    let app_running =
-        !alunixa_x_core::watcher::find_codex_processes_for_debug_port(request.debug_port)
-            .is_empty();
+    // 按本实例的调试端口判定是否在跑。
+    // 早先用 `find_codex_processes_for_debug_port`，但它在非 macOS 上返回全部
+    // Codex 进程：Windows 上只要有多开实例在跑，就会把「主 Codex 没开」误判成
+    // 「已运行」，进而走进重启分支去停进程。
+    let app_running = alunixa_x_core::cdp::endpoint_available(request.debug_port);
     if restart_disposition(request.sync_active_relay, app_running) == RestartDisposition::LaunchOnly
     {
         return spawn_alunixa_x_launch(request, "Codex 未运行，已按直接启动方式在后台唤起。");
@@ -1468,12 +2339,20 @@ fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
     ));
     let native_browser_shutdown = match stop_alunixa_x_for_restart(
         || {
+            // 主实例在 Windows 上是 AUMID 激活的，命令行未必带调试端口；
+            // 这里允许「按端口没匹配到就退回全局结束」，否则重启会卡在
+            // 「Codex 进程尚未退出」。多开页的结束走的是不允许退回的那个版本。
+            #[cfg(windows)]
+            alunixa_x_core::watcher::stop_codex_processes_for_debug_port_with_fallback(
+                request.debug_port,
+                true,
+            );
+            #[cfg(not(windows))]
             alunixa_x_core::watcher::stop_codex_processes_for_debug_port_and_wait(
                 request.debug_port,
             );
             anyhow::ensure!(
-                alunixa_x_core::watcher::find_codex_processes_for_debug_port(request.debug_port)
-                    .is_empty(),
+                !alunixa_x_core::cdp::endpoint_available(request.debug_port),
                 "Codex 进程尚未退出；未启动新实例"
             );
             Ok(())
@@ -1535,11 +2414,15 @@ fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
             }),
         );
     }
-    let restart_message = "Codex 已请求重启，启动任务正在后台运行。".to_string();
+    let mut restart_message = "Codex 已请求重启，启动任务正在后台运行。".to_string();
     match restart_alunixa_x_after_stop(&request, &home, settings.as_ref(), |request| {
         spawn_after_provider_guard_release(provider_guard, request, start_embedded_launcher)
     }) {
-        Ok(()) => {
+        Ok(warnings) => {
+            for warning in warnings {
+                restart_message.push_str("\n\n");
+                restart_message.push_str(&warning);
+            }
             let (debug_port, helper_port, started_at_ms) =
                 accepted_launch_identity(&request, launch_started_at_ms);
             CommandResult {
@@ -1659,10 +2542,11 @@ fn restart_alunixa_x_after_stop<F>(
     home: &Path,
     settings: Option<&BackendSettings>,
     spawn: F,
-) -> anyhow::Result<()>
+) -> anyhow::Result<Vec<String>>
 where
     F: FnOnce(&LaunchRequest) -> anyhow::Result<()>,
 {
+    let mut warnings = Vec::new();
     let snapshot = if let Some(settings) = settings {
         let snapshot = RelayLiveSnapshot::capture(home)?;
         if let Err(error) = sync_active_relay_to_home(settings, home) {
@@ -1670,6 +2554,11 @@ where
                 anyhow::bail!("同步当前供应商失败：{error}；回滚 live 配置也失败：{restore_error}");
             }
             return Err(error);
+        }
+        if let Some(warning) =
+            alunixa_x_core::aggregate_catalog::subagent_conflict_warning(home, settings)
+        {
+            warnings.push(warning);
         }
         Some(snapshot)
     } else {
@@ -1684,7 +2573,7 @@ where
         }
         return Err(error);
     }
-    Ok(())
+    Ok(warnings)
 }
 
 #[derive(Debug)]
@@ -1744,6 +2633,13 @@ fn sync_active_relay_to_home(
         let aggregate = settings
             .active_aggregate_relay_profile()
             .ok_or_else(|| anyhow::anyhow!("当前聚合供应商配置不完整"))?;
+        if aggregate.model_aggregation_enabled {
+            return alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules(
+                home,
+                &relay,
+                &relay_combined_common_config(settings),
+            );
+        }
         return alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
             home,
             &alunixa_x_core::protocol_proxy::local_responses_proxy_base_url(
@@ -1972,6 +2868,7 @@ fn start_embedded_launcher(request: &LaunchRequest) -> anyhow::Result<()> {
         debug_port: request.debug_port,
         helper_port: request.helper_port,
         status_store: StatusStore::default(),
+        ..Default::default()
     })
 }
 
@@ -2000,6 +2897,7 @@ pub fn resume_existing_codex_background(app: tauri::AppHandle) {
                 .and_then(|status| status.helper_port)
                 .unwrap_or_else(default_helper_port),
             status_store: StatusStore::default(),
+            ..Default::default()
         };
         if let Err(error) = alunixa_x_launcher::resume_if_running(options) {
             let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
@@ -2492,7 +3390,40 @@ pub async fn native_browser_status() -> NativeBrowserDiagnostics {
 
 #[tauri::command]
 pub fn load_settings() -> CommandResult<SettingsPayload> {
-    settings_payload("设置已加载。", "设置读取失败")
+    let Ok(_guard) = relay_switch_mutex().lock() else {
+        return failed(
+            "供应商切换锁已损坏，请重启管理器后再试。",
+            fallback_settings_payload(),
+        );
+    };
+    let store = SettingsStore::default();
+    let home = alunixa_x_core::relay_config::default_codex_home_dir();
+    if let Err(error) = alunixa_x_core::aggregate_catalog::recover_pending_catalog_refresh(&store, &home) {
+        return failed(&format!("模型目录存在待恢复操作：{error}"), fallback_settings_payload());
+    }
+    match alunixa_x_core::provider_import::initialize_local_config_provider(&store, &home) {
+        Ok(_) => {
+            let settings = match store.load() {
+                Ok(settings) => settings,
+                Err(error) => return failed(&format!("重新读取设置失败：{error}"), fallback_settings_payload()),
+            };
+            ok(
+            "设置已加载。",
+            SettingsPayload {
+                revision: settings.settings_revision.clone(),
+                settings,
+                settings_path: alunixa_x_core::paths::default_settings_path()
+                    .to_string_lossy()
+                    .to_string(),
+                user_scripts: user_script_inventory(),
+            },
+        )
+        },
+        Err(error) => failed(
+            &format!("读取本机默认供应商失败：{error}"),
+            fallback_settings_payload(),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -3475,56 +4406,24 @@ pub fn load_ccs_providers() -> CommandResult<CcsProvidersPayload> {
 }
 
 #[tauri::command]
-pub fn import_ccs_providers() -> CommandResult<SettingsPayload> {
+pub fn import_ccs_providers(bindings: Option<std::collections::BTreeMap<String, String>>) -> CommandResult<SettingsPayload> {
     let store = SettingsStore::default();
-    let mut settings = store.load().unwrap_or_default();
-    let providers =
-        match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
-            Ok(source) => source.providers,
-            Err(error) => {
-                let payload = settings_payload_value().unwrap_or_else(|(_, payload)| payload);
-                return failed(&format!("读取 cc-switch 供应商配置失败：{error}"), payload);
-            }
-        };
-
-    let mut existing_keys: Vec<String> = settings
-        .relay_profiles
-        .iter()
-        .map(alunixa_x_core::ccs_import::imported_provider_identity)
-        .collect();
-    let mut existing_ids: Vec<String> = settings
-        .relay_profiles
-        .iter()
-        .map(|profile| profile.id.clone())
-        .collect();
-    let mut imported = 0usize;
-
-    for provider in providers {
-        let key = alunixa_x_core::ccs_import::provider_identity_from_ccs(&provider);
-        if existing_keys.iter().any(|existing| existing == &key) {
-            continue;
-        }
-        let profile = alunixa_x_core::ccs_import::relay_profile_from_ccs(&provider, &existing_ids);
-        existing_ids.push(profile.id.clone());
-        existing_keys.push(key);
-        settings.relay_profiles.push(profile);
-        imported += 1;
-    }
-
-    if imported == 0 {
-        return settings_payload("没有新的 cc-switch 供应商配置需要导入。", "设置读取失败");
-    }
-
-    settings = normalize_settings_before_save(settings);
+    let mut settings = match store.load() {
+        Ok(settings) => settings,
+        Err(error) => return failed(&format!("读取设置失败：{error}"), fallback_settings_payload()),
+    };
+    let source = match alunixa_x_core::ccs_import::resolve_codex_provider_source(&settings.ccs_db_path) {
+        Ok(source) => source,
+        Err(error) => return failed(&format!("读取 cc-switch 供应商配置失败：{error}"), fallback_settings_payload()),
+    };
+    let (imported, linked) = match alunixa_x_core::ccs_import::import_providers_with_origins(&mut settings, &source, &bindings.unwrap_or_default()) {
+        Ok(counts) => counts,
+        Err(error) => return failed(&format!("导入 cc-switch 失败：{error}"), fallback_settings_payload()),
+    };
+    if imported == 0 && linked == 0 { return settings_payload("供应商均已导入，保留已有配置。", "设置读取失败"); }
     match store.save(&settings) {
-        Ok(()) => settings_payload(
-            &format!("已从 cc-switch 导入供应商配置：{imported} 个。"),
-            "导入供应商配置后重新读取设置失败",
-        ),
-        Err(error) => failed(
-            &format!("保存 cc-switch 供应商配置失败：{error}"),
-            settings_payload_value().unwrap_or_else(|(_, payload)| payload),
-        ),
+        Ok(()) => settings_payload(&format!("已导入 {imported} 个供应商，关联 {linked} 个已有供应商；已有配置未覆盖。"), "导入后读取设置失败"),
+        Err(error) => failed(&format!("保存 cc-switch 供应商失败：{error}"), fallback_settings_payload()),
     }
 }
 
@@ -3576,7 +4475,33 @@ pub fn dismiss_pending_provider_import() -> CommandResult<PendingProviderImportP
 }
 
 #[tauri::command]
-pub fn list_local_sessions(
+pub async fn list_local_sessions(
+    request: Option<ListLocalSessionsRequest>,
+) -> CommandResult<LocalSessionsPayload> {
+    let offset = request.as_ref().map_or(0, |request| request.offset);
+    let limit = request
+        .as_ref()
+        .map_or(DEFAULT_LOCAL_SESSIONS_PAGE_SIZE, |request| request.limit)
+        .clamp(1, MAX_LOCAL_SESSIONS_PAGE_SIZE);
+    match tauri::async_runtime::spawn_blocking(move || list_local_sessions_blocking(request)).await
+    {
+        Ok(result) => result,
+        Err(error) => failed(
+            &format!("会话查询后台任务失败：{error}"),
+            LocalSessionsPayload {
+                db_path: String::new(),
+                db_paths: Vec::new(),
+                sessions: Vec::new(),
+                offset,
+                limit,
+                has_more: false,
+                total_count: 0,
+            },
+        ),
+    }
+}
+
+fn list_local_sessions_blocking(
     request: Option<ListLocalSessionsRequest>,
 ) -> CommandResult<LocalSessionsPayload> {
     let request = request.unwrap_or(ListLocalSessionsRequest {
@@ -3585,45 +4510,18 @@ pub fn list_local_sessions(
     });
     let offset = request.offset;
     let limit = request.limit.clamp(1, MAX_LOCAL_SESSIONS_PAGE_SIZE);
-    let fetch_limit = offset.saturating_add(limit).saturating_add(1);
     let home = alunixa_x_core::codex_sqlite::default_codex_home_dir();
     let db_paths = alunixa_x_core::codex_sqlite::codex_session_db_paths_from_home(&home);
-    let mut sessions = Vec::new();
-    let mut session_ids = std::collections::HashSet::new();
-    let mut errors = Vec::new();
-    for db_path in &db_paths {
-        let known_reference_only =
-            alunixa_x_core::codex_sqlite::session_db_has_threads_table(db_path).ok() == Some(false);
-        if known_reference_only {
-            continue;
-        }
-        let adapter = local_session_adapter(db_path);
-        match adapter.list_local_session_ids() {
-            Ok(ids) => session_ids.extend(ids),
-            Err(error) if db_path.exists() => {
-                errors.push(format!("{}: {error}", db_path.to_string_lossy()));
-                continue;
-            }
-            Err(_) => continue,
-        }
-        match adapter.list_local_sessions_limited(fetch_limit) {
-            Ok(mut items) => sessions.append(&mut items),
-            Err(error) if db_path.exists() => {
-                errors.push(format!("{}: {error}", db_path.to_string_lossy()));
-            }
-            Err(_) => {}
-        }
-    }
-    sessions.sort_by(|left, right| {
-        right
-            .updated_at_ms
-            .cmp(&left.updated_at_ms)
-            .then_with(|| right.id.cmp(&left.id))
-    });
-    let mut seen_session_ids = std::collections::HashSet::new();
-    sessions.retain(|session| seen_session_ids.insert(session.id.clone()));
-    let has_more = sessions.len() > offset.saturating_add(limit);
-    let sessions = sessions.into_iter().skip(offset).take(limit).collect();
+    static PAGER: std::sync::OnceLock<std::sync::Mutex<alunixa_x_data::LocalSessionPager>> =
+        std::sync::OnceLock::new();
+    let pager = PAGER.get_or_init(Default::default);
+    let page = match pager.lock() {
+        Ok(mut pager) => pager.list_page(&db_paths, offset, limit),
+        Err(_) => alunixa_x_data::LocalSessionPage {
+            errors: vec!["会话查询缓存不可用，请重启管理窗口。".to_string()],
+            ..Default::default()
+        },
+    };
     let payload = LocalSessionsPayload {
         db_path: db_paths
             .first()
@@ -3633,24 +4531,24 @@ pub fn list_local_sessions(
             .iter()
             .map(|path| path.to_string_lossy().to_string())
             .collect(),
-        sessions,
+        sessions: page.sessions,
         offset,
         limit,
-        has_more,
-        total_count: session_ids.len(),
+        has_more: page.has_more,
+        total_count: page.total_count,
     };
-    let page = offset / limit + 1;
-    if errors.is_empty() {
+    let page_number = (offset / limit).saturating_add(1);
+    if page.errors.is_empty() {
         ok(
             &format!(
-                "已读取第 {page} 页，共 {} 个本地会话。",
+                "已读取第 {page_number} 页，共 {} 个本地会话。",
                 payload.sessions.len()
             ),
             payload,
         )
     } else {
         failed(
-            &format!("读取部分本地会话失败：{}", errors.join("; ")),
+            &format!("读取部分本地会话失败：{}", page.errors.join("; ")),
             payload,
         )
     }
@@ -3736,15 +4634,6 @@ pub fn delete_local_session(request: DeleteLocalSessionRequest) -> CommandResult
     }
 }
 
-fn local_session_adapter(db_path: &Path) -> alunixa_x_data::SQLiteStorageAdapter {
-    alunixa_x_data::SQLiteStorageAdapter::new(
-        db_path,
-        alunixa_x_data::BackupStore::new(
-            alunixa_x_core::paths::default_app_state_dir().join("backups"),
-        ),
-    )
-}
-
 /// 归一化「Codex 应用路径」。**无效路径一律丢弃，不落库。**
 ///
 /// 之前的写法是 normalize 成功才覆盖、失败就原样保留，于是误选的路径会被存进
@@ -3778,8 +4667,9 @@ fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSetti
             &settings.relay_context_config_contents,
         );
     for profile in &mut settings.relay_profiles {
+        let mut normalized = profile.clone();
         if let Err(error) =
-            alunixa_x_core::relay_config::normalize_relay_profile_for_storage(profile)
+            alunixa_x_core::relay_config::normalize_relay_profile_for_storage(&mut normalized)
         {
             log_manager_event(
                 "manager.normalize_relay_profile_for_storage.failed",
@@ -3789,6 +4679,8 @@ fn normalize_settings_before_save(mut settings: BackendSettings) -> BackendSetti
                     "error": error.to_string()
                 }),
             );
+        } else {
+            *profile = normalized;
         }
     }
     let common_config = relay_combined_common_config(&settings);
@@ -4239,6 +5131,48 @@ pub async fn preview_provider_sync() -> CommandResult<Value> {
 }
 
 #[tauri::command]
+pub fn load_provider_sync_recovery() -> CommandResult<Value> {
+    let home = alunixa_x_core::relay_config::default_codex_home_dir();
+    match alunixa_x_data::pending_recovery_journal(&home) {
+        Some(path) => {
+            let recoverable = path.file_name().and_then(|name| name.to_str()) == Some("recovery-journal.json");
+            ok(if recoverable { "发现未完成的历史会话修复，请检查并恢复。" }
+                else { "恢复目录不可读取，请检查目录权限或路径；新的修复已停止。" }, json!({
+                "syncStatus": "partial_failure", "recoveryJournalPath": path,
+                "backupDir": if recoverable { path.parent() } else { None },
+                "recoveryAvailable": recoverable,
+            }))
+        },
+        None => ok("没有待恢复的历史会话修复。", json!({"syncStatus":"none"})),
+    }
+}
+
+#[tauri::command]
+pub async fn recover_provider_sync(backup_dir: String) -> CommandResult<Value> {
+    let home = alunixa_x_core::relay_config::default_codex_home_dir();
+    match tauri::async_runtime::spawn_blocking(move || alunixa_x_data::recover_provider_sync_from_backup(&home, Path::new(&backup_dir))).await {
+        Ok(Ok(report)) => {
+            let payload = json!({
+                "syncStatus": if report.completed { "recovered" } else { "partial_failure" },
+                "recoveryJournalPath": report.recovery_journal_path,
+                "backupDir": report.recovery_journal_path.parent(),
+                "recoveryErrors": report.recovery_errors,
+                "databaseOutcomes": report.database_outcomes.iter().map(|item| json!({
+                    "database": item.database, "attemptedRows": item.attempted_rows,
+                    "restoredRows": item.restored_rows, "remainingRows": item.remaining_rows,
+                })).collect::<Vec<_>>(),
+                "changedSessionFiles": report.remaining_rollout_files,
+                "sqliteRowsUpdated": report.database_outcomes.iter().map(|item| item.remaining_rows).sum::<usize>(),
+            });
+            if report.completed { ok("未完成修复已恢复。", payload) }
+            else { failed("部分改动存在冲突，已保留后来写入的数据，请查看恢复记录。", payload) }
+        },
+        Ok(Err(error)) => failed(&format!("恢复失败：{error}"), json!({})),
+        Err(error) => failed(&format!("恢复任务失败：{error}"), json!({})),
+    }
+}
+
+#[tauri::command]
 pub async fn sync_providers_now(
     window: tauri::WebviewWindow,
     target_provider: Option<String>,
@@ -4361,8 +5295,13 @@ fn provider_sync_command_result(sync: alunixa_x_data::ProviderSyncResult) -> Com
         }
         _ => success_message,
     };
-    let failure_message = format!("历史会话修复未执行：{}", sync.message);
+    let failure_message = if matches!(sync.status, alunixa_x_data::ProviderSyncStatus::PartialFailure) {
+        format!("历史会话修复部分失败，仍有改动需处理：{}", sync.message)
+    } else if matches!(sync.status, alunixa_x_data::ProviderSyncStatus::Failed) {
+        format!("历史会话修复失败：{}", sync.message)
+    } else { format!("历史会话修复未执行：{}", sync.message) };
     let payload = json!({
+        "operationId": sync.backup_dir.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy()),
         "syncStatus": sync.status,
         "targetProvider": sync.target_provider,
         "changedSessionFiles": sync.changed_session_files,
@@ -4378,6 +5317,13 @@ fn provider_sync_command_result(sync: alunixa_x_data::ProviderSyncResult) -> Com
         "repairAudit": sync.repair_audit,
         "backupDir": sync.backup_dir,
         "syncMessage": sync.message,
+        "recoveryJournalPath": sync.recovery_journal_path,
+        "recoveryAvailable": sync.recovery_journal_path.as_ref().is_some_and(|path| path.file_name().and_then(|name| name.to_str()) == Some("recovery-journal.json")),
+        "recoveryErrors": sync.recovery_errors,
+        "databaseOutcomes": sync.database_outcomes.iter().map(|item| json!({
+            "database": item.database, "attemptedRows": item.attempted_rows,
+            "restoredRows": item.restored_rows, "remainingRows": item.remaining_rows,
+        })).collect::<Vec<_>>(),
     });
     if succeeded {
         ok(&success_message, payload)
@@ -4683,13 +5629,17 @@ pub async fn refresh_skill_catalog() -> CommandResult<SkillsPayload> {
 
     for repo in repos.iter().filter(|repo| repo.enabled) {
         let cached = cached_repo_skills(&repo.key());
-        match alunixa_x_core::skills::fetch_repo_skills(repo, &cached).await {
-            Ok(skills) => {
-                store_repo_skills(&repo.key(), &skills);
+        match alunixa_x_core::skills::resolve_repo_skills(repo.clone(), &cached).await {
+            Ok((resolved, skills)) => {
+                if resolved.key() != repo.key() {
+                    let _ = manager.save_repo(resolved.clone(), Some(&repo.key()));
+                    forget_repo_skills(&repo.key());
+                }
+                store_repo_skills(&resolved.key(), &skills);
                 remote.extend(skills);
             }
             Err(error) => {
-                repo_errors.push(format!("{}/{}：{error}", repo.owner, repo.name));
+                repo_errors.push(format!("{}/{}：{error:#}", repo.owner, repo.name));
                 // 拉不动就先用上一次的结果撑着，别让已知的 skill 从列表里消失
                 remote.extend(cached.into_values());
             }
@@ -4713,8 +5663,46 @@ pub async fn refresh_skill_catalog() -> CommandResult<SkillsPayload> {
 #[tauri::command]
 pub fn list_installed_skills() -> CommandResult<SkillsPayload> {
     let manager = default_skills_manager();
-    let payload = skills_payload(&manager, &[], Vec::new());
+    let payload = current_skills_payload(&manager);
     ok("已加载本地 Skills。", payload)
+}
+
+/// 导入 cc-switch 已安装的 Skills。cc-switch 的 Skill 文件位于
+/// `%USERPROFILE%/.cc-switch/skills/<id>/SKILL.md`，不在其 SQLite 数据库中。
+#[tauri::command]
+pub fn import_ccs_skills() -> CommandResult<SkillsPayload> {
+    let manager = default_skills_manager();
+    let root = alunixa_x_core::ccs_import::default_ccs_skills_dir();
+    let Ok(dir) = std::fs::read_dir(&root) else {
+        return failed(
+            &format!("未找到 cc-switch Skills 目录：{}", root.display()),
+            current_skills_payload(&manager),
+        );
+    };
+    let mut imported = 0usize;
+    let mut errors = Vec::new();
+    for entry in dir.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        match manager.import_from_directory(&id, &path) {
+            Ok(_) => imported += 1,
+            Err(error) => errors.push(format!("{id}：{error}")),
+        }
+    }
+    let payload = current_skills_payload(&manager);
+    if errors.is_empty() {
+        ok(&format!("已从 cc-switch 导入 {imported} 个 Skill。"), payload)
+    } else {
+        failed(
+            &format!("已从 cc-switch 导入 {imported} 个 Skill，{} 个失败：{}", errors.len(), errors.join("；")),
+            payload,
+        )
+    }
 }
 
 #[tauri::command]
@@ -4755,12 +5743,23 @@ async fn install_or_update_skill(
             );
         }
     };
-    let Some(skill) = skills.iter().find(|skill| skill.id == id) else {
+    let installed = manager.load_state().installed.get(id).cloned();
+    if installed.as_ref().is_some_and(|item| item.repo_key != repo_key || item.repo_path.is_empty()) {
+        return failed(
+            &format!("{failure_prefix}：旧安装记录缺少来源路径或来源不同，请先备份卸载原项后重新安装。"),
+            current_skills_payload(&manager),
+        );
+    }
+    let Some(mut skill) = skills.iter().find(|skill| match &installed {
+        Some(item) => skill.repo_path == item.repo_path,
+        None => skill.id == id,
+    }).cloned() else {
         return failed(
             &format!("{failure_prefix}：仓库里没有找到 {id}。"),
             current_skills_payload(&manager),
         );
     };
+    if installed.is_some() { skill.id = id.to_string(); }
 
     let zip = match alunixa_x_core::skills::download_repo_zip(&repo).await {
         Ok(bytes) => bytes,
@@ -4771,7 +5770,7 @@ async fn install_or_update_skill(
             );
         }
     };
-    match manager.install_from_zip(skill, &zip) {
+    match manager.install_from_zip(&skill, &zip) {
         Ok(_) => ok(success_message, current_skills_payload(&manager)),
         Err(error) => failed(
             &format!("{failure_prefix}：{error}"),
@@ -4839,14 +5838,72 @@ pub fn delete_skill_backup(backup_id: String) -> CommandResult<SkillsPayload> {
 }
 
 #[tauri::command]
-pub fn upsert_skill_repo(repo: alunixa_x_core::skills::SkillRepo) -> CommandResult<SkillsPayload> {
+pub async fn upsert_skill_repo(repo: alunixa_x_core::skills::SkillRepo, previous_key: Option<String>) -> CommandResult<SkillsPayload> {
     let manager = default_skills_manager();
-    match manager.upsert_repo(repo) {
-        Ok(_) => ok("仓库源已保存。", current_skills_payload(&manager)),
+    match manager.update_repo_enabled_if_unchanged(&repo, previous_key.as_deref()) {
+        Ok(true) => return ok("仓库启用状态已保存。", current_skills_payload(&manager)),
+        Ok(false) => {},
+        Err(error) => return failed(&format!("保存仓库状态失败：{error}"), current_skills_payload(&manager)),
+    }
+    let repo_key = repo.key();
+    let cached = cached_repo_skills(&repo_key);
+    let (repo, skills) = match alunixa_x_core::skills::resolve_repo_skills(repo, &cached).await {
+        Ok(result) => result,
+        Err(error) => {
+            return failed(
+                &format!("仓库验证失败，未保存：{error:#}"),
+                current_skills_payload(&manager),
+            );
+        }
+    };
+    let resolved_key = repo.key();
+    let old_key = previous_key.as_deref().or_else(|| {
+        manager.list_repos().iter().any(|r| r.key() == repo_key).then_some(repo_key.as_str())
+    });
+    match manager.save_repo(repo, old_key) {
+        Ok(_) => {
+            if let Some(old_key) = old_key {
+                if old_key != resolved_key { forget_repo_skills(old_key); }
+            }
+            store_repo_skills(&resolved_key, &skills);
+            let count = skills.len();
+            ok(&format!("仓库已验证并保存，发现 {count} 个 Skill。"), current_skills_payload(&manager))
+        }
         Err(error) => failed(
             &format!("保存仓库源失败：{error}"),
             current_skills_payload(&manager),
         ),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillRepositoryPayload {
+    repo: alunixa_x_core::skills::SkillRepo,
+    skills: Vec<alunixa_x_core::skills::SkillEntry>,
+    skill_count: usize,
+}
+
+#[tauri::command]
+pub async fn inspect_skill_repo(repo: alunixa_x_core::skills::SkillRepo) -> CommandResult<SkillRepositoryPayload> {
+    let manager = default_skills_manager();
+    let cached = cached_repo_skills(&repo.key());
+    match alunixa_x_core::skills::resolve_repo_skills(repo.clone(), &cached).await {
+        Ok((resolved, skills)) => {
+            let count = skills.len();
+            // 预览未保存仓库不会修改仓库设置。
+            if manager.list_repos().iter().any(|r| r.key() == resolved.key()) {
+                store_repo_skills(&resolved.key(), &skills);
+            }
+            ok(&format!("已解析仓库，发现 {count} 个 Skill。"), SkillRepositoryPayload {
+                repo: resolved, skills: manager.merge_entries(&skills).into_iter()
+                    .filter(|s| skills.iter().any(|r| r.id == s.id && r.repo_key == s.repo_key)).collect(),
+                skill_count: count,
+            })
+        }
+        Err(error) => failed(&format!("解析仓库失败：{error:#}"), SkillRepositoryPayload {
+            repo, skills: Vec::new(), skill_count: 0,
+        }),
     }
 }
 
@@ -4870,13 +5927,27 @@ fn skills_payload(
     remote: &[alunixa_x_core::skills::RemoteSkill],
     repo_errors: Vec<String>,
 ) -> SkillsPayload {
+    let repos = manager.list_repos();
+    let all_remote = all_cached_repo_skills();
+    let repository_skills = manager.merge_entries(&all_remote).into_iter()
+        .filter(|skill| all_remote.iter().any(|r| r.id == skill.id && r.repo_key == skill.repo_key))
+        .collect();
+    let repo_counts = repo_skill_cache().lock().ok().map(|cache| {
+        repos.iter().filter_map(|repo| cache.get(&repo.key())
+            .map(|skills| (repo.key(), skills.len()))).collect()
+    }).unwrap_or_default();
+    let remote: Vec<_> = remote.iter().filter(|skill| {
+        repos.iter().any(|repo| repo.enabled && repo.key() == skill.repo_key)
+    }).cloned().collect();
     SkillsPayload {
         skills: if remote.is_empty() {
             manager.local_inventory()
         } else {
-            manager.merge_entries(remote)
+            manager.merge_entries(&remote)
         },
-        repos: manager.list_repos(),
+        repos,
+        repository_skills,
+        repo_counts,
         backups: manager.list_backups(),
         repo_errors,
         skills_dir: manager.source_dir().to_string_lossy().to_string(),
@@ -4909,7 +5980,11 @@ type RepoSkillCache = std::collections::HashMap<
 fn repo_skill_cache() -> &'static std::sync::Mutex<RepoSkillCache> {
     static CACHE: std::sync::OnceLock<std::sync::Mutex<RepoSkillCache>> =
         std::sync::OnceLock::new();
-    CACHE.get_or_init(|| std::sync::Mutex::new(RepoSkillCache::new()))
+    CACHE.get_or_init(|| {
+        let cache = std::fs::read(alunixa_x_core::paths::default_app_state_dir().join("skill-catalog.json"))
+            .ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default();
+        std::sync::Mutex::new(cache)
+    })
 }
 
 fn cached_repo_skills(
@@ -4944,12 +6019,21 @@ fn store_repo_skills(repo_key: &str, skills: &[alunixa_x_core::skills::RemoteSki
                 .map(|skill| (skill.id.clone(), skill.clone()))
                 .collect(),
         );
+        persist_repo_skill_cache(&cache);
     }
 }
 
 fn forget_repo_skills(repo_key: &str) {
     if let Ok(mut cache) = repo_skill_cache().lock() {
         cache.remove(repo_key);
+        persist_repo_skill_cache(&cache);
+    }
+}
+
+fn persist_repo_skill_cache(cache: &RepoSkillCache) {
+    if let Ok(bytes) = serde_json::to_vec(cache) {
+        let path = alunixa_x_core::paths::default_app_state_dir().join("skill-catalog.json");
+        let _ = alunixa_x_core::settings::atomic_write(&path, &bytes);
     }
 }
 
@@ -4963,20 +6047,6 @@ pub fn open_external_url(url: String) -> CommandResult<Value> {
         Ok(()) => ok("已在系统浏览器打开链接。", json!({ "url": trimmed })),
         Err(error) => failed(&format!("打开链接失败：{error}"), json!({ "url": trimmed })),
     }
-}
-
-#[tauri::command]
-pub async fn install_entrypoints() -> InstallActionResult {
-    tauri::async_runtime::spawn_blocking(install::install_entrypoints)
-        .await
-        .unwrap_or_else(|error| install_background_failure("安装入口", error))
-}
-
-#[tauri::command]
-pub async fn uninstall_entrypoints(options: InstallOptions) -> InstallActionResult {
-    tauri::async_runtime::spawn_blocking(move || install::uninstall_entrypoints(options))
-        .await
-        .unwrap_or_else(|error| install_background_failure("卸载入口", error))
 }
 
 #[tauri::command]
@@ -5034,7 +6104,11 @@ pub async fn perform_update(
     app: tauri::AppHandle,
     release: Option<alunixa_x_core::update::Release>,
 ) -> CommandResult<Value> {
-    let result = perform_update_inner(release).await;
+    let emitter = app.clone();
+    let result = perform_update_inner(release, move |progress| {
+        let _ = emitter.emit("update-progress", progress);
+    })
+    .await;
     if result.status == "ok" {
         // 返回下载结果后正常退出，安装器等待后台服务清理完成再替换程序。
         std::thread::spawn(move || {
@@ -5050,13 +6124,17 @@ pub async fn perform_update(
 pub async fn perform_update(
     release: Option<alunixa_x_core::update::Release>,
 ) -> CommandResult<Value> {
-    perform_update_inner(release).await
+    perform_update_inner(release, |_| {}).await
 }
 
 // 无需 app runtime 的业务核心；其它平台测试不应引入 Wry 析构依赖。
-async fn perform_update_inner(
+async fn perform_update_inner<F>(
     release: Option<alunixa_x_core::update::Release>,
-) -> CommandResult<Value> {
+    mut on_progress: F,
+) -> CommandResult<Value>
+where
+    F: FnMut(alunixa_x_core::update::UpdateProgress) + Send,
+{
     let Some(release) = release else {
         return failed(
             "请先检查更新并选择可下载的 Release asset。",
@@ -5067,7 +6145,7 @@ async fn perform_update_inner(
         );
     };
     let download_dir = alunixa_x_core::paths::default_app_state_dir().join("updates");
-    match alunixa_x_core::update::perform_update(&release, &download_dir).await {
+    match alunixa_x_core::update::perform_update_with_progress(&release, &download_dir, &mut on_progress).await {
         Ok(result) => ok(
             if cfg!(target_os = "macos") {
                 "安装包已验证，Alunixa X 将关闭以安装更新，完成后自动重启；失败时保留旧版。"
@@ -5100,37 +6178,17 @@ pub fn load_watcher_state() -> CommandResult<WatcherPayload> {
     ok("开机启动状态已加载。", watcher_payload())
 }
 
+/// 界面上的「开机打开 Alunixa X」开关：开启 = 注册并启用，关闭 = 注销并禁用。
 #[tauri::command]
-pub fn install_watcher() -> CommandResult<WatcherPayload> {
+pub fn set_watcher_enabled(enabled: bool) -> CommandResult<WatcherPayload> {
     let launcher_path =
         alunixa_x_core::install::companion_binary_path(alunixa_x_core::install::SILENT_BINARY);
-    match alunixa_x_core::watcher::install_watcher(&launcher_path, default_debug_port()) {
-        Ok(()) => ok("开机启动已设置。", watcher_payload()),
-        Err(error) => failed(&format!("设置开机启动失败：{error}"), watcher_payload()),
-    }
-}
-
-#[tauri::command]
-pub fn uninstall_watcher() -> CommandResult<WatcherPayload> {
-    match alunixa_x_core::watcher::uninstall_watcher() {
-        Ok(()) => ok("开机启动已移除。", watcher_payload()),
-        Err(error) => failed(&format!("移除开机启动失败：{error}"), watcher_payload()),
-    }
-}
-
-#[tauri::command]
-pub fn enable_watcher() -> CommandResult<WatcherPayload> {
-    match alunixa_x_core::watcher::enable_watcher() {
-        Ok(()) => ok("开机启动已启用。", watcher_payload()),
-        Err(error) => failed(&format!("启用开机启动失败：{error}"), watcher_payload()),
-    }
-}
-
-#[tauri::command]
-pub fn disable_watcher() -> CommandResult<WatcherPayload> {
-    match alunixa_x_core::watcher::disable_watcher() {
-        Ok(()) => ok("开机启动已禁用。", watcher_payload()),
-        Err(error) => failed(&format!("禁用开机启动失败：{error}"), watcher_payload()),
+    match alunixa_x_core::watcher::set_watcher_enabled(enabled, &launcher_path, default_debug_port())
+    {
+        Ok(()) if enabled => ok("开机启动已开启。", watcher_payload()),
+        Ok(()) => ok("开机启动已关闭。", watcher_payload()),
+        Err(error) if enabled => failed(&format!("开启开机启动失败：{error}"), watcher_payload()),
+        Err(error) => failed(&format!("关闭开机启动失败：{error}"), watcher_payload()),
     }
 }
 
@@ -5956,11 +7014,8 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
     };
     match alunixa_x_core::relay_config::test_relay_profile(&profile, &test_model).await {
         Ok(result) => {
-            let status = if result.http_status < 400 {
-                "ok"
-            } else {
-                "failed"
-            };
+            let status = if !result.protocol_valid { "failed" }
+                else if result.completion_status != "completed" { "warning" } else { "ok" };
             let preview = result.response_preview.trim();
             let detail = if preview.is_empty() {
                 "响应内容为空".to_string()
@@ -5977,6 +7032,8 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
                     http_status: result.http_status,
                     endpoint: result.endpoint,
                     response_preview: result.response_preview,
+                    protocol_valid: result.protocol_valid,
+                    completion_status: result.completion_status,
                 },
             }
         }
@@ -5986,6 +7043,8 @@ pub async fn test_relay_profile(profile: RelayProfile) -> CommandResult<RelayPro
                 http_status: 0,
                 endpoint: String::new(),
                 response_preview: String::new(),
+                protocol_valid: false,
+                completion_status: "failed".into(),
             },
         ),
     }
@@ -6255,11 +7314,8 @@ pub async fn diagnose_relay_profile(profile: RelayProfile) -> CommandResult<Prov
 
     match alunixa_x_core::relay_config::test_relay_profile(&profile, &test_model).await {
         Ok(result) => {
-            let status = if result.http_status < 400 {
-                "ok"
-            } else {
-                "failed"
-            };
+            let status = if !result.protocol_valid { "failed" }
+                else if result.completion_status != "completed" { "warning" } else { "ok" };
             let preview = result.response_preview.trim();
             checks.push(ProviderDoctorCheck {
                 id: "request".to_string(),
@@ -6484,6 +7540,46 @@ fn apply_aggregate_relay_injection_to_home(
     home: &Path,
     session_provider: RelaySessionProvider,
 ) -> CommandResult<RelayPayload> {
+    // 模型聚合需要和普通供应商切换共用 catalog 写盘链路；旧的直接代理
+    // 写入路径保留给未开启模型聚合的旧配置和无 settings 测试调用。
+    if let Ok(settings) = SettingsStore::default().load() {
+        let profile = settings.active_relay_profile();
+        if profile.relay_mode == RelayMode::Aggregate
+            && settings
+                .active_aggregate_relay_profile()
+                .is_some_and(|aggregate| aggregate.model_aggregation_enabled)
+        {
+            let common_config = relay_combined_common_config(&settings);
+            match alunixa_x_core::relay_config::apply_relay_profile_to_home_with_switch_rules(
+                home,
+                &profile,
+                &common_config,
+            ) {
+                Ok(result) => {
+                    let status = alunixa_x_core::relay_config::relay_status_from_home(home);
+                    let mut message =
+                        "聚合供应商配置和模型目录已写入，选中的模型会固定发送到对应成员。"
+                            .to_string();
+                    if let Some(warning) =
+                        alunixa_x_core::aggregate_catalog::subagent_conflict_warning(
+                            home, &settings,
+                        )
+                    {
+                        message.push_str("\n\n");
+                        message.push_str(&warning);
+                    }
+                    return ok(&message, relay_payload(status, result.backup_path));
+                }
+                Err(error) => {
+                    let status = alunixa_x_core::relay_config::relay_status_from_home(home);
+                    return failed(
+                        &format!("写入聚合供应商配置失败：{error}"),
+                        relay_payload(status, None),
+                    );
+                }
+            }
+        }
+    }
     match alunixa_x_core::relay_config::apply_relay_config_to_home_with_session_provider(
         home,
         &alunixa_x_core::protocol_proxy::local_responses_proxy_base_url(
@@ -7359,6 +8455,25 @@ fn default_log_lines() -> usize {
 mod tests {
     use super::*;
 
+    #[test]
+    fn skills_payload_hides_disabled_repository_catalog() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = alunixa_x_core::skills::SkillsManager::new(
+            temp.path().join("skills"), temp.path().join("backups"),
+            temp.path().join("skills.json"), temp.path().join("home"),
+        );
+        let mut repo = alunixa_x_core::skills::parse_repo_key("acme/kit@main").unwrap();
+        let remote = vec![alunixa_x_core::skills::RemoteSkill {
+            id: "alpha".to_string(), name: "alpha".to_string(), description: String::new(),
+            repo_key: repo.key(), repo_path: "alpha".to_string(), content_hash: "v1".to_string(),
+        }];
+        manager.upsert_repo(repo.clone()).unwrap();
+        assert_eq!(skills_payload(&manager, &remote, Vec::new()).skills.len(), 1);
+        repo.enabled = false;
+        manager.upsert_repo(repo).unwrap();
+        assert!(skills_payload(&manager, &remote, Vec::new()).skills.is_empty());
+    }
+
     /// 进程级全局状态的测试锁。
     ///
     /// 不止保护 `CODEX_HOME`：`paths::set_settings_path_for_tests`、
@@ -7658,7 +8773,45 @@ cwd = \"/tmp\"
             updated_workspace_roots: 0,
             encrypted_content_warning: None,
             repair_audit: alunixa_x_data::ProviderSyncAudit::default(),
+            recovery_journal_path: None,
+            recovery_errors: Vec::new(),
+            database_outcomes: Vec::new(),
         }
+    }
+
+    #[test]
+    fn partial_provider_sync_exposes_residual_counts_and_recovery_path() {
+        let mut sync = provider_sync_result_for_test(alunixa_x_data::ProviderSyncStatus::PartialFailure, "concurrent update preserved");
+        sync.backup_dir = Some(PathBuf::from("/artificial/operation-1"));
+        sync.recovery_journal_path = Some(PathBuf::from("/artificial/operation-1/recovery-journal.json"));
+        sync.sqlite_rows_updated = 3;
+        sync.recovery_errors = vec!["人工冲突".into()];
+        let result = provider_sync_command_result(sync);
+        assert_eq!(result.status, "failed");
+        assert!(result.message.contains("部分失败"));
+        assert_eq!(result.payload["sqliteRowsUpdated"], 3);
+        assert_eq!(result.payload["operationId"], "operation-1");
+        assert_eq!(result.payload["recoveryJournalPath"], "/artificial/operation-1/recovery-journal.json");
+    }
+
+    #[test]
+    fn manager_stale_save_returns_latest_snapshot_without_overwriting_patch() {
+        let _guard = lock_codex_home_for_test();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("settings.json");
+        let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(path));
+        let store = SettingsStore::default();
+        store.save(&BackendSettings { enhancements_enabled: false, ..BackendSettings::default() }).unwrap();
+        let stale = store.load().unwrap();
+        let revision = stale.settings_revision.clone();
+        store.update(json!({"providerSyncEnabled":true})).unwrap();
+        let current_revision = store.revision().unwrap();
+        let result = save_settings(stale, Some(revision));
+        alunixa_x_core::paths::set_settings_path_for_tests(previous);
+        assert_eq!(result.status, "failed");
+        assert!(result.message.contains("revision_conflict"));
+        assert!(result.payload.settings.provider_sync_enabled);
+        assert_eq!(result.payload.revision, current_revision);
     }
 
     #[test]
@@ -7890,7 +9043,7 @@ base_url = "https://example.invalid/v1"
 
     #[test]
     fn update_install_requires_release_payload() {
-        let result = tauri::async_runtime::block_on(perform_update_inner(None));
+        let result = tauri::async_runtime::block_on(perform_update_inner(None, |_| {}));
 
         assert_eq!(result.status, "failed");
         assert!(result.message.contains("请先检查更新"));
@@ -8129,12 +9282,20 @@ base_url = "https://example.invalid/v1"
 
     #[test]
     fn aggregate_relay_injection_writes_local_proxy_without_chatgpt_auth() {
+        let _guard = lock_codex_home_for_test();
         let temp = tempfile::tempdir().unwrap();
+        // 只验证旧聚合链路，不读取运行中管理器的真实聚合设置和登录快照。
+        // 本地主线的同名单测（e0cb49cd）与远端（eb241dbf）做的是同一件事，
+        // 这里采用远端版本：额外写入一份默认 settings.json，隔离更彻底。
+        let settings_path = temp.path().join("settings.json");
+        std::fs::write(&settings_path, serde_json::to_vec(&BackendSettings::default()).unwrap()).unwrap();
+        let previous = alunixa_x_core::paths::set_settings_path_for_tests(Some(settings_path));
 
         let result = apply_aggregate_relay_injection_to_home(
             temp.path(),
             alunixa_x_core::settings::RelaySessionProvider::Custom,
         );
+        alunixa_x_core::paths::set_settings_path_for_tests(previous);
         let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
 
         assert_eq!(result.status, "ok");
@@ -8258,9 +9419,12 @@ base_url = "https://example.invalid/v1"
                 id: "aggregate".to_string(),
                 name: "Aggregate".to_string(),
                 session_provider: alunixa_x_core::settings::RelaySessionProvider::Custom,
+                model_aggregation_enabled: false,
                 strategy: alunixa_x_core::settings::AggregateRelayStrategy::Failover,
                 members: Vec::new(),
                 routes: Vec::new(),
+                default_relay_id: String::new(),
+                sync_default_member_login: false,
             }],
             ..BackendSettings::default()
         };
@@ -8290,9 +9454,12 @@ base_url = "https://example.invalid/v1"
                 id: "aggregate".to_string(),
                 name: "Aggregate".to_string(),
                 session_provider: alunixa_x_core::settings::RelaySessionProvider::Custom,
+                model_aggregation_enabled: false,
                 strategy: alunixa_x_core::settings::AggregateRelayStrategy::Failover,
                 members: Vec::new(),
                 routes: Vec::new(),
+                default_relay_id: String::new(),
+                sync_default_member_login: false,
             }],
             ..BackendSettings::default()
         };
@@ -8306,6 +9473,64 @@ base_url = "https://example.invalid/v1"
             auth.get("OPENAI_API_KEY").and_then(|item| item.as_str()),
             Some("alunixa-x-aggregate")
         );
+    }
+
+    /// 模型聚合 + `[features] multi_agent_v2` 时，重启同步要带回冲突提示，
+    /// 否则跨供应商子代理会在加密任务上静默失败（issue：feature flag 优先于目录）。
+    #[test]
+    fn model_aggregation_restart_reports_multi_agent_v2_conflict() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("config.toml"),
+            "model = \"old\"\n[features]\nmulti_agent_v2 = true\n",
+        )
+        .unwrap();
+        let settings = BackendSettings {
+            active_relay_id: "aggregate".to_string(),
+            active_aggregate_relay_id: "aggregate".to_string(),
+            relay_profiles: vec![
+                RelayProfile {
+                    id: "deepseek".to_string(),
+                    name: "DeepSeek".to_string(),
+                    model: "deepseek-chat".to_string(),
+                    base_url: "https://deepseek.example/v1".to_string(),
+                    api_key: "sk-test-redacted".to_string(),
+                    relay_mode: alunixa_x_core::settings::RelayMode::PureApi,
+                    ..RelayProfile::default()
+                },
+                RelayProfile {
+                    id: "aggregate".to_string(),
+                    relay_mode: alunixa_x_core::settings::RelayMode::Aggregate,
+                    ..RelayProfile::default()
+                },
+            ],
+            aggregate_relay_profiles: vec![alunixa_x_core::settings::AggregateRelayProfile {
+                id: "aggregate".to_string(),
+                name: "Aggregate".to_string(),
+                session_provider: alunixa_x_core::settings::RelaySessionProvider::Custom,
+                model_aggregation_enabled: true,
+                strategy: alunixa_x_core::settings::AggregateRelayStrategy::Failover,
+                members: vec![alunixa_x_core::settings::AggregateRelayMember {
+                    relay_id: "deepseek".to_string(),
+                    weight: 1,
+                }],
+                routes: Vec::new(),
+                default_relay_id: String::new(),
+                sync_default_member_login: false,
+            }],
+            ..BackendSettings::default()
+        };
+
+        let warnings = restart_alunixa_x_after_stop(
+            &launch_request(true),
+            temp.path(),
+            Some(&settings),
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("multi_agent_v2"), "{warnings:?}");
     }
 
     #[test]
@@ -8634,7 +9859,7 @@ base_url = "https://example.invalid/v1"
         unsafe {
             std::env::set_var("CODEX_HOME", &codex_home);
         }
-        let result = list_local_sessions(None);
+        let result = tauri::async_runtime::block_on(list_local_sessions(None));
 
         assert_eq!(result.status, "ok");
         assert_eq!(result.payload.sessions.len(), 1);
@@ -8655,7 +9880,7 @@ base_url = "https://example.invalid/v1"
             .execute("INSERT INTO threads VALUES ('t3', '', 'Oldest', 50)", [])
             .unwrap();
 
-        let first_page = list_local_sessions(Some(ListLocalSessionsRequest {
+        let first_page = list_local_sessions_blocking(Some(ListLocalSessionsRequest {
             offset: 0,
             limit: 2,
         }));
@@ -8665,7 +9890,7 @@ base_url = "https://example.invalid/v1"
         assert!(first_page.payload.has_more);
         assert_eq!(first_page.payload.total_count, 3);
 
-        let second_page = list_local_sessions(Some(ListLocalSessionsRequest {
+        let second_page = list_local_sessions_blocking(Some(ListLocalSessionsRequest {
             offset: 2,
             limit: 2,
         }));
@@ -8675,6 +9900,40 @@ base_url = "https://example.invalid/v1"
         assert_eq!(second_page.payload.sessions[0].id, "t3");
         assert!(!second_page.payload.has_more);
         assert_eq!(second_page.payload.total_count, 3);
+    }
+
+    #[test]
+    fn list_local_sessions_returns_partial_payload_and_clamps_extreme_pages() {
+        let _codex_home_guard = lock_codex_home_for_test();
+        let temp = tempfile::tempdir().unwrap();
+        let previous_codex_home = std::env::var_os("CODEX_HOME");
+        let home = temp.path().join("codex-home");
+        let sqlite = home.join("sqlite");
+        std::fs::create_dir_all(&sqlite).unwrap();
+        create_minimal_thread_db(&sqlite.join("state_5.sqlite"), "valid", "Valid", 10);
+        std::fs::write(home.join("state_5.sqlite"), b"not a database").unwrap();
+        unsafe {
+            std::env::set_var("CODEX_HOME", &home);
+        }
+        let first =
+            tauri::async_runtime::block_on(list_local_sessions(Some(ListLocalSessionsRequest {
+                offset: 0,
+                limit: 0,
+            })));
+        let beyond = list_local_sessions_blocking(Some(ListLocalSessionsRequest {
+            offset: usize::MAX,
+            limit: usize::MAX,
+        }));
+        restore_codex_home(previous_codex_home);
+        assert_eq!(first.status, "failed");
+        assert_eq!(first.payload.limit, 1);
+        assert_eq!(first.payload.total_count, 1);
+        assert_eq!(first.payload.sessions[0].id, "valid");
+        assert_eq!(beyond.status, "failed");
+        assert_eq!(beyond.payload.limit, MAX_LOCAL_SESSIONS_PAGE_SIZE);
+        assert_eq!(beyond.payload.total_count, 1);
+        assert!(beyond.payload.sessions.is_empty());
+        assert!(!beyond.payload.has_more);
     }
 
     #[test]
@@ -8703,7 +9962,7 @@ base_url = "https://example.invalid/v1"
         unsafe {
             std::env::set_var("CODEX_HOME", &codex_home);
         }
-        let result = list_local_sessions(None);
+        let result = list_local_sessions_blocking(None);
         restore_codex_home(previous_codex_home);
 
         assert_eq!(result.status, "ok");
@@ -9422,6 +10681,271 @@ model_reasoning_effort = "high"
         assert!(first > 0);
         assert!(second > 0);
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn multi_instance_manifest_roundtrips_runtime_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let instance = CodexMultiInstance {
+            instance_id: "zhipu".to_string(),
+            generation: 99,
+            identity: None,
+            profile_id: "profile-zhipu".to_string(),
+            profile_name: "Zhipu GLM".to_string(),
+            pid: Some(1234),
+            worker_birth_id: Some(123456789),
+            debug_port: 9456,
+            helper_port: 9457,
+            status: "starting".to_string(),
+            running: true,
+            started_at_ms: 99,
+            is_main: false,
+            app_path: Some("/Applications/Codex.app".to_string()),
+            codex_home: Some("/tmp/codex-home".to_string()),
+            sqlite_home: Some("/tmp/sqlite-home".to_string()),
+            user_data_dir: Some("/tmp/user-data".to_string()),
+            launch_result: None,
+        };
+        save_multi_instance_manifest(temp.path(), &instance).unwrap();
+        assert_eq!(
+            load_multi_instance_manifest(temp.path())
+                .unwrap()
+                .profile_name,
+            "Zhipu GLM"
+        );
+        assert_eq!(
+            load_multi_instance_manifest(temp.path())
+                .unwrap()
+                .debug_port,
+            9456
+        );
+    }
+
+    #[test]
+    fn multi_instance_receipt_requires_same_generation_paths_and_ports() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("user data");
+        let app = temp.path().join("Codex.app");
+        std::fs::create_dir(&data).unwrap();
+        std::fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+        std::fs::write(app.join("Contents/MacOS/Codex"), "fixture").unwrap();
+        // build_codex_executable 在 Windows 目标使用另一入口，测试仍只读临时目录。
+        std::fs::write(app.join("Codex.exe"), "fixture").unwrap();
+        let executable = alunixa_x_core::app_paths::build_codex_executable(&app);
+        let identity = alunixa_x_core::multi_worker::CodexInstanceIdentity {
+            instance_id: "fixture".into(),
+            generation: 7,
+            debug_port: 19401,
+            helper_port: 19402,
+            user_data_dir: data.canonicalize().unwrap(),
+            browser_id: "browser-A".into(),
+            process_id: 123,
+            process_birth_id: 456,
+            executable: executable.canonicalize().unwrap(),
+        };
+        let instance = CodexMultiInstance {
+            instance_id: "fixture".into(),
+            generation: 7,
+            identity: None,
+            profile_id: "p".into(),
+            profile_name: "Fixture".into(),
+            pid: None,
+            worker_birth_id: None,
+            debug_port: 19400,
+            helper_port: 19402,
+            status: "starting".into(),
+            running: false,
+            started_at_ms: 7,
+            is_main: false,
+            app_path: Some(app.to_string_lossy().into_owned()),
+            codex_home: None,
+            sqlite_home: None,
+            user_data_dir: Some(data.to_string_lossy().into_owned()),
+            launch_result: None,
+        };
+        save_multi_instance_manifest(temp.path(), &instance).unwrap();
+        let mut result = CodexMultiLaunchResult {
+            instance_id: "fixture".into(),
+            generation: 6,
+            helper_port: Some(19402),
+            identity: Some(identity.clone()),
+            status: "ready".into(),
+            message: "fixture".into(),
+            finished_at_ms: 8,
+            debug_port: Some(19401),
+            pid: Some(123),
+        };
+        let result_path = temp.path().join(MULTI_LAUNCH_RESULT_FILE);
+        write_multi_launch_result(&result_path, &result).unwrap();
+        let old = load_multi_instance_manifest(temp.path()).unwrap();
+        assert!(old.identity.is_none());
+        assert_eq!(old.debug_port, 19400);
+        result.generation = 7;
+        write_multi_launch_result(&result_path, &result).unwrap();
+        let current = load_multi_instance_manifest(temp.path()).unwrap();
+        assert_eq!(current.debug_port, 19401);
+        assert_eq!(current.identity, Some(identity.clone()));
+        assert!(multi_manifest_identity_matches(&current, &identity));
+        let mut wrong = identity.clone();
+        wrong.instance_id = "neighbor".into();
+        assert!(!multi_manifest_identity_matches(&current, &wrong));
+        wrong = identity.clone();
+        wrong.generation += 1;
+        assert!(!multi_manifest_identity_matches(&current, &wrong));
+        wrong = identity.clone();
+        wrong.helper_port += 1;
+        assert!(!multi_manifest_identity_matches(&current, &wrong));
+        wrong = identity;
+        wrong.user_data_dir = temp.path().canonicalize().unwrap();
+        assert!(!multi_manifest_identity_matches(&current, &wrong));
+        assert!(!multi_instance_is_running(&instance));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn multi_instance_worker_stop_does_not_kill_a_pid_with_lookalike_arguments() {
+        use std::os::unix::process::CommandExt;
+        let temp = tempfile::tempdir().unwrap();
+        let options = temp.path().join("worker-options.json");
+        std::fs::write(&options, "{}").unwrap();
+        let mut child = std::process::Command::new("/bin/sleep")
+            .arg0(format!("AlunixaX --alunixa-x-multi-worker {}", options.display()))
+            .arg("30").spawn().unwrap();
+        let result = terminate_multi_worker(child.id(), &options, None);
+        let remained_alive = child.try_wait().unwrap().is_none();
+        // 只清理本测试持有 Child 的合成进程，不借用真实应用的 PID。
+        let _ = child.kill();
+        let _ = child.wait();
+        result.unwrap();
+        assert!(remained_alive);
+    }
+
+    // 多开在 Windows 上曾经「窗口没出现、列表却显示运行中」：现在状态由
+    // worker 落盘的启动结果 + 端口判活共同决定，两者都要有测试守住。
+    #[test]
+    fn multi_instance_status_reports_worker_failure_instead_of_running() {
+        let failed = CodexMultiLaunchResult {
+            instance_id: String::new(),
+            generation: 0,
+            helper_port: None,
+            identity: None,
+            status: "failed".to_string(),
+            message: "调试端口 9456 未就绪".to_string(),
+            finished_at_ms: 12,
+            debug_port: Some(9456),
+            pid: None,
+        };
+        let ready = CodexMultiLaunchResult {
+            instance_id: String::new(),
+            generation: 0,
+            helper_port: None,
+            identity: None,
+            status: "ready".to_string(),
+            message: "Codex 多开实例已就绪。".to_string(),
+            finished_at_ms: 13,
+            debug_port: Some(9456),
+            pid: Some(4321),
+        };
+
+        let degraded = CodexMultiLaunchResult {
+            instance_id: String::new(),
+            generation: 0,
+            helper_port: None,
+            identity: None,
+            status: "ready_degraded".to_string(),
+            message: "实例已就绪但增强未注入".to_string(),
+            finished_at_ms: 14,
+            debug_port: Some(9456),
+            pid: Some(4321),
+        };
+
+        assert_eq!(multi_instance_status(true, Some(&failed)), "running");
+        assert_eq!(multi_instance_status(false, Some(&failed)), "failed");
+        // 注入降级要如实显示，不能当成就绪也不能当成失败。
+        assert_eq!(
+            multi_instance_status(true, Some(&degraded)),
+            "running_degraded"
+        );
+        assert_eq!(multi_instance_status(false, Some(&ready)), "stopped");
+        assert_eq!(multi_instance_status(false, Some(&degraded)), "stopped");
+        // 没有结果文件（worker 还没写、或用户自己关了窗口）不算失败。
+        assert_eq!(multi_instance_status(false, None), "stopped");
+    }
+
+    #[test]
+    fn multi_launch_result_roundtrips_through_instance_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let result = CodexMultiLaunchResult {
+            instance_id: String::new(), generation: 0, helper_port: None, identity: None,
+            status: "failed".to_string(),
+            message: "Codex 多开实例启动后调试端口 9456 未就绪，Codex 可能已退出。".to_string(),
+            finished_at_ms: 1234,
+            debug_port: Some(9456),
+            pid: None,
+        };
+
+        assert!(load_multi_launch_result(temp.path()).is_none());
+        write_multi_launch_result(&temp.path().join(MULTI_LAUNCH_RESULT_FILE), &result).unwrap();
+        let loaded = load_multi_launch_result(temp.path()).unwrap();
+        assert_eq!(loaded.status, "failed");
+        assert_eq!(loaded.debug_port, Some(9456));
+        assert_eq!(loaded.message, result.message);
+    }
+
+    #[test]
+    fn multi_launch_result_message_prefers_launcher_failure_detail() {
+        let ready = multi_launch_result_message(true, 9456, None);
+        assert!(ready.contains("已就绪"));
+
+        let without_detail = multi_launch_result_message(false, 9456, None);
+        assert!(without_detail.contains("9456"));
+        assert!(without_detail.contains("可能已退出"));
+
+        let with_detail = multi_launch_result_message(
+            false,
+            9456,
+            Some(&alunixa_x_core::status::LaunchStatus {
+                status: "failed".to_string(),
+                message: "该进程没有程序包标识符".to_string(),
+                ..Default::default()
+            }),
+        );
+        assert!(with_detail.contains("该进程没有程序包标识符"));
+        assert!(with_detail.contains("Microsoft Store"));
+    }
+
+    // 旧版 manifest 里没有 launchResult 字段，升级后必须仍能读出来（默认 None）。
+    #[test]
+    fn legacy_multi_instance_manifest_without_launch_result_still_loads() {
+        let temp = tempfile::tempdir().unwrap();
+        let legacy = serde_json::json!({
+            "instanceId": "zhipu",
+            "profileId": "profile-zhipu",
+            "profileName": "Zhipu GLM",
+            "pid": 1234,
+            "debugPort": 9456,
+            "helperPort": 9457,
+            "status": "running",
+            "running": true,
+            "startedAtMs": 99,
+            "isMain": false
+        });
+        let bytes = serde_json::to_vec_pretty(&legacy).unwrap();
+        alunixa_x_core::settings::atomic_write(&multi_instance_manifest_path(temp.path()), &bytes)
+            .unwrap();
+
+        let instance = load_multi_instance_manifest(temp.path()).unwrap();
+        assert!(instance.launch_result.is_none());
+        assert!(instance.worker_birth_id.is_none());
+        assert_eq!(instance.debug_port, 9456);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn multi_worker_stop_never_terminates_current_process() {
+        let options = std::env::temp_dir().join("alunixa-x-worker-options-test.json");
+        let pid = std::process::id();
+        terminate_multi_worker(pid, &options, None).unwrap();
     }
 
     #[test]

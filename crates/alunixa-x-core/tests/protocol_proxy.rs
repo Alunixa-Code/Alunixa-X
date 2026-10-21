@@ -2,7 +2,8 @@ use alunixa_x_core::protocol_proxy::{
     ChatSseToResponsesConverter, CompactionSseConverter, ProxySessionHeaders,
     audio_transcriptions_url, chat_completion_to_response,
     chat_completion_to_response_with_request, chat_completions_url, chat_sse_to_responses_sse,
-    chat_sse_to_responses_sse_with_request, image_edits_url, image_generations_url,
+    chat_sse_to_responses_sse_with_request, ensure_web_search_tool_for_history,
+    image_edits_url, image_generations_url,
     is_audio_transcriptions_proxy_path, is_chat_completions_proxy_path, is_image_edits_proxy_path,
     is_image_generations_proxy_path, is_models_proxy_path, is_responses_compact_proxy_path,
     is_responses_proxy_path, models_url, open_audio_transcriptions_proxy_request,
@@ -69,6 +70,290 @@ fn compaction_trigger_detection() {
 }
 
 #[test]
+fn web_search_history_restores_declaration_without_changing_history_or_function_tools() {
+    let mut request = json!({
+        "input": [{"type": "web_search_call", "id": "ws_test", "status": "completed",
+            "action": {"type": "search", "query": "example"}}],
+        "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
+        "tool_choice": "auto"
+    });
+    let original = request.clone();
+    assert!(ensure_web_search_tool_for_history(&mut request));
+    assert_eq!(request["input"], original["input"]);
+    assert_eq!(request["tools"][0], original["tools"][0]);
+    assert_eq!(request["tool_choice"], original["tool_choice"]);
+    assert_eq!(
+        request["tools"][1],
+        json!({"type": "web_search", "external_web_access": false})
+    );
+    let repaired = request.clone();
+    assert!(!ensure_web_search_tool_for_history(&mut request));
+    assert_eq!(request, repaired, "repair must be idempotent");
+}
+
+#[test]
+fn web_search_history_keeps_existing_declarations_including_additional_tools() {
+    for declaration in [
+        "web_search",
+        "web_search_preview",
+        "web_search_preview_2025_03_11",
+    ] {
+        for additional in [false, true] {
+            let tools = json!([{"type": declaration, "search_context_size": "low"}]);
+            let mut request = json!({
+                "input": [{"type": "web_search_call", "id": "ws_test"}],
+                "tools": if additional { json!([]) } else { tools.clone() }
+            });
+            if additional {
+                request["input"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!({"type": "additional_tools", "role": "developer", "tools": tools}));
+            }
+            let original = request.clone();
+            assert!(!ensure_web_search_tool_for_history(&mut request));
+            assert_eq!(request, original);
+        }
+    }
+}
+
+#[test]
+fn web_search_history_preserves_no_tool_semantics_and_explicit_tool_choices() {
+    for tools in [None, Some(Value::Null), Some(json!([]))] {
+        for choice in [
+            None,
+            Some(Value::Null),
+            Some(json!("auto")),
+            Some(json!("none")),
+            Some(json!("required")),
+            Some(json!({"type": "function", "name": "lookup"})),
+        ] {
+            let mut request = json!({"input": [{"type": "web_search_call"}]});
+            if let Some(tools) = &tools {
+                request["tools"] = tools.clone();
+            }
+            if let Some(choice) = &choice {
+                request["tool_choice"] = choice.clone();
+            }
+            assert!(ensure_web_search_tool_for_history(&mut request));
+            let expected = match choice {
+                None | Some(Value::Null) => json!("none"),
+                Some(Value::String(ref value)) if value == "auto" || value == "none" => {
+                    json!("none")
+                }
+                Some(value) => value,
+            };
+            assert_eq!(request["tool_choice"], expected);
+            assert_eq!(
+                request["tools"],
+                json!([{"type": "web_search", "external_web_access": false}])
+            );
+        }
+    }
+    let mut request = json!({
+        "input": [{"type": "web_search_call"},
+            {"type": "additional_tools", "tools": [{"type": "function", "name": "lookup"}]}]
+    });
+    assert!(ensure_web_search_tool_for_history(&mut request));
+    assert!(
+        request.get("tool_choice").is_none(),
+        "existing additional tools remain callable"
+    );
+}
+
+#[test]
+fn web_search_history_leaves_unrelated_and_malformed_requests_unchanged() {
+    for mut request in [
+        json!({"input": "hello"}),
+        json!({"input": [{"type": "message", "role": "user", "content": "hello"}]}),
+        json!({"input": [{"type": "web_search_call"}], "tools": {}}),
+        json!({"input": [{"type": "web_search_call"}], "tools": "invalid"}),
+        json!({"input": [null, 7, "web_search_call", {"content": "web_search_call"}]}),
+    ] {
+        let original = request.clone();
+        assert!(!ensure_web_search_tool_for_history(&mut request));
+        assert_eq!(request, original);
+    }
+}
+
+#[tokio::test]
+async fn web_search_history_proxy_declares_only_for_standard_responses() {
+    for (protocol, path, trigger, enabled, repair) in [
+        (RelayProtocol::Responses, "/v1/responses", false, true, true),
+        (RelayProtocol::Responses, "/v1/responses", false, false, false),
+        (RelayProtocol::Responses, "/v1/responses", true, true, true),
+        (RelayProtocol::Responses, "/v1/responses/compact", false, true, false),
+        (RelayProtocol::ChatCompletions, "/v1/responses", false, true, false),
+    ] {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let response_body = if trigger || is_responses_compact_proxy_path(path) {
+            json!({
+                "id": "resp_native_compaction",
+                "object": "response",
+                "output": [{"type": "compaction", "id": "cmp_test", "encrypted_content": "opaque"}]
+            })
+        } else {
+            json!({"id": "resp_model_route", "object": "response"})
+        };
+        let server = tokio::spawn(capture_request_with_response(
+            listener,
+            "application/json",
+            response_body.to_string(),
+        ));
+        let mut settings = model_route_settings("gpt-5.6-luna", "", format!("http://{address}/v1"));
+        settings.relay_profiles[1].protocol = protocol;
+        settings.relay_profiles[1].relay_mode = RelayMode::PureApi;
+        settings.relay_profiles[1].web_search_history_compat = enabled;
+        settings.relay_profiles[0].web_search_history_compat = !enabled;
+        if protocol == RelayProtocol::ChatCompletions {
+            // Model routing intentionally accepts only Responses targets.
+            settings.relay_profiles[0].model_routes.clear();
+            settings.active_relay_id = settings.relay_profiles[1].id.clone();
+        }
+        let mut request = json!({
+            "model": "gpt-5.6-luna",
+            "stream": false,
+            "tools": [],
+            "input": [
+                {"type": "message", "role": "user", "content": "summarize"},
+                {"type": "web_search_call", "id": "ws_test", "status": "completed"}
+            ]
+        });
+        if trigger {
+            request["input"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"type": "compaction_trigger", "future": "preserve"}));
+        }
+        let result = open_responses_proxy_request_with_settings_for_path(
+            &request.to_string(),
+            settings,
+            path,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status_code, 200);
+        let (headers, sent) = server.await.unwrap();
+        if repair {
+            let mut expected = request;
+            expected["tools"] = json!([{"type": "web_search", "external_web_access": false}]);
+            expected["tool_choice"] = json!("none");
+            assert_eq!(sent, expected, "history and native compaction must survive");
+            assert!(headers.starts_with("POST /v1/responses HTTP/1.1"));
+            assert!(!result.compaction);
+        } else if protocol == RelayProtocol::Responses {
+            assert_eq!(
+                sent, request,
+                "disabled providers and legacy compact remain unchanged"
+            );
+            assert!(headers.starts_with(&format!("POST {path} HTTP/1.1")));
+        } else {
+            let expected = responses_to_chat_completions_with_options(request, false).unwrap();
+            assert_eq!(sent, expected, "Chat conversion must remain unchanged");
+            assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn web_search_history_streaming_compaction_preserves_native_state() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let item = json!({"type": "compaction", "id": "cmp_test", "encrypted_content": "opaque"});
+    let response = format!(
+        "data: {}\n\ndata: {}\n\n",
+        json!({"type": "response.output_item.done", "output_index": 0, "item": item}),
+        json!({"type": "response.completed", "response": {"id": "resp_test", "output": [item]}})
+    );
+    let server = tokio::spawn(capture_request_with_response(
+        listener,
+        "text/event-stream",
+        response.clone(),
+    ));
+    let request = json!({
+        "model": "gpt-5.6-luna", "stream": true, "store": false,
+        "tools": [{"type": "function", "name": "lookup", "parameters": {"type": "object"}}],
+        "tool_choice": "auto",
+        "input": [
+            {"type": "compaction", "id": "cmp_prior", "encrypted_content": "prior-state"},
+            {"type": "web_search_call", "id": "ws_test", "status": "completed",
+                "action": {"type": "search", "query": "example"}},
+            {"type": "compaction_trigger", "future": "preserve"}
+        ]
+    });
+    let mut settings = model_route_settings("gpt-5.6-luna", "", format!("http://{address}/v1"));
+    settings.relay_profiles[1].web_search_history_compat = true;
+    settings.relay_profiles[1].relay_mode = RelayMode::PureApi;
+    let mut result = open_responses_proxy_request_with_settings(&request.to_string(), settings)
+        .await
+        .unwrap();
+    assert!(!result.compaction);
+    assert_eq!(result.read_body().await.unwrap(), response.as_bytes().to_vec());
+    let (_, sent) = server.await.unwrap();
+    let mut expected = request;
+    expected["tools"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "web_search", "external_web_access": false}));
+    assert_eq!(sent, expected);
+}
+
+#[tokio::test]
+async fn web_search_history_uses_each_fallback_providers_own_opt_in() {
+    for enabled in [false, true] {
+        let first = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let second = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let mut settings = aggregate_proxy_settings(
+            if enabled {
+                "web-history-on"
+            } else {
+                "web-history-off"
+            },
+            format!("http://{}/v1", first.local_addr().unwrap()),
+            format!("http://{}/v1", second.local_addr().unwrap()),
+        );
+        settings.relay_profiles[0].web_search_history_compat = !enabled;
+        settings.relay_profiles[1].web_search_history_compat = enabled;
+        settings.relay_profiles[0].relay_mode = RelayMode::PureApi;
+        settings.relay_profiles[1].relay_mode = RelayMode::PureApi;
+        let first_server = tokio::spawn(respond_once(
+            first,
+            "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n",
+        ));
+        let second_server = tokio::spawn(capture_json_request_once(second));
+        let request = json!({
+            "model": "gpt-5.6-luna", "stream": false,
+            "input": [{"type": "web_search_call", "id": "ws_test"}],
+            "tools": []
+        });
+        let result = open_responses_proxy_request_with_settings(&request.to_string(), settings)
+            .await
+            .unwrap();
+        assert_eq!(result.status_code, 200);
+        first_server.await.unwrap();
+        let (_, sent) = second_server.await.unwrap();
+        let mut expected = request;
+        if enabled {
+            expected["tools"] = json!([{"type": "web_search", "external_web_access": false}]);
+            expected["tool_choice"] = json!("none");
+        }
+        assert_eq!(
+            sent, expected,
+            "the first provider must not contaminate fallback requests"
+        );
+    }
+}
+
+#[test]
 fn compaction_history_item_expands_to_user_message_in_chat_conversion() {
     let converted = responses_to_chat_completions(json!({
         "model": "deepseek-v4-flash",
@@ -93,39 +378,186 @@ fn compaction_history_item_expands_to_user_message_in_chat_conversion() {
 }
 
 #[test]
-fn chat_conversion_rejects_encrypted_agent_content_without_echoing_payload() {
+fn chat_conversion_forwards_plaintext_encrypted_agent_content_in_order() {
+    let converted = responses_to_chat_completions(json!({
+        "model": "deepseek-v4-flash",
+        "input": [
+            { "type": "agent_message", "id": "amsg_real_shape",
+              "author": "/root/orchestrator", "recipient": "/root/worker",
+              "content": [
+                  { "type": "input_text",
+                    "text": "Message Type: NEW_TASK Task name: /root/worker Payload:" },
+                  { "type": "encrypted_content",
+                    "encrypted_content": "收到任务：请核对改动并把结论整理成三段发回。" }
+              ] }
+        ]
+    }))
+    .unwrap();
+
+    let messages = converted["messages"].as_array().unwrap();
+    let forwarded = messages
+        .iter()
+        .find(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("收到任务"))
+        })
+        .expect("agent_message 内的明文 encrypted_content 片段应透传为文本");
+    assert_eq!(forwarded["role"], "user");
+    let content = forwarded["content"].as_str().unwrap();
+    let header_pos = content.find("Payload:").expect("头部文本应保留");
+    let payload_pos = content.find("收到任务").unwrap();
+    assert!(
+        payload_pos > header_pos,
+        "片段顺序必须保持 header 在前、payload 在后"
+    );
+}
+
+#[test]
+fn chat_conversion_rejects_plaintext_encrypted_content_outside_agent_message() {
+    let error = responses_to_chat_completions(json!({
+        "model": "custom-model",
+        "input": [{"type": "message", "role": "user", "content": [
+            {"type": "input_text", "text": "Payload:"},
+            {"type": "encrypted_content", "text": "private-agent-payload"}
+        ]}]
+    }))
+    .expect_err("普通 message 里的 encrypted_content 必须 fail closed");
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
+    assert!(!diagnostic.contains("private-agent-payload"));
+}
+
+#[test]
+fn chat_conversion_rejects_agent_message_without_confirmed_payload_header() {
+    let error = responses_to_chat_completions(json!({
+        "model": "custom-model",
+        "input": [{"type": "agent_message", "content": [
+            {"type": "encrypted_content", "encrypted_content": "private-agent-payload"}
+        ]}]
+    }))
+    .expect_err("缺少 Payload: 头部的 agent_message 不得透传 encrypted_content");
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
+    assert!(!diagnostic.contains("private-agent-payload"));
+}
+
+#[test]
+fn chat_conversion_rejects_url_safe_base64_agent_payload_as_opaque() {
+    // 合法的 base64url 密文：含 `_`，解码后可打印 ASCII 占比明显低于阈值。
+    // 字母表归一化写错时这里会退化成「解码失败 → 当明文转发」，上游收到无意义载荷。
+    let opaque = "BU6X4ClyuwRNlt8ocboDTJXeJ3C5AkuU3SZvuAFKk9wlbrcASZLbJG22_0iR2iNs";
+    let error = responses_to_chat_completions(json!({
+        "model": "custom-model",
+        "input": [{"type": "agent_message", "content": [
+            {"type": "input_text", "text": "Message Type: NEW_TASK Payload:"},
+            {"type": "encrypted_content", "encrypted_content": opaque}
+        ]}]
+    }))
+    .expect_err("base64url 密文不得按明文转发给 Chat 上游");
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
+    assert!(!diagnostic.contains(opaque));
+}
+
+#[test]
+fn chat_conversion_rejects_object_shaped_encrypted_content() {
+    let error = responses_to_chat_completions(json!({
+        "model": "x",
+        "input": [{"type": "message", "role": "user", "content": {
+            "type": "encrypted_content", "encrypted_content": "private-agent-payload"
+        }}]
+    }))
+    .expect_err("content 为对象形态时同样必须拒绝 encrypted_content");
+    let diagnostic = format!("{error:#}");
+    assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
+    assert!(!diagnostic.contains("private-agent-payload"));
+}
+
+#[test]
+fn chat_conversion_rejects_opaque_encrypted_agent_content_without_echoing_payload() {
+    let opaque = "mMn9x0Kc2QvZ7LtR4bYwJpE1sH6dGfUgA0TiOeNkVXqBcD9ylZsKmWrT3uPh";
     for input in [
         json!([{"type":"message","role":"user","content":[
             {"type":"input_text","text":"Payload:"},
-            {"type":"encrypted_content","text":"private-agent-payload"}
+            {"type":"encrypted_content","text":opaque}
         ]}]),
-        json!([{"type":"encrypted_content","encrypted_content":"private-agent-payload"}]),
+        json!([{"type":"encrypted_content","encrypted_content":opaque}]),
         json!([{"type":"agent_message","content":[
-            {"type":"encrypted_content","encrypted_content":"private-agent-payload"}
+            {"type":"encrypted_content","encrypted_content":opaque}
         ]}]),
-        json!({"type":"encrypted_content","encrypted_content":"private-agent-payload"}),
+        json!([{"type":"agent_message","content":[
+            {"type":"input_text","text":"Payload:"},
+            {"type":"encrypted_content","encrypted_content":opaque}
+        ]}]),
+        json!({"type":"encrypted_content","encrypted_content":opaque}),
         json!([{"type":"message","role":"user","content":[{"type":"encrypted_content"}]}]),
     ] {
         for standard in [false, true] {
             let error = responses_to_chat_completions_with_options(
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\ours
                 json!({"model":"custom-model","input":input}),
                 standard,
             )
             .expect_err("加密 agent 内容必须明确拒绝，不能静默丢弃或视为明文");
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\base
+                json!({"model":"custom-model","input":input}), standard,
+            ).expect_err("加密 agent 内容必须明确拒绝，不能静默丢弃或视为明文");
+=======
+                json!({"model":"custom-model","input":input}),
+                standard,
+            )
+            .expect_err("opaque encrypted agent 内容必须明确拒绝，不能静默丢弃或当作文本转发");
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\theirs
             let diagnostic = format!("{error:#}");
             assert!(diagnostic.contains("unsupported_encrypted_agent_content"));
-            assert!(!diagnostic.contains("private-agent-payload"));
+            assert!(!diagnostic.contains(opaque));
         }
     }
 }
 
 #[test]
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\ours
 fn chat_conversion_preserves_plaintext_and_local_compaction_but_rejects_foreign_opaque_reasoning() {
     let converted = responses_to_chat_completions(json!({"input":[
         {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}]},
         {"role":"user","content":"plaintext-task"}, local_compaction_item("local-summary")
     ]}))
     .unwrap();
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\base
+fn chat_conversion_keeps_plaintext_and_existing_reasoning_compaction_contracts() {
+    let converted = responses_to_chat_completions(json!({
+        "model":"custom-model",
+        "input":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}],
+             "encrypted_content":"opaque-reasoning"},
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"Payload:"},
+                {"type":"input_text","text":"plaintext-task"}
+            ]},
+            local_compaction_item("local-summary"),
+            {"type":"function_call_output","call_id":"orphan",
+             "output":{"type":"encrypted_content","text":"tool-output-text"}}
+        ]
+    })).unwrap();
+=======
+fn chat_conversion_keeps_plaintext_and_existing_reasoning_compaction_contracts() {
+    let converted = responses_to_chat_completions(json!({
+        "model":"custom-model",
+        "input":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"visible-summary"}],
+             "encrypted_content":"opaque-reasoning"},
+            {"type":"message","role":"user","content":[
+                {"type":"input_text","text":"Payload:"},
+                {"type":"input_text","text":"plaintext-task"}
+            ]},
+            local_compaction_item("local-summary"),
+            {"type":"function_call_output","call_id":"orphan",
+             "output":{"type":"encrypted_content","text":"tool-output-text"}}
+        ]
+    }))
+    .unwrap();
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\theirs
     let messages = converted["messages"].to_string();
     for value in ["plaintext-task", "visible-summary", "local-summary"] {
         assert!(messages.contains(value));
@@ -140,6 +572,7 @@ fn chat_conversion_preserves_plaintext_and_local_compaction_but_rejects_foreign_
 
 #[tokio::test]
 async fn encrypted_agent_content_is_rejected_before_contacting_chat_upstream() {
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\ours
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -167,6 +600,58 @@ async fn encrypted_agent_content_is_rejected_before_contacting_chat_upstream() {
     let request = upstream.await.unwrap();
     assert!(result.is_err(), "必须在发送上游请求前拒绝不支持的加密内容");
     assert!(request.is_none(), "不得向 Chat 上游发送删掉 payload 的请求");
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\base
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let upstream = tokio::spawn(async move {
+        tokio::select! {
+            request = capture_json_request_once(listener) => Some(request),
+            _ = stopped => None,
+        }
+    });
+    let settings = session_header_settings(RelayProtocol::ChatCompletions, format!("http://{address}/v1"));
+    let result = open_responses_proxy_request_with_settings(
+        &json!({"model":"custom-model","stream":false,"input":[
+            {"type":"encrypted_content","encrypted_content":"private-agent-payload"}
+        ]}).to_string(), settings,
+    ).await;
+    let _ = stop.send(());
+    let request = upstream.await.unwrap();
+    assert!(result.is_err(), "必须在发送上游请求前拒绝不支持的加密内容");
+    assert!(request.is_none(), "不得向 Chat 上游发送删掉 payload 的请求");
+=======
+    for body in [
+        json!({"model":"custom-model","stream":false,"input":[
+            {"type":"encrypted_content","encrypted_content":"mMn9x0Kc2QvZ7LtR4bYwJpE1sH6dGfUgA0TiOeNkVXqBcD9ylZsKmWrT3uPh"}
+        ]}),
+        json!({"model":"x","stream":false,"input":[
+            {"type":"message","role":"user","content":{
+                "type":"encrypted_content","encrypted_content":"private-agent-payload"}}
+        ]}),
+    ] {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+        let upstream = tokio::spawn(async move {
+            tokio::select! {
+                request = capture_json_request_once(listener) => Some(request),
+                _ = stopped => None,
+            }
+        });
+        let settings = session_header_settings(
+            RelayProtocol::ChatCompletions,
+            format!("http://{address}/v1"),
+        );
+        let result = open_responses_proxy_request_with_settings(&body.to_string(), settings).await;
+        let _ = stop.send(());
+        let request = upstream.await.unwrap();
+        assert!(result.is_err(), "必须在发送上游请求前拒绝不支持的加密内容");
+        assert!(request.is_none(), "不得向 Chat 上游发送删掉 payload 的请求");
+    }
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\protocol_proxy.rs\theirs
 }
 
 #[tokio::test]
@@ -195,6 +680,7 @@ async fn responses_upstream_preserves_encrypted_agent_content() {
 fn compaction_stream_emits_one_done_item_before_completed() {
     let mut converter = CompactionSseConverter::new("custom-model");
     converter.push_summary_text("Preserve this summary.");
+    converter.push_upstream_bytes(b"data: {\"type\":\"response.completed\"}\n\n");
     let events = compaction_sse_events(&converter.finish());
     let mut items = Vec::new();
     let mut completed = None;
@@ -254,6 +740,7 @@ fn compaction_sse_events(payload: &[u8]) -> Vec<Value> {
 fn local_compaction_item(summary: &str) -> Value {
     let mut converter = CompactionSseConverter::new("model");
     converter.push_summary_text(summary);
+    converter.push_upstream_bytes(b"data: {\"type\":\"response.completed\"}\n\n");
     compaction_sse_events(&converter.finish())
         .into_iter()
         .find(|event| event["type"] == "response.output_item.done")
@@ -294,6 +781,7 @@ fn wrap_non_stream_response_produces_single_compaction_item() {
     let upstream = json!({
         "id": "resp_up",
         "object": "response",
+        "status": "completed",
         "output": [
             { "type": "reasoning", "summary": [] },
             { "type": "message", "role": "assistant",
@@ -320,7 +808,7 @@ fn wrap_non_stream_response_produces_single_compaction_item() {
 fn wrap_non_stream_chat_response_produces_single_compaction_item() {
     let upstream = json!({
         "choices": [
-            { "message": { "role": "assistant", "content": "SUMMARYfromCHAT" } }
+            { "message": { "role": "assistant", "content": "SUMMARYfromCHAT" }, "finish_reason": "stop" }
         ]
     })
     .to_string();
@@ -372,6 +860,7 @@ fn compaction_converter_accepts_data_only_responses_events() {
         b"data: {\"type\":\"response.output_text.delta\",\"delta\":\"Summary\"}\n\n",
     );
     assert_eq!(converter.summary_text(), "Summary");
+    converter.push_upstream_bytes(b"data: {\"type\":\"response.completed\"}\n\n");
     let events = compaction_sse_events(&converter.finish());
     let item = &events
         .iter()
@@ -430,7 +919,7 @@ fn summary_converter_does_not_relabel_native_compaction_as_local_text() {
 
 #[test]
 fn compaction_converter_accepts_complete_chat_message_without_delta() {
-    let upstream = b"data: {\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Chat summary\"}}]}\n\n";
+    let upstream = b"data: {\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"Chat summary\"},\"finish_reason\":\"stop\"}]}\n\n";
     let mut converter = CompactionSseConverter::new("custom-model").with_chat_upstream();
     converter.push_upstream_bytes(upstream);
     let events = compaction_sse_events(&converter.finish());
@@ -479,7 +968,7 @@ fn compaction_converter_buffers_sse_events_across_chunks() {
 #[test]
 fn compaction_converter_strips_leading_think_block_from_chat_stream() {
     // DeepSeek 类 thinking 模型把推理塞在 delta.content 的 <think> 块里。
-    let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"<think>step by step\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" reasoning...\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"</think>\\n真实摘要内容\"}}]}\n\ndata: [DONE]\n\n";
+    let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"<think>step by step\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" reasoning...\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"</think>\\n真实摘要内容\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
     let mut converter = CompactionSseConverter::new("deepseek").with_chat_upstream();
     converter.push_upstream_bytes(sse.as_bytes());
     let payload = String::from_utf8(converter.finish()).unwrap();
@@ -493,6 +982,7 @@ fn compaction_converter_strips_think_block_from_direct_text() {
     // 非流式路径直接 push 文本，think 剥离同样在 finish 生效。
     let mut converter = CompactionSseConverter::new("deepseek");
     converter.push_summary_text("<think>internal reasoning</think>\nSUMMARY_BODY");
+    converter.push_upstream_bytes(b"data: {\"type\":\"response.completed\"}\n\n");
     let payload = String::from_utf8(converter.finish()).unwrap();
     assert!(payload.contains("SUMMARY_BODY"));
     assert!(!payload.contains("internal reasoning"));
@@ -917,10 +1407,7 @@ async fn responses_compaction_v2_auth_error_is_not_retried_as_summary() {
 }
 
 #[tokio::test]
-async fn native_compaction_errors_preserve_cooldown_without_summary_retry() {
-    use alunixa_x_core::channel_protection;
-    use futures_util::poll;
-    use std::task::Poll;
+async fn native_compaction_errors_are_forwarded_without_summary_retry() {
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
 
     for status in [429, 503] {
@@ -934,14 +1421,7 @@ async fn native_compaction_errors_preserve_cooldown_without_summary_retry() {
             .expect(1)
             .mount(&server)
             .await;
-        let mut config = remote_compaction_settings(&server.uri(), RelayProtocol::Responses);
-        let id = format!("native-compaction-cooldown-{status}");
-        config.active_relay_id = id.clone();
-        let relay = &mut config.relay_profiles[0];
-        relay.id = id;
-        relay.rate_limit_cooldown_enabled = true;
-        relay.cooldown_error_statuses = vec![status];
-        let relay = relay.clone();
+        let config = remote_compaction_settings(&server.uri(), RelayProtocol::Responses);
         let mut response = open_responses_proxy_request_with_settings(
             &json!({"model": "model", "stream": true, "input": [{"type": "compaction_trigger"}]})
                 .to_string(),
@@ -958,11 +1438,6 @@ async fn native_compaction_errors_preserve_cooldown_without_summary_retry() {
         let requests = server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1);
         assert!(String::from_utf8_lossy(&requests[0].body).contains("compaction_trigger"));
-
-        // 状态已写入后立即 poll，无需脆弱的墙钟上限断言或实际等待冷却结束。
-        let key = channel_protection::key_for_relay(&relay);
-        let mut next = std::pin::pin!(channel_protection::acquire(&key, &relay));
-        assert!(matches!(poll!(next.as_mut()), Poll::Pending));
     }
 }
 
@@ -1137,7 +1612,9 @@ data: {"type":"response.output_item.done","item":{"id":"cmp_empty","type":"compa
 
 event: response.completed
 
-data: {"type":"response.completed","response":{"id":"resp_empty","status":"completed"}}"#,
+data: {"type":"response.completed","response":{"id":"resp_empty","status":"completed"}}
+
+"#,
                 )
                 .await;
             } else {
@@ -1414,12 +1891,8 @@ async fn responses_compact_request_keeps_compact_path_upstream() {
         let (mut stream, _) = listener.accept().await.unwrap();
         let request =
             String::from_utf8_lossy(&read_async_http_request(&mut stream).await).to_string();
-        stream
-            .write_all(
-                b"HTTP/1.1 200 OK\r\ncontent-length: 35\r\ncontent-type: application/json\r\n\r\n{\"id\":\"resp_1\",\"object\":\"response\"}",
-            )
-            .await
-            .unwrap();
+        write_remote_compaction_response(&mut stream, "200 OK",
+            r#"{"id":"resp_1","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque-fixture"}]}"#).await;
         request
     });
     let settings = BackendSettings {
@@ -2933,7 +3406,7 @@ fn responses_request_maps_codex_custom_and_namespace_tools_to_chat_functions() {
 }
 
 #[test]
-fn responses_request_stream_includes_usage_and_apply_patch_proxy_tools() {
+fn responses_request_stream_includes_usage_and_raw_apply_patch_tool() {
     let converted = responses_to_chat_completions(json!({
         "model": "gpt-5-mini",
         "input": "hi",
@@ -2956,25 +3429,18 @@ fn responses_request_stream_includes_usage_and_apply_patch_proxy_tools() {
         .iter()
         .map(|tool| tool["function"]["name"].as_str().unwrap())
         .collect();
+    assert_eq!(names, vec!["apply_patch"]);
     assert_eq!(
-        names,
-        vec![
-            "apply_patch_add_file",
-            "apply_patch_delete_file",
-            "apply_patch_update_file",
-            "apply_patch_replace_file",
-            "apply_patch_batch"
-        ]
+        converted["tools"][0]["function"]["parameters"]["properties"]["input"]["type"],
+        "string"
     );
-    assert_eq!(
-        converted["tools"][2]["function"]["parameters"]["properties"]["hunks"]["items"]["properties"]
-            ["lines"]["items"]["required"],
-        json!(["op", "text"])
+    assert!(
+        converted["tools"][0]["function"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("Original tool definition:")
     );
-    assert_eq!(
-        converted["tool_choice"]["function"]["name"],
-        "apply_patch_batch"
-    );
+    assert_eq!(converted["tool_choice"]["function"]["name"], "apply_patch");
 }
 
 #[test]
@@ -3074,11 +3540,73 @@ fn responses_input_replays_apply_patch_custom_history_as_proxy_tool() {
 
     assert_eq!(
         converted["messages"][0]["tool_calls"][0]["function"]["name"],
-        "apply_patch_add_file"
+        "apply_patch"
     );
     assert_eq!(
         converted["messages"][0]["tool_calls"][0]["function"]["arguments"],
-        "{\"content\":\"# Test\",\"path\":\"docs/test.md\"}"
+        "{\"input\":\"*** Begin Patch\\n*** Add File: docs/test.md\\n+# Test\\n*** End Patch\"}"
+    );
+}
+
+#[test]
+fn responses_input_migrates_legacy_apply_patch_proxy_history() {
+    for legacy_name in [
+        "apply_patch_add_file",
+        "apply_patch_delete_file",
+        "apply_patch_update_file",
+        "apply_patch_replace_file",
+        "apply_patch_batch",
+    ] {
+        let raw_patch = "*** Begin Patch\n*** Add File: docs/test.md\n+# Test\n*** End Patch";
+        let converted = responses_to_chat_completions(json!({
+            "model": "gpt-5-mini",
+            "input": [
+                {
+                    "type": "custom_tool_call",
+                    "call_id": "call_legacy_patch",
+                    "name": legacy_name,
+                    "input": raw_patch
+                }
+            ],
+            "tools": [{ "type": "custom", "name": "apply_patch" }]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            converted["messages"][0]["tool_calls"][0]["function"]["name"],
+            "apply_patch"
+        );
+        let arguments = converted["messages"][0]["tool_calls"][0]["function"]["arguments"]
+            .as_str()
+            .unwrap();
+        let arguments: Value = serde_json::from_str(arguments).unwrap();
+        assert_eq!(arguments["input"], raw_patch);
+    }
+}
+
+#[test]
+fn responses_input_replays_same_path_delete_add_patch_as_apply_patch() {
+    let converted = responses_to_chat_completions(json!({
+        "model": "gpt-5-mini",
+        "input": [
+            {
+                "type": "custom_tool_call",
+                "call_id": "call_patch",
+                "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Delete File: docs/test.md\n*** Add File: docs/test.md\n+hello\n*** End Patch"
+            }
+        ],
+        "tools": [{ "type": "custom", "name": "apply_patch" }]
+    }))
+    .unwrap();
+
+    assert_eq!(
+        converted["messages"][0]["tool_calls"][0]["function"]["name"],
+        "apply_patch"
+    );
+    assert_eq!(
+        converted["messages"][0]["tool_calls"][0]["function"]["arguments"],
+        "{\"input\":\"*** Begin Patch\\n*** Delete File: docs/test.md\\n*** Add File: docs/test.md\\n+hello\\n*** End Patch\"}"
     );
 }
 
@@ -3497,8 +4025,8 @@ fn chat_completion_response_reconstructs_apply_patch_proxy_call() {
                         "id": "call_patch",
                         "type": "function",
                         "function": {
-                            "name": "apply_patch_add_file",
-                            "arguments": "{\"path\":\"README.md\",\"content\":\"hello\"}"
+                            "name": "apply_patch",
+                            "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: README.md\\n+hello\\n*** End Patch\"}"
                         }
                     }]
                 }
@@ -3520,7 +4048,7 @@ fn chat_completion_response_reconstructs_apply_patch_proxy_call() {
 }
 
 #[test]
-fn chat_completion_response_remaps_string_apply_patch_proxy_tools() {
+fn chat_completion_response_remaps_string_apply_patch_tool() {
     let converted = chat_completion_to_response_with_request(
         json!({
             "id": "chatcmpl_patch_string_tool",
@@ -3534,8 +4062,8 @@ fn chat_completion_response_remaps_string_apply_patch_proxy_tools() {
                         "id": "call_patch",
                         "type": "function",
                         "function": {
-                            "name": "apply_patch_add_file",
-                            "arguments": "{\"path\":\"docs/test.md\",\"content\":\"# Test\\n\"}"
+                            "name": "apply_patch",
+                            "arguments": "{\"input\":\"*** Begin Patch\\n*** Add File: docs/test.md\\n+# Test\\n*** End Patch\"}"
                         }
                     }]
                 }
@@ -3543,7 +4071,7 @@ fn chat_completion_response_remaps_string_apply_patch_proxy_tools() {
         }),
         &json!({
             "model": "gpt-5-mini",
-            "tools": ["apply_patch_add_file", "apply_patch_batch"]
+            "tools": ["apply_patch"]
         }),
     )
     .unwrap();
@@ -3988,8 +4516,13 @@ async fn aggregate_proxy_fails_over_to_next_member_in_same_request() {
     .unwrap();
     let body = result.read_body().await.unwrap();
 
-    assert_eq!(result.status_code, 200);
-    assert_eq!(body, br#"{"id":"resp_1","object":"response"}"#.to_vec());
+    assert_eq!(
+        result.status_code,
+        200,
+        "unexpected mock response: {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert_eq!(body.as_slice(), br#"{"id":"resp_1","object":"response"}"#);
     let first_request = first_server.await.unwrap();
     let second_request = second_server.await.unwrap();
     assert!(
@@ -4001,6 +4534,234 @@ async fn aggregate_proxy_fails_over_to_next_member_in_same_request() {
         !second_request
             .to_ascii_lowercase()
             .contains("authorization:")
+    );
+}
+
+/// 官方登录成员：聚合代理用该账号 OAuth 凭据把请求转发到 chatgpt.com 后端，
+/// 带 OAuth Bearer 与 `chatgpt-account-id`，不能带供应商 API Key。
+#[tokio::test]
+async fn aggregate_official_member_forwards_with_oauth_credentials() {
+    let _lock = settings_path_test_lock().lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
+
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(capture_json_request_once(listener));
+    let _env_guard = EnvVarGuard::set(
+        "ALUNIXA_X_OFFICIAL_BASE_URL",
+        &format!("http://{address}/backend-api/codex"),
+    );
+
+    let official_id = "proxy-official-login".to_string();
+    let aggregate_id = "proxy-official-agg".to_string();
+    let settings = BackendSettings {
+        relay_profiles: vec![
+            RelayProfile {
+                id: official_id.clone(),
+                name: "官方登录".to_string(),
+                relay_mode: RelayMode::Official,
+                auth_contents: json!({
+                    "auth_mode": "chatgpt",
+                    "tokens": {
+                        "access_token": "official-access",
+                        "refresh_token": "official-refresh",
+                        "account_id": "acct-official"
+                    }
+                })
+                .to_string(),
+                ..RelayProfile::default()
+            },
+            RelayProfile {
+                id: aggregate_id.clone(),
+                name: "aggregate".to_string(),
+                relay_mode: RelayMode::Aggregate,
+                ..RelayProfile::default()
+            },
+        ],
+        active_relay_id: aggregate_id.clone(),
+        active_aggregate_relay_id: aggregate_id.clone(),
+        aggregate_relay_profiles: vec![AggregateRelayProfile {
+            id: aggregate_id,
+            name: "aggregate".to_string(),
+            session_provider: RelaySessionProvider::Custom,
+            model_aggregation_enabled: false,
+            strategy: AggregateRelayStrategy::Failover,
+            members: vec![AggregateRelayMember {
+                relay_id: official_id,
+                weight: 1,
+            }],
+            routes: Vec::new(),
+            default_relay_id: String::new(),
+            sync_default_member_login: false,
+        }],
+        ..BackendSettings::default()
+    };
+
+    let result = open_responses_proxy_request_with_settings(
+        r#"{"model":"gpt-5.6-sol","input":"hi","stream":false}"#,
+        settings,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status_code, 200);
+
+    let (headers, body) = server.await.unwrap();
+    let headers_lower = headers.to_ascii_lowercase();
+    assert!(
+        headers.starts_with("POST /backend-api/codex/responses HTTP/1.1"),
+        "{headers}"
+    );
+    assert!(
+        headers_lower.contains("authorization: bearer official-access"),
+        "{headers}"
+    );
+    assert!(
+        headers_lower.contains("chatgpt-account-id: acct-official"),
+        "{headers}"
+    );
+    assert!(headers_lower.contains("originator: codex_cli_rs"), "{headers}");
+    assert!(!headers_lower.contains("sk-"), "{headers}");
+    assert_eq!(body["model"], "gpt-5.6-sol");
+}
+
+/// 官方登录 token 被提前撤销：第一次 401 后强制刷新一次并原样重试，
+/// 第二次请求带刷新后的 Bearer；refresh 请求带轮换前的 refresh token。
+#[tokio::test]
+async fn aggregate_official_member_refreshes_and_retries_after_401() {
+    let _lock = settings_path_test_lock().lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let _guard = SettingsPathGuard::set(temp.path().join("settings.json"));
+
+    let upstream = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let upstream_addr = upstream.local_addr().unwrap();
+    let upstream_server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        let (mut first, _) = upstream.accept().await.unwrap();
+        requests.push(read_http_request(&mut first).await);
+        first
+            .write_all(
+                b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 2\r\ncontent-type: application/json\r\n\r\n{}",
+            )
+            .await
+            .unwrap();
+        drop(first);
+        let (mut second, _) = upstream.accept().await.unwrap();
+        requests.push(read_http_request(&mut second).await);
+        second
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-length: 35\r\ncontent-type: application/json\r\n\r\n{\"id\":\"resp_1\",\"object\":\"response\"}",
+            )
+            .await
+            .unwrap();
+        requests
+    });
+    let token = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let token_addr = token.local_addr().unwrap();
+    let token_server = tokio::spawn(async move {
+        let (mut stream, _) = token.accept().await.unwrap();
+        let request = read_http_request(&mut stream).await;
+        let body = r#"{"access_token":"refreshed-access","refresh_token":"refreshed-refresh"}"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: application/json\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).await.unwrap();
+        request
+    });
+
+    let _base_env = EnvVarGuard::set(
+        "ALUNIXA_X_OFFICIAL_BASE_URL",
+        &format!("http://{upstream_addr}/backend-api/codex"),
+    );
+    let _token_env = EnvVarGuard::set(
+        "ALUNIXA_X_OFFICIAL_TOKEN_URL",
+        &format!("http://{token_addr}/oauth/token"),
+    );
+
+    let official_id = "proxy-official-401".to_string();
+    let aggregate_id = "proxy-official-401-agg".to_string();
+    let settings = BackendSettings {
+        relay_profiles: vec![
+            RelayProfile {
+                id: official_id.clone(),
+                name: "官方登录".to_string(),
+                relay_mode: RelayMode::Official,
+                auth_contents: json!({
+                    "auth_mode": "chatgpt",
+                    "tokens": {
+                        "access_token": "official-access",
+                        "refresh_token": "official-refresh",
+                        "account_id": "acct-official"
+                    }
+                })
+                .to_string(),
+                ..RelayProfile::default()
+            },
+            RelayProfile {
+                id: aggregate_id.clone(),
+                name: "aggregate".to_string(),
+                relay_mode: RelayMode::Aggregate,
+                ..RelayProfile::default()
+            },
+        ],
+        active_relay_id: aggregate_id.clone(),
+        active_aggregate_relay_id: aggregate_id.clone(),
+        aggregate_relay_profiles: vec![AggregateRelayProfile {
+            id: aggregate_id,
+            name: "aggregate".to_string(),
+            session_provider: RelaySessionProvider::Custom,
+            model_aggregation_enabled: false,
+            strategy: AggregateRelayStrategy::Failover,
+            members: vec![AggregateRelayMember {
+                relay_id: official_id,
+                weight: 1,
+            }],
+            routes: Vec::new(),
+            default_relay_id: String::new(),
+            sync_default_member_login: false,
+        }],
+        ..BackendSettings::default()
+    };
+
+    let result = open_responses_proxy_request_with_settings(
+        r#"{"model":"gpt-5.6-sol","input":"hi","stream":false}"#,
+        settings,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.status_code, 200);
+
+    let requests = upstream_server.await.unwrap();
+    assert!(
+        requests[0]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer official-access"),
+        "{}",
+        requests[0]
+    );
+    assert!(
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("authorization: bearer refreshed-access"),
+        "{}",
+        requests[1]
+    );
+    let token_request = token_server.await.unwrap();
+    assert!(
+        token_request.contains("grant_type=refresh_token"),
+        "{token_request}"
+    );
+    assert!(
+        token_request.contains("refresh_token=official-refresh"),
+        "{token_request}"
     );
 }
 
@@ -4152,7 +4913,8 @@ async fn model_route_preserves_responses_compact_endpoint() {
         .await
         .unwrap();
     let target_addr = target.local_addr().unwrap();
-    let target_server = tokio::spawn(capture_json_request_once(target));
+    let target_server = tokio::spawn(capture_request_with_response(target, "application/json",
+        json!({"id":"compact","object":"response.compaction","output":[{"type":"compaction","encrypted_content":"opaque-fixture"}]}).to_string()));
     let request = json!({
         "model": "gpt-5.6-luna",
         "input": [{ "role": "user", "content": "compact this conversation" }],
@@ -4357,6 +5119,228 @@ async fn aggregate_proxy_rewrites_requested_model_to_selected_member_default_mod
     fallback_server.abort();
 }
 
+#[tokio::test]
+async fn aggregate_prefixed_model_binds_member_and_preserves_upstream_model() {
+    let first = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let first_addr = first.local_addr().unwrap();
+    let second = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let second_addr = second.local_addr().unwrap();
+    let first_server = tokio::spawn(capture_json_request_once(first));
+    let second_server = tokio::spawn(respond_once(
+        second,
+        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n",
+    ));
+    let mut settings = aggregate_proxy_settings(
+        "prefixed-model",
+        format!("http://{first_addr}/v1"),
+        format!("http://{second_addr}/v1"),
+    );
+    for relay in settings.relay_profiles.iter_mut().take(2) {
+        relay.relay_mode = RelayMode::PureApi;
+        relay.no_auth = true;
+        relay.api_key.clear();
+    }
+    let first_id = settings.relay_profiles[0].id.clone();
+    settings.relay_profiles[0].model = "deepseek-v4-pro".to_string();
+    settings.relay_profiles[0].model_list = "deepseek-v4-pro".to_string();
+    settings.aggregate_relay_profiles[0].model_aggregation_enabled = true;
+
+    let request = format!(
+        r#"{{"model":"cpx-{first_id}/deepseek-v4-pro","input":"hi","stream":false}}"#
+    );
+    let mut result = open_responses_proxy_request_with_settings(&request, settings)
+        .await
+        .unwrap();
+    let (_, body) = first_server.await.unwrap();
+    assert_eq!(result.status_code, 200);
+    assert_eq!(body["model"], "deepseek-v4-pro");
+    let response: Value = serde_json::from_slice(&result.read_body().await.unwrap()).unwrap();
+    assert_eq!(response["id"], "resp_model_route");
+    second_server.abort();
+}
+
+/// 模型聚合 + 默认供应商：解析不到成员的普通模型名固定发往默认成员，
+/// 上游模型名去掉 `<前缀>/` 与窗口后缀；未设置默认时保持原有 400。
+#[tokio::test]
+async fn aggregate_default_provider_forwards_unbound_model() {
+    let default_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let default_addr = default_listener.local_addr().unwrap();
+    let other_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let other_addr = other_listener.local_addr().unwrap();
+    let default_server = tokio::spawn(capture_json_request_once(default_listener));
+    let other_server = tokio::spawn(respond_once(
+        other_listener,
+        "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\n\r\n",
+    ));
+    let request = r#"{"model":"ccs-legacy/gpt-9.9-unknown[1M]","input":"hi","stream":false}"#;
+    let base = aggregate_proxy_settings(
+        "default-provider",
+        format!("http://{other_addr}/v1"),
+        format!("http://{default_addr}/v1"),
+    );
+
+    let mut without_default = base.clone();
+    without_default.aggregate_relay_profiles[0].model_aggregation_enabled = true;
+    let result =
+        open_responses_proxy_request_with_settings(request, without_default).await.unwrap();
+    assert_eq!(result.status_code, 400, "未设置默认供应商时仍是 400");
+
+    let mut settings = base;
+    settings.aggregate_relay_profiles[0].model_aggregation_enabled = true;
+    settings.aggregate_relay_profiles[0].default_relay_id = settings.relay_profiles[1].id.clone();
+    let result = open_responses_proxy_request_with_settings(request, settings).await.unwrap();
+    assert_eq!(result.status_code, 200);
+    let (_, body) = default_server.await.unwrap();
+    assert_eq!(
+        body["model"], "ccs-legacy/gpt-9.9-unknown[1M]",
+        "默认供应商原样转发请求里的 model id（不做去前缀/去后缀的静默改名）"
+    );
+    other_server.abort();
+}
+
+#[tokio::test]
+async fn aggregate_live_settings_updates_preserve_selected_model_and_failover() {
+    let _lock = settings_path_test_lock().lock().unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let settings_path = temp.path().join("settings.json");
+    let _guard = SettingsPathGuard::set(settings_path.clone());
+    let (events, mut received) = tokio::sync::mpsc::unbounded_channel();
+    let mut servers = Vec::new();
+    let mut urls = Vec::new();
+    let failing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let hold_next = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let release = std::sync::Arc::new(tokio::sync::Notify::new());
+    for name in ["a", "b", "c"] {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        urls.push(format!("http://{}/v1", listener.local_addr().unwrap()));
+        let events = events.clone();
+        let failing = failing.clone();
+        let hold_next = hold_next.clone();
+        let release = release.clone();
+        servers.push(tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let request = read_http_request(&mut stream).await;
+                let (headers, body) = request.split_once("\r\n\r\n").unwrap();
+                let body: Value = serde_json::from_str(body).unwrap();
+                let authorization = headers.lines().find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.eq_ignore_ascii_case("authorization").then(|| value.trim().to_string())
+                });
+                events.send((name, body["model"].as_str().unwrap().to_string(), authorization)).unwrap();
+                if name == "b" && hold_next.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                    release.notified().await;
+                }
+                let response = if name == "c" && failing.load(std::sync::atomic::Ordering::SeqCst) {
+                    "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 2\r\nconnection: close\r\ncontent-type: application/json\r\n\r\n{}"
+                } else {
+                    "HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\ncontent-type: application/json\r\n\r\n{}"
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+        }));
+    }
+    let mut settings = aggregate_proxy_settings("live-settings", urls[0].clone(), urls[1].clone());
+    for (index, relay) in settings.relay_profiles.iter_mut().take(2).enumerate() {
+        relay.relay_mode = RelayMode::MixedApi;
+        relay.model = format!("model-{index}");
+        relay.model_list = relay.model.clone();
+    }
+    settings.aggregate_relay_profiles[0].strategy = AggregateRelayStrategy::Failover;
+    settings.aggregate_relay_profiles[0].model_aggregation_enabled = true;
+    let first_id = settings.relay_profiles[0].id.clone();
+    let second_id = settings.relay_profiles[1].id.clone();
+    settings.aggregate_relay_profiles[0].default_relay_id = first_id.clone();
+
+    // 每次均走实际文件读取入口，保持同一代理运行时、同一会话标识。
+    fn persist(path: &Path, settings: &BackendSettings) {
+        let mut stored = settings.clone();
+        for relay in stored.relay_profiles.iter_mut().take(2) {
+            // model / URL / Key 扁平字段不参与序列化；使用真实存储快照格式。
+            relay.config_contents = format!(
+                "model = {:?}\nmodel_provider = \"custom\"\n[model_providers.custom]\nname = \"mock\"\nbase_url = {:?}\nwire_api = \"responses\"\n",
+                relay.model, relay.base_url,
+            );
+            relay.auth_contents = json!({"OPENAI_API_KEY": relay.api_key}).to_string();
+        }
+        std::fs::write(path, serde_json::to_vec(&stored).unwrap()).unwrap();
+    }
+    async fn request(path: &Path, settings: &BackendSettings, model: &str) -> u16 {
+        persist(path, settings);
+        let body = json!({"model": model, "input": "hi", "stream": false,
+            "conversation_id": "same-live-session"}).to_string();
+        let mut response = open_responses_proxy_request(&body, None).await.unwrap();
+        let status = response.status_code;
+        let body = response.read_body().await.unwrap();
+        if status != 200 {
+            eprintln!("mock request status {status}: {}", String::from_utf8_lossy(&body));
+        }
+        status
+    }
+    macro_rules! expect {
+        ($model:expr, $target:expr, $upstream_model:expr, $key:expr) => {{
+            assert_eq!(request(&settings_path, &settings, $model).await, 200);
+            let event = tokio::time::timeout(Duration::from_secs(2), received.recv())
+                .await.unwrap().unwrap();
+            assert_eq!(event, ($target, $upstream_model.to_string(), Some($key.to_string())));
+            assert!(received.try_recv().is_err(), "不能产生额外上游请求");
+        }};
+    }
+    let first_model = format!("cpx-{first_id}/model-0");
+    let second_model = format!("cpx-{second_id}/model-1");
+    expect!(&first_model, "a", "model-0", "Bearer sk-first");
+    // 只改成员 URL / Key，下次请求即采用新值。
+    settings.relay_profiles[0].base_url = urls[2].clone();
+    settings.relay_profiles[0].api_key = "synthetic-new-key".to_string();
+    expect!(&first_model, "c", "model-0", "Bearer synthetic-new-key");
+    // 重设默认成员不改派已经明确选择的成员模型。
+    settings.aggregate_relay_profiles[0].default_relay_id = second_id.clone();
+    expect!(&first_model, "c", "model-0", "Bearer synthetic-new-key");
+    expect!("model-1", "b", "model-1", "Bearer sk-second");
+    // 重设成员默认模型不覆盖本次显式选择。
+    settings.relay_profiles[0].model = "new-default".to_string();
+    settings.relay_profiles[0].model_list = "model-0,new-default".to_string();
+    expect!(&first_model, "c", "model-0", "Bearer synthetic-new-key");
+    // 移除成员只使其模型失效；不能静默改派给默认成员。
+    settings.aggregate_relay_profiles[0].members.remove(0);
+    assert_eq!(request(&settings_path, &settings, &first_model).await, 400);
+    assert!(received.try_recv().is_err());
+    expect!(&second_model, "b", "model-1", "Bearer sk-second");
+    settings.aggregate_relay_profiles[0].members.insert(0, AggregateRelayMember {
+        relay_id: first_id, weight: 1,
+    });
+    expect!(&first_model, "c", "model-0", "Bearer synthetic-new-key");
+
+    // 关闭按模型聚合后，故障转移遵循成员默认模型，并按新成员列表即时生效。
+    settings.aggregate_relay_profiles[0].model_aggregation_enabled = false;
+    failing.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(request(&settings_path, &settings, "client-model").await, 200);
+    assert_eq!(received.recv().await.unwrap(),
+        ("c", "new-default".to_string(), Some("Bearer synthetic-new-key".to_string())));
+    assert_eq!(received.recv().await.unwrap(),
+        ("b", "model-1".to_string(), Some("Bearer sk-second".to_string())));
+    assert!(received.try_recv().is_err());
+    settings.aggregate_relay_profiles[0].members.remove(0);
+    expect!("client-model", "b", "model-1", "Bearer sk-second");
+    // 保存设置不能中断已经发出的请求；新地址 / Key 从下一次请求起生效。
+    hold_next.store(true, std::sync::atomic::Ordering::SeqCst);
+    let old_settings = settings.clone();
+    let old_path = settings_path.clone();
+    let in_flight = tokio::spawn(async move { request(&old_path, &old_settings, "client-model").await });
+    let event = tokio::time::timeout(Duration::from_secs(2), received.recv()).await.unwrap().unwrap();
+    assert_eq!(event, ("b", "model-1".to_string(), Some("Bearer sk-second".to_string())));
+    settings.relay_profiles[1].base_url = urls[0].clone();
+    settings.relay_profiles[1].api_key = "synthetic-next-key".to_string();
+    settings.relay_profiles[1].model = "next-default-model".to_string();
+    persist(&settings_path, &settings);
+    release.notify_one();
+    assert_eq!(in_flight.await.unwrap(), 200);
+    expect!("client-model", "a", "next-default-model", "Bearer synthetic-next-key");
+    for server in servers {
+        server.abort();
+    }
+}
+
 async fn respond_once(listener: tokio::net::TcpListener, response: &'static str) {
     let (mut stream, _) = listener.accept().await.unwrap();
     let mut buffer = [0; 1024];
@@ -4374,6 +5358,38 @@ async fn capture_request_and_respond_once(
     let request = String::from_utf8_lossy(&buffer[..read]).to_string();
     stream.write_all(response.as_bytes()).await.unwrap();
     request
+}
+
+/// 从已接受的连接读完整请求（头 + content-length 指定的 body）。
+async fn read_http_request(stream: &mut tokio::net::TcpStream) -> String {
+    let mut buffer = Vec::new();
+    let mut chunk = [0; 4096];
+    let (header_end, content_length) = loop {
+        let read = stream.read(&mut chunk).await.unwrap();
+        assert!(read > 0, "request closed before headers completed");
+        buffer.extend_from_slice(&chunk[..read]);
+        let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&buffer[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.split_once(':').and_then(|(name, value)| {
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+            })
+            .unwrap_or(0);
+        break (header_end + 4, content_length);
+    };
+    while buffer.len() < header_end + content_length {
+        let read = stream.read(&mut chunk).await.unwrap();
+        assert!(read > 0, "request closed before body completed");
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+    String::from_utf8_lossy(&buffer).to_string()
 }
 
 async fn capture_json_request_once(
@@ -4501,6 +5517,7 @@ fn aggregate_proxy_settings(
             id: aggregate_id,
             name: "aggregate".to_string(),
             session_provider: RelaySessionProvider::Custom,
+            model_aggregation_enabled: false,
             strategy: AggregateRelayStrategy::RequestRoundRobin,
             members: vec![
                 AggregateRelayMember {
@@ -4513,10 +5530,50 @@ fn aggregate_proxy_settings(
                 },
             ],
             routes: Vec::new(),
+            default_relay_id: String::new(),
+            sync_default_member_login: false,
         }],
         ..BackendSettings::default()
     }
 }
+
+#[tokio::test]
+async fn aggregate_request_build_error_still_fails_over_with_and_without_exec() {
+    let _lock = settings_path_test_lock().lock().unwrap();
+    for with_exec in [false, true] {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
+                "status": "completed", "output": []
+            })))
+            .mount(&server)
+            .await;
+        let settings = aggregate_proxy_settings(
+            &format!("build-error-{with_exec}"),
+            "not-a-url".to_string(),
+            format!("{}/v1", server.uri()),
+        );
+        let mut request = json!({"model": "native-model", "stream": false, "input": "hello"});
+        if with_exec {
+            request["tools"] = json!([{"type": "custom", "name": "exec"}]);
+        }
+        let upstream = open_responses_proxy_request_with_settings_for_path(
+            &request.to_string(),
+            settings,
+            "/v1/responses",
+        )
+        .await
+        .expect("request build errors must participate in ordinary failover");
+        assert_eq!(upstream.status_code, 200);
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(
+            received[0].body_json::<Value>().unwrap()["tools"],
+            request["tools"]
+        );
+    }
+}
+
 #[tokio::test]
 async fn audio_transcriptions_proxy_forwards_multipart_body() {
     let _lock = settings_path_test_lock().lock().unwrap();
@@ -5087,6 +6144,34 @@ fn write_no_auth_relay_settings(settings_dir: &Path, base_url: &str, protocol: &
 
 struct SettingsPathGuard {
     previous: Option<PathBuf>,
+}
+
+/// 官方登录相关地址的测试覆盖（生产默认 chatgpt.com / auth.openai.com）。
+/// 这些环境变量只影响官方登录成员，测试内串行使用。
+struct EnvVarGuard {
+    name: &'static str,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl EnvVarGuard {
+    fn set(name: &'static str, value: &str) -> Self {
+        let previous = std::env::var_os(name);
+        unsafe {
+            std::env::set_var(name, value);
+        }
+        Self { name, previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
 }
 
 fn settings_path_test_lock() -> &'static Mutex<()> {

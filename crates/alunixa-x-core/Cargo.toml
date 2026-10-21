@@ -10,6 +10,9 @@ aes-gcm.workspace = true
 anyhow.workspace = true
 async-trait = "0.1"
 base64.workspace = true
+http.workspace = true
+httpdate.workspace = true
+sha1 = "0.10"
 directories.workspace = true
 futures-util = "0.3"
 fs2.workspace = true
@@ -35,6 +38,7 @@ zstd.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
   "Win32_Foundation",
+  "Win32_Networking_WinHttp",
   "Win32_Storage_EnhancedStorage",
   "Win32_Storage_FileSystem",
   "Win32_Storage_Packaging_Appx",

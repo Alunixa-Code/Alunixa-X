@@ -107,6 +107,8 @@ const GLASS_VISION_CSS: &str =
     include_str!("../../../assets/inject/upstream/glass-vision/glass-vision.css");
 const GLASS_VISION_RENDERER: &str =
     include_str!("../../../assets/inject/upstream/glass-vision/renderer-inject.js");
+const DREAM_SKIN_COMMUNITY_COMPAT_CSS: &str =
+    include_str!("../../../assets/inject/dream-skin-community-compat.css");
 #[cfg(windows)]
 const DREAM_SKIN_DEFAULT_IMAGE: &[u8] =
     include_bytes!("../../../assets/inject/upstream/dream-skin/windows/dream-reference.jpg");
@@ -114,6 +116,9 @@ const DREAM_SKIN_DEFAULT_IMAGE: &[u8] =
 const DREAM_SKIN_DEFAULT_IMAGE: &[u8] =
     include_bytes!("../../../assets/inject/upstream/dream-skin/macos/portal-hero.png");
 const PET_REAL_MOUSE_SCRIPT: &str = include_str!("../../../assets/inject/pet-real-mouse-inject.js");
+const API_QUOTA_GATE_SCRIPT: &str = include_str!("../../../assets/inject/api-quota-gate.js");
+const NATIVE_FAST_UNLOCK_SCRIPT: &str =
+    include_str!("../../../assets/inject/native-fast-unlock.js");
 const STEPWISE_SCRIPT: &str = concat!(
     "(() => {\n",
     include_str!("../../../assets/inject/floating-panel/runtime/state.js"),
@@ -139,7 +144,7 @@ const STEPWISE_SCRIPT: &str = concat!(
     "\n})();\n",
 );
 pub const DIAGNOSTIC_BUILD_ID: &str = "diag-20260518-1";
-const DREAM_SKIN_RENDERER_REVISION: &str = "24-home-composer-rounded";
+const DREAM_SKIN_RENDERER_REVISION: &str = "26-dream-skin-1.5.20";
 
 pub fn renderer_script() -> &'static str {
     RENDERER_SCRIPT
@@ -204,7 +209,9 @@ fn dream_skin_target_runtime_script(settings: &BackendSettings, include_art: boo
 
     let (engine, renderer, base_css) = dream_skin_target_assets(settings);
     let managed_css = managed_dream_skin_css(settings);
-    let css = format!("{base_css}\n{managed_css}");
+    // 原生 shell 兼容属于基础主题：内置图片和没有 Safe CSS 的图片也必须可达。
+    let native_shell_css = include_str!("../../../assets/inject/dream-skin-native-shell-compat.css");
+    let css = format!("{base_css}\n{native_shell_css}\n{managed_css}");
     let theme = serde_json::to_string(&settings.codex_app_dream_skin_theme_config)
         .expect("dream skin target theme should serialize");
     let style_revision = dream_skin_content_signature(css.as_bytes());
@@ -243,7 +250,8 @@ fn dream_skin_target_runtime_script(settings: &BackendSettings, include_art: boo
         )
         .replace(
             "__DREAM_SKIN_VERSION_JSON__",
-            &serde_json::to_string("1.2.0").unwrap(),
+            &serde_json::to_string(crate::dream_skin_package::DREAM_SKIN_PACKAGE_CLIENT_VERSION)
+                .unwrap(),
         )
         .replace(
             "__DREAM_SKIN_STYLE_REVISION_JSON__",
@@ -298,7 +306,10 @@ fn managed_dream_skin_css(settings: &BackendSettings) -> String {
     let Ok(css) = std::fs::read_to_string(css_path) else {
         return String::new();
     };
-    crate::dream_skin_package::compile_safe_css(&css).unwrap_or_default()
+    let Ok(compiled) = crate::dream_skin_package::compile_safe_css(&css) else {
+        return String::new();
+    };
+    format!("{compiled}\n{DREAM_SKIN_COMMUNITY_COMPAT_CSS}")
 }
 
 fn dream_skin_skin_api_bootstrap_script(theme: &str) -> String {
@@ -381,6 +392,14 @@ pub fn stepwise_script() -> &'static str {
 
 pub fn pet_real_mouse_script() -> &'static str {
     PET_REAL_MOUSE_SCRIPT
+}
+
+pub fn api_quota_gate_script() -> &'static str {
+    API_QUOTA_GATE_SCRIPT
+}
+
+pub fn native_fast_unlock_script() -> &'static str {
+    NATIVE_FAST_UNLOCK_SCRIPT
 }
 
 const PET_V2_SPRITE_DETECTION_SCRIPT: &str = r#"
@@ -501,6 +520,16 @@ pub fn hide_official_usage_alert_config(settings: &BackendSettings) -> bool {
     profile.relay_mode == crate::settings::RelayMode::Official && profile.official_mix_api_key
 }
 
+pub fn force_chinese_locale_config(settings: &BackendSettings) -> Value {
+    json!({ "enabled": settings.codex_app_force_chinese_locale, "locale": "zh-CN" })
+}
+
+fn renderer_after_document_ready(script: &str) -> String {
+    format!(
+        "(()=>{{const start=()=>{{{script}\n}};if(document.body)start();else document.addEventListener('DOMContentLoaded',start,{{once:true}});}})();"
+    )
+}
+
 pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettings) -> String {
     let helper_url = format!("http://127.0.0.1:{helper_port}");
     let instance_label = std::env::var("ALUNIXA_X_INSTANCE_LABEL")
@@ -522,7 +551,14 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
     let dream_skin_theme = &settings.codex_app_dream_skin_theme_config;
     let dream_skin_target_runtime = dream_skin_target_runtime_script(settings, false);
     let paste_fix = paste_fix_enabled_config(settings);
+    let force_chinese_locale = force_chinese_locale_config(settings);
     let hide_official_usage_alert = hide_official_usage_alert_config(settings);
+    // Fast 的新文档脚本需要 Page.enable；DOM 增强必须等正常文档就绪，不能访问空的根节点。
+    let renderer_runtime = if settings.enhancements_enabled && settings.codex_app_native_fast_unlock {
+        renderer_after_document_ready(renderer_script())
+    } else {
+        renderer_script().to_string()
+    };
     let stepwise_runtime =
         if settings.codex_app_stepwise_enabled || settings.codex_app_answer_outline_enabled {
             stepwise_script()
@@ -547,12 +583,20 @@ pub fn injection_script_with_settings(helper_port: u16, settings: &BackendSettin
         serde_json::to_string(&hide_official_usage_alert)
             .expect("usage alert config should serialize"),
         format!(
-            "window.__ALUNIXA_X_WHALE_IMAGE__ = {};\n{}\n{}\n{}",
+            "window.__ALUNIXA_X_WHALE_IMAGE__ = {};\n{}\n{}\n{}\n{}",
             serde_json::to_string(&image_data_uri("image/png", WHALE_DEFAULT_IMAGE))
                 .expect("whale image should serialize"),
             whale_runtime_script(),
             include_str!("../../../assets/inject/composer-readiness.js"),
-            renderer_script()
+            format!(
+                "{}\nwindow.__alunixaXNativeFastUnlock.runtime.update({});",
+                native_fast_unlock_script(),
+                json!({
+                    "enhancementsEnabled": settings.enhancements_enabled,
+                    "codexAppNativeFastUnlock": settings.codex_app_native_fast_unlock,
+                }),
+            ),
+            renderer_runtime
         ),
         stepwise_runtime,
         dream_skin_target_runtime,
@@ -668,6 +712,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn native_fast_renderer_waits_for_dom_and_reinjection_runs_immediately() {
+        let wrapped = renderer_after_document_ready("window.started=(window.started||0)+1;");
+        let test = format!(r#"
+          const vm=require('node:vm'),assert=require('node:assert/strict');
+          for(const ready of [false,true]){{
+            let listener;
+            const window={{}},document={{body:ready?{{}}:null,addEventListener:(name,callback,options)=>{{
+              assert.equal(name,'DOMContentLoaded');assert.equal(options.once,true);listener=callback;
+            }}}};
+            vm.runInNewContext({},{{window,document}});
+            assert.equal(window.started,ready?1:undefined);
+            if(!ready){{document.body={{}};listener();assert.equal(window.started,1);}}
+          }}
+        "#, serde_json::to_string(&wrapped).unwrap());
+        let output = std::process::Command::new("node").arg("-e").arg(test).output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    #[test]
+    fn native_shell_compatibility_is_present_without_managed_safe_css() {
+        let temp = tempfile::tempdir().unwrap();
+        for image in [String::new(), temp.path().join("selected.png").to_string_lossy().into_owned()] {
+            let mut settings = BackendSettings::default();
+            settings.codex_app_dream_skin_enabled = true;
+            settings.codex_app_dream_skin_image_path = image;
+            assert!(managed_dream_skin_css(&settings).is_empty());
+            let script = dream_skin_target_runtime_script(&settings, false);
+            assert!(script.contains("全尺寸 shell"));
+            settings.codex_app_dream_skin_paused = true;
+            assert!(dream_skin_target_runtime_script(&settings, false).is_empty());
+        }
+    }
+
+    #[test]
     fn injection_does_not_project_retired_plugin_cache() {
         let script = injection_script_with_settings(57321, &BackendSettings::default());
         assert!(!script.contains("window.__ALUNIXA_X_PLUGIN_MARKETPLACES__ ="));
@@ -704,6 +782,29 @@ mod tests {
     }
 
     #[test]
+    fn community_shell_css_only_changes_native_surface_paint_and_insets() {
+        let css = DREAM_SKIN_COMMUNITY_COMPAT_CSS;
+        assert!(css.contains("[data-codex-os=\"win32\"]"));
+        assert!(css.contains("[data-dream-task-mode=\"full\"]"));
+        assert!(css.contains("--app-shell-titlebar-height: 0px"));
+        assert!(css.contains("[data-app-action-timeline-scroll]"));
+        assert!(css.contains("[role=\"menu\"]"));
+        for excluded in [
+            "opacity:",
+            "z-index:",
+            "position:",
+            "img",
+            "canvas",
+            "video",
+        ] {
+            assert!(
+                !css.contains(excluded),
+                "unexpected media/layer override: {excluded}"
+            );
+        }
+    }
+
+    #[test]
     fn image_overlay_config_includes_fit_mode() {
         let settings = BackendSettings {
             codex_app_image_overlay_fit_mode: "fill".to_string(),
@@ -712,5 +813,19 @@ mod tests {
         let config = image_overlay_config(57321, &settings);
 
         assert_eq!(config["fitMode"].as_str(), Some("fill"));
+    }
+
+    #[test]
+    fn image_overlay_config_clears_endpoint_when_asset_is_unavailable() {
+        let settings = BackendSettings {
+            codex_app_image_overlay_enabled: true,
+            codex_app_image_overlay_path: "C:\\missing\\overlay.png".to_string(),
+            ..BackendSettings::default()
+        };
+        let config = image_overlay_config(57321, &settings);
+
+        assert_eq!(config["enabled"], false);
+        assert_eq!(config["dataUrl"], "");
+        assert_eq!(config["imageUrl"], "");
     }
 }

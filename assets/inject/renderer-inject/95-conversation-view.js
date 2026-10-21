@@ -209,7 +209,6 @@
     installThreadScrollUserIntentCapture();
     installThreadScrollRouteHooks();
     scheduleThreadScrollSync(true);
-    refreshCodexServiceTierControls();
   }
 
   function officialUsagePolicy() {
@@ -714,6 +713,23 @@
     return iconButtons.at(-1) || null;
   }
 
+  function nativeSessionRenameCapability(dialog, initialTitle) {
+    if (!(dialog instanceof HTMLElement)) return null;
+    const buttons = [...dialog.querySelectorAll("button")].filter((button) => visibleElement(button) && !button.disabled);
+    const suggestion = buttons.find((button) => {
+      const text = normalizedElementText(button);
+      if (!text || text === initialTitle || /^(取消|保存|Cancel|Save)$/i.test(text)) return false;
+      const semantics = `${button.getAttribute("aria-label") || ""} ${button.getAttribute("data-testid") || ""}`;
+      return button.classList.contains("text-info")
+        || /(?:title|name)[-_ ]suggestion|(?:use|apply|accept).*(?:suggested|suggestion)|使用.*建议|采用.*建议/i.test(semantics);
+    }) || null;
+    const generate = buttons.find((button) => /生成.*(?:名称|标题)|(?:generate|suggest).*(?:title|name)/i.test(
+      `${normalizedElementText(button)} ${button.getAttribute("aria-label") || ""}`)) || null;
+    const pending = dialog.matches('[aria-busy="true"], [data-state="loading"]')
+      || !!dialog.querySelector('[aria-busy="true"], [role="progressbar"], [data-state="loading"]');
+    return suggestion || generate || pending ? { suggestion, generate, pending } : null;
+  }
+
   async function activateSessionAutoRenameMenuItem(event) {
     if (event?.type === "keydown" && !["Enter", " "].includes(event.key)) return;
     const item = event?.currentTarget;
@@ -768,24 +784,22 @@
     }
     const titleInput = dialog.querySelector('input[aria-label="聊天标题"], input[aria-label="Chat title"]');
     const initialTitle = titleInput?.value || "";
+    // 新版可能只有手动输入框。先确认原生能力，不能空等 20 秒后关掉用户窗口。
+    const capability = await waitForSessionElement(() => nativeSessionRenameCapability(visibleSessionRenameDialog(), initialTitle), 800);
+    if (!capability) {
+      showToast("当前 Codex 未提供自动命名，可在此窗口手动重命名", null);
+      return;
+    }
+    if (!capability.suggestion && capability.generate) capability.generate.click();
     showToast("正在使用 Codex 生成会话名称…", null);
 
     const suggestionButton = await waitForSessionElement(() => {
       const currentDialog = visibleSessionRenameDialog();
       if (!currentDialog) return null;
-      return [...currentDialog.querySelectorAll("button")]
-        .filter(visibleElement)
-        .find((button) => {
-          const text = normalizedElementText(button);
-          return button.classList.contains("text-info")
-            && !!text
-            && text !== initialTitle
-            && !/^(取消|保存|Cancel|Save)$/i.test(text);
-        }) || null;
+      return nativeSessionRenameCapability(currentDialog, initialTitle)?.suggestion || null;
     }, sessionAutoRenameTimeoutMs);
     if (!(suggestionButton instanceof HTMLElement)) {
-      closeSessionRenameDialog(visibleSessionRenameDialog());
-      showToast("Codex 未能生成新名称，请稍后重试", null);
+      showToast("Codex 未能生成新名称，可在此窗口手动重命名", null);
       return;
     }
 
@@ -798,8 +812,7 @@
     const saveButton = [...activeDialog?.querySelectorAll?.("button") || []]
       .find((button) => /^(保存|Save)$/i.test(normalizedElementText(button)));
     if (!renamedInput || !(saveButton instanceof HTMLElement) || saveButton.disabled) {
-      closeSessionRenameDialog(activeDialog);
-      showToast("Codex 未能应用新名称，请稍后重试", null);
+      showToast("Codex 未能应用新名称，可在此窗口手动重命名", null);
       return;
     }
     saveButton.click();
@@ -926,7 +939,11 @@
   }
 
   function scan() {
+    if (document.hidden) {
+      window.__codexSessionDeleteScanPending = true;
+      return;
+    }
     void installDictationSupportPatch();
     runScanStep(scanLightweight);
-    requestAnimationFrame(() => runScanStep(scanDeferred));
+    scheduleDeferredScan();
   }

@@ -8,6 +8,133 @@ use crate::settings::{RelayMode, RelayProfile, RelayProtocol};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CcsImportOrigin {
+    pub kind: String,
+    pub database: String,
+    pub source_id: String,
+}
+
+fn legacy_source_id_matches(profile_id: &str, source_id: &str) -> bool {
+    let base = format!("ccs-{}", sanitize_id(source_id));
+    profile_id == base || profile_id.strip_prefix(&format!("{base}-"))
+        .and_then(|suffix| suffix.parse::<u64>().ok()).is_some_and(|suffix| suffix >= 2)
+}
+
+fn legacy_profile_matches_source(profile: &RelayProfile, provider: &CcsProviderImport) -> bool {
+    legacy_source_id_matches(&profile.id, &provider.source_id)
+        && (profile.name.ends_with("（ccswitch）") || profile.name.ends_with("(ccswitch)"))
+        && strip_ccs_name_suffix(&profile.name) == strip_ccs_name_suffix(&provider.name)
+        && profile.protocol == provider.protocol
+        && profile.upstream_base_url.trim().trim_end_matches('/') == provider.base_url.trim().trim_end_matches('/')
+}
+
+/// 来源身份来自实际解析成功的库路径；常规 DB 替换不会改变身份。
+pub fn import_providers_with_origins(
+    settings: &mut crate::settings::BackendSettings,
+    source: &CcsProviderSource,
+    bindings: &std::collections::BTreeMap<String, String>,
+) -> anyhow::Result<(usize, usize)> {
+    if source.providers.is_empty() {
+        return Ok((0, 0));
+    }
+    let mut source_ids = std::collections::HashSet::new();
+    for provider in &source.providers {
+        anyhow::ensure!(!provider.source_id.trim().is_empty() && source_ids.insert(&provider.source_id),
+            "cc-switch 来源 ID 为空或重复，未导入任何供应商");
+    }
+    let database = source.db_path.canonicalize()?.to_string_lossy().to_string();
+    let mut next = settings.clone();
+    let mut imported = 0;
+    let mut linked = 0;
+    for provider in &source.providers {
+        let origin = CcsImportOrigin {
+            kind: "cc-switch".into(),
+            database: database.clone(),
+            source_id: provider.source_id.clone(),
+        };
+        let existing: Vec<_> = next
+            .ccs_import_sources
+            .iter()
+            .filter(|(id, value)| {
+                **value == origin && next.relay_profiles.iter().any(|p| &p.id == *id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if existing.len() > 1 {
+            anyhow::bail!("同一 cc-switch 来源已关联多个供应商，请先明确关联关系");
+        }
+        if !existing.is_empty() {
+            if bindings
+                .get(&provider.source_id)
+                .is_some_and(|id| id != &existing[0])
+            {
+                anyhow::bail!("此 cc-switch 来源已经导入，不能自动改绑其他供应商");
+            }
+            continue;
+        }
+        let explicit = bindings
+            .get(&provider.source_id)
+            .filter(|id| !id.trim().is_empty());
+        let candidates: Vec<_> = next
+            .relay_profiles
+            .iter()
+            .filter(|profile| {
+                legacy_profile_matches_source(profile, provider)
+                    && !next.ccs_import_sources.contains_key(&profile.id)
+            })
+            .map(|profile| profile.id.clone())
+            .collect();
+        let target = if let Some(id) = explicit {
+            if !next.relay_profiles.iter().any(|profile| &profile.id == id) {
+                anyhow::bail!("关联供应商不存在：{id}");
+            }
+            if next
+                .ccs_import_sources
+                .get(id)
+                .is_some_and(|old| old != &origin)
+            {
+                anyhow::bail!("供应商 {id} 已关联其他来源，不能覆盖来源");
+            }
+            Some(id.clone())
+        } else if candidates.len() == 1 {
+            let profile = next.relay_profiles.iter().find(|profile| profile.id == candidates[0]).expect("candidate profile");
+            anyhow::ensure!(source.providers.iter().filter(|source| legacy_profile_matches_source(profile, source)).count() == 1,
+                "多个 cc-switch 来源匹配同一旧供应商，请显式选择来源关联，未自动合并");
+            Some(candidates[0].clone())
+        } else {
+            if candidates.len() > 1
+                || next.relay_profiles.iter().any(|profile| {
+                    !next.ccs_import_sources.contains_key(&profile.id)
+                        && legacy_source_id_matches(&profile.id, &provider.source_id)
+                })
+            {
+                anyhow::bail!(
+                    "旧 cc-switch 供应商「{}」来源不明确，请在导入菜单选择已有供应商进行关联",
+                    provider.name
+                );
+            }
+            None
+        };
+        if let Some(id) = target {
+            next.ccs_import_sources.insert(id, origin);
+            linked += 1;
+        } else {
+            let ids: Vec<_> = next
+                .relay_profiles
+                .iter()
+                .map(|profile| profile.id.clone())
+                .collect();
+            let profile = relay_profile_from_ccs(provider, &ids);
+            next.ccs_import_sources.insert(profile.id.clone(), origin);
+            next.relay_profiles.push(profile);
+            imported += 1;
+        }
+    }
+    *settings = next;
+    Ok((imported, linked))
+}
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CcsProviderImport {
     pub source_id: String,
     pub name: String,
@@ -30,6 +157,10 @@ pub fn default_ccs_db_path() -> PathBuf {
     home_dir()
         .join(format!(".{}-{}", "cc", "switch"))
         .join(format!("{}-{}.db", "cc", "switch"))
+}
+
+pub fn default_ccs_skills_dir() -> PathBuf {
+    home_dir().join(".cc-switch").join("skills")
 }
 
 pub fn list_codex_providers_from_default_db() -> anyhow::Result<Vec<CcsProviderImport>> {
@@ -146,6 +277,12 @@ pub fn relay_profile_from_ccs(
         base_url: provider.base_url.clone(),
         upstream_base_url: provider.base_url.clone(),
         api_key: provider.api_key.clone(),
+        api_keys: vec![crate::settings::RelayApiKey {
+            id: "default".to_string(),
+            name: "默认".to_string(),
+            api_key: provider.api_key.clone(),
+        }],
+        active_api_key_id: "default".to_string(),
         protocol: provider.protocol,
         relay_mode: RelayMode::PureApi,
         official_mix_api_key: false,
@@ -244,6 +381,11 @@ fn extract_protocol(config: &Value) -> RelayProtocol {
         if is_chat_protocol(&api_format) {
             return RelayProtocol::ChatCompletions;
         }
+        // 导入源的 Codex 供应商允许把上游设为 Anthropic Messages，
+        // 导入时要保住协议，否则会退化成 Responses 直连并必然 404。
+        if is_anthropic_protocol(&api_format) {
+            return RelayProtocol::AnthropicMessages;
+        }
     }
     if let Some(wire_api) = config
         .get("config")
@@ -296,6 +438,17 @@ fn is_chat_protocol(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
         "chat" | "chat_completions" | "chat-completions" | "openai_chat" | "openai-chat"
+    )
+}
+
+fn is_anthropic_protocol(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "anthropic"
+            | "anthropic_messages"
+            | "anthropic-messages"
+            | "claude"
+            | "claude_messages"
     )
 }
 

@@ -6,7 +6,7 @@ use alunixa_x_core::launcher::{
 use alunixa_x_core::models::{DeleteResult, DeleteStatus, ExportResult, ExportStatus, SessionRef};
 use alunixa_x_core::routes::{
     BridgeContext, BridgeDataService, BridgeRuntimeService, BridgeSettingsService,
-    CoreRuntimeService, handle_bridge_request,
+    CoreRuntimeService, evaluate_extension_cdp, handle_bridge_request,
 };
 use alunixa_x_core::settings::BackendSettings;
 use alunixa_x_core::status::StatusStore;
@@ -30,6 +30,8 @@ async fn bridge_routes_cover_all_current_paths() {
         ("/user-scripts/delete", json!({"key": "user:a.js"})),
         ("/user-scripts/reload", json!({})),
         ("/user-scripts/load", json!({})),
+        ("/cdp/targets", json!({})),
+        ("/cdp/evaluate", json!({"kind":"avatar-overlay","expression":"1"})),
         ("/devtools/open", json!({})),
         ("/manager/open", json!({})),
         ("/manager/open-transient", json!({})),
@@ -69,6 +71,10 @@ async fn bridge_routes_cover_all_current_paths() {
             "/thread-usage-history",
             json!({"session_id": "s1", "title": "First"}),
         ),
+        (
+            "/thread-usage-live",
+            json!({"session_id": "s1", "title": "First"}),
+        ),
         ("/archived-thread", json!({"title": "Archived"})),
     ];
 
@@ -79,6 +85,45 @@ async fn bridge_routes_cover_all_current_paths() {
             "{path} should be routed"
         );
     }
+}
+
+#[tokio::test]
+async fn cdp_evaluate_rejects_empty_expression_without_touching_cdp() {
+    let error = evaluate_extension_cdp(1, &json!({"kind": "avatar-overlay"}))
+        .await
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("expression"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn cdp_routes_are_wired_for_extensions() {
+    let result = handle_bridge_request(test_context(), "/cdp/targets", json!({})).await;
+    assert_eq!(result["status"], "failed");
+    assert_ne!(result["message"], "Unknown bridge path");
+    assert!(
+        result["message"].as_str().unwrap_or("").contains("CDP targets"),
+        "{}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn thread_usage_live_route_returns_recent_token_events() {
+    // 内置状态栏走的就是这条路由；它必须与 /thread-usage-history 分开，
+    // 因为状态栏按秒级轮询，拿不动全量历史。
+    let result = handle_bridge_request(
+        test_context(),
+        "/thread-usage-live",
+        json!({"session_id": "s1", "title": "First"}),
+    )
+    .await;
+    assert_eq!(result["status"], "ok");
+    assert_eq!(result["session_id"], "s1");
+    assert_eq!(result["events"][0]["cached_input_tokens"], json!(900));
+    assert_eq!(result["events"][0]["context_window"], json!(258400));
 }
 
 #[tokio::test]
@@ -428,15 +473,17 @@ async fn settings_routes_use_settings_service() {
     let updated = handle_bridge_request(
         ctx.clone(),
         "/settings/set",
-        json!({"providerSyncEnabled": true, "codexAppSessionDelete": false, "codexAppServiceTierControls": true, "codexAppPetRealMouseLook": true}),
+        json!({"providerSyncEnabled": true, "codexAppSessionDelete": false, "codexAppNativeFastUnlock": true, "codexAppPetRealMouseLook": true, "codexAppActivityOverlayRight": true}),
     )
     .await;
     let loaded = handle_bridge_request(ctx, "/settings/get", json!({})).await;
 
     assert_eq!(updated["providerSyncEnabled"], true);
     assert_eq!(updated["codexAppSessionDelete"], false);
-    assert_eq!(updated["codexAppServiceTierControls"], true);
+    assert_eq!(updated["codexAppNativeFastUnlock"], true);
+    assert!(updated.get("codexAppServiceTierControls").is_none());
     assert_eq!(updated["codexAppPetRealMouseLook"], true);
+    assert_eq!(updated["codexAppActivityOverlayRight"], true);
     assert_eq!(loaded, updated);
 }
 
@@ -1112,6 +1159,7 @@ async fn launch_lifecycle_uses_hook_supplied_bridge_context_for_injection() {
             debug_port: 9229,
             helper_port: 57321,
             status_store: StatusStore::new(temp.path().join("latest-status.json")),
+            ..Default::default()
         },
         &hooks,
     )
@@ -1199,8 +1247,9 @@ impl BridgeSettingsService for FakeSettings {
             "codexAppConversationView",
             "codexAppThreadScrollRestore",
             "codexAppNativeMenuPlacement",
-            "codexAppServiceTierControls",
+            "codexAppNativeFastUnlock",
             "codexAppPetRealMouseLook",
+            "codexAppActivityOverlayRight",
             "codexAppWhaleWidgetEnabled",
         ] {
             if let Some(value) = payload.get(key).and_then(Value::as_bool) {
@@ -1363,6 +1412,25 @@ impl BridgeDataService for FakeData {
         })
     }
 
+    async fn thread_usage_live(&self, session: SessionRef) -> anyhow::Result<Value> {
+        Ok(json!({
+            "status": "ok",
+            "session_id": session.session_id,
+            "events": [
+                {
+                    "t": "2026-06-02T05:00:00Z",
+                    "input_tokens": 1200,
+                    "cached_input_tokens": 900,
+                    "output_tokens": 120,
+                    "reasoning_output_tokens": 40,
+                    "total_tokens": 1320,
+                    "context_window": 258400,
+                    "turn_output_tokens": 120
+                }
+            ]
+        }))
+    }
+
     async fn thread_usage_history(&self, session: SessionRef) -> anyhow::Result<Value> {
         Ok(json!({
             "status": "ok",
@@ -1454,6 +1522,7 @@ impl LaunchHooks for ContextHooks {
         _debug_port: u16,
         _settings: &BackendSettings,
         _extra_args: &[String],
+        _instance: &alunixa_x_core::launcher::LaunchInstance,
     ) -> anyhow::Result<CodexLaunch> {
         Ok(CodexLaunch::Process {
             command: vec!["codex".to_string()],

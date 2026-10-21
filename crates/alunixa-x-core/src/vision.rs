@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::model_suffix::lookup_model_map;
+
 const BATCH_SIZE: usize = 5;
 /// 黄金窗口：Phase 1 同步补全的最近 N 轮 user 消息。
 const GOLDEN_WINDOW_DEPTH: usize = 10;
@@ -116,42 +118,6 @@ pub enum ImageHandling {
     /// VLM 分析管线（两阶段：同步当前+黄金窗口，后台补深层）。
     #[serde(rename = "vlm")]
     Vlm,
-}
-
-/// 归一化 per-model map 的查表 key：剥掉 `[1M]` 窗口后缀，**保留原大小写**。
-///
-/// 后缀剥离复用 `model_suffix::parse_model_suffix`（与 catalog 生成同一套语义），
-/// 与前端 `model-windows.ts` 的 `modelMapKeyFromRowName` 逐字对齐：
-/// 只剥「合法窗口后缀」，`x[abc]`/`x[0]` 这类非法后缀整串保留。
-fn normalize_model_key(raw: &str) -> String {
-    crate::model_suffix::parse_model_suffix(raw).0
-}
-
-/// 在 per-model map 中逐级查表：原始名 → 规范 slug（剥后缀）→ 剥后缀 + 大小写不敏感。
-///
-/// 三级回退与前端 `model-windows.ts::lookupModelMapEntry` 同源（issue #2345）：
-/// - 直接命中：上游请求里的 model 字符串与 map key 逐字相同；
-/// - 规范 slug：请求带 `[1M]` 后缀而 key 不带（前端落盘的新数据）；
-/// - 归一化后大小写不敏感：**两侧都先剥后缀再比大小写**——只剥请求侧不够，
-///   历史数据的 key 是带后缀的行名原样（`deepseek-v4-pro[1M]`），请求侧不带后缀时
-///   会整个漏掉。同时覆盖供应商 slug 大小写不统一（`GLM-5.3` vs `glm-5.3`）。
-///
-/// 大小写不敏感一级按 BTreeMap 的字典序取第一个匹配，保证同一份配置的多次请求
-/// 解析结果稳定（不会因 HashMap 迭代序在两个同名不同 case 的 key 之间抖动）。
-fn lookup_model_map<'a, T>(
-    map: &'a std::collections::BTreeMap<String, T>,
-    model: &str,
-) -> Option<&'a T> {
-    if let Some(value) = map.get(model) {
-        return Some(value);
-    }
-    let slug = normalize_model_key(model);
-    if let Some(value) = map.get(&slug) {
-        return Some(value);
-    }
-    map.iter()
-        .find(|(key, _)| normalize_model_key(key).to_lowercase() == slug.to_lowercase())
-        .map(|(_, value)| value)
 }
 
 /// 解析 model_vlm JSON，返回该模型的图片处理模式。
@@ -887,6 +853,41 @@ pub fn inject_analysis(messages: &mut [Value], result: &Result<String, String>, 
 
 // ── Main entry: strip + analyze + inject with cache ───────────────────
 
+/// 已完成的图片预处理结果；失败通过 Result 返回，调用方必须停止发送。
+#[derive(Debug, Default)]
+pub struct VlmPreprocessReport {
+    pub descriptions_injected: usize,
+}
+
+#[derive(Debug)]
+pub enum VlmPreprocessError {
+    MissingConfiguration,
+    AnalysisFailed,
+}
+
+impl std::fmt::Display for VlmPreprocessError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::MissingConfiguration => {
+                "VLM 配置不完整，无法分析本轮图片；请补充配置或显式选择剥离图片"
+            }
+            Self::AnalysisFailed => {
+                "VLM 未能分析本轮图片，已停止向主模型发送请求；请检查视觉服务后重试"
+            }
+        })
+    }
+}
+
+impl std::error::Error for VlmPreprocessError {}
+
+impl VlmPreprocessError {
+    pub(crate) fn response_body(&self) -> Value {
+        json!({"error":{"type":"vlm_preprocessing_error", "code": match self {
+            Self::MissingConfiguration => "vlm_configuration_missing",
+            Self::AnalysisFailed => "vlm_preprocessing_failed",
+        }, "message":self.to_string()}})
+    }
+}
 /// 对 messages 做图片剥离、VLM 分析、描述注入（带缓存、并发控制、上下文溢出保护）。
 ///
 /// # 参数
@@ -902,7 +903,7 @@ pub async fn strip_image_blocks(
     context_window_str: &str,
     request_model: &str,
     responses: bool,
-) {
+) -> Result<VlmPreprocessReport, VlmPreprocessError> {
     // 0. 上下文溢出保护：基于剥离图片后的纯文本预估，因为图片最终会被删掉。
     let context_window =
         resolve_context_window(model_windows_json, context_window_str, request_model);
@@ -942,7 +943,7 @@ pub async fn strip_image_blocks(
                 "skipped_images": image_count,
             }),
         );
-        return;
+        return Ok(VlmPreprocessReport::default());
     }
 
     // 1. 计算注入预算 X = available / AVG_DESC_BUDGET。
@@ -952,7 +953,7 @@ pub async fn strip_image_blocks(
     let all_image_msgs = collect_recent_image_messages(messages, ANALYZE_DEPTH_LIMIT);
     if all_image_msgs.is_empty() {
         strip_all_images(messages);
-        return;
+        return Ok(VlmPreprocessReport::default());
     }
 
     // 3. 确定黄金窗口边界（最近 GOLDEN_WINDOW_DEPTH 条 user/tool 消息中最早一条的 index）。
@@ -1049,6 +1050,11 @@ pub async fn strip_image_blocks(
                 round_urls.push(url.clone());
             }
         }
+        if !round_urls.is_empty() && (vlm_config.api_key.trim().is_empty()
+            || vlm_config.model.trim().is_empty() || vlm_config.base_url.trim().is_empty())
+        {
+            return Err(VlmPreprocessError::MissingConfiguration);
+        }
         if analyze_and_inject(&round_urls, vlm_config, &mut descriptions, *msg_idx)
             .await
             .is_err()
@@ -1061,7 +1067,7 @@ pub async fn strip_image_blocks(
                     "is_current": true,
                 }),
             );
-            return;
+            return Err(VlmPreprocessError::AnalysisFailed);
         }
     }
 
@@ -1247,6 +1253,7 @@ pub async fn strip_image_blocks(
             );
         });
     }
+    Ok(VlmPreprocessReport { descriptions_injected: descriptions.len() })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
@@ -1812,7 +1819,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap();
 
         // 图片已被删除
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1854,7 +1861,7 @@ mod tests {
             "gpt-4",
             false,
         )
-        .await;
+        .await.unwrap();
 
         // 图片已被剥离（防止图片叠加纯文本导致溢出更严重）
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1891,7 +1898,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap();
 
         // 消息应保持不变
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1918,7 +1925,7 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // 故意不可达
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "272000", "gpt-4", false).await.unwrap_err();
 
         // fail-closed：图片保留
         let parts = messages[0]["content"].as_array().unwrap();
@@ -1971,7 +1978,7 @@ mod tests {
             base_url: "https://127.0.0.1:1".to_string(), // VLM 不可达，触发 fail-closed 路径
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await.unwrap_err();
 
         // VLM 不可达 → analyze_all 返回 Err → strip_image_blocks early return
         // → fail-closed：全部图片保留，不注入任何描述。
@@ -2030,7 +2037,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "900000", "gpt-4", false).await.unwrap();
 
         // 所有图片已删除
         for msg in &messages {
@@ -2140,7 +2147,7 @@ mod tests {
             base_url: String::new(),
         };
 
-        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &vlm_config, "{}", "800", "gpt-4", false).await.unwrap();
 
         // 所有图片已删除
         for msg in &messages {
@@ -2309,7 +2316,7 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts
@@ -2353,7 +2360,7 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", true).await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", true).await.unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
 
@@ -2419,7 +2426,7 @@ mod tests {
             }),
         ];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
 
         let parts = messages[1]["content"].as_array().unwrap();
         assert!(
@@ -2517,7 +2524,7 @@ mod tests {
             ]
         })];
 
-        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &config, "{}", "272000", "gpt-4", false).await.unwrap();
 
         let parts = messages[0]["content"].as_array().unwrap();
         let has_image = parts.iter().any(|p| {
@@ -2612,7 +2619,7 @@ mod tests {
             }),
         ];
 
-        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4", false).await;
+        strip_image_blocks(&mut messages, &config, "{}", "900000", "gpt-4", false).await.unwrap();
 
         // 两轮图片均应被剥离
         for (i, label) in ["historical", "current"].iter().enumerate() {

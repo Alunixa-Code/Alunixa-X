@@ -242,6 +242,30 @@ fn build_catalog_json_uses_fallback_for_no_suffix_entries() {
 }
 
 #[test]
+fn build_catalog_json_fills_base_instructions_for_bundled_template_entries() {
+    // #2492：Codex Beta 26.727 起每个 model entry 都必须带 base_instructions，
+    // bundled 模板首条（gpt-5.5）没有该字段，clone 出来的条目必须补齐；
+    // 取值镜像条目自身的 instructions_template（Codex legacy 序列化规则）。
+    let entries = collect_catalog_entries(
+        "alunixa-x-unknown-model-for-base-instructions",
+        &HashMap::new(),
+        &HashMap::new(),
+        "",
+    );
+    let catalog: serde_json::Value =
+        serde_json::from_str(&build_model_catalog_json(&entries, None)).unwrap();
+    let model = &catalog["models"][0];
+    let base = model["base_instructions"]
+        .as_str()
+        .expect("base_instructions 必须存在且为字符串");
+    let template = model["model_messages"]["instructions_template"]
+        .as_str()
+        .expect("bundled 模板条目应带 instructions_template");
+    assert_eq!(base, template);
+    assert!(!base.is_empty());
+}
+
+#[test]
 fn build_catalog_json_uses_runtime_compatible_gpt56_metadata() {
     let entries = collect_catalog_entries(
         "gpt-5.6-sol\ngpt-5.6-terra\ngpt-5.6-luna",
@@ -764,6 +788,15 @@ fn builtin_model_metadata_index_covers_all_embedded_entries() {
     let kimi = index.iter().find(|e| e["slug"] == "kimi-k3").unwrap();
     assert_eq!(kimi["source"], "Kimi");
     assert_eq!(kimi["context_window"], 1_048_576);
+    // 「思考等级」列的内置初值随索引一起下发（effort 数组 + 默认档）。
+    let kimi_efforts: Vec<_> = kimi["supported_reasoning_levels"]
+        .as_array()
+        .expect("内置条目带思考等级")
+        .iter()
+        .map(|level| level["effort"].as_str().unwrap())
+        .collect();
+    assert_eq!(kimi_efforts, vec!["low", "high", "max"]);
+    assert_eq!(kimi["default_reasoning_level"], "high");
 }
 
 #[test]
@@ -912,4 +945,18 @@ fn gpt6_sol_luna_metadata_matches_official_efforts_fast_and_default_window() {
         assert_eq!(model["context_window"], 200_000);
         assert_eq!(model["max_context_window"], 200_000);
     }
+}
+
+/// Kimi 的 Responses 接口不认 `tool_search`：内置元数据按模型名声明关闭，
+/// 管理器元数据面板（按模型名查）与任意上游生成的 catalog（含第三方中转）都是 false。
+#[test]
+fn kimi_builtin_metadata_disables_search_tool() {
+    for slug in ["kimi-k3", "k3", "kimi-k2.6", "kimi-k2.7-code-highspeed", "kimi-k3[1M]"] {
+        let metadata = builtin_model_metadata(slug).unwrap_or_else(|| panic!("{slug} 应命中内置元数据"));
+        assert_eq!(metadata.entry["supports_search_tool"], false, "{slug}");
+    }
+    let entries = collect_catalog_entries("kimi-k3", &HashMap::new(), &HashMap::new(), "kimi-k3");
+    let catalog: serde_json::Value =
+        serde_json::from_str(&build_model_catalog_json(&entries, None)).unwrap();
+    assert_eq!(catalog["models"][0]["supports_search_tool"], false);
 }

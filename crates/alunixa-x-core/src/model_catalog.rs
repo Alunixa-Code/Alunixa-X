@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
+
 use crate::settings::{RelayProfile, SettingsStore};
 use serde_json::{Map, Value, json};
 
@@ -42,7 +44,12 @@ pub async fn read_codex_model_catalog() -> Value {
     if settings_path.exists() {
         if let Ok(settings) = SettingsStore::new(settings_path).load() {
             let profile = settings.active_relay_profile();
-            let catalog = relay_profile_model_catalog_value(&home, &profile);
+            let catalog = if let Some(aggregate) = crate::aggregate_catalog::active_model_aggregation(&settings) {
+                crate::aggregate_catalog::catalog_summary(&home, &settings, &aggregate)
+                    .unwrap_or_else(|_| relay_profile_model_catalog_value(&home, &profile))
+            } else {
+                relay_profile_model_catalog_value(&home, &profile)
+            };
             if catalog
                 .get("models")
                 .and_then(Value::as_array)
@@ -91,7 +98,7 @@ fn relay_profile_model_catalog_value(home: &Path, profile: &RelayProfile) -> Val
         profile.name.trim()
     };
     let model_count = models.len();
-    let model_metadata = model_ui_metadata_map_with_overrides(&models, &profile.model_metadata);
+    let model_metadata = relay_profile_model_ui_metadata_map(profile, &models);
     json!({
         "status": if models.is_empty() { "not_configured" } else { "ok" },
         "path": home.join("config.toml").to_string_lossy(),
@@ -145,6 +152,50 @@ fn relay_profile_model_ids(profile: &RelayProfile) -> Vec<String> {
     )
 }
 
+/// 当前活动供应商在 Codex 模型列表里公布的模型 ID 集合，用于清理历史残留引用
+/// （例如换目录后模型选择器里还留着的 `ccs-xxx/model`）。
+///
+/// - 模型聚合：目录里的全部 `cpx-*`——目录由 Alunixa X 生成，这份集合是权威的；
+///   成员未就绪导致目录算不出来时返回空集，调用方据此跳过清理，绝不误删。
+/// - 官方登录且没混用 API Key：模型列表由 Codex 自己决定，返回空集表示「不要清理」。
+/// - 普通 API 供应商：它的 model_list + 当前 model + 模型路由的源模型名，
+///   并同时收下剥掉 `[1M]` 这类窗口后缀的形式，宁可多留不可误删。
+pub fn active_published_model_ids(settings: &crate::settings::BackendSettings) -> HashSet<String> {
+    if let Some(aggregate) = crate::aggregate_catalog::active_model_aggregation(settings) {
+        // 配了默认供应商时，目录外的模型名仍有兜底转发，清「最近使用」会误删可用条目。
+        if crate::aggregate_catalog::default_backs_unbound_models(&aggregate) {
+            return HashSet::new();
+        }
+        return crate::aggregate_catalog::active_model_bindings(settings)
+            .map(|bindings| {
+                bindings
+                    .into_iter()
+                    .map(|binding| binding.catalog_model)
+                    .collect()
+            })
+            .unwrap_or_default();
+    }
+    let profile = settings.active_relay_profile();
+    if profile.relay_mode == crate::settings::RelayMode::Official && !profile.official_mix_api_key {
+        return HashSet::new();
+    }
+    let mut ids = HashSet::new();
+    for model in relay_profile_model_ids(&profile) {
+        let (stripped, _) = crate::model_suffix::parse_model_suffix(&model);
+        if !stripped.is_empty() {
+            ids.insert(stripped);
+        }
+        ids.insert(model);
+    }
+    for route in &profile.model_routes {
+        let model = route.model.trim();
+        if !model.is_empty() {
+            ids.insert(model.to_string());
+        }
+    }
+    ids
+}
+
 fn model_ui_metadata_map(models: &[String]) -> Value {
     model_ui_metadata_map_with_overrides(models, "")
 }
@@ -172,6 +223,55 @@ fn model_ui_metadata_map_with_overrides(models: &[String], user_json: &str) -> V
         }
     }
     Value::Object(metadata)
+}
+
+fn relay_profile_model_ui_metadata_map(profile: &RelayProfile, models: &[String]) -> Value {
+    let mut metadata = model_ui_metadata_map_with_overrides(models, &profile.model_metadata)
+        .as_object().cloned().unwrap_or_default();
+    let windows: std::collections::BTreeMap<String, String> =
+        serde_json::from_str::<Value>(&profile.model_windows)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .map(|object| object.into_iter()
+                .filter_map(|(key, value)| value.as_str().map(|text| (key, text.to_string())))
+                .collect())
+            .unwrap_or_default();
+    let fallback = crate::model_suffix::parse_window_token(&profile.context_window);
+    for model in models {
+        let window = crate::model_suffix::lookup_model_map(&windows, model)
+            .and_then(|token| crate::model_suffix::parse_window_token(token))
+            .or(fallback);
+        if let Some(window) = window {
+            let entry = metadata.entry(model.clone()).or_insert_with(|| json!({}));
+            for field in ["contextWindow", "maxContextWindow", "context_window", "max_context_window"] {
+                entry[field] = json!(window);
+            }
+        }
+    }
+    Value::Object(metadata)
+}
+
+#[cfg(test)]
+mod window_override_tests {
+    use super::*;
+
+    #[test]
+    fn manual_window_precedes_profile_and_builtin_metadata() {
+        let models = vec!["gpt-5.5".to_string(), "vendor-model".to_string()];
+        let profile = RelayProfile {
+            model_windows: r#"{"GPT-5.5[1M]":"1M"}"#.into(),
+            context_window: "128K".into(),
+            ..Default::default()
+        };
+        let metadata = relay_profile_model_ui_metadata_map(&profile, &models);
+        for field in ["contextWindow", "maxContextWindow", "context_window", "max_context_window"] {
+            assert_eq!(metadata["gpt-5.5"][field], 1_000_000);
+            assert_eq!(metadata["vendor-model"][field], 128_000);
+        }
+        let metadata = relay_profile_model_ui_metadata_map(&RelayProfile::default(), &models);
+        assert!(metadata["gpt-5.5"]["contextWindow"].as_u64().is_some());
+        assert!(metadata.get("vendor-model").is_none());
+    }
 }
 
 pub async fn read_codex_model_catalog_from_home(
@@ -732,6 +832,19 @@ fn responses_api_status(status: &str, endpoint: &str, message: &str) -> Value {
 pub async fn fetch_relay_profile_model_ids(
     profile: &RelayProfile,
 ) -> anyhow::Result<(Vec<String>, String)> {
+    // 官方登录 profile 没有 Base URL：带账号 OAuth 凭据读官方模型目录，
+    // 「从上游获取」按钮对官方账号同样可用（issue 讨论场景：聚合成员要填模型列表）。
+    if crate::official_login::member_uses_official_login_transport(profile) {
+        return fetch_official_login_model_ids(profile).await;
+    }
+    if crate::official_login::is_official_login_profile(profile)
+        && profile.base_url.trim().is_empty()
+    {
+        anyhow::bail!(
+            "官方登录供应商「{}」缺少 ChatGPT 登录凭据，请先导入或登录官方账号",
+            profile.name
+        );
+    }
     let source = ModelSource {
         source_id: format!("relay-profile:{}", profile.id),
         source_type: "relay_profile".to_string(),
@@ -745,7 +858,7 @@ pub async fn fetch_relay_profile_model_ids(
         } else {
             profile.upstream_base_url.trim().to_string()
         },
-        api_key: profile.api_key.trim().to_string(),
+        api_key: crate::relay_config::relay_profile_api_key(profile),
         headers: profile.custom_headers.clone(),
     };
     if source.base_url.is_empty() {
@@ -762,6 +875,88 @@ pub async fn fetch_relay_profile_model_ids(
         anyhow::bail!("{message}");
     }
     Ok((models, endpoint))
+}
+
+/// 官方模型目录的客户端版本参数；与 Codex CLI 的取值保持一致。
+const OFFICIAL_MODELS_CLIENT_VERSION: &str = "0.159.0";
+
+/// 官方登录 profile 的模型列表：带账号 OAuth 凭据请求 chatgpt.com 官方目录。
+async fn fetch_official_login_model_ids(
+    profile: &RelayProfile,
+) -> anyhow::Result<(Vec<String>, String)> {
+    let credential = crate::official_login::resolve_official_credential(profile, false).await?;
+    let base = crate::official_login::official_base_url();
+    let endpoint = format!("{}/models", base.trim().trim_end_matches('/'));
+    let client = crate::http_client::proxied_client(&profile.user_agent)?;
+    let mut request = client
+        .get(&endpoint)
+        .query(&[("client_version", OFFICIAL_MODELS_CLIENT_VERSION)])
+        .header(
+            reqwest::header::AUTHORIZATION,
+            format!("Bearer {}", credential.access_token.trim()),
+        )
+        .header("originator", "codex_cli_rs")
+        .header("version", OFFICIAL_MODELS_CLIENT_VERSION)
+        .timeout(MODELS_FETCH_TIMEOUT);
+    if !credential.account_id.trim().is_empty() {
+        request = request.header("chatgpt-account-id", credential.account_id.trim());
+    }
+    let response = request.send().await.context("官方模型列表请求失败")?;
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    if !status.is_success() {
+        anyhow::bail!(
+            "获取官方模型列表失败：HTTP {status} {}",
+            truncate_for_message(&text)
+        );
+    }
+    let value: Value = serde_json::from_str(&text).context("官方模型列表解析失败")?;
+    let models = parse_official_model_ids(&value);
+    if models.is_empty() {
+        anyhow::bail!("官方账号没有返回可见模型");
+    }
+    Ok((models, endpoint))
+}
+
+/// 官方目录条目：slug/id/name 均可作为模型 id；`visibility=hide` 与
+/// `visible_in_picker=false` 是官方内部预留位，不进入供应商模型列表。
+pub(crate) fn parse_official_model_ids(value: &Value) -> Vec<String> {
+    let entries = value
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| value.get("models").and_then(Value::as_array))
+        .or_else(|| value.get("items").and_then(Value::as_array))
+        .or_else(|| value.as_array());
+    let Some(entries) = entries else {
+        return Vec::new();
+    };
+    let mut ids = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let (id, hidden) = match entry {
+            Value::String(id) => (id.trim().to_string(), false),
+            Value::Object(map) => {
+                let hidden = map
+                    .get("visibility")
+                    .and_then(Value::as_str)
+                    .is_some_and(|visibility| visibility.eq_ignore_ascii_case("hide"))
+                    || map.get("visible_in_picker").and_then(Value::as_bool) == Some(false);
+                let id = ["slug", "id", "name"]
+                    .iter()
+                    .find_map(|key| map.get(*key).and_then(Value::as_str))
+                    .map(str::trim)
+                    .unwrap_or_default()
+                    .to_string();
+                (id, hidden)
+            }
+            _ => (String::new(), false),
+        };
+        if id.is_empty() || hidden || !seen.insert(id.clone()) {
+            continue;
+        }
+        ids.push(id);
+    }
+    ids
 }
 
 fn preferred_responses_api_status(sources: &[Value]) -> Value {
@@ -1243,5 +1438,111 @@ mod model_fetch_tests {
             status["message"]
         );
         drop(listener);
+    }
+
+    #[test]
+    fn official_model_ids_skip_hidden_entries_and_dedupe() {
+        let value = json!({
+            "data": [
+                {"slug": "gpt-6.1-sol"},
+                {"slug": "gpt-reserve", "visibility": "hide"},
+                {"id": "gpt-6-sol"},
+                {"name": "gpt-6-luna", "visible_in_picker": false},
+                "gpt-6.1-sol",
+                {"slug": "   "}
+            ]
+        });
+        assert_eq!(
+            parse_official_model_ids(&value),
+            vec!["gpt-6.1-sol", "gpt-6-sol"]
+        );
+    }
+
+    #[test]
+    fn official_model_ids_accept_models_and_items_shapes() {
+        assert_eq!(
+            parse_official_model_ids(&json!({"models": [{"slug": "a"}]})),
+            vec!["a"]
+        );
+        assert_eq!(
+            parse_official_model_ids(&json!({"items": ["b"]})),
+            vec!["b"]
+        );
+        assert!(parse_official_model_ids(&json!({"other": []})).is_empty());
+    }
+
+    /// 官方登录 profile 的模型拉取：带 OAuth 凭据请求官方 models 端点，跳过隐藏位。
+    struct OfficialBaseUrlEnvGuard {
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl OfficialBaseUrlEnvGuard {
+        fn set(value: &str) -> Self {
+            let previous = std::env::var_os("ALUNIXA_X_OFFICIAL_BASE_URL");
+            unsafe {
+                std::env::set_var("ALUNIXA_X_OFFICIAL_BASE_URL", value);
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for OfficialBaseUrlEnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.previous {
+                    Some(value) => std::env::set_var("ALUNIXA_X_OFFICIAL_BASE_URL", value),
+                    None => std::env::remove_var("ALUNIXA_X_OFFICIAL_BASE_URL"),
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn official_login_profile_fetches_models_with_oauth_headers() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 4096];
+            let read = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let body = r#"{"data":[{"slug":"gpt-6.1-sol"},{"slug":"gpt-reserve","visibility":"hide"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            request
+        });
+        let _guard = OfficialBaseUrlEnvGuard::set(&format!("http://{address}/backend-api/codex"));
+
+        let profile = RelayProfile {
+            id: "official".to_string(),
+            name: "官方登录".to_string(),
+            relay_mode: crate::settings::RelayMode::Official,
+            auth_contents: r#"{"auth_mode":"chatgpt","tokens":{"access_token":"official-access","refresh_token":"r","account_id":"acct-1"}}"#.to_string(),
+            ..RelayProfile::default()
+        };
+        let (models, endpoint) = fetch_relay_profile_model_ids(&profile).await.unwrap();
+        assert_eq!(models, vec!["gpt-6.1-sol"]);
+        assert!(endpoint.ends_with("/backend-api/codex/models"), "{endpoint}");
+
+        let request = server.await.unwrap();
+        let lower = request.to_ascii_lowercase();
+        assert!(
+            request.starts_with("GET /backend-api/codex/models?client_version="),
+            "{request}"
+        );
+        assert!(
+            lower.contains("authorization: bearer official-access"),
+            "{request}"
+        );
+        assert!(lower.contains("chatgpt-account-id: acct-1"), "{request}");
+        assert!(lower.contains("originator: codex_cli_rs"), "{request}");
     }
 }

@@ -27,9 +27,10 @@ pub fn switch_relay_profile_in_home(
     }
     crate::codex_app_state::capture_app_state_snapshot_nonfatal(home, "relay_switch.before");
 
-    store
+    let saved_settings = store
         .load()
         .context("读取原供应商设置失败，已停止切换以避免覆盖配置")?;
+    restore_missing_saved_profiles(&mut selected_settings, &saved_settings);
     let target = selected_settings.active_relay_profile();
     let snapshot_invalid = !target.auth_contents.trim().is_empty()
         && serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
@@ -85,7 +86,23 @@ pub fn switch_relay_profile_in_home(
         home,
         "relay_switch.after",
     );
+    crate::codex_app_state::prune_stale_model_references_after_switch_nonfatal(
+        home, &result.settings, "relay_switch.after",
+    );
     Ok(result)
+}
+
+fn restore_missing_saved_profiles(selected: &mut BackendSettings, saved: &BackendSettings) {
+    for profile in &saved.relay_profiles {
+        if !selected.relay_profiles.iter().any(|item| item.id == profile.id) {
+            selected.relay_profiles.push(profile.clone());
+        }
+    }
+    for aggregate in &saved.aggregate_relay_profiles {
+        if !selected.aggregate_relay_profiles.iter().any(|item| item.id == aggregate.id) {
+            selected.aggregate_relay_profiles.push(aggregate.clone());
+        }
+    }
 }
 
 fn backfill_profile_before_switch(
@@ -131,13 +148,11 @@ fn apply_selected_relay_profile(
     let relay = settings.active_relay_profile();
     let common_config = relay_combined_common_config(settings);
     let result = if relay.relay_mode == RelayMode::Official && !relay.official_mix_api_key {
-        crate::relay_config::apply_official_profile_to_home(home, &relay, &common_config)?
+        crate::relay_config::apply_relay_profile_with_preservation(home, &relay, &common_config, crate::protocol_proxy::protocol_proxy_port(), settings.relay_preserve_nonprovider_settings)?
     } else {
         validate_switch_profile_files(&relay)?;
-        crate::relay_config::apply_relay_profile_to_home_with_switch_rules(
-            home,
-            &relay,
-            &common_config,
+        crate::relay_config::apply_relay_profile_with_preservation(
+            home, &relay, &common_config, crate::protocol_proxy::protocol_proxy_port(), settings.relay_preserve_nonprovider_settings,
         )?
     };
     crate::relay_config::sync_codex_agent_capabilities_in_home(home, settings)?;

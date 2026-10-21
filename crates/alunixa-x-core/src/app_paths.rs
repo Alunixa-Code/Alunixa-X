@@ -13,9 +13,15 @@ struct AppPackageSpec {
     priority: u8,
 }
 
-const CODEX_PACKAGE_EXECUTABLES: &[&str] = &["ChatGPT.exe", "Codex.exe", "codex.exe"];
+const CODEX_PACKAGE_EXECUTABLES: &[&str] = &[
+    "ChatGPT.exe",
+    "Codex.exe",
+    "codex.exe",
+    "ChatGPT (Beta).exe",
+];
+
 #[cfg(not(target_os = "linux"))]
-const STANDALONE_CODEX_EXECUTABLES: &[&str] = &["ChatGPT.exe", "Codex.exe", "codex.exe"];
+const STANDALONE_CODEX_EXECUTABLES: &[&str] = CODEX_PACKAGE_EXECUTABLES;
 
 /// Linux 可执行文件名（原生优先，兼容便携包）
 #[cfg(target_os = "linux")]
@@ -27,6 +33,7 @@ const LINUX_CODEX_EXECUTABLES: &[&str] = &[
     "ChatGPT.exe",
     "Codex.exe",
     "codex.exe",
+    "ChatGPT (Beta).exe",
 ];
 
 #[cfg(windows)]
@@ -531,9 +538,9 @@ pub fn describe_codex_app_dir_rejection(path: &Path) -> String {
         return "这是一个文件；请选择 Codex 应用目录或目录内的可执行文件".to_string();
     }
     if path.join("app").is_dir() {
-        return "目录中没有找到 Codex 可执行文件（Codex.exe / ChatGPT.exe），且目录名也不像 MSIX 包".to_string();
+        return "目录中没有找到 Codex 可执行文件（Codex.exe / ChatGPT.exe / ChatGPT (Beta).exe），且目录名也不像 MSIX 包".to_string();
     }
-    "目录中没有找到 Codex 可执行文件（Codex.exe / ChatGPT.exe）".to_string()
+    "目录中没有找到 Codex 可执行文件（Codex.exe / ChatGPT.exe / ChatGPT (Beta).exe）".to_string()
 }
 
 /// 自动探测全部落空时的失败文案，按「显式传入 / 已保存 / 纯自动」三种来源分别给出
@@ -698,13 +705,13 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
         return normalize_codex_app_path(parent);
     }
 
-    if executable_in_dir(path).is_some() {
+    if is_desktop_host_directory(path) {
         return Some(path.to_path_buf());
     }
 
     let nested_app = path.join("app");
     if nested_app.is_dir() {
-        if executable_in_dir(&nested_app).is_some() {
+        if is_desktop_host_directory(&nested_app) {
             return Some(nested_app);
         }
         // WindowsApps 常因 ACL 无法枚举 exe；只要包名像 OpenAI.Codex_* 仍接受 app\
@@ -719,6 +726,21 @@ pub fn normalize_codex_app_path(path: &Path) -> Option<PathBuf> {
     }
 
     None
+}
+
+/// 桌面宿主必须有包身份或 Electron 资源；只有 codex.exe 的 CLI 安装不算宿主。
+fn is_desktop_host_directory(path: &Path) -> bool {
+    if executable_in_dir(path).is_none() {
+        return false;
+    }
+    // MSIX 的清单解析已经校验过包名与入口边界，保留 Store ACL 受限的兼容路径。
+    if packaged_manifest_application(path).is_some() || is_codex_store_package_dir(path) {
+        return true;
+    }
+    ["resources", "Resources"].iter().any(|name| {
+        let resources = path.join(name);
+        resources.join("app.asar").is_file() || resources.join("app/package.json").is_file()
+    })
 }
 
 /// Alunixa X 管理控制台/安装根，绝不能当作 OpenAI Codex 桌面应用。
@@ -883,7 +905,9 @@ pub fn find_desktop_managed_codex_cli() -> Option<PathBuf> {
     )
 }
 
-fn find_desktop_managed_codex_cli_from_var(local_appdata: Option<&Path>) -> Option<PathBuf> {
+pub(crate) fn find_desktop_managed_codex_cli_from_var(
+    local_appdata: Option<&Path>,
+) -> Option<PathBuf> {
     let bin = local_appdata?.join("OpenAI").join("Codex").join("bin");
     let mut candidates = vec![bin.join("codex.exe")];
     if let Ok(entries) = std::fs::read_dir(&bin) {
@@ -1065,40 +1089,156 @@ fn same_windows_path(left: &Path, right: &Path) -> bool {
 }
 
 fn packaged_manifest_app_id(app_dir: &Path) -> Option<String> {
+    if let Some((app_id, _)) = packaged_manifest_application(app_dir) {
+        return Some(app_id);
+    }
     let package_dir = packaged_package_dir(app_dir)?;
     let manifest = std::fs::read_to_string(package_dir.join("AppxManifest.xml")).ok()?;
     manifest_first_application_id(&manifest)
 }
 
+/// 启动路径与 AUMID 必须取自同一个桌面 Application，不能误选包内辅助程序。
+fn packaged_manifest_application(app_dir: &Path) -> Option<(String, PathBuf)> {
+    package_spec_from_path(app_dir)?;
+    let package_dir = packaged_package_dir(app_dir)?;
+    let manifest = std::fs::read_to_string(package_dir.join("AppxManifest.xml")).ok()?;
+    manifest_application_tags(&manifest)
+        .into_iter()
+        .find_map(|tag| {
+            let app_id = xml_attribute_value(tag, "Id").filter(|id| !id.is_empty())?;
+            let executable = xml_attribute_value(tag, "Executable")?;
+            Some((app_id, manifest_executable_path(package_dir, &executable)?))
+        })
+}
+
+fn manifest_executable_path(package_dir: &Path, executable: &str) -> Option<PathBuf> {
+    // 使用 Windows 规则跨平台校验，拒绝盘符、UNC、父目录、ADS 及尾点/尾空格别名。
+    let components = executable.split(['/', '\\']).collect::<Vec<_>>();
+    if components.iter().any(|component| {
+        component.is_empty()
+            || matches!(*component, "." | "..")
+            || component.contains(':')
+            || component.chars().any(char::is_control)
+            || component.ends_with([' ', '.'])
+            || component.eq_ignore_ascii_case("resources")
+    }) || !components
+        .last()
+        .is_some_and(|name| is_supported_app_executable_name(name))
+    {
+        return None;
+    }
+    let executable = components
+        .iter()
+        .fold(package_dir.to_path_buf(), |path, part| path.join(part));
+    // 已存在的符号链接也不能把包内路径重定向到包外；WindowsApps ACL 不可读时仍
+    // 可使用清单里的合法相对路径，避免重新退回硬编码 ChatGPT.exe。
+    if !executable_stays_in_package(package_dir, &executable) {
+        return None;
+    }
+    Some(executable)
+}
+
+fn executable_stays_in_package(package_dir: &Path, executable: &Path) -> bool {
+    match (package_dir.canonicalize(), executable.canonicalize()) {
+        (Ok(package), Ok(target)) => target.starts_with(package),
+        _ => true,
+    }
+}
+
 // AppxManifest.xml 中第一个 <Application> 节点的 Id，即 AUMID 感叹号后的部分。
 fn manifest_first_application_id(manifest: &str) -> Option<String> {
+    manifest_application_tags(manifest)
+        .into_iter()
+        .find_map(|tag| xml_attribute_value(tag, "Id"))
+}
+
+fn manifest_application_tags(manifest: &str) -> Vec<&str> {
+    let mut tags = Vec::new();
     let mut rest = manifest;
-    while let Some(pos) = rest.find("<Application") {
-        rest = &rest[pos + "<Application".len()..];
-        // 跳过 <Applications> 等容器节点，只处理 <Application ...>。
-        if !rest.chars().next().is_some_and(char::is_whitespace) {
+    while let Some(pos) = rest.find('<') {
+        rest = &rest[pos + 1..];
+        if let Some(comment) = rest.strip_prefix("!--") {
+            let Some(end) = comment.find("-->") else {
+                break;
+            };
+            rest = &comment[end + 3..];
             continue;
         }
-        let tag_end = rest.find('>')?;
-        if let Some(id) = xml_attribute_value(&rest[..tag_end], "Id") {
-            return Some(id);
+        let mut quote = None;
+        let end = rest.char_indices().find_map(|(index, character)| {
+            if quote == Some(character) {
+                quote = None;
+            } else if quote.is_none() {
+                if matches!(character, '\'' | '"') {
+                    quote = Some(character);
+                } else if character == '>' {
+                    return Some(index);
+                }
+            }
+            None
+        });
+        let Some(end) = end else {
+            break;
+        };
+        if let Some(attributes) = rest[..end].strip_prefix("Application")
+            && attributes.chars().next().is_some_and(char::is_whitespace)
+        {
+            tags.push(attributes);
         }
-        rest = &rest[tag_end..];
+        rest = &rest[end + 1..];
+    }
+    tags
+}
+
+fn xml_attribute_value(tag: &str, name: &str) -> Option<String> {
+    let mut rest = tag.trim_start();
+    while !rest.is_empty() && !rest.starts_with('/') {
+        let end = rest.find(|character: char| character.is_whitespace() || character == '=')?;
+        let attribute = &rest[..end];
+        rest = rest[end..].trim_start().strip_prefix('=')?.trim_start();
+        let quote = rest
+            .chars()
+            .next()
+            .filter(|character| matches!(character, '\'' | '"'))?;
+        rest = &rest[quote.len_utf8()..];
+        let end = rest.find(quote)?;
+        let value = &rest[..end];
+        if attribute == name {
+            return xml_attribute_text(value);
+        }
+        rest = rest[end + quote.len_utf8()..].trim_start();
     }
     None
 }
 
-fn xml_attribute_value(tag: &str, name: &str) -> Option<String> {
-    for segment in tag.split_whitespace() {
-        let Some((attr, value)) = segment.split_once('=') else {
-            continue;
+fn xml_attribute_text(value: &str) -> Option<String> {
+    let mut decoded = String::new();
+    let mut rest = value;
+    while let Some(start) = rest.find('&') {
+        decoded.push_str(&rest[..start]);
+        rest = &rest[start + 1..];
+        let end = rest.find(';')?;
+        let entity = &rest[..end];
+        let character = match entity {
+            "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "quot" => '"',
+            "apos" => '\'',
+            _ => {
+                let number = if let Some(hex) = entity.strip_prefix("#x") {
+                    u32::from_str_radix(hex, 16).ok()?
+                } else {
+                    entity.strip_prefix('#')?.parse().ok()?
+                };
+                char::from_u32(number)?
+            }
         };
-        if attr != name {
-            continue;
-        }
-        return Some(value.trim_matches('"').trim_matches('\'').to_string());
+        decoded.push(character);
+        rest = &rest[end + 1..];
     }
-    None
+    decoded.push_str(rest);
+    Some(decoded)
 }
 
 fn package_name_from_app_dir(app_dir: &Path) -> Option<String> {
@@ -1248,7 +1388,10 @@ pub(crate) fn is_supported_windows_app_package_name(package_name: &str) -> bool 
 
 pub(crate) fn is_supported_app_executable_name(name: &str) -> bool {
     // Windows
-    if name.eq_ignore_ascii_case("Codex.exe") || name.eq_ignore_ascii_case("ChatGPT.exe") {
+    if CODEX_PACKAGE_EXECUTABLES
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
         return true;
     }
     // Linux（无扩展名）
@@ -1259,6 +1402,14 @@ pub(crate) fn is_supported_app_executable_name(name: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn is_windows_desktop_app_executable_name(name: &str) -> bool {
+    // 小写 codex.exe 通常是独立 CLI，不据此阻塞清理或接管桌面应用。
+    name == "Codex.exe"
+        || name.eq_ignore_ascii_case("ChatGPT.exe")
+        || name.eq_ignore_ascii_case("ChatGPT (Beta).exe")
 }
 
 fn package_spec_from_path(path: &Path) -> Option<AppPackageSpec> {
@@ -1290,6 +1441,9 @@ fn package_entry_dir(package_dir: &Path, spec: AppPackageSpec) -> Option<PathBuf
     if app.is_dir() {
         return Some(app);
     }
+    if packaged_manifest_application(package_dir).is_some() {
+        return Some(package_dir.to_path_buf());
+    }
     for name in spec.executable_names {
         if package_dir.join(name).is_file() {
             return Some(package_dir.to_path_buf());
@@ -1299,6 +1453,9 @@ fn package_entry_dir(package_dir: &Path, spec: AppPackageSpec) -> Option<PathBuf
 }
 
 fn executable_in_dir(dir: &Path) -> Option<PathBuf> {
+    if let Some((_, executable)) = packaged_manifest_application(dir) {
+        return Some(executable);
+    }
     let names: &[&str] = if let Some(spec) = package_spec_from_path(dir) {
         spec.executable_names
     } else {
@@ -1313,7 +1470,10 @@ fn executable_in_dir(dir: &Path) -> Option<PathBuf> {
     };
     for name in names {
         let candidate = dir.join(name);
-        if candidate.is_file() {
+        let inside_package = package_spec_from_path(dir).is_none()
+            || packaged_package_dir(dir)
+                .is_some_and(|package| executable_stays_in_package(package, &candidate));
+        if candidate.is_file() && inside_package {
             return Some(candidate);
         }
     }
@@ -1350,6 +1510,182 @@ fn strip_prefix_ignore_ascii_case<'a>(value: &'a str, prefix: &str) -> Option<&'
     }
     let (head, rest) = value.split_at(prefix.len());
     head.eq_ignore_ascii_case(prefix).then_some(rest)
+}
+
+#[cfg(test)]
+mod beta_executable_tests {
+    use super::*;
+
+    #[test]
+    fn manifest_attributes_preserve_quoted_spaces_and_ignore_embedded_attribute_names() {
+        assert_eq!(
+            xml_attribute_value(
+                r#" Id = 'BetaApp' Executable = "app\ChatGPT (Beta).exe" "#,
+                "Executable"
+            )
+            .as_deref(),
+            Some(r"app\ChatGPT (Beta).exe")
+        );
+        assert_eq!(
+            xml_attribute_value(r#" Description="Id='Wrong'" Id="BetaApp" "#, "Id").as_deref(),
+            Some("BetaApp")
+        );
+    }
+
+    #[test]
+    fn desktop_cleanup_name_guard_blocks_beta_but_not_lowercase_cli() {
+        assert!(is_windows_desktop_app_executable_name("ChatGPT (Beta).exe"));
+        assert!(is_windows_desktop_app_executable_name("ChatGPT.exe"));
+        assert!(is_windows_desktop_app_executable_name("Codex.exe"));
+        assert!(!is_windows_desktop_app_executable_name("codex.exe"));
+        assert!(!is_windows_desktop_app_executable_name(
+            "ChatGPT (Beta) Helper.exe"
+        ));
+    }
+
+    fn beta_package(root: &Path, executable: &str) -> PathBuf {
+        let package = root.join("OpenAI.CodexBeta_26.727.4816.0_x64__2p2nqsd0c76g0");
+        let app = package.join("app");
+        std::fs::create_dir_all(&app).unwrap();
+        std::fs::write(
+            package.join("AppxManifest.xml"),
+            format!(
+                r#"<Package><Applications><Application Id = 'BetaApp' Executable = '{executable}' /></Applications></Package>"#
+            ),
+        )
+        .unwrap();
+        app
+    }
+
+    #[test]
+    fn manifest_executable_with_spaces_wins_over_stable_fallback() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = beta_package(temp.path(), r"app\ChatGPT (Beta).exe");
+        let beta = app.join("ChatGPT (Beta).exe");
+        std::fs::write(&beta, "beta").unwrap();
+        std::fs::write(app.join("ChatGPT.exe"), "stable").unwrap();
+
+        assert_eq!(build_codex_executable(&app), beta);
+        assert_eq!(
+            normalize_codex_app_path(&app.join("ChatGPT (Beta).exe")),
+            Some(app.clone())
+        );
+        assert_eq!(
+            derive_packaged_app_user_model_id(&app).as_deref(),
+            Some("OpenAI.CodexBeta_2p2nqsd0c76g0!BetaApp")
+        );
+    }
+
+    #[test]
+    fn beta_executable_without_manifest_is_detected() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = temp.path().join("portable");
+        std::fs::create_dir(&app).unwrap();
+        let beta = app.join("ChatGPT (Beta).exe");
+        std::fs::write(&beta, "beta").unwrap();
+        std::fs::create_dir(app.join("resources")).unwrap();
+        std::fs::write(app.join("resources/app.asar"), "electron").unwrap();
+        assert_eq!(normalize_codex_app_path(&app), Some(app.clone()));
+        assert_eq!(build_codex_executable(&app), beta);
+        assert!(is_supported_app_executable_name("ChatGPT (Beta).exe"));
+    }
+
+    #[test]
+    fn standalone_cli_is_not_a_desktop_host() {
+        let temp = tempfile::tempdir().unwrap();
+        for (index, name) in ["codex.exe", "Codex.exe"].into_iter().enumerate() {
+            let directory = temp.path().join(format!("{index}-{}", name.replace('.', "-")));
+            std::fs::create_dir(&directory).unwrap();
+            let executable = directory.join(name);
+            std::fs::write(&executable, "cli").unwrap();
+            assert_eq!(normalize_codex_app_path(&directory), None);
+            assert_eq!(normalize_codex_app_path(&executable), None);
+        }
+    }
+
+    #[test]
+    fn manifest_cannot_redirect_launch_outside_package() {
+        let temp = tempfile::tempdir().unwrap();
+        for value in [
+            r"..\ChatGPT (Beta).exe",
+            r"app\..\ChatGPT (Beta).exe",
+            r"C:\outside\ChatGPT (Beta).exe",
+            r"\outside\ChatGPT (Beta).exe",
+            r"\\server\share\ChatGPT (Beta).exe",
+            "/outside/ChatGPT (Beta).exe",
+            r"app\ChatGPT (Beta).exe:payload",
+        ] {
+            let app = beta_package(temp.path(), value);
+            let fallback = app.join("ChatGPT.exe");
+            std::fs::write(&fallback, "stable").unwrap();
+            assert_eq!(build_codex_executable(&app), fallback, "{value}");
+        }
+    }
+
+    #[test]
+    fn manifest_skips_helper_application_when_selecting_entrypoint_and_aumid() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = beta_package(temp.path(), r"app\ChatGPT (Beta).exe");
+        let beta = app.join("ChatGPT (Beta).exe");
+        std::fs::write(&beta, "beta").unwrap();
+        std::fs::write(
+            app.parent().unwrap().join("AppxManifest.xml"),
+            r#"<Package><Applications>
+                <Application Id="Helper" Executable="app\resources\codex.exe" />
+                <Application Id="BetaApp" Executable="app\ChatGPT (Beta).exe" />
+            </Applications></Package>"#,
+        )
+        .unwrap();
+        assert_eq!(build_codex_executable(&app), beta);
+        assert!(
+            derive_packaged_app_user_model_id(&app)
+                .unwrap()
+                .ends_with("!BetaApp")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn manifest_cannot_follow_an_executable_symlink_outside_package() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = beta_package(temp.path(), r"app\ChatGPT (Beta).exe");
+        let outside = temp.path().join("outside.exe");
+        std::fs::write(&outside, "outside").unwrap();
+        std::os::unix::fs::symlink(outside, app.join("ChatGPT (Beta).exe")).unwrap();
+        let fallback = app.join("ChatGPT.exe");
+        std::fs::write(&fallback, "stable").unwrap();
+        assert_eq!(build_codex_executable(&app), fallback);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn beta_fallback_cannot_reuse_a_rejected_manifest_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = beta_package(temp.path(), r"app\ChatGPT (Beta).exe");
+        let outside = temp.path().join("outside.exe");
+        std::fs::write(&outside, "outside").unwrap();
+        std::os::unix::fs::symlink(outside, app.join("ChatGPT (Beta).exe")).unwrap();
+        assert_eq!(build_codex_executable(&app), app.join("ChatGPT.exe"));
+    }
+
+    #[test]
+    fn manifest_comments_do_not_override_the_real_beta_entrypoint() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = beta_package(temp.path(), r"app\ChatGPT (Beta).exe");
+        std::fs::write(
+            app.parent().unwrap().join("AppxManifest.xml"),
+            r#"<Package><Applications>
+                <!-- <Application Id="Old" Executable="app\ChatGPT.exe" /> -->
+                <Application Id="BetaApp" Description="Beta > Stable" Executable="app\ChatGPT&#32;(Beta).exe" />
+            </Applications></Package>"#,
+        ).unwrap();
+        assert_eq!(build_codex_executable(&app), app.join("ChatGPT (Beta).exe"));
+        assert!(
+            derive_packaged_app_user_model_id(&app)
+                .unwrap()
+                .ends_with("!BetaApp")
+        );
+    }
 }
 
 #[cfg(test)]

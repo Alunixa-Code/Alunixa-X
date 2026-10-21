@@ -31,6 +31,7 @@ fn aggregate(strategy: AggregateRelayStrategy) -> AggregateRelayProfile {
         id: "agg".to_string(),
         name: "聚合".to_string(),
         session_provider: RelaySessionProvider::Custom,
+        model_aggregation_enabled: false,
         strategy,
         members: vec![
             AggregateRelayMember {
@@ -47,6 +48,8 @@ fn aggregate(strategy: AggregateRelayStrategy) -> AggregateRelayProfile {
             },
         ],
         routes: Vec::new(),
+        default_relay_id: String::new(),
+        sync_default_member_login: false,
     }
 }
 
@@ -55,6 +58,7 @@ fn aggregate_with_id(id: &str, strategy: AggregateRelayStrategy) -> AggregateRel
         id: id.to_string(),
         name: "聚合".to_string(),
         session_provider: RelaySessionProvider::Custom,
+        model_aggregation_enabled: false,
         strategy,
         members: vec![
             AggregateRelayMember {
@@ -67,6 +71,8 @@ fn aggregate_with_id(id: &str, strategy: AggregateRelayStrategy) -> AggregateRel
             },
         ],
         routes: Vec::new(),
+        default_relay_id: String::new(),
+        sync_default_member_login: false,
     }
 }
 
@@ -264,6 +270,56 @@ fn aggregate_members_must_be_api_capable_relay_profiles() {
             relay_id: "official-login".to_string()
         }
     );
+}
+
+/// 官方登录成员：快照带 ChatGPT 凭据时参与轮转，选中后原样返回给代理层凭据解析。
+#[test]
+fn aggregate_members_accept_official_login_profiles_with_credentials() {
+    let mut settings = settings(AggregateRelayStrategy::RequestRoundRobin);
+    settings.relay_profiles.push(RelayProfile {
+        id: "official-login".to_string(),
+        name: "官方登录".to_string(),
+        relay_mode: RelayMode::Official,
+        auth_contents: r#"{"auth_mode":"chatgpt","tokens":{"access_token":"access","refresh_token":"refresh","account_id":"acct-1"}}"#.to_string(),
+        ..RelayProfile::default()
+    });
+    settings.aggregate_relay_profiles[0].members = vec![AggregateRelayMember {
+        relay_id: "official-login".to_string(),
+        weight: 1,
+    }];
+
+    let mut selector = RelayRotationSelector::from_settings(&settings).unwrap();
+    let selected = selector
+        .select(&settings, RotationContext::default())
+        .unwrap();
+    assert_eq!(selected.id, "official-login");
+    assert!(alunixa_x_core::official_login::is_official_login_profile(
+        &selected
+    ));
+}
+
+/// 只有 refresh token（access 缺失）也算可用：请求路径会先刷新再发。
+#[test]
+fn official_member_with_refresh_token_only_stays_selectable() {
+    let mut settings = settings(AggregateRelayStrategy::RequestRoundRobin);
+    settings.relay_profiles.push(RelayProfile {
+        id: "official-login".to_string(),
+        name: "官方登录".to_string(),
+        relay_mode: RelayMode::Official,
+        auth_contents: r#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"refresh","account_id":"acct-1"}}"#.to_string(),
+        ..RelayProfile::default()
+    });
+    settings.aggregate_relay_profiles[0].members = vec![AggregateRelayMember {
+        relay_id: "official-login".to_string(),
+        weight: 1,
+    }];
+    settings.aggregate_relay_profiles[0].routes = Vec::new();
+
+    let mut selector = RelayRotationSelector::from_settings(&settings).unwrap();
+    let selected = selector
+        .select(&settings, RotationContext::default())
+        .unwrap();
+    assert_eq!(selected.id, "official-login");
 }
 
 #[test]
@@ -785,9 +841,12 @@ fn aggregate_route_serializes_with_camel_case_fields() {
         id: "agg".to_string(),
         name: "聚合".to_string(),
         session_provider: RelaySessionProvider::Custom,
+        model_aggregation_enabled: false,
         strategy: AggregateRelayStrategy::Failover,
         members: Vec::new(),
         routes: vec![route("deepseek-*", "relay-b", 10)],
+        default_relay_id: String::new(),
+        sync_default_member_login: false,
     };
 
     let serialized = serde_json::to_string(&profile).unwrap();

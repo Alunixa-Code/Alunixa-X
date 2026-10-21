@@ -67,6 +67,8 @@ struct CodexToolContext {
     native_tool_aliases: BTreeMap<String, String>,
     has_custom_tools: bool,
     has_namespace_tools: bool,
+    /// 只用于拒绝模型虚构的已移除原生调用，不参与客户端工具映射。
+    rejected_native_search: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +76,6 @@ struct CodexCustomToolSpec {
     openai_name: String,
     namespace: String,
     kind: CodexCustomToolKind,
-    proxy_action: Option<CodexPatchProxyAction>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -786,8 +787,10 @@ pub struct UpstreamProxyResponse {
     pub native_compaction_passthrough: bool,
     /// 响应体已经读完。为 Some 时不要再读 response。
     pub buffered_body: Option<Vec<u8>>,
+    /// 上游请求是否使用了 Responses exec 兼容包装。
+    pub exec_adapted: bool,
+    pub(crate) exec_outcome: Option<crate::responses_exec_transport::ExecOutcome>,
     pub response: Option<reqwest::Response>,
-    pub(crate) _channel_permit: Option<crate::channel_protection::ChannelPermit>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -3062,6 +3065,17 @@ fn finish_upstream_builder(
 }
 
 fn validate_upstream(relay: &crate::settings::RelayProfile) -> anyhow::Result<()> {
+    // 纯官方 profile 没有 URL/Key：凭据齐全时走官方登录通道，否则给出可行动的错误。
+    if crate::official_login::is_official_login_profile(relay) && relay.base_url.trim().is_empty()
+    {
+        if crate::official_login::official_login_available(relay) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "官方登录成员「{}」缺少 ChatGPT 登录凭据，请先在管理器中完成或导入官方登录",
+            relay.name
+        );
+    }
     if relay.base_url.trim().is_empty() {
         anyhow::bail!("上游 Base URL 不能为空");
     }
@@ -3316,18 +3330,32 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
             .and_then(Value::as_str)
             .unwrap_or("");
         if !is_stream {
+            let body = crate::anthropic_bridge::normalize_non_stream_body_for_compaction(
+                wire_api,
+                &upstream_body,
+            )?;
             return Ok(ProxyHttpResponse {
                 status: "200 OK".to_string(),
                 content_type: "text/event-stream; charset=utf-8".to_string(),
-                body: wrap_non_stream_response_as_compaction(&upstream_body, model)?,
+                body: wrap_non_stream_response_as_compaction(&body, model)?,
             });
         }
         let mut converter = CompactionSseConverter::new(model);
-        if wire_api != UpstreamWireApi::Responses {
+        if wire_api == UpstreamWireApi::AnthropicMessages {
+            // Anthropic 事件流先落成 chat 事件流，再交给既有的 chat 压缩聚合器。
+            let chat_sse =
+                crate::anthropic_bridge::anthropic_sse_to_chat_sse(&String::from_utf8_lossy(
+                    &upstream_body,
+                ));
             converter = converter.with_chat_upstream();
+            converter.push_upstream_bytes(chat_sse.as_bytes());
+        } else {
+            if wire_api != UpstreamWireApi::Responses {
+                converter = converter.with_chat_upstream();
+            }
+            // 整包已收齐，直接喂给有状态 SSE 解析器（与 launcher 逐 chunk 路径同逻辑）。
+            converter.push_upstream_bytes(&upstream_body);
         }
-        // 整包已收齐，直接喂给有状态 SSE 解析器（与 launcher 逐 chunk 路径同逻辑）。
-        converter.push_upstream_bytes(&upstream_body);
         return Ok(ProxyHttpResponse {
             status: "200 OK".to_string(),
             content_type: "text/event-stream; charset=utf-8".to_string(),
@@ -3336,6 +3364,25 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
     }
 
     if wire_api == UpstreamWireApi::Responses {
+        let body = if upstream.exec_adapted {
+            let (body, valid) = if is_stream {
+                let mut converter = crate::responses_exec_sse::ExecSseAdapter::new();
+                let mut bytes = match converter.push_bytes(&upstream_body) {
+                    Ok(bytes) => bytes,
+                    Err(_) => converter.fail(),
+                };
+                bytes.extend(converter.finish()?);
+                (bytes, converter.succeeded())
+            } else {
+                crate::responses_exec_transport::adapted_json(&upstream_body)
+            };
+            if let Some(outcome) = upstream.exec_outcome.as_mut() {
+                outcome.finish(valid);
+            }
+            body
+        } else {
+            upstream_body.to_vec()
+        };
         return Ok(ProxyHttpResponse {
             status: "200 OK".to_string(),
             content_type: if upstream_content_type.is_empty() {
@@ -3343,7 +3390,34 @@ pub async fn handle_responses_proxy_request(body: &str) -> anyhow::Result<ProxyH
             } else {
                 upstream_content_type
             },
-            body: upstream_body.to_vec(),
+            body,
+        });
+    }
+
+    if wire_api == UpstreamWireApi::AnthropicMessages {
+        // Anthropic → Chat → Responses：第二跳与 Chat 上游共用同一份映射。
+        if is_stream {
+            let text = String::from_utf8_lossy(&upstream_body);
+            return Ok(ProxyHttpResponse {
+                status: "200 OK".to_string(),
+                content_type: "text/event-stream; charset=utf-8".to_string(),
+                body: crate::anthropic_bridge::anthropic_sse_to_responses_sse(&text, &request_json),
+            });
+        }
+        let message: Value = serde_json::from_slice(&upstream_body)?;
+        let thinking_blocks = crate::anthropic_bridge::thinking_blocks_from_anthropic_message(&message);
+        let chat_json = crate::anthropic_bridge::anthropic_message_to_chat_completion(message)?;
+        let mut response_json = chat_completion_to_response_with_request(chat_json, &request_json)?;
+        if !thinking_blocks.is_empty() {
+            crate::anthropic_bridge::attach_thinking_to_responses(
+                &mut response_json,
+                &thinking_blocks,
+            );
+        }
+        return Ok(ProxyHttpResponse {
+            status: "200 OK".to_string(),
+            content_type: "application/json; charset=utf-8".to_string(),
+            body: serde_json::to_vec(&response_json)?,
         });
     }
 
@@ -7010,37 +7084,15 @@ fn tool_output_content(value: &Value) -> Value {
 
 fn build_custom_tool_call_history(name: &str, input: &Value) -> (String, String) {
     let input = response_output_text(input);
-    if name == "apply_patch" || input.starts_with("*** Begin Patch") {
-        let operations = parse_apply_patch_operations(&input);
-        if operations.len() == 1 {
-            let action = operations[0]
-                .get("type")
-                .and_then(Value::as_str)
-                .and_then(single_apply_patch_action)
-                .unwrap_or(CodexPatchProxyAction::Batch);
-            return (
-                format!("{name}_{}", action.suffix()),
-                build_apply_patch_operation_arguments(&operations[0], action),
-            );
-        }
-        return (
-            format!("{name}_batch"),
-            json!({ "operations": operations, "raw_patch": input }).to_string(),
-        );
-    }
+    let name = legacy_apply_patch_proxy_name(name).unwrap_or(name);
     (name.to_string(), json!({ "input": input }).to_string())
 }
 
 fn reconstruct_custom_tool_call_input_with_context(
-    tool_context: &CodexToolContext,
-    upstream_name: &str,
+    _tool_context: &CodexToolContext,
+    _upstream_name: &str,
     arguments: &str,
 ) -> String {
-    if let Some(spec) = tool_context.custom_tools.get(upstream_name) {
-        if spec.kind == CodexCustomToolKind::ApplyPatch {
-            return reconstruct_apply_patch_input(spec.proxy_action, arguments);
-        }
-    }
     reconstruct_custom_tool_call_input(arguments)
 }
 
@@ -7617,23 +7669,12 @@ async fn send_responses_upstream_request(
     original_user_agent: Option<&str>,
     beta_features: Option<&str>,
     session_headers: ProxySessionHeaders<'_>,
+    official_credential: Option<&crate::official_login::OfficialCredential>,
 ) -> anyhow::Result<reqwest::Response> {
-    let mut builder = upstream_request_builder(
-        crate::http_client::proxied_client(&effective_user_agent(
-            &relay.user_agent,
-            original_user_agent,
-        ))?,
-        endpoint,
-        relay,
-        is_stream,
-        upstream_body,
-    );
-    builder = with_client_session_headers(builder, relay, session_headers);
-    if wire_api == UpstreamWireApi::Responses {
-        if let Some(value) = beta_features.filter(|value| !value.is_empty()) {
-            builder = builder.header("x-codex-beta-features", value);
-        }
-    }
+    let builder = build_responses_upstream_request(
+        relay, endpoint, upstream_body, wire_api, is_stream,
+        original_user_agent, beta_features, session_headers, official_credential,
+    )?;
     send_upstream_request_for_responses(builder, is_stream).await
 }
 
@@ -7911,7 +7952,7 @@ async fn read_limited_upstream_body(
 fn usable_compaction_content(item: &Value) -> Option<&str> {
     item.get("encrypted_content")?
         .as_str()
-        .filter(|content| !content.is_empty())
+        .filter(|content| !content.trim().is_empty())
 }
 
 fn json_compaction_count(value: &Value) -> Option<usize> {
@@ -7925,8 +7966,11 @@ fn json_compaction_count(value: &Value) -> Option<usize> {
 
 fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usize> {
     if response_body_is_stream(content_type, body) {
-        let text = String::from_utf8_lossy(body).replace("\r\n", "\n");
+        let text = std::str::from_utf8(body).ok()?.replace("\r\n", "\n");
         let mut count = 0;
+        let mut completed = false;
+        let tail = text.rsplit("\n\n").next().unwrap_or("");
+        if tail.lines().any(|line| !line.trim().is_empty() && !line.starts_with(':')) { return None; }
         for block in text.split("\n\n") {
             let mut event_name = None;
             let mut data_parts = Vec::new();
@@ -7945,10 +7989,9 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
             if data.trim() == "[DONE]" {
                 continue;
             }
-            let Ok(json) = serde_json::from_str::<Value>(&data) else {
-                continue;
-            };
+            let json = serde_json::from_str::<Value>(&data).ok()?;
             let event = event_name.or_else(|| json.get("type").and_then(Value::as_str));
+            if completed { return None; }
             match event {
                 Some("response.output_item.done")
                     if json
@@ -7964,17 +8007,21 @@ fn upstream_compaction_item_count(body: &[u8], content_type: &str) -> Option<usi
                 }
                 Some("response.completed") => {
                     json.get("response")?.get("id")?.as_str()?;
-                    return Some(count);
+                    if matches!(json.pointer("/response/status").and_then(Value::as_str), Some("failed" | "incomplete")) { return None; }
+                    completed = true;
                 }
                 Some("response.failed" | "response.incomplete" | "error") => return None,
                 _ => {}
             }
         }
-        return None;
+        return completed.then_some(count);
     }
     let Ok(json) = serde_json::from_slice::<Value>(body) else {
         return None;
     };
+    if json.get("error").is_some_and(|error| !error.is_null())
+        || json.get("status").and_then(Value::as_str).is_some_and(|status| status != "completed")
+    { return None; }
     json_compaction_count(&json)
 }
 
@@ -8118,16 +8165,9 @@ fn render_native_compaction_as_sse(body: &[u8]) -> Option<Vec<u8>> {
     Some(sse.into_bytes())
 }
 
-fn incomplete_compaction_stream(body: &[u8]) -> Vec<u8> {
-    let mut output = String::from_utf8_lossy(body)
-        .into_owned()
-        .replace("\r\n", "\n");
-    if !output.is_empty() && !output.ends_with("\n\n") {
-        if !output.ends_with('\n') {
-            output.push('\n');
-        }
-        output.push('\n');
-    }
+fn incomplete_compaction_stream(_body: &[u8]) -> Vec<u8> {
+    // 验收未完成时绝不能先交付部分 checkpoint，再追加一个失败事件。
+    let mut output = String::new();
     push_sse(
         &mut output,
         "response.failed",
@@ -8168,8 +8208,9 @@ fn native_compaction_unsupported_result(
             compaction: false,
             native_compaction_passthrough: false,
             buffered_body: Some(serde_json::to_vec(&body).unwrap_or_default()),
+            exec_adapted: false,
+            exec_outcome: None,
             response: None,
-            _channel_permit: None,
         })
     } else {
         Err(error)
@@ -8358,6 +8399,9 @@ async fn open_image_proxy_request(
 ) -> anyhow::Result<UpstreamProxyResponse> {
     let settings = SettingsStore::default().load().unwrap_or_default();
     let relay = crate::relay_rotation::select_relay_for_probe(&settings)?;
+    if crate::official_login::member_uses_official_login_transport(&relay) {
+        anyhow::bail!("图片请求暂不支持官方登录成员「{}」", relay.name);
+    }
     let base_url = if relay.upstream_base_url.trim().is_empty() {
         crate::relay_config::relay_profile_base_url(&relay)
     } else {
@@ -8424,8 +8468,9 @@ async fn open_image_proxy_request(
         compaction: false,
         native_compaction_passthrough: false,
         buffered_body: None,
+        exec_adapted: false,
+        exec_outcome: None,
         response: Some(upstream),
-        _channel_permit: None,
     })
 }
 
@@ -8434,7 +8479,8 @@ fn with_relay_auth(
     relay: &crate::settings::RelayProfile,
 ) -> reqwest::RequestBuilder {
     // 认证（API Key / 无认证）+ 供应商自定义请求头，统一在 relay_headers 里决定优先级。
-    crate::relay_headers::apply(request, relay)
+    // Anthropic 上游的 `x-api-key` 与 `anthropic-version` 也在这里按协议注入。
+    crate::relay_headers::apply_for_protocol(request, relay)
 }
 
 fn with_client_session_headers(
@@ -9206,7 +9252,6 @@ fn local_definition_name(reference: &str) -> Option<&str> {
 
 fn collect_tool_search_output_namespaces(body: &Value) -> Vec<Value> {
     let mut collected: Vec<Value> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let Some(items) = body.get("input").and_then(Value::as_array) else {
         return collected;
     };
@@ -9219,16 +9264,7 @@ fn collect_tool_search_output_namespaces(body: &Value) -> Vec<Value> {
             continue;
         };
         for tool in tools {
-            let Some(name) = tool
-                .get("name")
-                .and_then(Value::as_str)
-                .filter(|value| !value.is_empty())
-            else {
-                continue;
-            };
-            if seen.insert(name.to_string()) {
-                collected.push(tool.clone());
-            }
+            merge_namespace_definition(&mut collected, tool);
         }
     }
 
@@ -9481,6 +9517,7 @@ pub struct CompactionSseConverter {
     sse_buffer: String,
     sse_utf8_remainder: Vec<u8>,
     responses_wire: bool,
+    completed: bool,
 }
 
 impl CompactionSseConverter {
@@ -10135,4 +10172,518 @@ fn remove_unsupported_native_search(body: &mut Value) -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+use std::collections::BTreeMap;
+
+use std::collections::BTreeSet;
+
+use std::collections::VecDeque;
+
+use std::time::{Duration, SystemTime};
+
+use base64::Engine as _;
+
+fn exec_retry_after_duration(
+    headers: &reqwest::header::HeaderMap,
+    now: SystemTime,
+) -> Option<Duration> {
+    let value = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim();
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    let retry_at = httpdate::parse_http_date(value).ok()?;
+    Some(retry_at.duration_since(now).unwrap_or_default())
+}
+
+/// 附件尚无 Chat 映射，必须在任何上游发送之前明确拒绝。
+#[derive(Debug)]
+pub(crate) struct UnsupportedInputFile {
+    param: String,
+}
+
+impl std::fmt::Display for UnsupportedInputFile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Chat/Anthropic 转换不支持 input_file 附件，请使用支持附件的 Responses 上游"
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedInputFile {}
+
+impl UnsupportedInputFile {
+    pub(crate) fn response_body(&self) -> Value {
+        json!({"error":{"type":"invalid_request_error", "code":"unsupported_input_file",
+            "param":self.param, "message":self.to_string()}})
+    }
+}
+
+fn validate_chat_attachments(body: &Value) -> anyhow::Result<()> {
+    fn content(value: &Value, path: &str) -> anyhow::Result<()> {
+        if value.get("type").and_then(Value::as_str) == Some("input_file") {
+            return Err(UnsupportedInputFile {
+                param: path.to_string(),
+            }
+            .into());
+        }
+        if let Some(parts) = value.as_array() {
+            for (index, part) in parts.iter().enumerate() {
+                if part.get("type").and_then(Value::as_str) == Some("input_file") {
+                    return Err(UnsupportedInputFile {
+                        param: format!("{path}[{index}]"),
+                    }
+                    .into());
+                }
+            }
+        }
+        Ok(())
+    }
+    fn item(value: &Value, path: &str) -> anyhow::Result<()> {
+        content(value, path)?;
+        let kind = value.get("type").and_then(Value::as_str);
+        if matches!(kind, None | Some("message" | "agent_message")) {
+            if let Some(parts) = value.get("content") {
+                content(parts, &format!("{path}.content"))?;
+            }
+        } else if kind == Some("function_call_output") {
+            if let Some(parts) = value.get("output") {
+                content(parts, &format!("{path}.output"))?;
+            }
+        }
+        Ok(())
+    }
+    if let Some(input) = body.get("input") {
+        if let Some(items) = input.as_array() {
+            for (index, value) in items.iter().enumerate() {
+                item(value, &format!("input[{index}]"))?;
+            }
+        } else {
+            item(input, "input")?;
+        }
+    }
+    Ok(())
+}
+
+pub struct CompactionSseOutcome {
+    pub payload: Vec<u8>,
+    pub succeeded: bool,
+}
+
+pub(crate) fn validate_compaction_json_completion(
+    body: &Value,
+    wire: UpstreamWireApi,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        body.get("error").is_none_or(Value::is_null),
+        "压缩上游返回错误"
+    );
+    let complete = match wire {
+        UpstreamWireApi::Responses => {
+            body.get("status").and_then(Value::as_str) == Some("completed")
+        }
+        UpstreamWireApi::ChatCompletions => {
+            body.pointer("/choices/0/finish_reason")
+                .and_then(Value::as_str)
+                == Some("stop")
+        }
+        UpstreamWireApi::AnthropicMessages => matches!(
+            body.get("stop_reason").and_then(Value::as_str),
+            Some("end_turn" | "stop_sequence")
+        ),
+        _ => false,
+    };
+    anyhow::ensure!(complete, "压缩上游没有正常完成状态");
+    Ok(())
+}
+
+fn build_responses_upstream_request(
+    relay: &crate::settings::RelayProfile,
+    endpoint: &str,
+    upstream_body: &Value,
+    wire_api: UpstreamWireApi,
+    is_stream: bool,
+    original_user_agent: Option<&str>,
+    beta_features: Option<&str>,
+    session_headers: ProxySessionHeaders<'_>,
+    official_credential: Option<&crate::official_login::OfficialCredential>,
+) -> anyhow::Result<reqwest::RequestBuilder> {
+    // 伪装 Claude Code 时 UA 必须换成官方 CLI 的值，否则网关按 UA 判定客户端。
+    let user_agent = if relay.protocol == crate::settings::RelayProtocol::AnthropicMessages
+        && relay.anthropic_impersonate_claude_code
+    {
+        crate::anthropic_bridge::CLAUDE_CODE_USER_AGENT.to_string()
+    } else {
+        effective_user_agent(&relay.user_agent, original_user_agent)
+    };
+    let mut builder = upstream_request_builder(
+        crate::http_client::proxied_client(&user_agent)?,
+        endpoint,
+        relay,
+        is_stream,
+        upstream_body,
+        official_credential,
+    );
+    builder = with_client_session_headers(builder, relay, session_headers);
+    if relay.protocol == crate::settings::RelayProtocol::AnthropicMessages {
+        // 1M 上下文 / Claude Code 身份都靠 anthropic-beta 表达；用户显式配了该头就不插手。
+        let has_custom_beta = relay
+            .custom_headers
+            .iter()
+            .any(|header| header.key.trim().eq_ignore_ascii_case("anthropic-beta"));
+        if !has_custom_beta {
+            let model = upstream_body
+                .get("model")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let context_1m = crate::anthropic_bridge::model_declares_context_1m(relay, model);
+            if let Some(beta) = crate::anthropic_bridge::anthropic_beta_header(
+                relay.anthropic_impersonate_claude_code,
+                context_1m,
+            ) {
+                builder = builder.header("anthropic-beta", beta);
+            }
+        }
+        if relay.anthropic_impersonate_claude_code {
+            builder = builder.header("x-app", "cli");
+        }
+    }
+    if wire_api == UpstreamWireApi::Responses {
+        if let Some(value) = beta_features.filter(|value| !value.is_empty()) {
+            builder = builder.header("x-codex-beta-features", value);
+        }
+    }
+    Ok(builder)
+}
+
+/// 官方登录成员的上游认证：OAuth Bearer + `chatgpt-account-id`，
+/// 供应商自定义头照常保留（显式 `Authorization` 除外，官方身份不能被用户头覆盖）。
+fn with_official_login_auth(
+    mut builder: reqwest::RequestBuilder,
+    relay: &crate::settings::RelayProfile,
+    credential: &crate::official_login::OfficialCredential,
+) -> reqwest::RequestBuilder {
+    // originator 是官方后端识别客户端来源的固定头（Codex CLI 同值）。
+    builder = builder
+        .bearer_auth(credential.access_token.trim())
+        .header("originator", "codex_cli_rs");
+    if !credential.account_id.trim().is_empty() {
+        builder = builder.header("chatgpt-account-id", credential.account_id.trim());
+    }
+    let custom_headers: Vec<crate::settings::RelayHeaderKeyValue> = relay
+        .custom_headers
+        .iter()
+        .filter(|header| !header.key.trim().eq_ignore_ascii_case("authorization"))
+        .cloned()
+        .collect();
+    crate::relay_headers::apply_headers(builder, &custom_headers)
+}
+
+/// 已确认的 multi_agent v2 agent_message 明文形态：
+/// content[] 同时包含以 `Payload:` 结尾的 input_text 头部和 encrypted_content 载荷片段。
+/// 只有这一种结构允许把 encrypted_content 片段按明文文本透传；其余一律 fail closed。
+fn agent_message_has_confirmed_plaintext_shape(content: &Value) -> bool {
+    let Some(parts) = content.as_array() else {
+        return false;
+    };
+    let has_payload_header = parts.iter().any(|part| {
+        part.get("type").and_then(Value::as_str) == Some("input_text")
+            && part
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.trim_end().ends_with("Payload:"))
+    });
+    let has_payload_fragment = parts
+        .iter()
+        .any(|part| part.get("type").and_then(Value::as_str) == Some("encrypted_content"));
+    has_payload_header && has_payload_fragment
+}
+
+/// 在已确认的 agent_message 明文形态内，判定 encrypted_content 片段值是否为
+/// 无法在 Chat 协议中表达的 opaque 密文（二级防线，不承担来源范围判定）。
+///
+/// 实证依据：Codex Desktop（cli_version 0.162.0-alpha.2 / multi_agent_version v2）
+/// 的 120 个真实 rollout 会话里，agent_message 的 encrypted_content 片段共 216 处，
+/// 216/216 都是可打印明文（含中文、常规空格换行），0 处是纯 base64 高熵形态：
+/// 当前客户端在这条路径上的构造事实就是明文字符串，名义协议里的「加密」未在
+/// 该字段启用。但守卫不依赖这一点，只把最典型的密文形态判为 opaque，
+/// 两条路径都不静默丢内容——
+/// 1. 含 \t \n \r 之外的控制字符：明文文本不会携带，判为二进制；
+/// 2. 无空白的纯 base64 字母表（去填充后 ≥32 字符）且可解码，解出字节的
+///    可打印 ASCII 占比明显偏低（<60%）：分块加密输出的编码形态。
+///    明文句子 base64 后通常带空格，不命中前半段；单 token 明文解码回来仍是
+///    ASCII 文本，可打印占比高，不命中后半段。
+///
+/// 两个条件都不满足即按明文透传。
+fn encrypted_content_value_is_opaque(value: &str) -> bool {
+    if value
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    {
+        return true;
+    }
+    let body = value.trim_end_matches('=');
+    if body.len() < 32
+        || !body
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'-' | b'_' | b'='))
+    {
+        return false;
+    }
+    // base64url 与标准字母表在字符集层面无法区分，解码前逐字符映射到标准表。
+    // 这里不能写成 replace(['-', '_'], "+/")：str::replace 会把每个匹配字符替换成
+    // 完整的 "+/" 两个字符，长度改变后解码必然失败，opaque 载荷会被误判为明文。
+    let canonical: String = body
+        .chars()
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            other => other,
+        })
+        .collect();
+    let padded = format!("{canonical}{}", "=".repeat((4 - canonical.len() % 4) % 4));
+    let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&padded) else {
+        // 长度不满足编码约束（解码失败）就不是合法的密文编码，按明文处理；
+        // 真实密文的编码必然满足长度约束。
+        // （len % 4 == 1 的输入也在这里被排除。）
+        return false;
+    };
+    if decoded.is_empty() {
+        return false;
+    }
+    // 明文（ASCII 文本再 base64）解码回来仍是高可打印文本；密文解码字节接近
+    // 均匀分布，可打印 ASCII 占比仅约 37%。阈值取 60%。
+    let printable = decoded
+        .iter()
+        .filter(|b| matches!(**b, 0x20..0x7f | b'\t' | b'\n' | b'\r'))
+        .count();
+    printable * 5 < decoded.len() * 3
+}
+
+fn custom_proxy_tool_with_original_definition(
+    tool: &Value,
+    name: &str,
+    description: &str,
+) -> Value {
+    let mut description = if description.trim().is_empty() {
+        format!("FREEFORM custom tool: {name}. Put only the tool input text here.")
+    } else {
+        format!(
+            "{}\n\nThis is a FREEFORM tool. Do not wrap the input in JSON or markdown.",
+            description.trim()
+        )
+    };
+    description.push_str("\n\nOriginal tool definition:\n```json\n");
+    description.push_str(&canonical_json_string(tool));
+    description.push_str("\n```");
+
+    json!({
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "input": {
+                        "type": "string",
+                        "description": "Raw string input for the original custom tool. Preserve formatting exactly and follow the original tool definition embedded in the description."
+                    }
+                },
+                "required": ["input"]
+            }
+        }
+    })
+}
+
+/// 从历史里的 tool_search_output item 收集 Codex 客户端检索命中的命名空间工具。
+///
+/// 条目形如 `{ type: "namespace", name, description, tools: [...] }`，必须走
+/// `add_namespace_tools_to_context` + `namespace_tool_to_chat_tools` 展开成
+/// `mcp__<server>__<tool>`。只取 namespace 名字的话上游只能看到外壳，
+/// 调不到内层工具，反向转换也还原不出 namespace 字段。
+fn merge_namespace_definition(collected: &mut Vec<Value>, tool: &Value) {
+    let Some(name) = tool
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+    else {
+        return;
+    };
+    let kind = tool.get("type").and_then(Value::as_str);
+    let existing = collected.iter_mut().find(|entry| {
+        entry.get("name").and_then(Value::as_str) == Some(name)
+            && entry.get("type").and_then(Value::as_str) == kind
+    });
+    let Some(existing) = existing else {
+        collected.push(tool.clone());
+        return;
+    };
+    if kind != Some("namespace") {
+        *existing = tool.clone();
+        return;
+    }
+    let mut children = existing
+        .get("tools")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for child in tool
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let child_name = child.get("name").and_then(Value::as_str);
+        let child_type = child.get("type").and_then(Value::as_str);
+        if let Some(old) = children.iter_mut().find(|old| {
+            child_name.is_some()
+                && old.get("name").and_then(Value::as_str) == child_name
+                && old.get("type").and_then(Value::as_str) == child_type
+        }) {
+            // 后来的定义只决定下一轮调用的 schema，不改写旧 call/output。
+            if old.get("parameters") != child.get("parameters") {
+                let _ = crate::diagnostic_log::append_diagnostic_log(
+                    "protocol_proxy.namespace_schema_updated",
+                    json!({"namespace":name, "tool":child_name, "policy":"current_then_latest_history"}),
+                );
+            }
+            *old = child.clone();
+        } else {
+            children.push(child.clone());
+        }
+    }
+    *existing = tool.clone();
+    existing["tools"] = json!(children);
+}
+
+/// 出站与两种反向转换共享同一投影，已过滤的原生工具不能抢占同名客户端工具。
+struct ChatToolProjection {
+    tools: Vec<Value>,
+    context: CodexToolContext,
+}
+
+fn chat_tool_projection(body: &Value) -> ChatToolProjection {
+    let mut namespaces = collect_tool_search_output_namespaces(body);
+    let mut projected = Vec::new();
+    for tool in body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        match tool.get("type").and_then(Value::as_str) {
+            Some("web_search" | "web_search_preview") => {}
+            Some("namespace") => merge_namespace_definition(&mut namespaces, tool),
+            _ => projected.push(tool.clone()),
+        }
+    }
+    // 顶层当前定义最后合并，优先于所有历史定义；同名 namespace 新 children 不丢。
+    projected.extend(namespaces);
+    let value = json!(projected);
+    let mut context = build_codex_tool_context(Some(&value));
+    for tool in body
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if matches!(
+            tool.get("type").and_then(Value::as_str),
+            Some("web_search" | "web_search_preview")
+        ) {
+            let name = tool
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("web_search");
+            if !context.function_tools.contains_key(name)
+                && !context.custom_tools.contains_key(name)
+            {
+                context.rejected_native_search.insert(name.to_string());
+            }
+        }
+    }
+    let mut tools = responses_tools_to_chat_tools(value.as_array().expect("tools array"), &context);
+    dedup_chat_tools_by_name(&mut tools);
+    ChatToolProjection { tools, context }
+}
+
+/// 旧版本曾把 apply_patch 拆成多个结构化代理动作。新请求只声明
+/// `apply_patch`，历史里的旧动作名必须在回放前迁移，避免上游收到
+/// 未声明工具名。
+fn legacy_apply_patch_proxy_name(name: &str) -> Option<&'static str> {
+    match name {
+        "apply_patch_add_file"
+        | "apply_patch_delete_file"
+        | "apply_patch_update_file"
+        | "apply_patch_replace_file"
+        | "apply_patch_batch" => Some("apply_patch"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod exec_retry_after_tests {
+    use super::*;
+    use reqwest::header::{HeaderMap, RETRY_AFTER};
+
+    fn headers(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(RETRY_AFTER, value.parse().unwrap());
+        headers
+    }
+
+    #[test]
+    fn delta_seconds_are_preserved() {
+        assert_eq!(
+            exec_retry_after_duration(&headers(" 90 "), SystemTime::UNIX_EPOCH),
+            Some(Duration::from_secs(90))
+        );
+        assert_eq!(
+            exec_retry_after_duration(&headers("0"), SystemTime::UNIX_EPOCH),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn future_http_date_uses_remaining_delay() {
+        let retry_at = SystemTime::UNIX_EPOCH + Duration::from_secs(180);
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(90_250);
+        assert_eq!(
+            exec_retry_after_duration(&headers(&httpdate::fmt_http_date(retry_at)), now),
+            Some(Duration::from_millis(89_750))
+        );
+    }
+
+    #[test]
+    fn past_http_date_is_immediate() {
+        assert_eq!(
+            exec_retry_after_duration(
+                &headers("Thu, 01 Jan 1970 00:00:00 GMT"),
+                SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+            ),
+            Some(Duration::ZERO)
+        );
+    }
+
+    #[test]
+    fn missing_and_invalid_values_are_ignored() {
+        assert_eq!(
+            exec_retry_after_duration(&HeaderMap::new(), SystemTime::UNIX_EPOCH),
+            None
+        );
+        for value in ["", "not-a-date", "-1", "1.5"] {
+            assert_eq!(
+                exec_retry_after_duration(&headers(value), SystemTime::UNIX_EPOCH),
+                None,
+                "{value}"
+            );
+        }
+    }
 }

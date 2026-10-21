@@ -1,3 +1,5 @@
+mod auto_takeover;
+mod agent_collaboration_commands;
 pub mod commands;
 pub mod install;
 mod restored_operations;
@@ -20,6 +22,10 @@ const MANAGER_NAVIGATION_EVENT: &str = "manager-navigation-requested";
 
 pub(crate) fn app_is_exiting() -> bool {
     APP_EXITING.load(Ordering::SeqCst)
+}
+
+pub fn run_agent_collaboration_mcp(args: &[std::ffi::OsString]) -> anyhow::Result<()> {
+    agent_collaboration_commands::run_mcp(args)
 }
 
 pub fn run() {
@@ -98,15 +104,21 @@ pub fn run() {
             commands::start_weixin_connect_from_saved_settings();
             register_main_window_events(main_window);
             commands::resume_existing_codex_background(app.handle().clone());
+            // 自动接管官方 App（默认关闭）：设置里开着才起守护线程。
+            auto_takeover::start_supervisor();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            agent_collaboration_commands::agent_collaboration_request,
             commands::backend_version,
             commands::startup_options,
             commands::consume_pending_manager_navigation,
             commands::load_overview,
             commands::launch_alunixa_x,
             commands::launch_codex_multi_instance,
+            commands::list_codex_multi_instances,
+            commands::stop_codex_multi_instance,
+            commands::restart_codex_multi_instance,
             commands::restart_alunixa_x,
             commands::load_settings,
             commands::load_image_models,
@@ -120,6 +132,8 @@ pub fn run() {
             commands::download_dictation_local_model,
             commands::claude_localization_status,
             commands::claude_localization_action,
+            commands::claude_localization_set_voice_input,
+            commands::claude_localization_set_localization,
             commands::native_browser_status,
             commands::save_settings,
             commands::list_tools,
@@ -173,6 +187,8 @@ pub fn run() {
             commands::preview_provider_sync,
             commands::apply_session_index_cleanup,
             commands::sync_providers_now,
+            commands::load_provider_sync_recovery,
+            commands::recover_provider_sync,
             commands::load_ads,
             commands::refresh_script_market,
             commands::refresh_plugin_market,
@@ -186,6 +202,7 @@ pub fn run() {
             commands::delete_user_script,
             commands::refresh_skill_catalog,
             commands::list_installed_skills,
+            commands::import_ccs_skills,
             commands::install_skill,
             commands::update_skill,
             commands::set_skill_enabled,
@@ -193,18 +210,19 @@ pub fn run() {
             commands::restore_skill_backup,
             commands::delete_skill_backup,
             commands::upsert_skill_repo,
+            commands::inspect_skill_repo,
             commands::delete_skill_repo,
             commands::open_external_url,
-            commands::install_entrypoints,
-            commands::uninstall_entrypoints,
             commands::repair_shortcuts,
             commands::check_update,
             commands::perform_update,
             commands::load_watcher_state,
-            commands::install_watcher,
-            commands::uninstall_watcher,
-            commands::enable_watcher,
-            commands::disable_watcher,
+            commands::set_watcher_enabled,
+            // 自动接管官方 App：前端 invoke 找不到命令时是运行期静默失败，
+            // 没有编译期兜底，所以这三个必须注册在这里（契约测试会守）。
+            commands::load_auto_takeover_state,
+            commands::take_over_codex_now,
+            commands::pause_auto_takeover_for_instance,
             commands::read_latest_logs,
             commands::clear_logs,
             commands::scan_agent_cache,
@@ -251,8 +269,13 @@ pub fn run() {
                     api.prevent_exit();
                     if !SHUTDOWN_STARTED.swap(true, Ordering::SeqCst) {
                         APP_EXITING.store(true, Ordering::SeqCst);
+                        auto_takeover::stop_supervisor();
                         let app = app_handle.clone();
                         tauri::async_runtime::spawn_blocking(move || {
+                            // 退出前先等待自有 CLI 任务清理，避免进程退出后遗留执行器。
+                            tauri::async_runtime::block_on(
+                                alunixa_x_core::agent_collaboration::executor::shutdown_owned_tasks(),
+                            );
                             if let Err(error) = alunixa_x_launcher::shutdown() {
                                 let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
                                     "app.shutdown_failed",

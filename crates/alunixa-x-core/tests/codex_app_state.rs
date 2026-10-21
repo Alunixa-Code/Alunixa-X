@@ -234,6 +234,7 @@ fn app_state_sync_normalizes_current_state_and_writes_backup_before_change() {
         json!(["C:/work/app", "C:\\work\\app\\"])
     );
 }
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\ours
 
 #[test]
 fn projectless_main_window_preparation_keeps_saved_projects_and_clears_active_root() {
@@ -308,3 +309,86 @@ hotkey-window-projectless-default-enabled = false
     assert!(!result.changed);
     assert_eq!(state["active-workspace-roots"], json!(["C:/work/app"]));
 }
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\base
+=======
+
+/// 切换目录后「最近使用」里上个目录的模型 ID 要被清掉，合法条目和其他字段原样保留。
+#[test]
+fn prune_stale_recent_models_drops_unavailable_entries_and_keeps_the_rest() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let state_path = home.join(".codex-global-state.json");
+    std::fs::write(
+        &state_path,
+        json!({
+            "electron-saved-workspace-roots": ["C:/work/app"],
+            "electron-persisted-atom-state": {
+                "composer-recent-model-configurations-v1": [
+                    {"model": "cpx-relay-mv5bil9a/deepseek-v4-flash", "reasoningEffort": "max"},
+                    {"model": "ccs-deepseek/deepseek-flash", "reasoningEffort": "max"},
+                    {"model": "gpt-6.1-sol", "reasoningEffort": "max"},
+                    {"reasoningEffort": "max"}
+                ],
+                "sidebar-width": 280
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut valid = std::collections::HashSet::new();
+    valid.insert("cpx-relay-mv5bil9a/deepseek-v4-flash".to_string());
+    let removed = alunixa_x_core::codex_app_state::prune_stale_recent_model_configurations(
+        home, &valid,
+    )
+    .unwrap();
+
+    assert_eq!(removed, 2);
+    let state: Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    let entries = state["electron-persisted-atom-state"]
+        ["composer-recent-model-configurations-v1"]
+        .as_array()
+        .unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["model"], "cpx-relay-mv5bil9a/deepseek-v4-flash");
+    // 没有 model 字段的条目结构不认识，原样保留。
+    assert!(entries[1].get("model").is_none());
+    assert_eq!(state["electron-saved-workspace-roots"], json!(["C:/work/app"]));
+    assert_eq!(
+        state["electron-persisted-atom-state"]["sidebar-width"],
+        json!(280)
+    );
+    // 改前必须留备份。
+    let backups = std::fs::read_dir(home.join("backups_state/app-state-sync"))
+        .unwrap()
+        .count();
+    assert!(backups >= 1);
+}
+
+/// 目录算不出来（空集合）时绝不改文件：宁可留着残留，也不能误删用户的选择。
+#[test]
+fn prune_stale_recent_models_skips_when_no_published_models() {
+    let temp = tempfile::tempdir().unwrap();
+    let home = temp.path();
+    let state_path = home.join(".codex-global-state.json");
+    let original = json!({
+        "electron-persisted-atom-state": {
+            "composer-recent-model-configurations-v1": [
+                {"model": "ccs-deepseek/deepseek-flash"}
+            ]
+        }
+    })
+    .to_string();
+    std::fs::write(&state_path, &original).unwrap();
+
+    let removed = alunixa_x_core::codex_app_state::prune_stale_recent_model_configurations(
+        home,
+        &std::collections::HashSet::new(),
+    )
+    .unwrap();
+
+    assert_eq!(removed, 0);
+    assert_eq!(std::fs::read_to_string(&state_path).unwrap(), original);
+}
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\codex_app_state.rs\theirs

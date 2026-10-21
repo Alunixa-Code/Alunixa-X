@@ -51,6 +51,7 @@
    * 同一套外壳 + 自定义内容，所以单独走一遍，但外壳结构与类名完全对齐。
    */
   function openCodexPlusModalForExtension(id, definition) {
+    closeCodexPlusPage();
     document.querySelectorAll(".alunixa-x-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll(`.${alunixaXPageClass}, [data-alunixa-x-dialog="true"]`).forEach((node) => node.remove());
     const overlay = document.createElement("div");
@@ -71,13 +72,10 @@
       </div>
     `;
     document.body.appendChild(overlay);
-    positionCodexPlusPage(overlay);
+    observeCodexPlusPageLayout(overlay);
     // 拓展入口不在内置的三个 id 里，setCodexPlusSidebarNavActive 认不出来，
     // 所以自己点亮该入口，再调一次 sync 让原生选中态被压下去。
     setCodexPlusExtensionNavActive(id);
-    window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
-    window.__alunixaXPageResizeHandler = () => positionCodexPlusPage(overlay);
-    window.addEventListener("resize", window.__alunixaXPageResizeHandler);
     // 与内置页面一致：点图标栏上的任何原生按钮就关掉这个覆盖层。
     //
     // 注意必须连拓展自己的入口一起排除：拓展入口 id 是动态生成的，不在那三个内置
@@ -138,6 +136,8 @@
 
   /** 关闭当前拓展页面并执行其 onCleanup。 */
   function closeCodexPlusPage() {
+    clearTimeout(window.__alunixaXPageNavigationCloseTimer);
+    window.__alunixaXPageNavigationCloseTimer = null;
     const cleanup = window.__alunixaXExtensionPageCleanup;
     window.__alunixaXExtensionPageCleanup = null;
     if (typeof cleanup === "function") {
@@ -146,8 +146,13 @@
       } catch {}
     }
     window.removeEventListener("resize", window.__alunixaXPageResizeHandler);
+    window.__alunixaXPageResizeHandler = null;
+    window.__alunixaXPageLayoutObserver?.disconnect();
+    window.__alunixaXPageLayoutObserver = null;
+    window.__alunixaXPageLayoutTargets = null;
     document.querySelectorAll(`.${alunixaXPageClass}`).forEach((node) => node.remove());
     setCodexPlusSidebarNavActive(false);
+    restoreCodexPlusPageBackButton();
   }
 
   /** 拓展入口的 DOM 标记：用它反查注册表项，dispose 后据此清理。 */

@@ -15,7 +15,7 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -706,7 +706,7 @@ fn run_official_usage_status_harness() -> serde_json::Value {
 const scriptPath = {script_path};
 function node() {{
   return {{
-    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}},
+    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}}, toggleAttribute() {{}},
     addEventListener() {{}}, querySelector() {{ return null; }}, querySelectorAll() {{ return []; }},
     closest() {{ return null; }}, getAttribute() {{ return null; }},
     classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }},
@@ -900,8 +900,33 @@ process.exit(0);
 fn injection_script_installs_image_and_video_overlays_from_data_or_blob() {
     let script = assets::injection_script(57321);
 
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
     assert!(script.contains("const source = config.dataUrl || config.sourceUrl || \"\""));
     assert!(script.contains("backgroundImage: `url(\"${url.replace(/\"/g, \"%22\")}\")`"));
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
+    assert!(script.contains("const source = config.dataUrl || \"\""));
+    assert!(script.contains("backgroundImage: `url(\"${source.replace(/\"/g, \"%22\")}\")`"));
+=======
+    assert!(script.contains("typeof config.dataUrl === \"string\""));
+    assert!(script.contains("overlay.id = alunixaXImageOverlayId"));
+    let overlay_script = script
+        .split("function installCodexPlusImageOverlay()")
+        .nth(1)
+        .and_then(|body| body.split("function scheduleCodexPlusImageOverlay()").next())
+        .expect("image overlay entry point should be embedded");
+    assert!(overlay_script.contains("data-alunixa-x-image-native"));
+    assert!(overlay_script.contains("root.insertBefore(overlay, document.body"));
+    assert!(!overlay_script.contains("maskImage"));
+    assert!(!overlay_script.contains("ScrollTimeline"));
+    assert!(!overlay_script.contains("cloneNode"));
+    assert!(script.contains("URL.createObjectURL(new Blob([bytes], { type: data[1] }))"));
+    assert!(script.contains("image.src = resource.imageSource"));
+    assert!(!script.contains("JSON.stringify(source)"));
+    assert!(overlay_script.contains("zIndex: String(wallpaperLayer)"));
+    assert!(script.contains("pointerEvents: \"none\""));
+    assert!(!script.contains("alunixaXImageOverlayTransparentTargetSelector"));
+    assert!(!script.contains("function installCodexPlusImageOverlayForeground"));
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
     assert!(script.contains(
         "fit: { size: \"contain\", position: \"center center\", repeat: \"no-repeat\" }"
     ));
@@ -2704,7 +2729,7 @@ const scriptPath = {script_path};
 const store = new Map();
 function node() {{
   return {{
-    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}},
+    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}}, toggleAttribute() {{}},
     addEventListener() {{}}, querySelector() {{ return null; }}, querySelectorAll() {{ return []; }},
     closest() {{ return null; }},
     classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }},
@@ -2945,6 +2970,98 @@ fn injection_script_exposes_sidebar_thread_id_badge_control() {
 }
 
 #[test]
+fn injection_script_exposes_capacity_auto_retry_control() {
+    let script = assets::injection_script(57321);
+
+    // 开关接线：默认值 → 后端映射 → 中文标签 → 菜单 DOM → 设置面板输入框。
+    assert!(script.contains("capacityAutoRetry: false"));
+    assert!(script.contains("capacityAutoRetry: \"codexAppCapacityAutoRetry\""));
+    assert!(script.contains("容量错误自动重试"));
+    assert!(script.contains("data-alunixa-x-setting=\"capacityAutoRetry\""));
+    assert!(script.contains("data-alunixa-x-capacity-retry-max-attempts=\"true\""));
+    assert!(script.contains("data-alunixa-x-capacity-retry-interval=\"true\""));
+
+    // 运行逻辑：横幅识别只看语义结构（aside + 重试按钮），不绑 Codex 的 hash 类名。
+    assert!(script.contains("function findCapacityAutoRetryBanner"));
+    assert!(script.contains("function capacityAutoRetryTick"));
+    assert!(script.contains("function syncCodexPlusCapacityAutoRetry"));
+    assert!(script.contains("querySelectorAll(\"aside\")"));
+    assert!(script.contains("capacityAutoRetryLabelPattern"));
+    // 原生倒计时在跑时让路，避免和 Codex 自己的自动重试撞车。
+    assert!(script.contains("capacityAutoRetryCountdownPattern"));
+    assert!(script.contains("capacityAutoRetryNativeCountdownRunning"));
+    // 0 秒间隔必须合法（用户要求"失败就立刻重试"），但有 1 秒地板值防热循环。
+    assert!(script.contains("capacityAutoRetryMinIntervalMs = 1000"));
+    assert!(script.contains("capacityAutoRetryDefaultIntervalSeconds = 0"));
+    // 插进 DOM 的浮标必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
+    assert!(script.contains("data-alunixa-x-ext\", \"capacity-auto-retry\""));
+    assert!(script.contains("syncCodexPlusCapacityAutoRetry);"));
+}
+
+#[test]
+fn injection_script_uses_an_icon_for_idle_dictation() {
+    let script = assets::injection_script(57321);
+
+    // 空闲态是图标按钮：文字按钮在 composer 底栏比原生图标宽一倍多。
+    assert!(script.contains("function alunixaXDictationMicButton"));
+    assert!(script.contains("function alunixaXDictationMicIcon"));
+    assert!(script.contains("alunixaXDictationMicButton(state.phase !== \"idle\")"));
+    // 不再有「空闲态渲染文字按钮」这条路径。
+    assert!(!script.contains("alunixaXDictationControl(\"start\", \"语音输入\""));
+    // 无障碍名称不能丢：图标按钮只能靠 aria-label / title 表达用途。
+    assert!(script.contains("button.setAttribute(\"aria-label\", \"语音输入\")"));
+    assert!(script.contains("button.setAttribute(\"title\", \"语音输入\")"));
+    // 录音/转写这些状态仍然带文字，图标说不清。
+    assert!(script.contains("alunixaXDictationControl(\"insert\", \"停止并插入\")"));
+}
+
+#[test]
+fn injection_script_exposes_the_usage_status_line() {
+    let script = assets::injection_script(57321);
+
+    // 开关接线：默认值 → 后端映射。
+    assert!(script.contains("usageStatusLine: true"));
+    assert!(script.contains("usageStatusLine: \"codexAppUsageStatusLine\""));
+    assert!(script.contains("usageStatusLine: false"));
+
+    // 数据源走尾部快照路由，不能退回按秒整读历史的 /thread-usage-history。
+    assert!(script.contains("postJson(\"/thread-usage-live\""));
+    assert!(script.contains("data-above-composer-conversation-id"));
+    assert!(script.contains("data-composer-surface-variant"));
+    // 插进 DOM 的节点必须带归属标记，否则会触发自喂扫描循环（issue #1960）。
+    assert!(script.contains("data-alunixa-x-ext\", \"builtin-usage-statusline\""));
+    assert!(script.contains("registerCodexPlusExtensionSelector"));
+    // 设置面板里的开关要能立刻生效，不用等下一拍轮询。
+    assert!(script.contains("__ALUNIXA_X_USAGE_STATUSLINE_SYNC__"));
+}
+
+#[test]
+fn injection_script_recovers_a_stalled_codex_boot_shell() {
+    let script = assets::injection_script(57321);
+
+    // 空壳判定依据：有 #root、长不出 <main>、且里头一个字都没有。
+    assert!(script.contains("function bootShellRecoveryStuck"));
+    assert!(script.contains("function bootShellRecoverySettled"));
+    assert!(script.contains("document.querySelector(\"main\")"));
+    assert!(script.contains("root.innerText.trim() === \"\""));
+
+    // 只刷主页面：活动悬浮层 / quick-chat 带 initialRoute，本来就没有 <main>。
+    assert!(script.contains("function bootShellRecoveryAppliesHere"));
+    assert!(script.contains("/[?&]initialRoute=/"));
+    // 宽限要足够长，才能把「启动慢」和「真卡死」分开。
+    assert!(script.contains("bootShellRecoveryGraceMs = 20000"));
+    // 限次靠 sessionStorage + 冷却：写不进去就宁可不刷，避免刷新循环。
+    assert!(script.contains("bootShellRecoveryCooldownMs = 60000"));
+    assert!(script.contains("window.sessionStorage.getItem(bootShellRecoveryStorageKey)"));
+    assert!(script.contains("window.sessionStorage.setItem(bootShellRecoveryStorageKey"));
+    // 触发过要能从 alunixa-x.log 复盘。
+    assert!(script.contains("boot_shell_recovery_reload"));
+    assert!(script.contains("window.location.reload();"));
+    // 模块末尾必须真的装上，否则整段是死代码。
+    assert!(script.contains("installBootShellRecovery();"));
+}
+
+#[test]
 fn injection_script_keeps_session_action_buttons_in_pr_style() {
     let script = assets::injection_script(57321);
 
@@ -3056,7 +3173,7 @@ fn run_session_ref_contract_harness() -> serde_json::Value {
 const scriptPath = {script_path};
 function node() {{
   return {{
-    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}},
+    appendChild() {{}}, prepend() {{}}, remove() {{}}, setAttribute() {{}}, removeAttribute() {{}}, toggleAttribute() {{}},
     addEventListener() {{}}, querySelector() {{ return null; }}, querySelectorAll() {{ return []; }},
     closest() {{ return null; }}, getAttribute() {{ return null; }},
     classList: {{ add() {{}}, remove() {{}}, toggle() {{}}, contains() {{ return false; }} }},
@@ -3377,7 +3494,7 @@ fn injection_script_unlocks_custom_model_catalog() {
     assert!(script.contains("loadAppServerRequestCandidates"));
     assert!(script.contains("appServerFallbackAssetUrls"));
     assert!(script.contains("collectAppServerRequestCandidatesFromModule"));
-    assert!(script.contains("codexAppServerModelRequestPatchVersion = \"13\""));
+    assert!(script.contains("codexAppServerModelRequestPatchVersion = \"24\""));
 
     assert!(script.contains("list-models-for-host"));
     assert!(script.contains("appServerModelRequestMethod"));
@@ -3487,42 +3604,24 @@ if (existingContainerDefault.model !== hostModel) process.exit(10);
 }
 
 #[test]
-fn injection_script_exposes_fast_service_tier_control() {
+fn injection_script_retires_legacy_fast_controls_and_preserves_native_unlock() {
     let script = assets::injection_script(57321);
-
-    assert!(script.contains("default-service-tier"));
-    assert!(script.contains("setting-storage-"));
-    assert!(script.contains("codexAppAssetUrl"));
-    assert!(script.contains("codexThreadServiceTierOverrides"));
-    assert!(script.contains("setCodexThreadServiceTierMode"));
-    assert!(script.contains("codexServiceTierRequestOverride"));
-    assert!(script.contains("codexServiceTierSupportedFastModels"));
-    assert!(script.contains("\"gpt-5.4\""));
-    assert!(script.contains("\"gpt-5.5\""));
-    assert!(script.contains("\"gpt-5.6-sol\""));
-    assert!(script.contains("\"gpt-5.6-terra\""));
-    assert!(script.contains("\"gpt-5.6-luna\""));
-    assert!(script.contains("codexServiceTierFastSupportedForModel"));
-    assert!(script.contains("codexServiceTierModelForRequest"));
-    assert!(script.contains("codexServiceTierMaybeLoadModelCatalog"));
-    assert!(script.contains("fastBlocked"));
-    assert!(script.contains("data-tier=\"unsupported\""));
-    assert!(script.contains("nextParams.service_tier = override.serviceTier"));
-    assert!(script.contains("serviceTierControls: false"));
-    assert!(script.contains("data-alunixa-x-setting=\"serviceTierControls\""));
-    assert!(script.contains("data-codex-service-tier-controls"));
-    assert!(script.contains("removeCodexServiceTierBadges"));
-    assert!(script.contains("installCodexServiceTierDispatcherPatch"));
-    assert!(script.contains("codexServiceTierDispatcherPatchable"));
-    assert!(script.contains("dispatcher is a non-writable RPC stub"));
-    assert!(script.contains("Object.isExtensible(dispatcher)"));
-    assert!(script.contains("applyCodexServiceTierRequestOnly"));
-    assert!(script.contains("alunixaXServiceTierPrewarmThreadStart"));
-    assert!(script.contains("Object.isExtensible(client)"));
+    for retired in [
+        "data-alunixa-x-setting=\"serviceTierControls\"",
+        "data-codex-service-tier-global-fast",
+        "toggleCodexServiceTierFromBadge",
+        "setCodexThreadServiceTierMode",
+        "applyCodexServiceTierRequestOnly",
+    ] {
+        assert!(!script.contains(retired), "retired legacy Fast behavior: {retired}");
+    }
+    assert!(script.contains("data-alunixa-x-setting=\"nativeFastUnlock\""));
+    assert!(script.contains("__alunixaXNativeFastUnlock"));
+    assert!(script.contains("codexAppNativeFastUnlock"));
+    assert!(script.contains("serviceTiers"));
     assert!(script.contains("locateCodexAppServerClientBreakpoint"));
-    assert!(script.contains("installCodexAppServerClientCapture"));
-    assert!(script.contains("__alunixaXAppServerClientCapture"));
     assert!(script.contains("installCodexAppServerClientPrototypePatch"));
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
     assert!(script.contains("__alunixaXAppServerClientClass"));
     assert!(script.contains("app_server_client_prototype_patch_installed"));
     assert!(script.contains("服务模式"));
@@ -3597,6 +3696,72 @@ fn injection_script_exposes_fast_service_tier_control() {
     assert!(script.contains("dispatcher export unavailable"));
     assert!(!script.contains("data-codex-max-reasoning-control"));
     assert!(!script.contains("codexAppMaxReasoningOverride"));
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
+    assert!(script.contains("__alunixaXAppServerClientClass"));
+    assert!(script.contains("app_server_client_prototype_patch_installed"));
+    assert!(script.contains("服务模式"));
+    assert!(script.contains("data-codex-service-tier-status"));
+    assert!(script.contains("data-codex-service-tier-inherit"));
+    assert!(script.contains("data-codex-service-tier-standard"));
+    assert!(script.contains("data-codex-service-tier-fast"));
+    assert!(script.contains("data-codex-service-tier-custom"));
+    assert!(script.contains("data-codex-service-tier-thread-inherit"));
+    assert!(script.contains("data-codex-service-tier-thread-standard"));
+    assert!(script.contains("data-codex-service-tier-thread-fast"));
+    assert!(script.contains("global-standard"));
+    assert!(script.contains("global-fast"));
+    assert!(script.contains("defaultMode"));
+    assert!(script.contains("codexServiceTierEffectiveThreadMode"));
+    assert!(script.contains("codexServiceTierDefaultModeForControlMode"));
+    assert!(script.contains("normalizeCodexServiceTierControlMode(state.mode) !== \"custom\""));
+    assert!(script.contains("state.draft = null"));
+    assert!(script.contains("后端未连接，无法切换服务模式"));
+    assert!(script.contains("未连接"));
+    assert!(script.contains("thread/start"));
+    assert!(script.contains("thread/resume"));
+    assert!(script.contains("turn/start"));
+    assert!(script.contains("send-cli-request-for-host"));
+    assert!(script.contains("start-conversation"));
+    assert!(script.contains("applyCodexServiceTierRequestOverride(\"thread/start\", message)"));
+    assert!(script.contains("codex-service-tier-badge"));
+    assert!(script.contains("installCodexServiceTierBadge"));
+    assert!(script.contains("toggleCodexServiceTierFromBadge"));
+    assert!(script.contains("wireCodexServiceTierBadge"));
+    assert!(script.contains("codexServiceTierBadgePlacement"));
+    assert!(script.contains("codexServiceTierBadgeFooterGroup"));
+    assert!(script.contains("codexServiceTierFindComposerEl"));
+    assert!(script.contains("codexServiceTierVisibleComposerFooters"));
+    assert!(script.contains("codexServiceTierBestComposerFooter"));
+    assert!(script.contains("codexServiceTierComposerCandidates"));
+    assert!(script.contains("codexServiceTierComposerScore"));
+    assert!(script.contains("data-codex-service-tier-badge"));
+    assert!(script.contains("codexServiceTierBadgeWired"));
+    assert!(script.contains("setAttribute(\"role\", \"button\")"));
+    assert!(script.contains("setAttribute(\"tabindex\", \"0\")"));
+    assert!(script.contains("继承 Codex 默认设置"));
+    assert!(script.contains("继承 config.toml"));
+    assert!(script.contains("serviceTierInheritSourceLabel"));
+    assert!(script.contains("resolveInheritedServiceTier"));
+    assert!(script.contains("getConfigTomlServiceTier"));
+    assert!(script.contains("catalog.service_tier"));
+    assert!(script.contains("service_tier=\\\"priority\\\""));
+    assert!(script.contains("Fast 仅支持"));
+    assert!(script.contains("当前 thread"));
+    assert!(script.contains("standard"));
+    assert!(script.contains("fast"));
+    assert!(script.contains("[\"setting-storage-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"setting-storage-\", \"vscode-api-\", \"app-initial-\"]"));
+    assert!(script.contains("[\"vscode-api-\", \"app-initial-\"]"));
+    assert!(script.contains("codexSettingStorageFromModule"));
+    assert!(script.contains("codexStateApiFromModule"));
+    assert!(script.contains("message.type === \"fetch\""));
+    assert!(script.contains("vscode://codex/"));
+    assert!(script.contains("./(?:assets/)?"));
+    assert!(script.contains("dispatcher export unavailable"));
+    assert!(!script.contains("data-codex-max-reasoning-control"));
+    assert!(!script.contains("codexAppMaxReasoningOverride"));
+=======
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
 }
 
 #[test]
@@ -3665,66 +3830,17 @@ fn injection_script_refreshes_sidebar_after_undo_without_stale_asset_exports() {
 }
 
 #[test]
-fn injection_script_applies_fast_service_tier_contract() {
-    let cases = run_service_tier_contract_harness();
+fn injection_script_preserves_native_tiers_and_shared_provider_contracts() {
+    let cases = run_native_tier_and_provider_contract_harness();
 
-    assert_eq!(cases["supportedFast"]["serviceTier"], "priority");
-    assert_eq!(cases["supportedFast"]["service_tier"], "priority");
-
-    assert_eq!(
-        cases["unsupportedModel"]["serviceTier"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        cases["unsupportedModel"]["service_tier"],
-        serde_json::Value::Null
-    );
-
-    assert_eq!(cases["turnWithoutModel"]["serviceTier"], "priority");
-    assert_eq!(cases["turnWithoutModelDiagnosticModel"], "gpt-5.4");
-
-    assert_eq!(
-        cases["customInheritUnsupported"]["serviceTier"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        cases["customInheritUnsupported"]["service_tier"],
-        serde_json::Value::Null
-    );
-
-    assert_eq!(cases["inheritUnsetStatus"], "继承 Codex 默认设置：默认");
-    assert_eq!(cases["inheritFastStatus"], "继承 Codex 默认设置：fast");
-    assert_eq!(
-        cases["inheritStandardStatus"],
-        "继承 Codex 默认设置：standard"
-    );
-    assert_eq!(
-        cases["inheritConfigTomlFastStatus"],
-        "继承 config.toml：fast"
-    );
-    assert_eq!(cases["resolvedConfigTomlTier"]["configServiceTier"], "fast");
-    assert_eq!(
-        cases["resolvedConfigTomlTier"]["serviceTierSource"],
-        "config-toml"
-    );
-    assert_eq!(
-        cases["resolvedUnsetTier"]["configServiceTier"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        cases["resolvedUnsetTier"]["serviceTierSource"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        cases["inheritedConfigFastBlocked"]["serviceTier"],
-        serde_json::Value::Null
-    );
-    assert_eq!(
-        cases["inheritedConfigFastBlocked"]["service_tier"],
-        serde_json::Value::Null
-    );
-
-    assert_eq!(cases["startConversation"]["serviceTier"], "priority");
+    // 旧浏览器开关和线程模式残留不能再注入或剥离原生 service tier。
+    assert_eq!(cases["withoutNativeTier"]["serviceTier"], serde_json::Value::Null);
+    assert_eq!(cases["withoutNativeTier"]["service_tier"], serde_json::Value::Null);
+    assert_eq!(cases["customModelNativeTier"]["serviceTier"], serde_json::Value::Null);
+    assert_eq!(cases["customModelNativeTier"]["service_tier"], "priority");
+    assert_eq!(cases["threadOnlyRequest"]["serviceTier"], serde_json::Value::Null);
+    assert_eq!(cases["customModelNativeSnakeTier"]["service_tier"], "priority");
+    assert_eq!(cases["startConversation"]["serviceTier"], serde_json::Value::Null);
     assert_eq!(
         cases["explicitProjectStartConversation"]["workspaceKind"],
         "project"
@@ -3741,19 +3857,31 @@ fn injection_script_applies_fast_service_tier_contract() {
         cases["projectlessStartConversation"]["projectlessOutputDirectory"],
         "C:/projectless/outputs"
     );
+<<<<<<< D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\ours
     assert!(
         cases["projectlessStartConversation"]
             .get("projectAssignment")
             .is_none()
     );
     assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
+||||||| D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\base
+    assert!(cases["projectlessStartConversation"]
+        .get("projectAssignment")
+        .is_none());
+    assert_eq!(cases["fetchStartConversation"]["serviceTier"], "priority");
+=======
+    assert!(cases["projectlessStartConversation"]
+        .get("projectAssignment")
+        .is_none());
+    assert_eq!(cases["fetchStartConversation"]["serviceTier"], serde_json::Value::Null);
+>>>>>>> D:\Cursor\AlunixaX\.tmp\upstream-v110-20261020\merge\crates\alunixa-x-core\tests\cdp_bridge.rs\theirs
     assert_eq!(
         cases["fetchSendCliRequest"]["params"]["serviceTier"],
-        "priority"
+        serde_json::Value::Null
     );
     assert_eq!(
         cases["fetchSendCliRequest"]["params"]["service_tier"],
-        "priority"
+        serde_json::Value::Null
     );
     assert_eq!(cases["solFastAvailability"]["supported"], true);
     assert_eq!(cases["solDescriptor"]["defaultReasoningEffort"], "low");
@@ -3779,6 +3907,7 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["serviceTierClientPatched"], true);
     assert_eq!(cases["serviceTierClientSendTier"], "priority");
     assert_eq!(cases["serviceTierClientPrewarmTier"], "priority");
+    assert_eq!(cases["retiredClientPatchReplaced"], true);
     assert_eq!(cases["frozenClientPatchSkipped"], true);
     assert_eq!(cases["captureLine"], 1);
     assert_eq!(cases["captureColumn"], 24);
@@ -3795,7 +3924,7 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["providerFromOtherUnchanged"], true);
     assert_eq!(cases["nonThreadProviderUnchanged"], true);
     assert_eq!(
-        cases["providerWithServiceTierControlsDisabled"]["modelProvider"],
+        cases["providerWithLegacyControlsIgnored"]["modelProvider"],
         "vendor_alpha"
     );
     assert_eq!(cases["appServerProviderOverride"], "vendor_alpha");
@@ -3908,7 +4037,7 @@ fn injection_script_applies_fast_service_tier_contract() {
     assert_eq!(cases["globalStatsigWithoutHostPreserved"], true);
 }
 
-fn run_service_tier_contract_harness() -> serde_json::Value {
+fn run_native_tier_and_provider_contract_harness() -> serde_json::Value {
     let temp = tempfile::tempdir().expect("temp dir should be created");
     let script_path = temp.path().join("renderer-inject.js");
     let harness_path = temp.path().join("service-tier-harness.cjs");
@@ -3921,6 +4050,7 @@ fn run_service_tier_contract_harness() -> serde_json::Value {
 const scriptPath = {script_path};
 const store = new Map();
 store.set("alunixaXSettings", JSON.stringify({{ serviceTierControls: true }}));
+store.set("codexThreadServiceTierOverrides", JSON.stringify({{ version: "1", mode: "global-fast", defaultMode: "fast", entries: {{}} }}));
 function node() {{
   return {{
     appendChild() {{}},
@@ -3928,6 +4058,7 @@ function node() {{
     remove() {{}},
     setAttribute() {{}},
     removeAttribute() {{}},
+    toggleAttribute() {{}},
     addEventListener() {{}},
     querySelector() {{ return null; }},
     querySelectorAll() {{ return []; }},
@@ -3970,67 +4101,31 @@ globalThis.navigator = {{ userAgent: "node-test" }};
 globalThis.performance = {{ getEntriesByType: () => [] }};
 require(scriptPath);
 const api = window.__alunixaXServiceTierTest;
-api.setServiceTierState({{ status: "ok", serviceTier: "priority", fastTierValue: "priority" }});
 api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4", "gpt-5.5"] }});
-const inheritUnsetStatus = api.statusSummary({{
-  controlMode: "inherit",
-  threadMode: "inherit",
-  defaultMode: "inherit",
-  effectiveMode: "standard",
-  effectiveServiceTier: null,
-}});
-const inheritFastStatus = api.statusSummary({{
-  controlMode: "inherit",
-  threadMode: "inherit",
-  defaultMode: "inherit",
-  effectiveMode: "fast",
-  effectiveServiceTier: "priority",
-}});
-const inheritStandardStatus = api.statusSummary({{
-  controlMode: "inherit",
-  threadMode: "inherit",
-  defaultMode: "inherit",
-  effectiveMode: "standard",
-  effectiveServiceTier: "standard",
-}});
-const inheritConfigTomlFastStatus = api.statusSummary({{
-  controlMode: "inherit",
-  threadMode: "inherit",
-  defaultMode: "inherit",
-  effectiveMode: "fast",
-  effectiveServiceTier: "fast",
-  serviceTierSource: "config-toml",
-}});
-
-api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
-const supportedFast = api.applyServiceTierOverride("turn/start", {{
+const withoutNativeTier = api.applyServiceTierOverride("turn/start", {{
   threadId: "thread-12345678",
   model: "gpt-5.4",
   service_tier: null,
 }}, "conv-should-not-be-model");
 
-const unsupportedModel = api.applyServiceTierOverride("turn/start", {{
+const customModelNativeTier = api.applyServiceTierOverride("turn/start", {{
   threadId: "thread-12345678",
   model: "gpt-4.1",
   service_tier: "priority",
 }}, "conv-should-not-be-model");
 
-const turnWithoutModel = api.applyServiceTierOverride("turn/start", {{
+const threadOnlyRequest = api.applyServiceTierOverride("turn/start", {{
   threadId: "thread-12345678",
   service_tier: null,
 }}, "conversation-should-not-be-model");
-const turnWithoutModelDiagnosticModel = api.diagnostics().at(-1)?.detail?.model;
 
 api.setModelCatalog({{ status: "ok", model: "gpt-4.1", default_model: "gpt-4.1", models: ["gpt-4.1"] }});
-api.setThreadState({{ mode: "custom", defaultMode: "inherit", entries: {{}}, draft: {{ mode: "inherit", at: Date.now() }} }});
-api.setServiceTierState({{ serviceTier: "priority" }});
-const customInheritUnsupported = api.applyServiceTierOverride("turn/start", {{
+const customModelNativeSnakeTier = api.applyServiceTierOverride("turn/start", {{
   threadId: "thread-12345678",
   service_tier: "priority",
 }}, "");
 
 api.setModelCatalog({{ status: "ok", model: "gpt-5.5", default_model: "gpt-5.5", models: ["gpt-5.5"] }});
-api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
 const startConversation = api.requestOverride({{
   type: "start-conversation",
   threadId: "thread-12345678",
@@ -4196,7 +4291,6 @@ await appServerClient.sendRequest(
   nativeProjectlessAppServerParams,
   {{ signal: "native-projectless" }}
 );
-api.setThreadState({{ mode: "global-fast", defaultMode: "fast", entries: {{}} }});
 api.setBackendSettings({{ codexAppServiceTierControls: true }});
 localStorage.setItem("alunixaXSettings", JSON.stringify({{ serviceTierControls: true }}));
 const serviceTierClientCalls = [];
@@ -4205,10 +4299,23 @@ const serviceTierClient = {{
   async prewarmThreadStart(params) {{ serviceTierClientCalls.push({{ method: "prewarm", params }}); return {{ ok: true }}; }},
 }};
 const serviceTierClientPatched = api.patchAppServerClient(serviceTierClient);
-await serviceTierClient.sendRequest("turn/start", {{ threadId: "thread-service-tier", model: "gpt-5.4" }});
-await serviceTierClient.prewarmThreadStart({{ threadId: "thread-service-tier", model: "gpt-5.4" }});
+await serviceTierClient.sendRequest("turn/start", {{ threadId: "thread-service-tier", model: "gpt-5.4", serviceTier: "priority" }});
+await serviceTierClient.prewarmThreadStart({{ threadId: "thread-service-tier", model: "gpt-5.4", serviceTier: "priority" }});
 const serviceTierClientSendTier = serviceTierClientCalls[0]?.params?.serviceTier;
 const serviceTierClientPrewarmTier = serviceTierClientCalls[1]?.params?.serviceTier;
+// 运行中升级必须替换旧闭包，不能因为旧版本标记而保留旧 Fast 请求覆盖。
+const retiredCalls = [];
+const retiredOriginal = async (method, params) => {{ retiredCalls.push(params); return params; }};
+const retiredClient = {{
+  __alunixaXModelRequestPatch: "23",
+  __alunixaXModelOriginalSendRequest: retiredOriginal,
+  sendRequest: async (method, params) => retiredOriginal(method, {{ ...params, serviceTier: "legacy-forced-fast" }}),
+}};
+const retiredNativeParams = {{ threadId: "thread-retired-fast", model: "gpt-5.4", serviceTier: "default", service_tier: "priority" }};
+api.patchAppServerClient(retiredClient);
+await retiredClient.sendRequest("turn/start", retiredNativeParams);
+const retiredClientPatchReplaced = retiredCalls[0] === retiredNativeParams
+  && retiredCalls[0].serviceTier === "default" && retiredCalls[0].service_tier === "priority";
 const frozenClient = Object.preventExtensions({{ async sendRequest() {{ return {{ ok: true }}; }} }});
 const frozenClientPatchSkipped = api.patchAppServerClient(frozenClient) === false;
 const captureSample = "x" + String.fromCharCode(10) + "async sendRequest(e,t,n){{if(this.dispatchMessage==null)throw Error(`AppServerRequestClient is missing a message dispatcher`);}}";
@@ -4222,25 +4329,11 @@ window.__alunixaXAppServerClientClass = class CodexPlusTestClient {{
 }};
 const prototypePatched = api.installAppServerClientPrototypePatch();
 const protoClient = new window.__alunixaXAppServerClientClass();
-const protoTurn = await protoClient.sendRequest("turn/start", {{ threadId: "thread-prototype", model: "gpt-5.4" }});
-const protoPrewarm = await protoClient.prewarmThreadStart({{ threadId: "thread-prototype", model: "gpt-5.4" }});
+const protoTurn = await protoClient.sendRequest("turn/start", {{ threadId: "thread-prototype", model: "gpt-5.4", serviceTier: "priority" }});
+const protoPrewarm = await protoClient.prewarmThreadStart({{ threadId: "thread-prototype", model: "gpt-5.4", serviceTier: "priority" }});
 const prototypeSendTier = protoTurn && protoTurn.params ? protoTurn.params.serviceTier : null;
 const prototypePrewarmTier = protoPrewarm && protoPrewarm.prewarm ? protoPrewarm.prewarm.serviceTier : null;
 const prototypeState = api.appServerClientPrototypeState();
-api.setThreadState({{ mode: "inherit", defaultMode: "inherit", entries: {{}} }});
-api.setBackendSettings({{ codexAppServiceTierControls: false }});
-api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4"], service_tier: "fast" }});
-const resolvedConfigTomlTier = await api.resolveInheritedServiceTier();
-api.setModelCatalog({{ status: "ok", model: "gpt-5.4", default_model: "gpt-5.4", models: ["gpt-5.4"] }});
-const resolvedUnsetTier = await api.resolveInheritedServiceTier();
-api.setModelCatalog({{ status: "ok", model: "gpt-4.1", default_model: "gpt-4.1", models: ["gpt-4.1"] }});
-api.setThreadState({{ mode: "inherit", defaultMode: "inherit", entries: {{}} }});
-api.setServiceTierState({{ status: "ok", serviceTier: null, configServiceTier: "fast", serviceTierSource: "config-toml" }});
-const inheritedConfigFastBlocked = api.applyServiceTierOverride("turn/start", {{
-  threadId: "thread-12345678",
-  model: "gpt-4.1",
-  service_tier: null,
-}}, "");
 const appServerParamsUnchanged = appServerCalls[0]?.params === nativeAppServerParams
   && appServerCalls[0]?.params?.workspaceKind === "project"
   && appServerCalls[0]?.params?.cwd === "C:/native/work"
@@ -4272,7 +4365,7 @@ const explicitOtherProvider = {{ cwd: "C:/mobile", modelProvider: "other" }};
 const providerFromOther = api.applyProviderOverride("thread/start", explicitOtherProvider);
 const nonThreadParams = {{ cwd: "C:/mobile", modelProvider: "openai" }};
 const nonThreadProviderUnchanged = api.applyProviderOverride("turn/start", nonThreadParams) === nonThreadParams;
-const providerWithServiceTierControlsDisabled = api.requestOverride({{
+const providerWithLegacyControlsIgnored = api.requestOverride({{
   type: "start-conversation",
   cwd: "C:/mobile",
   modelProvider: "openai",
@@ -4820,18 +4913,10 @@ await deleteOnlyClient.sendRequest("ping", {{}});
 const sessionDeleteOnlyRegistersNativeClient = deleteOnlyInstalled
   && window.__alunixaXNativeHostClients.get("ssh:delete-only")?.ref?.deref() === deleteOnlyClient;
 process.stdout.write(JSON.stringify({{
-  supportedFast,
-  unsupportedModel,
-  turnWithoutModel,
-  turnWithoutModelDiagnosticModel,
-  customInheritUnsupported,
-  inheritUnsetStatus,
-  inheritFastStatus,
-  inheritStandardStatus,
-  inheritConfigTomlFastStatus,
-  resolvedConfigTomlTier,
-  resolvedUnsetTier,
-  inheritedConfigFastBlocked,
+  withoutNativeTier,
+  customModelNativeTier,
+  threadOnlyRequest,
+  customModelNativeSnakeTier,
   startConversation,
   explicitProjectStartConversation,
   projectlessStartConversation,
@@ -4853,6 +4938,7 @@ process.stdout.write(JSON.stringify({{
   serviceTierClientPatched,
   serviceTierClientSendTier,
   serviceTierClientPrewarmTier,
+  retiredClientPatchReplaced,
   frozenClientPatchSkipped,
   captureLine,
   captureColumn,
@@ -4866,7 +4952,7 @@ process.stdout.write(JSON.stringify({{
   providerFromOpenAi,
   providerFromOtherUnchanged: providerFromOther === explicitOtherProvider,
   nonThreadProviderUnchanged,
-  providerWithServiceTierControlsDisabled,
+  providerWithLegacyControlsIgnored,
   appServerProviderOverride,
   directThreadStartedId,
   nestedThreadStartedId,
@@ -5034,6 +5120,15 @@ fn runtime_evaluate_params_sets_expected_flags() {
     let params = bridge::runtime_evaluate_params("1 + 1");
 
     assert_eq!(params["expression"], "1 + 1");
+    assert_eq!(params["awaitPromise"], false);
+    assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
+}
+
+#[test]
+fn runtime_evaluate_params_return_by_value_sets_flag() {
+    let params = bridge::runtime_evaluate_params_return_by_value("({hello:\"world\"})");
+
+    assert_eq!(params["returnByValue"], true);
     assert_eq!(params["awaitPromise"], false);
     assert_eq!(params["allowUnsafeEvalBlockedByCSP"], true);
 }
@@ -5619,7 +5714,7 @@ async fn install_bridge_routes_binding_while_waiting_for_command_response() {
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
     )
     .await
     .expect("bridge should not hang while processing interleaved binding call")
@@ -5675,7 +5770,7 @@ async fn install_bridge_immediately_evaluates_new_document_scripts() {
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(
+        install_test_bridge(
             &url,
             BRIDGE_BINDING_NAME,
             noop_handler(),
@@ -5759,7 +5854,7 @@ async fn install_bridge_returns_after_installing_and_keeps_message_pump_alive() 
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(
+        install_test_bridge(
             &url,
             BRIDGE_BINDING_NAME,
             handler,
@@ -5796,7 +5891,7 @@ async fn install_bridge_command_error_mentions_method_and_id() {
     let handler = noop_handler();
     let error = tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
     )
     .await
     .expect("bridge should not hang on CDP error response")
@@ -5886,7 +5981,7 @@ async fn install_bridge_rejects_bad_payload_with_id_and_continues_after_unparsea
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[]),
     )
     .await
     .expect("bridge should not hang after bad payload")
@@ -5947,7 +6042,7 @@ async fn install_bridge_queues_consecutive_bindings_without_recursive_dispatch()
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
     )
     .await
     .expect("bridge should not hang while draining queued binding calls")
@@ -6017,7 +6112,7 @@ async fn install_bridge_does_not_wait_for_resolve_runtime_evaluate_ack() {
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
     )
     .await
     .expect("bridge install should not wait for resolve ack")
@@ -6103,7 +6198,7 @@ async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
 
     tokio::time::timeout(
         Duration::from_secs(2),
-        bridge::install_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
+        install_test_bridge(&url, BRIDGE_BINDING_NAME, handler, &[]),
     )
     .await
     .expect("bridge install should return while generate is pending")
@@ -6117,10 +6212,10 @@ async fn install_bridge_keeps_status_responsive_while_generate_is_pending() {
 async fn superseded_bridge_session_stops_answering_binding_calls() {
     let (url, stale_rx, fresh_rx) = spawn_two_session_cdp_server().await;
 
-    bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect("first bridge install should succeed");
-    bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect("second bridge install should succeed");
 
@@ -6216,10 +6311,10 @@ async fn superseded_bridge_session_closes_socket_without_incoming_messages() {
         let _ = fresh_alive_tx.send(fresh_resolved);
     });
 
-    bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect("first bridge install should succeed");
-    bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect("second bridge install should succeed");
 
@@ -6241,10 +6336,10 @@ async fn superseded_bridge_session_closes_socket_without_incoming_messages() {
 async fn failed_bridge_reinstall_keeps_existing_session_current() {
     let (url, active_rx, failed_rx) = spawn_failed_reinstall_cdp_server().await;
 
-    bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect("first bridge install should succeed");
-    let error = bridge::install_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
+    let error = install_test_bridge(&url, BRIDGE_BINDING_NAME, noop_handler(), &[])
         .await
         .expect_err("second bridge install should fail");
     assert!(error.to_string().contains("Runtime.addBinding"));
@@ -6412,6 +6507,86 @@ async fn recv_text_message(socket: &mut TestSocket) -> Option<String> {
     }
 }
 
+#[tokio::test]
+async fn extension_cdp_evaluate_returns_objects_and_arrays_by_value() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("cdp listener should bind");
+    let port = listener.local_addr().expect("listener address").port();
+    let websocket = format!("ws://127.0.0.1:{port}/devtools/page/overlay");
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else {
+                break;
+            };
+            let websocket = websocket.clone();
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut peeked = [0_u8; 2048];
+                let peeked_len = stream.peek(&mut peeked).await.unwrap_or(0);
+                let head = String::from_utf8_lossy(&peeked[..peeked_len]);
+                if head.contains("GET /json") {
+                    let mut buf = vec![0_u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let body = json!([{
+                        "id": "overlay",
+                        "type": "page",
+                        "title": "overlay",
+                        "url": "app://-/index.html?initialRoute=%2Favatar-overlay",
+                        "webSocketDebuggerUrl": websocket,
+                    }])
+                    .to_string();
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes()).await;
+                    return;
+                }
+                let mut socket = accept_async(stream)
+                    .await
+                    .expect("websocket should upgrade");
+                let command = recv_json(&mut socket).await;
+                assert_eq!(command["method"], "Runtime.evaluate");
+                let by_value = command["params"]["returnByValue"] == true;
+                let expression = command["params"]["expression"].as_str().unwrap_or("");
+                // 不带 returnByValue 时，V8 对对象只回 objectId，value 为空。
+                let remote = if !by_value {
+                    json!({ "type": "object", "objectId": "obj-1" })
+                } else if expression.contains('[') {
+                    json!({ "type": "object", "value": [1, "two"] })
+                } else {
+                    json!({ "type": "object", "value": { "hello": "world" } })
+                };
+                send_json(
+                    &mut socket,
+                    json!({ "id": command["id"], "result": { "result": remote } }),
+                )
+                .await;
+                close_socket(&mut socket).await;
+            });
+        }
+    });
+
+    let object = alunixa_x_core::routes::evaluate_extension_cdp(
+        port,
+        &json!({ "kind": "avatar-overlay", "expression": "({hello:\"world\"})" }),
+    )
+    .await
+    .expect("object evaluation should succeed");
+    assert_eq!(object["results"][0]["ok"], true);
+    assert_eq!(object["results"][0]["value"]["hello"], "world");
+
+    let array = alunixa_x_core::routes::evaluate_extension_cdp(
+        port,
+        &json!({ "kind": "avatar-overlay", "expression": "[1, \"two\"]" }),
+    )
+    .await
+    .expect("array evaluation should succeed");
+    assert_eq!(array["results"][0]["ok"], true);
+    assert_eq!(array["results"][0]["value"], json!([1, "two"]));
+}
+
 async fn spawn_cdp_server<F, Fut>(handler: F) -> (String, oneshot::Receiver<()>)
 where
     F: FnOnce(TestSocket) -> Fut + Send + 'static,
@@ -6472,6 +6647,23 @@ fn assert_expression_contains_request(command: &serde_json::Value, request_id: &
 async fn close_socket(socket: &mut TestSocket) {
     socket.close(None).await.expect("websocket should close");
     let _ = tokio::time::timeout(Duration::from_millis(200), socket.next()).await;
+}
+
+async fn install_test_bridge(
+    websocket_url: &str,
+    binding_name: &str,
+    handler: bridge::BridgeHandler,
+    new_document_scripts: &[String],
+) -> anyhow::Result<()> {
+    // 桥接模拟协议使用缺省开关，不能受本机用户已开启的 Fast 等设置影响。
+    // 目录保留到进程结束，供安装后启动的后台任务继续读取。
+    static SETTINGS_DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+    SETTINGS_DIR.get_or_init(|| {
+        let dir = tempfile::tempdir().unwrap();
+        alunixa_x_core::paths::set_settings_path_for_tests(Some(dir.path().join("settings.json")));
+        dir
+    });
+    bridge::install_bridge(websocket_url, binding_name, handler, new_document_scripts).await
 }
 
 fn noop_handler() -> bridge::BridgeHandler {

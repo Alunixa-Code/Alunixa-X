@@ -52,6 +52,157 @@ pub struct DreamSkinActivation {
     pub active_image_path: String,
 }
 
+/// 新实例仅复制当前选中的主题；不共享主实例路径，也不复制整个主题库。
+/// 先完整读取和校验，再在新状态目录里发布快照；已有快照一律不覆盖。
+pub fn prepare_instance_theme_snapshot(
+    source_state: &Path,
+    target_state: &Path,
+    settings: &BackendSettings,
+) -> anyhow::Result<DreamSkinActivation> {
+    std::fs::create_dir_all(target_state)?;
+    reject_symlink(target_state)?;
+    let target_state = target_state.canonicalize()?;
+    let source_state = source_state.canonicalize()?;
+    if source_state == target_state {
+        bail!("instance theme snapshot requires a separate state directory");
+    }
+    let config = settings.codex_app_dream_skin_theme_config.clone();
+    let image = settings.codex_app_dream_skin_image_path.trim();
+    if image.is_empty() {
+        return Ok(DreamSkinActivation {
+            config,
+            active_image_path: String::new(),
+        });
+    }
+    let source = Path::new(image);
+    if !crate::dream_skin::is_managed_dream_skin_image(source, &source_state)
+        && stored_theme_image_extension(&source_state, source).is_none()
+    {
+        bail!("instance theme image is outside the source state directory");
+    }
+    let draft = DreamSkinThemeDraft {
+        config: config.clone(),
+        image_path: image.into(),
+        builtin: false,
+    };
+    validate_theme_draft(&draft)?;
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|value| ["png", "jpg", "jpeg", "webp", "gif", "bmp"].contains(&value.as_str()))
+        .context("unsupported instance theme image")?;
+    let image_bytes = read_snapshot_asset(source, &source_state, 32 * 1024 * 1024)?;
+    let css_source = if crate::dream_skin::is_managed_dream_skin_image(source, &source_state) {
+        source.with_file_name("current.css")
+    } else {
+        source.with_file_name("theme.css")
+    };
+    let css = if css_source.try_exists()? {
+        let bytes = read_snapshot_asset(&css_source, &source_state, THEME_CONFIG_LIMIT)?;
+        crate::dream_skin_package::validate_safe_css(std::str::from_utf8(&bytes)?)?;
+        Some(bytes)
+    } else {
+        None
+    };
+    let mut auxiliary = Vec::new();
+    for name in ["manifest.json", "LICENSE.txt"] {
+        let path = source_state.join(THEMES_DIR).join(&config.id).join(name);
+        if path.try_exists()? {
+            auxiliary.push((
+                name,
+                read_snapshot_asset(&path, &source_state, THEME_CONFIG_LIMIT)?,
+            ));
+        }
+    }
+    let target = target_state.join("dream-skin");
+    if std::fs::symlink_metadata(&target).is_ok() {
+        bail!("instance theme snapshot already exists");
+    }
+    let staging = target_state.join(format!(".dream-skin-snapshot-{}", unique_suffix()));
+    std::fs::create_dir(&staging)?;
+    let active = staging.join("theme");
+    let stored = staging.join("themes").join(&config.id);
+    std::fs::create_dir_all(&active)?;
+    std::fs::create_dir_all(&stored)?;
+    crate::settings::atomic_write(&active.join(format!("current.{extension}")), &image_bytes)?;
+    crate::settings::atomic_write(&stored.join(format!("image.{extension}")), &image_bytes)?;
+    crate::settings::atomic_write(
+        &stored.join(THEME_CONFIG_FILE),
+        &serde_json::to_vec_pretty(&config)?,
+    )?;
+    if let Some(css) = &css {
+        crate::settings::atomic_write(&active.join("current.css"), css)?;
+        crate::settings::atomic_write(&stored.join("theme.css"), css)?;
+    }
+    for (name, bytes) in &auxiliary {
+        crate::settings::atomic_write(&stored.join(name), bytes)?;
+    }
+    // 复制各文件期间主实例可能切换主题；发布前再核对同一份输入，拒绝混合快照。
+    if read_snapshot_asset(source, &source_state, 32 * 1024 * 1024)? != image_bytes
+        || css.as_ref().is_some_and(|bytes| {
+            read_snapshot_asset(&css_source, &source_state, THEME_CONFIG_LIMIT)
+                .ok()
+                .as_ref()
+                != Some(bytes)
+        })
+        || auxiliary.iter().any(|(name, bytes)| {
+            read_snapshot_asset(
+                &source_state.join(THEMES_DIR).join(&config.id).join(name),
+                &source_state,
+                THEME_CONFIG_LIMIT,
+            )
+            .ok()
+            .as_ref()
+                != Some(bytes)
+        })
+    {
+        bail!("source theme changed during instance snapshot");
+    }
+    if std::fs::symlink_metadata(&target).is_ok() {
+        bail!("instance theme snapshot already exists");
+    }
+    std::fs::rename(&staging, &target).context("failed to publish instance theme snapshot")?;
+    Ok(DreamSkinActivation {
+        config,
+        active_image_path: target
+            .join("theme")
+            .join(format!("current.{extension}"))
+            .to_string_lossy()
+            .into_owned(),
+    })
+}
+
+fn read_snapshot_asset(path: &Path, root: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > limit
+        || !path.canonicalize()?.starts_with(root)
+    {
+        bail!("invalid instance theme asset: {}", path.display());
+    }
+    let file = std::fs::File::open(path)?;
+    let opened = file.metadata()?;
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    let after = std::fs::symlink_metadata(path)?;
+    if bytes.len() as u64 > limit
+        || opened.len() != metadata.len()
+        || opened.modified()? != metadata.modified()?
+        || after.len() != metadata.len()
+        || after.modified()? != metadata.modified()?
+        || after.file_type().is_symlink()
+    {
+        bail!(
+            "instance theme asset changed during snapshot: {}",
+            path.display()
+        );
+    }
+    Ok(bytes)
+}
+
 pub fn list_dream_skin_themes(
     state_dir: &Path,
     settings: &BackendSettings,
@@ -441,7 +592,18 @@ pub fn prepare_dream_skin_activation(
         crate::dream_skin::prepare_dream_skin_image_for_directory(source, &managed_dir, "current")?
     };
     let active_css = managed_dir.join("current.css");
-    let source_css = source.parent().map(|parent| parent.join("theme.css"));
+    // 当前草稿引用的是 current 图片；重复应用不能因此丢掉已激活的 CSS。
+    let source_css = if crate::dream_skin::is_managed_dream_skin_image(source, state_dir) {
+        if active_css.exists() {
+            Some(active_css.clone())
+        } else {
+            load_stored_dream_skin_theme(state_dir, &draft.config.id)
+                .ok()
+                .map(|stored| PathBuf::from(stored.image_path).with_file_name("theme.css"))
+        }
+    } else {
+        source.parent().map(|parent| parent.join("theme.css"))
+    };
     if let Some(source_css) = source_css {
         let metadata = std::fs::symlink_metadata(&source_css).ok();
         if metadata.is_some_and(|item| {
