@@ -7243,7 +7243,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "984baaecb71a3fc9d2954f5f96837924aace63fd",
       "upstreamMappedSha256": "97371f56dd546b4e82fecb2b13e45595ead1c1b64af7195143fc41ba9758b042",
-      "localSha256": "a30b492888b698d68d33eb2a52b9374a9848236e6d4711e6988b22d1f73e628d",
+      "localSha256": "1ce522e2886397fb8026e3b3b5557eff0a9692415cb9d4cebdad8f5dfe8abf5b",
       "disposition": "merged-with-ax-contract",
       "rationale": "Merge native route/auth/cache/thinking/1M, plaintext agent payloads, original patch input, bounded exec negotiation and strict compaction; retain independent CC Switch-derived Anthropic and AX fidelity validation instead of lossy fallbacks.",
       "verification": [
@@ -7526,7 +7526,7 @@
       "presentInUpstreamFinalTree": true,
       "upstreamGitBlob": "8c32b88095c8ab625246efd6031f5afedb2bea4c",
       "upstreamMappedSha256": "90de6c3fac1dd4bbaa76acd3e2d42173cecc915613a184bc1d1d9740cfd5a9e8",
-      "localSha256": "77a50e028f734ca1ec4622e83a4fd1d4553c15195c5c7d6962d45a18a2f143e2",
+      "localSha256": "0134a35ba01a2caef333d504ac9cd0616ecf34a749e5f3c326e2650b8379da62",
       "disposition": "merged-with-ax-contract",
       "rationale": "Integrate named keys, snapshots, aggregate and context changes with AX compare-and-swap, cross-process locking, multi-file rollback, unknown fields and independent image-profile preservation.",
       "verification": [

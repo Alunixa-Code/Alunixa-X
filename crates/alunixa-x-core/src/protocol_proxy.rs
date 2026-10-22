@@ -6124,12 +6124,16 @@ fn append_responses_item(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             seen_tool_call_ids.insert(call_id.to_string());
+            seen_tool_output_ids.remove(call_id);
             pending_tool_calls.push(json!({"id":call_id,"type":"function","function":{
                 "name":"tool_search","arguments":responses_arguments_to_chat(item.get("arguments").unwrap_or(&json!({})))
             }}));
         }
         Some("tool_search_output") => {
             let call_id = item["call_id"].as_str().unwrap_or("");
+            if !seen_tool_output_ids.insert(call_id.to_string()) {
+                return Ok(());
+            }
             flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
             messages.push(json!({"role":"tool","tool_call_id":call_id,"content":response_output_text(&item["tools"])}));
         }
@@ -6145,6 +6149,9 @@ fn append_responses_item(
             }
             if !seen_tool_call_ids.contains(call_id) {
                 return fidelity::reject("orphan tool output requires matching call history");
+            }
+            if !seen_tool_output_ids.insert(call_id.to_string()) {
+                return Ok(());
             }
             flush_tool_calls(messages, pending_tool_calls, pending_reasoning);
             messages.push(json!({
@@ -6192,6 +6199,9 @@ fn append_responses_item(
             let output = content.get("content").unwrap_or(content);
             if !seen_tool_call_ids.contains(call_id) {
                 return fidelity::reject("orphan tool output requires matching call history");
+            }
+            if !seen_tool_output_ids.insert(call_id.to_string()) {
+                return Ok(());
             }
             messages.push(json!({
                 "role": "tool",
@@ -12095,6 +12105,38 @@ mod response_compatibility_tests {
                 .to_string()
                 .contains("conflicting duplicate tool output")
         );
+    }
+
+    #[test]
+    fn identical_custom_search_and_legacy_results_are_coalesced_after_validation() {
+        for (call, result) in [
+            (
+                json!({"type":"custom_tool_call","call_id":"call_1","name":"fixture","input":"raw"}),
+                json!({"type":"custom_tool_call_output","call_id":"call_1","output":"same"}),
+            ),
+            (
+                json!({"type":"tool_search_call","call_id":"call_1","arguments":{}}),
+                json!({"type":"tool_search_output","call_id":"call_1","tools":[]}),
+            ),
+            (
+                json!({"type":"tool_call","tool_use":{"id":"call_1","name":"fixture","input":{}}}),
+                json!({"type":"tool_result","content":{"tool_use_id":"call_1","content":"same"}}),
+            ),
+        ] {
+            let response = responses_to_chat_completions(json!({"model":"fixture",
+                "input":[call, result.clone(), result]}))
+            .unwrap();
+            assert_eq!(
+                response["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|message| message["role"] == "tool")
+                    .count(),
+                1,
+                "{response}"
+            );
+        }
     }
 
     #[test]

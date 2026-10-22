@@ -3115,6 +3115,8 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 fn atomic_write_unique(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let resolved = resolve_symlink_target(path);
+    let path = resolved.as_deref().unwrap_or(path);
     atomic_write_with_temp(path, bytes, unique_temp_path_for(path))
 }
 
@@ -3123,6 +3125,8 @@ fn atomic_write_with_temp(path: &Path, bytes: &[u8], temp_path: PathBuf) -> anyh
 }
 
 pub(crate) fn atomic_write_untracked(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    let resolved = resolve_symlink_target(path);
+    let path = resolved.as_deref().unwrap_or(path);
     atomic_write_with_temp_impl(path, bytes, unique_temp_path_for(path), false)
 }
 
