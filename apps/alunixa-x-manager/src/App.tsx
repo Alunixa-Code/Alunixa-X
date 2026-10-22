@@ -1431,12 +1431,12 @@ export function App() {
   );
 
   const call = <T,>(command: string, args?: Record<string, unknown>) => {
-    const snapshot = args?.settings as BackendSettings | undefined;
     return invoke<T>(command, command === "save_settings"
-      ? { ...args, expectedRevision: snapshot?.revision || "" }
+      ? { ...args, expectedRevision: args?.expectedRevision ?? settingsRevisionRef.current ?? "" }
       : args).then((result) => {
         const response = result as { message?: string };
-        if (command === "save_settings" && response?.message?.includes("settings_revision_conflict")) {
+        if (command === "save_settings" && (response?.message?.includes("settings_revision_conflict")
+          || response?.message?.includes("配置已被其他页面或程序修改"))) {
           // 所有保存调用都保留当前草稿，不能把失败响应当成新表单回填。
           throw new Error(response.message);
         }
@@ -2705,8 +2705,11 @@ export function App() {
     if (issue) { showNotice(t("设置保存"), issue, "failed"); return null; }
     const requestId = ++settingsSaveRequestRef.current;
     const persist = async () => {
+      const versioned = committedSettingsRef.current?.revision
+        ? { ...normalized, revision: committedSettingsRef.current.revision }
+        : normalized;
       const result = await run(() => call<SettingsResult>("save_settings", {
-        settings: normalized, expectedRevision: settingsRevisionRef.current, capabilityWrites: writes,
+        settings: versioned, expectedRevision: settingsRevisionRef.current, capabilityWrites: writes,
       }));
       if (result && isSuccessStatus(result.status)) {
         settingsRevisionRef.current = result.revision ?? null;

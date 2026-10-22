@@ -78,12 +78,14 @@ test("all full saves require their own revision and conflicts preserve the calle
   find(app);
   assert.ok(initializer);
   let request: any;
-  const context = vm.createContext({ invoke: async (_command: string, args: unknown) => { request = args; return { message: "settings_revision_conflict: newer settings exist", status: "failed" }; } });
+  const context = vm.createContext({ settingsRevisionRef: { current: "transaction-old" },
+    invoke: async (_command: string, args: unknown) => { request = args; return { message: "settings_revision_conflict: newer settings exist", status: "failed" }; } });
   vm.runInContext(ts.transpileModule(`const call = ${initializer}; globalThis.callTest = call;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
   const draft = { revision: "old", model: "draft-model" };
   await assert.rejects(context.callTest("save_settings", { settings: draft }), /settings_revision_conflict/);
-  assert.equal(request.expectedRevision, "old");
+  assert.equal(request.expectedRevision, "transaction-old");
   assert.deepEqual(draft, { revision: "old", model: "draft-model" });
+  context.settingsRevisionRef.current = null;
   await assert.rejects(context.callTest("save_settings", { settings: { model: "unversioned" } }));
   assert.equal(request.expectedRevision, "");
 });
