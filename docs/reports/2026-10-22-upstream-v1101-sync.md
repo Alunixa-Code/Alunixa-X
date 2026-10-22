@@ -45,7 +45,7 @@ New tests execute the real wrapper together with the real queue, using distinct 
 
 ## Verification and Release
 
-Final local v1.0.47 workspace: **104 result blocks, 3,026 passed, 0 failed, 23 environment-dependent ignored cases**. Node: **951 tests, 950 passed, 0 failed, 1 pre-existing skip**. TypeScript, Vite, locale parity, generated fragments, branding and 22 site/installer cases passed. Production save/advanced-provider/restored-enhancement/manager/collaboration workflows and the separate demo preview passed in Chromium. Image compositing passed 64 pixel cases; the new Rust fixture and complete renderer passed all Electron media cases plus a nonzero intentional-failure control.
+Final local v1.0.47 workspace: **104 result blocks, 3,027 passed, 0 failed, 23 environment-dependent ignored cases**. Node: **951 tests, 950 passed, 0 failed, 1 pre-existing skip**. TypeScript, Vite, locale parity, generated fragments, branding and 22 site/installer cases passed. Production save/advanced-provider/restored-enhancement/manager/collaboration workflows and the separate demo preview passed in Chromium. Image compositing passed 64 pixel cases; the new Rust fixture and complete renderer passed all Electron media cases plus a nonzero intentional-failure control.
 
 Production Chromium checks cover real revision handling, advanced model creation/save/reopen, five protocols/adaptive/context, restored enhancement inventory, named keys, Skills, MCP and three locales/narrow windows. The public preview is validated separately using only demo IPC.
 
