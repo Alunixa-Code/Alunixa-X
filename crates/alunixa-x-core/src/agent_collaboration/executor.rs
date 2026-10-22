@@ -13,7 +13,6 @@ use tokio::process::{Child, Command};
 
 use super::{AgentConfig, MAX_OUTPUT_BYTES, MAX_PROMPT_BYTES, Store, TaskRecord};
 
-const MAX_RUNTIME: Duration = Duration::from_secs(10 * 60);
 const MAX_LINE_BYTES: usize = 1024 * 1024;
 const MAX_STDOUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_STDERR_BYTES: usize = 2 * 1024 * 1024;
@@ -299,7 +298,8 @@ async fn run_task(store: &Store, id: &str) -> anyhow::Result<Outcome> {
     let child = command
         .spawn()
         .context("无法启动原生 CLI，请检查路径和执行权限")?;
-    supervise(store, &task, provider, child, MAX_RUNTIME).await
+    let runtime_limit = Duration::from_secs(u64::from(config.max_runtime_minutes) * 60);
+    supervise(store, &task, provider, child, runtime_limit).await
 }
 
 fn configure_cli(
@@ -427,13 +427,17 @@ async fn supervise(
     let mut last_progress = Instant::now() - Duration::from_secs(1);
     let mut published_progress = String::new();
 
+    let timeout_message = format!(
+        "任务超过 {} 分钟上限，已终止 CLI；可在协作设置中调整运行上限，并检查工作区中可能已完成的操作",
+        (runtime_limit.as_secs() / 60).max(1)
+    );
     let stop_reason: Option<(&str, &'static str)> = loop {
         if exit_status.is_some() && stdout_closed && stderr_closed {
             break None;
         }
         tokio::select! {
             _ = tokio::time::sleep_until(deadline) => {
-                break Some(("任务超过 10 分钟上限，已终止 CLI；请检查工作区中可能已完成的操作", "interrupted"));
+                break Some((timeout_message.as_str(), "interrupted"));
             }
             _ = tick.tick() => {
                 match store.worker_should_stop(&task.id) {

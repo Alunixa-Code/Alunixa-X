@@ -300,7 +300,7 @@ async fn run_weixin_connect_with_client(
                     let _ = client
                         .send_text_chunks(
                             &message.from_user_id,
-                            "Codex 处理失败，请在 Alunixa X 管理器中查看连接状态。",
+                            &weixin_failure_reply(&error.to_string()),
                             &message.context_token,
                         )
                         .await;
@@ -433,6 +433,35 @@ fn compact_work_dir(work_dir: &std::path::Path) -> String {
     path.into_owned()
 }
 
+/// 微信端收到的失败回复要带上原因：过去只有一句「处理失败」，用户必须回到电脑上
+/// 打开管理器才知道是 CLI 路径、登录态还是上游错误（#2349）。
+/// 只取首行、隐去用户目录并截断，避免把长堆栈或本机路径整段发到聊天里。
+fn weixin_failure_reply(error: &str) -> String {
+    const MAX_REASON_CHARS: usize = 160;
+    let mut reason = error
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_string();
+    for key in ["USERPROFILE", "HOME"] {
+        if let Some(home) = std::env::var_os(key) {
+            let home = home.to_string_lossy().to_string();
+            if home.len() > 1 {
+                reason = reason.replace(&home, "~");
+            }
+        }
+    }
+    if reason.chars().count() > MAX_REASON_CHARS {
+        reason = reason.chars().take(MAX_REASON_CHARS).collect::<String>() + "…";
+    }
+    if reason.is_empty() {
+        "Codex 处理失败，请在 Alunixa X 管理器中查看连接状态。".to_string()
+    } else {
+        format!("Codex 处理失败：{reason}\n详情请在 Alunixa X 管理器中查看连接状态。")
+    }
+}
+
 fn is_allowed_peer(allow_from: &str, peer: &str) -> bool {
     let allow_from = allow_from.trim();
     allow_from.is_empty()
@@ -536,6 +565,22 @@ mod tests {
         path.set("   ");
         assert!(runtime_path.apply(&mut config));
         assert_eq!(config.executable, "");
+    }
+
+    #[test]
+    fn weixin_failure_reply_carries_a_short_first_line_reason() {
+        let reply =
+            weixin_failure_reply("app-server 启动失败：拒绝访问\nstack line 1\nstack line 2");
+        assert!(reply.contains("app-server 启动失败：拒绝访问"), "{reply}");
+        assert!(!reply.contains("stack line"), "{reply}");
+        let long = "x".repeat(500);
+        let reply = weixin_failure_reply(&long);
+        assert!(reply.chars().count() < 260, "{reply}");
+        assert!(reply.contains('…'));
+        assert_eq!(
+            weixin_failure_reply("  \n "),
+            "Codex 处理失败，请在 Alunixa X 管理器中查看连接状态。"
+        );
     }
 
     #[test]

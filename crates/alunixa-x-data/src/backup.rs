@@ -9,6 +9,12 @@ use uuid::Uuid;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 
+/// 至少保留的最新备份份数。
+const RETAINED_BACKUP_MANIFESTS: usize = 10;
+/// 超过这个时长、且不在最新 [`RETAINED_BACKUP_MANIFESTS`] 份之内的备份才回收。
+/// 按时长而不是只按份数：一次批量删除几十个会话时，同一次操作的备份必须全部保留。
+const BACKUP_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
+
 #[derive(Debug, Clone)]
 pub struct BackupStore {
     root: PathBuf,
@@ -154,11 +160,56 @@ impl BackupStore {
             &serde_json::to_vec_pretty(&payload)?,
         )?;
         pending.committed = true;
-        fs::OpenOptions::new()
-            .write(true)
-            .open(self.path_for(&token))?
-            .sync_all()?;
+        sync_file(&self.path_for(&token))?;
+        // 删除会话的撤销只发生在删除之后，旧备份没有长期价值；但历史上这里
+        // 从不清理，单份会话备份含全部消息时可以到 GB 级（issue #2544）。
+        // 清理失败不影响本次备份：调用方已拿到可用 token。
+        let _ = self.prune_retained_backups(&token);
         Ok((token, entries))
+    }
+
+    /// 回收旧的会话备份（manifest + blob 目录）。
+    ///
+    /// - 只识别本 store 写出的 token（`{秒级时间戳}-{32 位十六进制}`），同目录下其它
+    ///   功能的备份（如 `env-conflicts-*.json`）不参与；
+    /// - 按 token 里的时间而不是文件 mtime 排序，时钟回拨或拷贝来的备份不会把新备份挤掉；
+    /// - 刚写出的 `current` 永远保留；其余只有既不在最新 N 份、又超过保留时长才删除。
+    ///
+    /// 逐条删除而不 `remove_dir_all`：目录里若混入了别的条目，不应连带删除。
+    fn prune_retained_backups(&self, current: &str) -> anyhow::Result<()> {
+        let Ok(entries) = fs::read_dir(&self.root) else {
+            return Ok(());
+        };
+        let mut manifests: Vec<(u64, String)> = entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let file_type = entry.file_type().ok()?;
+                if !file_type.is_file() || file_type.is_symlink() {
+                    return None;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                let token = name.strip_suffix(".json")?;
+                let epoch = backup_token_epoch(token)?;
+                (token != current).then(|| (epoch, token.to_string()))
+            })
+            .collect();
+        if manifests.len() < RETAINED_BACKUP_MANIFESTS {
+            return Ok(());
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        manifests.sort_by(|left, right| right.0.cmp(&left.0));
+        // current 占用一个保留名额。
+        for (epoch, token) in manifests.into_iter().skip(RETAINED_BACKUP_MANIFESTS - 1) {
+            if now.saturating_sub(epoch) < BACKUP_RETENTION_SECS {
+                continue;
+            }
+            let _ = fs::remove_file(self.path_for(&token));
+            remove_backup_blob_directory(&self.root, &token);
+        }
+        Ok(())
     }
 
     pub fn read_backup(&self, token: &str) -> anyhow::Result<Value> {
@@ -351,6 +402,19 @@ pub(crate) fn private_atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<
     Ok(())
 }
 
+/// 把已写好的文件刷到磁盘。
+///
+/// 必须用可写句柄：Windows 的 `FlushFileBuffers` 要求 `GENERIC_WRITE`，
+/// `File::open` 拿到的只读句柄刷盘必然返回 `ERROR_ACCESS_DENIED (5)`，
+/// provider 同步因此整次 skipped（#2612）。不截断、不创建，只为刷盘而打开。
+pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?
+        .sync_all()
+}
+
 pub(crate) fn sync_directory(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -392,6 +456,34 @@ fn copy_hashed(
 }
 fn hash_file(path: &Path) -> anyhow::Result<(u64, String)> {
     copy_hashed(&mut File::open(path)?, &mut std::io::sink(), u64::MAX)
+}
+
+/// 解析 `write_backup_with_files` 生成的 token：`{epoch}-{uuid 简写}`。
+fn backup_token_epoch(token: &str) -> Option<u64> {
+    let (epoch, id) = token.split_once('-')?;
+    if id.len() != 32 || !id.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    epoch.parse().ok()
+}
+
+/// 删除某份备份的 blob 目录。逐条删除、不递归到符号链接目标。
+fn remove_backup_blob_directory(root: &Path, token: &str) {
+    let directory = root.join(format!("{token}.files"));
+    let Ok(metadata) = fs::symlink_metadata(&directory) else {
+        return;
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return;
+    }
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.filter_map(Result::ok) {
+            if entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+    let _ = fs::remove_dir(&directory);
 }
 
 #[cfg(test)]
@@ -477,5 +569,121 @@ mod tests {
             assert!(path.is_dir());
             assert_eq!(fs::read_dir(path).unwrap().count(), 0);
         }
+    }
+
+    #[test]
+    fn sync_file_flushes_through_a_writable_handle_without_changing_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("manifest.json");
+        fs::write(&path, b"{\"version\":2}").unwrap();
+        sync_file(&path).unwrap();
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            b"{\"version\":2}",
+            "刷盘不能截断或改写内容"
+        );
+        assert!(
+            sync_file(&temp.path().join("missing.json")).is_err(),
+            "不存在的文件不能被创建"
+        );
+        assert!(!temp.path().join("missing.json").exists());
+    }
+
+    #[test]
+    fn old_backups_are_pruned_after_the_retention_limit() {
+        // issue #2544：删除会话的备份从不清理，长期使用后目录可达 GB 级。
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("backups");
+        let store = BackupStore::new(&root);
+        fs::create_dir_all(&root).unwrap();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let old_epoch = now - BACKUP_RETENTION_SECS - 3600;
+        let make = |epoch: u64, index: usize| {
+            let token = format!("{epoch}-{index:032x}");
+            fs::write(store.path_for(&token), b"{}").unwrap();
+            fs::create_dir_all(root.join(format!("{token}.files"))).unwrap();
+            fs::write(root.join(format!("{token}.files")).join("a.blob"), b"x").unwrap();
+            token
+        };
+        let stale: Vec<_> = (0..12)
+            .map(|index| make(old_epoch + index as u64, index))
+            .collect();
+        let foreign = root.join("env-conflicts-1700000000000.json");
+        fs::write(&foreign, b"[]").unwrap();
+
+        let source = temp.path().join("rollout.jsonl");
+        fs::write(&source, b"synthetic rollout").unwrap();
+        let (fresh, _) = store
+            .write_backup_with_files(
+                "fixture",
+                Path::new("fake.db"),
+                json!({}),
+                &[BackupFileSource {
+                    path: source.clone(),
+                    original_path: source.to_string_lossy().into(),
+                }],
+            )
+            .unwrap();
+
+        assert!(store.path_for(&fresh).exists(), "刚写的备份必须保留");
+        assert!(root.join(format!("{fresh}.files")).is_dir());
+        // 保留最新 10 份（含刚写的），其余超期的连同 blob 目录删除。
+        for token in &stale[..3] {
+            assert!(!store.path_for(token).exists(), "{token} 应被回收");
+            assert!(!root.join(format!("{token}.files")).exists());
+        }
+        for token in &stale[3..] {
+            assert!(
+                store.path_for(token).exists(),
+                "{token} 在最新 10 份内，应保留"
+            );
+        }
+        assert!(foreign.exists(), "其它功能的备份不能被当成会话备份回收");
+    }
+
+    #[test]
+    fn recent_backups_from_one_batch_are_all_kept() {
+        // 一次批量删除几十个会话：未超期的备份即使超过 10 份也全部保留。
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("backups");
+        let store = BackupStore::new(&root);
+        let tokens: Vec<_> = (0..15)
+            .map(|_| {
+                store
+                    .write_backup("fixture", Path::new("fake.db"), json!({}))
+                    .unwrap()
+            })
+            .collect();
+        for token in &tokens {
+            assert!(store.path_for(token).exists(), "{token} 被提前回收");
+        }
+    }
+
+    #[test]
+    fn backup_written_after_clock_rollback_is_never_pruned() {
+        // 已有 10 份「未来时间」的备份（时钟回拨后），新写的备份仍必须保留。
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("backups");
+        let store = BackupStore::new(&root);
+        fs::create_dir_all(&root).unwrap();
+        let future = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        for index in 0..10 {
+            fs::write(
+                store.path_for(&format!("{}-{index:032x}", future + index)),
+                b"{}",
+            )
+            .unwrap();
+        }
+        let token = store
+            .write_backup("fixture", Path::new("fake.db"), json!({}))
+            .unwrap();
+        assert!(store.read_backup(&token).is_ok());
     }
 }

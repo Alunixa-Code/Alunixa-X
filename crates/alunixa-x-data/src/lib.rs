@@ -37,5 +37,5 @@ pub use rollout_image_cleanup::{
 pub use storage::{
     DashboardUsageAnalytics, LocalSession, LocalSessionPage, LocalSessionPager, ModelUsageShare,
     SQLiteStorageAdapter, delete_local_from_paths, delete_local_from_paths_with_home,
-    move_codex_thread_workspace_from_paths, summarize_local_session_usage,
+    local_session_titles, move_codex_thread_workspace_from_paths, summarize_local_session_usage,
 };

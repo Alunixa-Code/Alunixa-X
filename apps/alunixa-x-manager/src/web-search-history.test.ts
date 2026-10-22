@@ -5,6 +5,9 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import {
+  independentProxyEnabled,
+  setIndependentProxyConfigured,
+  requestCompatibilityEnabled,
   modelRouteSaveRequiresRestart,
   normalizeRelayModelRoutes,
   PROTOCOL_PROXY_BASE_URL,
@@ -56,7 +59,7 @@ test("experimental search history compatibility is per-provider and starts the h
 
 test("checkbox draft and generated config route to proxy and restore the real upstream on disable", () => {
   const context = vm.createContext({
-    PROTOCOL_PROXY_BASE_URL, webSearchHistoryCompatEnabled, normalizeRelayModelRoutes, hasModelProtocols,
+    requestCompatibilityEnabled, independentProxyEnabled, PROTOCOL_PROXY_BASE_URL, webSearchHistoryCompatEnabled, normalizeRelayModelRoutes, hasModelProtocols,
     relaySessionProvider: () => "custom",
     sessionProviderForProtocol: (provider: string) => provider,
     isAggregateRelayProfile: () => false,
@@ -79,6 +82,21 @@ test("checkbox draft and generated config route to proxy and restore the real up
     const config = context.buildRelayConfigToml(value, { includeBearerToken: false });
     assert.ok(config.includes(`base_url = "${value.webSearchHistoryCompat ? PROTOCOL_PROXY_BASE_URL : original.baseUrl}"`));
   }
+});
+
+test("independent Responses proxy enables the helper per provider and clearing it removes cached routing", () => {
+  const original = settings();
+  setIndependentProxyConfigured("source", true);
+  try {
+    assert.equal(independentProxyEnabled(profile()), true);
+    assert.equal(independentProxyEnabled({ ...profile(), relayMode: "official" }), false);
+    assert.equal(independentProxyEnabled(profile("other")), false);
+    assert.equal(settingsRequireLocalHelper(original), true);
+    assert.equal(modelRouteSaveRequiresRestart(original, original, profile().baseUrl), true);
+  } finally {
+    setIndependentProxyConfigured("source", false);
+  }
+  assert.equal(settingsRequireLocalHelper(original), false);
 });
 
 test("provider checkbox binds checked state, draft update and the Responses-only disabled state", () => {

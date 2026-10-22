@@ -2,7 +2,7 @@
 //
 // cdp_bridge.rs 只守「接线还在不在」，这里把分片里的纯计算函数抠出来放进沙箱真跑，
 // 验证三件在真机上不好复现的事：
-//   1. 生成速度按「同一轮内相邻事件差」算，换轮（turn_output_tokens 回落）要切段，
+//   1. 生成速度按「同一轮内相邻事件差」算，按真实 turn_id 换轮，
 //      过短/过长的间隔不能当样本；
 //   2. 缓存命中与上下文占用是 Codex 自己的口径（cached/input、total/context_window），
 //      窗口缺失时不能瞎算成 0%；
@@ -35,15 +35,18 @@ function declaration(name: string): string {
 const sandboxSource = [
   declaration("alunixaXUsageStaleMs"),
   declaration("alunixaXUsagePercent"),
+  declaration("alunixaXUsageLatestTurn"),
   declaration("alunixaXUsageRate"),
+  declaration("alunixaXUsageTurnCache"),
   declaration("alunixaXUsageSnapshot"),
   declaration("alunixaXUsageThreadId"),
-  "return { alunixaXUsagePercent, alunixaXUsageRate, alunixaXUsageSnapshot, alunixaXUsageThreadId };",
+  "return { alunixaXUsagePercent, alunixaXUsageRate, alunixaXUsageTurnCache, alunixaXUsageSnapshot, alunixaXUsageThreadId };",
 ].join("\n");
 
 type Sandbox = {
   alunixaXUsagePercent: (numerator: number, denominator: number) => number | null;
   alunixaXUsageRate: (events: Array<Record<string, unknown>>) => number | null;
+  alunixaXUsageTurnCache: (events: Array<Record<string, unknown>>) => number | null;
   alunixaXUsageSnapshot: (events: Array<Record<string, unknown>>) => {
     speed: number | null;
     cache: number | null;
@@ -69,6 +72,7 @@ function event(secondsFromStart: number, turnOutputTokens: number, extra: Record
   return {
     t: new Date(Date.UTC(2026, 5, 2, 5, 0, secondsFromStart)).toISOString(),
     turn_output_tokens: turnOutputTokens,
+    turn_id: "turn-1",
     input_tokens: 1000,
     cached_input_tokens: 0,
     output_tokens: 0,
@@ -84,9 +88,9 @@ test("生成速度按同一轮内相邻事件差计算，换轮时切段", () =>
     event(0, 100),
     event(10, 600),
     event(20, 1100),
-    // 新一轮：累计输出回落到 200，前一段不能跨轮相减。
-    event(30, 200),
-    event(40, 700),
+    // 累计输出跨轮仍然递增，只有 turn_id 能确认边界。
+    event(30, 2100, { turn_id: "turn-2" }),
+    event(40, 2600, { turn_id: "turn-2" }),
   ];
   assert.equal(alunixaXUsageRate(events), 500 / 10);
   assert.equal(alunixaXUsageRate([event(0, 100)]), null, "只有一条事件时算不出速度");
@@ -122,6 +126,42 @@ test("缓存命中与上下文占用按 Codex 的口径取值", () => {
   assert.equal(noWindow?.context, null);
 
   assert.equal(alunixaXUsageSnapshot([]), null);
+});
+
+test("同一轮缓存命中率按输入 token 加权，换轮后重新计算", () => {
+  const { alunixaXUsageTurnCache } = sandbox(Date.UTC(2026, 5, 2, 5, 0, 10));
+  assert.equal(alunixaXUsageTurnCache([
+    event(0, 100, { input_tokens: 100, cached_input_tokens: 40 }),
+    event(1, 200, { input_tokens: 900, cached_input_tokens: 810 }),
+  ]), 85);
+  assert.equal(alunixaXUsageTurnCache([
+    event(0, 100, { input_tokens: 100, cached_input_tokens: 40 }),
+    event(1, 200, { input_tokens: 1000, cached_input_tokens: 100, turn_id: "turn-2" }),
+  ]), 10);
+});
+
+test("会话累计输出持续增长时，第二轮 0% 不能混成 50%", () => {
+  const { alunixaXUsageTurnCache, alunixaXUsageRate } = sandbox(Date.UTC(2026, 5, 2, 5, 0, 10));
+  const events = [
+    event(0, 100, { cached_input_tokens: 1000 }),
+    event(1, 200, { turn_id: "turn-2" }),
+  ];
+  assert.equal(alunixaXUsageTurnCache(events), 0);
+  assert.equal(alunixaXUsageRate(events), null, "新一轮只有一次调用，不能跨轮估算速度");
+});
+
+test("缺少真实轮边界的旧记录只取最后一次调用", () => {
+  const { alunixaXUsageTurnCache, alunixaXUsageRate } = sandbox(Date.UTC(2026, 5, 2, 5, 0, 10));
+  const events = [
+    event(0, 100, { cached_input_tokens: 1000, turn_id: undefined }),
+    event(1, 200, { turn_id: undefined }),
+  ];
+  assert.equal(alunixaXUsageTurnCache(events), 0);
+  assert.equal(alunixaXUsageRate(events), null);
+  assert.equal(alunixaXUsageTurnCache([]), null);
+  assert.equal(alunixaXUsageTurnCache([
+    event(0, 100, { input_tokens: 0, cached_input_tokens: 100, turn_id: undefined }),
+  ]), null);
 });
 
 test("最近一条事件超过阈值后标记为过期", () => {
@@ -199,7 +239,7 @@ function lifecycle() {
   const source = [
     ...["alunixaXUsageState", "alunixaXUsageStaleMs", "alunixaXUsageIdleIntervalMs",
       "alunixaXUsageActiveIntervalMs", "alunixaXUsageWarmupIntervalMs", "alunixaXUsageFailureLimit",
-      "alunixaXUsagePercent", "alunixaXUsageRate", "alunixaXUsageSnapshot",
+      "alunixaXUsagePercent", "alunixaXUsageLatestTurn", "alunixaXUsageRate", "alunixaXUsageTurnCache", "alunixaXUsageSnapshot",
       "alunixaXUsageHide", "alunixaXUsageShow", "alunixaXUsageSyncPlacement",
       "alunixaXUsageRemember", "alunixaXUsageRefresh", "alunixaXUsageTick"].map(declaration),
     "return { state: alunixaXUsageState, sync: alunixaXUsageSyncPlacement, tick: alunixaXUsageTick, remember: alunixaXUsageRemember };",

@@ -447,3 +447,47 @@ fn mcp_protocol_keeps_errors_per_request_and_never_exposes_configuration_mutatio
             .is_empty()
     );
 }
+
+#[test]
+fn sub_agent_runtime_limit_defaults_to_ten_minutes_and_is_configurable() {
+    // #2618：运行上限过去写死 10 分钟，现在可在协作设置中调整。
+    let legacy: CollaborationConfig = serde_json::from_value(json!({
+        "enabled": true,
+        "defaultAgentId": "deepseek",
+        "agents": serde_json::to_value(CollaborationConfig::default().agents).unwrap()
+    }))
+    .unwrap();
+    assert_eq!(
+        legacy.max_runtime_minutes, 10,
+        "旧配置缺省字段时保持原来的 10 分钟"
+    );
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("maxRuntimeMinutes")
+            .is_none(),
+        "默认值不写出，回退到 deny_unknown_fields 的旧版本仍能读取"
+    );
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = store(&temp);
+    let mut config = CollaborationConfig::default();
+    config.max_runtime_minutes = 45;
+    store.save_config(config.clone()).unwrap();
+    assert_eq!(store.config().unwrap().max_runtime_minutes, 45);
+    assert_eq!(
+        serde_json::to_value(store.config().unwrap()).unwrap()["maxRuntimeMinutes"],
+        45
+    );
+
+    for invalid in [0, 241] {
+        let mut bad = config.clone();
+        bad.max_runtime_minutes = invalid;
+        assert!(store.save_config(bad).is_err(), "{invalid} 分钟应被拒绝");
+    }
+    assert_eq!(
+        store.config().unwrap().max_runtime_minutes,
+        45,
+        "拒绝时不改已保存的值"
+    );
+}

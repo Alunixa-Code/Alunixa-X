@@ -80,7 +80,7 @@ import {
 import { createPresetPatch } from "@/components/ProviderPresetSelector";
 import { PRESETS, type ProviderPreset } from "./presets";
 import { createPortal } from "react-dom";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { lazy, Suspense, Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 
 import { Badge as UiBadge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -101,8 +101,11 @@ const SignalArchive = lazy(() => import("@/components/SignalArchive"));
 import { AgentCachePanel } from "./agent-cache";
 import { AgentCollaborationPage } from "./AgentCollaborationPage";
 import { PluginMarketScreen } from "./PluginMarketScreen";
+import { ReleaseNotes } from "./ReleaseNotes";
+import { UPDATE_CHECK_INTERVAL_MS, UpdateNotifications } from "./update-notification";
 import { McpPage, PageHeader } from "./ManagementPages";
-import { SkillsPage, SessionPage } from "./ManagementExtra";
+import { SkillsPage } from "./ManagementExtra";
+import { ProjectSessionPage } from "./ProjectSessionPage";
 import { ENHANCEMENT_SECTION_IDS, managerNavigationDestination, type EnhancementTab, type ManagerNavigationIntent } from "./enhancement-navigation";
 import { DEFAULT_AUTO_COMPACT_PERCENT, autoCompactOptions, normalizeAutoCompactPercent } from "./auto-compact";
 import { defaultWhaleBalanceSettings, normalizeWhaleBalanceSettings, whaleBalanceSettingsIssue, type WhaleBalanceIssue, type WhaleBalanceProtocol, type WhaleBalanceSettings } from "./whale-settings";
@@ -130,6 +133,7 @@ import {
   normalizeTokenCountInput,
   modelMetadataKey,
   modelFastSupportMode,
+  synchronizeModelMetadataLiteSupport,
   synchronizeModelMetadataFastSupport,
   type ModelFastSupportMode,
   parseModelMetadataDocument,
@@ -151,6 +155,9 @@ import {
   type ImportedModelMetadata,
 } from "./model-metadata";
 import {
+  independentProxyEnabled,
+  setIndependentProxyConfigured,
+  requestCompatibilityEnabled,
   findRelayModelRouteIssue,
   modelRouteSaveRequiresRestart,
   normalizeRelayModelRoutes,
@@ -169,6 +176,9 @@ import {
   type ModelWindowRow,
 } from "./model-windows";
 import {
+  reasoningParameterMode,
+  setModelReasoningParameterMode,
+  type ReasoningParameterMode,
   formatReasoningLevelsLabel,
   normalizeReasoningLevels,
   REASONING_LEVELS,
@@ -220,7 +230,7 @@ import {
 } from "./dream-skin";
 import { hasModelProtocols, parseModelProtocols, modelProtocolForName, modelProtocolKey } from "./model-protocols";
 import { supportsClaudeAdaptive } from "./claude-thinking";
-import { getLanguage, getLocale, t, tf, LANGUAGE_OPTIONS, isLanguage, setLanguage } from "@/i18n";
+import { subscribeLanguage, getLanguage, getLocale, t, tf, LANGUAGE_OPTIONS, isLanguage, setLanguage } from "@/i18n";
 import { vlmTestTranslation } from "./vlm-test-translation";
 import {
   multiLaunchInstanceFailure,
@@ -231,6 +241,8 @@ import {
 } from "./multi-launch-model";
 
 const isWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent);
+const isMacPlatform = /\bMacintosh\b/i.test(navigator.userAgent);
+const supportsPetRealMouseLook = isWindowsPlatform || isMacPlatform;
 
 /// 多开启动后轮询「就绪/失败」结论的节奏：worker 最长等 90 秒就绪，这里给到 2 分钟。
 const MULTI_LAUNCH_POLL_INTERVAL_MS = 3000;
@@ -350,6 +362,13 @@ type BackendSettings = WhaleBalanceSettings & {
   codexAppServiceTierControls: boolean;
   codexAppPetRealMouseLook: boolean;
   codexAppActivityOverlayRight: boolean;
+  /** 协议代理内部自动重试（与 Rust `protocol_proxy_auto_retry` 对应）。 */
+  protocolProxyAutoRetry: boolean;
+  protocolProxyAutoRetryMaxAttempts: number;
+  protocolProxyAutoRetryIntervalSeconds: number;
+  protocolProxyAutoRetryMode: "streaming" | "streaming-legacy" | "buffered";
+  /** 流式避震下首段可见输出后到提交的延迟（毫秒）；0 表示一出现可见输出立即提交。与 Rust `protocol_proxy_auto_retry_commit_delay_ms` 对应。 */
+  protocolProxyAutoRetryCommitDelayMs: number;
   codexAppCapacityAutoRetry: boolean;
   codexAppStepwiseEnabled: boolean;
   codexAppAnswerOutlineEnabled: boolean;
@@ -508,6 +527,8 @@ export type RelayProfile = {
   modelRoutes?: RelayModelRoute[];
   standardOpenaiProtocol: boolean;
   webSearchHistoryCompat: boolean;
+  trustUpstreamCatalogLite?: boolean;
+  strictResponsesReasoning?: boolean;
   /** Anthropic 上游的认证字段：`x-api-key`（默认）或 `authorization`。 */
   anthropicAuthHeader?: string;
   /** Anthropic 的 `max_tokens` 兜底值，0/缺省表示用内置 8192；填了则优先于请求值。 */
@@ -599,6 +620,7 @@ const emptyContextSelection = (): RelayContextSelection => ({
 
 type UserScriptInventory = {
   enabled?: boolean;
+  skip_next_start?: boolean;
   scripts?: Array<{
     key: string;
     name: string;
@@ -612,6 +634,62 @@ type UserScriptInventory = {
     source_url?: string;
     homepage?: string;
   }>;
+};
+
+type RequestLogUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens?: number;
+  reasoningTokens?: number;
+};
+
+type RequestLogAttemptDetail = {
+  attempt: number;
+  code?: string | null;
+  message?: string | null;
+  delayMs?: number | null;
+};
+
+type RequestLogEntry = {
+  id: string;
+  timestampMs: number;
+  startedAtMs: number;
+  durationMs: number;
+  method: string;
+  path: string;
+  statusCode: number;
+  success: boolean;
+  stream: boolean;
+  model: string;
+  upstreamModel: string;
+  relayId: string;
+  relayName: string;
+  wireApi: string;
+  /** Codex 会话/线程 id（来自请求头；旧日志没有该字段）。 */
+  threadId?: string | null;
+  /** 会话标题（后端按 threadId 从 Codex 本地会话库补齐；可能缺失）。 */
+  threadTitle?: string | null;
+  attempts: number;
+  autoRetries: number;
+  retryReasons?: string[];
+  /** 每次自动重试前的失败尝试摘要；旧日志没有该字段。 */
+  attemptDetails?: RequestLogAttemptDetail[] | null;
+  /** 请求进行中时为 running；旧日志没有该字段。 */
+  state?: string | null;
+  /** 首字耗时（毫秒）。 */
+  firstTokenMs?: number | null;
+  /** 运行中按流式增量粗估的输出 token。 */
+  estimatedOutputTokens?: number | null;
+  error?: string | null;
+  streamOutcome?: string | null;
+  usage?: RequestLogUsage | null;
+  cacheHitRatio?: number | null;
+};
+
+type RequestLogsResult = {
+  status: Status;
+  message: string;
+  entries: RequestLogEntry[];
 };
 
 type SettingsResult = CommandResult<{
@@ -904,6 +982,7 @@ type TaskProgress = {
   percent: number;
   message: string;
   indeterminate?: boolean;
+  failed?: boolean;
 };
 
 type UpdateStage = "downloading" | "writing" | "launching";
@@ -956,6 +1035,9 @@ type DiagnosticsResult = CommandResult<{
 type WatcherResult = CommandResult<{
   enabled: boolean;
   disabled_flag: string;
+  start_minimized: boolean;
+  start_codex: boolean;
+  start_codex_on_open: boolean;
 }>;
 
 // 与 Rust 侧 `auto_takeover::AutoTakeoverPayload`（rename_all = "camelCase"）逐字段对齐。
@@ -1045,10 +1127,10 @@ function providerSyncProgressMessage(result: CommandResult<ProviderSyncPayload>)
 }
 
 const providerSyncSourceLabels: Record<ProviderSyncTargetSource, string> = {
-  config: t("配置"),
-  rollout: t("会话"),
-  sqlite: t("索引"),
-  manual: t("手动"),
+  get config() { return t("配置"); },
+  get rollout() { return t("会话"); },
+  get sqlite() { return t("索引"); },
+  get manual() { return t("手动"); },
 };
 
 function providerSyncTargetLabel(target: ProviderSyncTargetOption): string {
@@ -1097,7 +1179,7 @@ const TOOL_ICONS: Record<string, string> = {
   claude: new URL("./assets/agents/claude.svg", import.meta.url).href,
 };
 
-type Route = "officialRemote" | "remoteProjects" | "usageAnalytics" | "imageModels" | "overview" | "relay" | "multiLaunch" | "grok" | "claude" | "relayEnvironment" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "agentCollaboration" | "maintenance" | "about" | "settings";
+type Route = "officialRemote" | "remoteProjects" | "usageAnalytics" | "imageModels" | "overview" | "relay" | "multiLaunch" | "grok" | "claude" | "relayEnvironment" | "requestLog" | "sessions" | "context" | "skills" | "weixin" | "enhance" | "dreamSkin" | "userScripts" | "pluginMarket" | "agentCache" | "agentCollaboration" | "maintenance" | "about" | "settings";
 type Theme = "dark" | "light";
 
 const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
@@ -1112,49 +1194,50 @@ const MANAGER_NAVIGATION_EVENT = "manager-navigation-requested";
  * 新增页面时**必须**想清楚归属：默认可见会让 Codex 专属功能在 Grok 下露出来。
  */
 const routes: Array<{ id: Route; label: string; icon: LucideIcon; badge?: string; tool?: string }> = [
-  { id: "imageModels", label: t("生图模型"), icon: ImagePlus },
+  { id: "imageModels", get label() { return t("生图模型"); }, icon: ImagePlus },
   // 概览在两个工具下都可见：它承载共用的置顶推荐位，以及各自的状态。
-  { id: "overview", label: t("概览"), icon: LayoutDashboard },
-  { id: "relay", label: t("供应商配置"), icon: KeyRound, tool: "codex" },
-  { id: "multiLaunch", label: t("Codex多开"), icon: Layers3, badge: "NEW", tool: "codex" },
-  { id: "grok", label: t("Grok 配置"), icon: Blocks, tool: "grok" },
-  { id: "claude", label: t("Claude 增强"), icon: Languages, tool: "claude" },
-  { id: "sessions", label: t("会话管理"), icon: MessageCircle, tool: "codex" },
+  { id: "overview", get label() { return t("概览"); }, icon: LayoutDashboard },
+  { id: "relay", get label() { return t("供应商配置"); }, icon: KeyRound, tool: "codex" },
+  { id: "multiLaunch", get label() { return t("Codex多开"); }, icon: Layers3, tool: "codex" },
+  { id: "grok", get label() { return t("Grok 配置"); }, icon: Blocks, tool: "grok" },
+  { id: "claude", get label() { return t("Claude 增强"); }, icon: Languages, tool: "claude" },
+  { id: "sessions", get label() { return t("会话管理"); }, icon: MessageCircle, tool: "codex" },
   { id: "context", label: "MCP", icon: Network, tool: "codex" },
   { id: "skills", label: "Skills", icon: BookOpen, tool: "codex" },
-  { id: "weixin", label: t("微信连接"), icon: ScanLine, tool: "codex" },
-  { id:"officialRemote",label:t("官方手机远控"),icon:Cable,tool:"codex" },
-  { id:"remoteProjects",label:t("远程项目"),icon:GitBranch,tool:"codex" },
-  { id:"usageAnalytics",label:t("Token 与模型使用统计"),icon:LayoutDashboard,tool:"codex" },
-  { id: "enhance", label: t("Codex增强"), icon: Hammer, tool: "codex" },
-  { id: "dreamSkin", label: t("皮肤管理"), icon: Palette, tool: "codex" },
-  { id: "userScripts", label: t("拓展"), icon: FileCode2, tool: "codex" },
-  { id: "pluginMarket", label: t("Codex 插件市场"), icon: Store, tool: "codex" },
+  { id: "weixin", get label() { return t("微信连接"); }, icon: ScanLine, tool: "codex" },
+  { id:"officialRemote",get label() { return t("官方手机远控"); },icon:Cable,tool:"codex" },
+  { id:"remoteProjects",get label() { return t("远程项目"); },icon:GitBranch,tool:"codex" },
+  { id:"usageAnalytics",get label() { return t("Token 与模型使用统计"); },icon:LayoutDashboard,tool:"codex" },
+  { id: "enhance", get label() { return t("Codex增强"); }, icon: Hammer, tool: "codex" },
+  { id: "dreamSkin", get label() { return t("皮肤管理"); }, icon: Palette, tool: "codex" },
+  { id: "userScripts", get label() { return t("拓展"); }, icon: FileCode2, tool: "codex" },
+  { id: "pluginMarket", get label() { return t("Codex 插件市场"); }, icon: Store, tool: "codex" },
   // 缓存清理覆盖多个 AI 应用，属于应用级页面，在各工具下均可访问。
-  { id: "agentCache", label: t("AI Agent 缓存清理"), icon: Trash2 },
+  { id: "agentCache", get label() { return t("AI Agent 缓存清理"); }, icon: Trash2 },
   // 跨客户端协作属于应用级能力，各工具下共用同一组任务。
-  { id: "agentCollaboration", label: t("Agent 协作"), icon: GitBranch, badge: "实验" },
-  { id: "maintenance", label: t("安装维护"), icon: Wrench, tool: "codex" },
-  { id: "about", label: t("关于"), icon: Info },
-  { id: "settings", label: t("设置"), icon: Settings },
-  { id: "relayEnvironment", label: t("中转站环境配置检测"), icon: ShieldCheck, tool: "codex" },
+  { id: "agentCollaboration", get label() { return t("Agent 协作"); }, icon: GitBranch, get badge() { return t("实验"); } },
+  { id: "maintenance", get label() { return t("安装维护"); }, icon: Wrench, tool: "codex" },
+  { id: "about", get label() { return t("关于"); }, icon: Info },
+  { id: "settings", get label() { return t("设置"); }, icon: Settings },
+  { id: "relayEnvironment", get label() { return t("代理设置"); }, icon: ShieldCheck, tool: "codex" },
+  { id: "requestLog", get label() { return t("请求日志"); }, icon: List, tool: "codex" },
 ];
 
 const navigationSections: Array<{ label: string; routes: Route[]; placement?: "bottom" }> = [
   {
-    label: t("工作区"),
-    routes: ["overview", "relay", "multiLaunch", "grok", "claude"],
+    get label() { return t("工作区"); },
+    routes: ["overview", "relay", "relayEnvironment", "requestLog", "multiLaunch", "grok", "claude"],
   },
   {
-    label: t("全局管理"),
+    get label() { return t("全局管理"); },
     routes: ["context", "skills", "sessions", "remoteProjects", "usageAnalytics"],
   },
   {
-    label: t("扩展"),
+    get label() { return t("扩展"); },
     routes: ["weixin", "officialRemote", "enhance", "dreamSkin", "userScripts", "pluginMarket"],
   },
   {
-    label: t("系统"),
+    get label() { return t("系统"); },
     routes: ["maintenance"],
     placement: "bottom",
   },
@@ -1226,6 +1309,11 @@ const defaultSettings: BackendSettings = {
   codexAppServiceTierControls: false,
   codexAppPetRealMouseLook: false,
   codexAppActivityOverlayRight: false,
+  protocolProxyAutoRetry: true,
+  protocolProxyAutoRetryMaxAttempts: 5,
+  protocolProxyAutoRetryIntervalSeconds: 2,
+  protocolProxyAutoRetryMode: "streaming",
+  protocolProxyAutoRetryCommitDelayMs: 1000,
   codexAppCapacityAutoRetry: false,
   codexAppStepwiseEnabled: false,
   codexAppAnswerOutlineEnabled: false,
@@ -1331,6 +1419,7 @@ export function App() {
     }
   };
 
+  useSyncExternalStore(subscribeLanguage, getLanguage, getLanguage);
   const [theme, setTheme] = useState<Theme>(() => loadInitialTheme());
   const [route, setRoute] = useState<Route>(() => loadInitialRoute());
   const [enhancementTab, setEnhancementTab] = useState<EnhancementTab>("general");
@@ -1378,6 +1467,10 @@ export function App() {
   const [dreamSkinUnsavedDialog, setDreamSkinUnsavedDialog] = useState(false);
   const dreamSkinPendingActionRef = useRef<(() => void) | null>(null);
   const [update, setUpdate] = useState<UpdateResult | null>(null);
+  const [updatePrompt, setUpdatePrompt] = useState<UpdateResult | null>(null);
+  const updateNotifications = useRef(new UpdateNotifications());
+  const updateCheckPending = useRef<{ manual: boolean } | null>(null);
+  const updateInstallPending = useRef(false);
   const [updateInstallProgress, setUpdateInstallProgress] = useState<TaskProgress>({
     active: false,
     percent: 0,
@@ -1626,6 +1719,14 @@ export function App() {
     if (isSuccessStatus(result.status)) await reloadUserScripts();
   };
 
+  const setUserScriptsSkipNextStart = async (skip: boolean) => {
+    const result = await run(() => call<SettingsResult>("set_user_scripts_skip_next_start", { skip }));
+    if (!result) return;
+    setSettings(result);
+    setScriptMarket((current) => syncMarketInstalledState(current, result.user_scripts));
+    showResultNotice(t("本地拓展"), result);
+  };
+
   const setUserScriptEnabled = async (key: string, enabled: boolean) => {
     const result = await run(() => call<SettingsResult>("set_user_script_enabled", { key, enabled }));
     if (result) {
@@ -1776,6 +1877,16 @@ export function App() {
       if (!silent || !isSuccessStatus(result.status)) showResultNotice(t("会话管理"), result, { silentSuccess: true });
     }
     return result;
+  };
+
+  const listProjectSessions = async (cwd: string): Promise<LocalSession[]> => {
+    const result = await run(() => call<LocalSessionsResult>("list_project_sessions", { request: { cwd } }));
+    if (!result || !isSuccessStatus(result.status)) {
+      if (result) showResultNotice(t("会话管理"), result);
+      return [];
+    }
+    showNotice(t("会话管理"), result.message, "ok");
+    return result.sessions;
   };
 
 
@@ -2190,19 +2301,20 @@ export function App() {
   const deleteLocalSession = async (session: LocalSession) => {
     const title = session.title || session.id;
     const confirmed = await confirmSessionDelete(t("删除会话"), tf("删除会话“{0}”？此操作会删除本地数据库记录和 rollout 文件，并创建备份。", [title]));
-    if (!confirmed) return;
+    if (!confirmed) return false;
     const result = await run(() => requestDeleteLocalSession(session));
     if (result) {
       showResultNotice(t("会话删除"), result);
       await refreshLocalSessions(true, localSessions?.offset ?? 0);
     }
+    return !!result && isSuccessStatus(result.status);
   };
 
   const deleteLocalSessions = async (sessions: LocalSession[]) => {
     const uniqueSessions = Array.from(new Map(sessions.map((session) => [session.id, session])).values());
     if (!uniqueSessions.length) {
       showNotice(t("批量删除会话"), t("请先选择要删除的会话。"), "failed");
-      return;
+      return false;
     }
     const preview = uniqueSessions
       .slice(0, 6)
@@ -2213,7 +2325,7 @@ export function App() {
       t("批量删除会话"),
       tf("删除选中的 {0} 个会话？此操作会删除本地数据库记录和 rollout 文件，并为每个会话创建备份。\n\n{1}{2}", [uniqueSessions.length, preview, extraCount]),
     );
-    if (!confirmed) return;
+    if (!confirmed) return false;
 
     let succeeded = 0;
     const failed: string[] = [];
@@ -2236,6 +2348,23 @@ export function App() {
       showNotice(t("批量删除会话"), tf("已删除 {0} 个会话。", [succeeded]), "ok");
     }
     await refreshLocalSessions(true, localSessions?.offset ?? 0);
+    return true;
+  };
+
+  const archiveLocalSessions = async (sessions: LocalSession[], archived = true) => {
+    const uniqueSessions = Array.from(new Map(sessions.map((session) => [session.id, session])).values());
+    if (!uniqueSessions.length) return false;
+    const confirmed = await confirmSessionDelete(
+      archived ? t("归档会话") : t("取消归档会话"),
+      tf("{0} 个会话？这只更新本地归档状态，不删除 rollout 文件。", [uniqueSessions.length]),
+    );
+    if (!confirmed) return false;
+    const result = await run(() => call<CommandResult<{ succeeded: number; failed: number }>>("archive_local_sessions", {
+      request: { sessions: uniqueSessions, archived },
+    }));
+    if (result) showNotice(archived ? t("归档会话") : t("取消归档会话"), result.message, result.status);
+    await refreshLocalSessions(true, localSessions?.offset ?? 0);
+    return true;
   };
 
   const refreshLiveContextEntries = async (silent = false) => {
@@ -2618,28 +2747,77 @@ export function App() {
     }
   };
 
-  const checkUpdate = async (silent = false) => {
-    const result = await run(() => call<UpdateResult>("check_update"));
+  const setWatcherStartMinimized = async (minimized: boolean) => {
+    const result = await run(() => call<WatcherResult>("set_watcher_start_minimized", { minimized }));
     if (result) {
-      setUpdate(result);
-      if (!silent || result.updateAvailable) {
-        showNotice(t("GitHub Release 检查"), result.message, result.status);
-      }
+      setWatcher(result);
+      showNotice(t("开机启动自动最小化"), result.message, result.status);
     }
   };
 
-  const performUpdate = async () => {
-    if (updateInstallProgress.active) return;
+  const setWatcherStartCodex = async (startCodex: boolean) => {
+    const result = await run(() => call<WatcherResult>("set_watcher_start_codex", { startCodex }));
+    if (result) {
+      setWatcher(result);
+      showNotice(t("登录时自动启动 Codex"), result.message, result.status);
+    }
+  };
+
+  const setWatcherStartCodexOnOpen = async (enabled: boolean) => {
+    const result = await run(() => call<WatcherResult>("set_watcher_start_codex_on_open", { enabled }));
+    if (result) {
+      setWatcher(result);
+      showNotice(t("打开 Alunixa X 时自动启动 Codex"), result.message, result.status);
+    }
+  };
+
+  const checkUpdate = async (silent = false) => {
+    if (updateInstallPending.current) return;
+    if (updateCheckPending.current) {
+      // 手动检查复用正在进行的后台请求，但仍按用户主动检查显示结果。
+      if (!silent) updateCheckPending.current.manual = true;
+      return;
+    }
+    const request = { manual: !silent };
+    updateCheckPending.current = request;
+    try {
+      const result = await call<UpdateResult>("check_update");
+      // 后台检查失败时保留上次可用的安装包，手动检查仍显示错误。
+      if (request.manual || result.status !== "failed") setUpdate(result);
+      if (updateNotifications.current.shouldPrompt(result, request.manual)) {
+        setUpdatePrompt(result);
+      } else if (request.manual) {
+        showNotice(t("GitHub Release 检查"), result.message, result.status);
+      }
+    } catch (error) {
+      if (request.manual) showNotice(t("GitHub Release 检查"), stringifyError(error), "failed");
+    } finally {
+      updateCheckPending.current = null;
+    }
+  };
+
+  const closeUpdatePrompt = () => {
+    if (updatePrompt?.latestVersion) updateNotifications.current.dismiss(updatePrompt.latestVersion);
+    setUpdatePrompt(null);
+  };
+
+  const performUpdate = async (selectedUpdate = update) => {
+    if (updateInstallPending.current) return;
     const release =
-      update?.latestVersion && update.assetName && update.assetUrl
+      selectedUpdate?.latestVersion && selectedUpdate.assetName && selectedUpdate.assetUrl
         ? {
-            version: update.latestVersion,
+            version: selectedUpdate.latestVersion,
             url: "",
-            body: update.releaseSummary ?? "",
-            asset_name: update.assetName,
-            asset_url: update.assetUrl,
+            body: selectedUpdate.releaseSummary ?? "",
+            asset_name: selectedUpdate.assetName,
+            asset_url: selectedUpdate.assetUrl,
           }
         : null;
+    if (!release) {
+      showNotice(t("更新安装"), t("请先检查更新并选择可下载的 Release asset。"), "failed");
+      return;
+    }
+    updateInstallPending.current = true;
     setUpdateInstallProgress({
       active: true,
       percent: 0,
@@ -2672,12 +2850,13 @@ export function App() {
       });
       const result = await run(() => call<UpdateResult>("perform_update", { release }));
       if (result) {
-        setUpdate(result);
+        setUpdate({ ...selectedUpdate!, ...result });
         setUpdateInstallProgress({
           active: false,
           percent: result.progress ?? 100,
           indeterminate: false,
           message: result.message,
+          failed: result.status === "failed",
         });
         showNotice(t("更新安装"), result.message, result.status);
       } else {
@@ -2686,9 +2865,15 @@ export function App() {
           percent: 100,
           indeterminate: false,
           message: t("安装包更新失败，请查看错误提示后重试。"),
+          failed: true,
         });
       }
+    } catch (error) {
+      const message = stringifyError(error);
+      setUpdateInstallProgress({ active: false, percent: 0, indeterminate: false, message, failed: true });
+      showNotice(t("更新安装"), message, "failed");
     } finally {
+      updateInstallPending.current = false;
       window.clearTimeout(fallbackTimer);
       unlisten?.();
     }
@@ -2708,8 +2893,14 @@ export function App() {
       const versioned = committedSettingsRef.current?.revision
         ? { ...normalized, revision: committedSettingsRef.current.revision }
         : normalized;
+      let conflicted = false;
       const result = await run(() => call<SettingsResult>("save_settings", {
         settings: versioned, expectedRevision: settingsRevisionRef.current, capabilityWrites: writes,
+      }).catch((error: unknown) => {
+        const message = stringifyError(error);
+        conflicted = message.includes("settings_revision_conflict")
+          || message.includes("配置已被其他页面或程序修改");
+        throw error;
       }));
       if (result && isSuccessStatus(result.status)) {
         settingsRevisionRef.current = result.revision ?? null;
@@ -2729,7 +2920,7 @@ export function App() {
         if (!silent) showNotice(t("设置保存"), result.message, result.status);
         return saved;
       }
-      if (requestId === settingsSaveRequestRef.current) {
+      if (!conflicted && requestId === settingsSaveRequestRef.current) {
         for(const key of writes) {
           if(nativeCapabilityWritesRef.current.get(key)===generations.get(key)) nativeCapabilityWritesRef.current.delete(key);
         }
@@ -2810,6 +3001,78 @@ export function App() {
       }
       setSettingsForm(normalizeSettings(result.settings));
       showNotice(t("设置重置"), result.message, result.status);
+    }
+  };
+
+  const exportSettings = async () => {
+    try {
+      const selected = await saveDialog({
+        title: t("导出 Alunixa X 配置"),
+        defaultPath: "alunixa-x-plus-settings.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!selected) return;
+      const result = await run(() => call<CommandResult<{ path: string }>>("export_settings", {
+        path: selected,
+        settings: normalizeSettings(settingsForm),
+      }));
+      if (result) showNotice(t("导出 Alunixa X 配置"), result.message, result.status);
+    } catch (error) {
+      showNotice(t("导出 Alunixa X 配置"), stringifyError(error), "failed");
+    }
+  };
+
+  const importSettings = async () => {
+    try {
+      const selected = await open({
+        title: t("导入 Alunixa X 配置"),
+        multiple: false,
+        directory: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (typeof selected !== "string" || !selected.trim()) return;
+      const result = await run(() => call<SettingsResult>("preview_import_settings", { path: selected }));
+      if (!result || !isSuccessStatus(result.status)) {
+        if (result) showNotice(t("导入 Alunixa X 配置"), result.message, result.status);
+        return;
+      }
+      setSettings(settings ?? result);
+      setSettingsForm(normalizeSettings(result.settings));
+      showNotice(t("导入 Alunixa X 配置"), result.message, "ok");
+    } catch (error) {
+      showNotice(t("导入 Alunixa X 配置"), stringifyError(error), "failed");
+    }
+  };
+
+  const chooseSettingsPath = async () => {
+    try {
+      const selected = await saveDialog({
+        title: t("选择配置文件路径"),
+        defaultPath: "settings.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!selected) return;
+      const result = await run(() => call<SettingsResult>("set_settings_path", { path: selected }));
+      if (result) {
+        if (isSuccessStatus(result.status)) {
+          setSettings(result);
+          setSettingsForm(normalizeSettings(result.settings));
+        }
+        showNotice(t("配置文件路径"), result.message, result.status);
+      }
+    } catch (error) {
+      showNotice(t("配置文件路径"), stringifyError(error), "failed");
+    }
+  };
+
+  const resetSettingsPath = async () => {
+    const result = await run(() => call<SettingsResult>("reset_settings_path"));
+    if (result) {
+      if (isSuccessStatus(result.status)) {
+        setSettings(result);
+        setSettingsForm(normalizeSettings(result.settings));
+      }
+      showNotice(t("配置文件路径"), result.message, result.status);
     }
   };
 
@@ -3384,6 +3647,12 @@ export function App() {
     })();
   }, []);
 
+  useEffect(() => {
+    // 长期开着管理器也能发现更新；后台检查失败不打扰当前操作。
+    const timer = window.setInterval(() => void checkUpdate(true), UPDATE_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
   // 主题卡片的「更多操作」是原生 details 弹层：原生不会因为点了别处就收起，
   // 会出现多个菜单同时展开。这里统一做外点收起（details 的开关是 DOM 瞬态，不经 React 状态）。
   useEffect(() => {
@@ -3658,6 +3927,10 @@ export function App() {
       nativeCapabilityPending: (key: string) => nativeCapabilityWritesRef.current.has(key),
       refreshSettings,
       resetSettings,
+      exportSettings,
+      importSettings,
+      chooseSettingsPath,
+      resetSettingsPath,
       resetImageOverlaySettings,
       chooseCodexAppPath: async (mode: "folder" | "file") => {
         let selected: unknown;
@@ -3800,11 +4073,14 @@ export function App() {
       reloadUserScripts,
       installMarketScript,
       setUserScriptsEnabled,
+      setUserScriptsSkipNextStart,
       setUserScriptEnabled,
       deleteUserScript,
       refreshLocalSessions,
+      listProjectSessions,
       deleteLocalSession,
       deleteLocalSessions,
+      archiveLocalSessions,
       openExternalUrl,
       applyRelayInjection,
       applyPureApiInjection,
@@ -3837,13 +4113,16 @@ export function App() {
         showNotice(t("检查完成"), t("已刷新 Codex 应用、入口和 Watcher 状态。"), "ok");
       },
       setWatcherEnabled,
+      setWatcherStartMinimized,
+      setWatcherStartCodex,
+      setWatcherStartCodexOnOpen,
       setAutoTakeover,
       refreshAutoTakeover: () => refreshAutoTakeover(false),
       takeOverNow: () => runAutoTakeoverCommand("take_over_codex_now"),
       pauseAutoTakeover: () => runAutoTakeoverCommand("pause_auto_takeover_for_instance"),
       toggleTheme: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
     }),
-    [route, launchForm, settingsForm, settings, overview, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, multiLaunchPending, multiLaunchInstances, multiLaunchInstancesLoading, multiLaunchActionPending, dreamSkinLibrary, dreamSkinMarket, dreamSkinCommunity, selectedDreamSkinTheme, savedDreamSkinThemeDraft, dreamSkinThemeDraft, dreamSkinDraftDirty, pendingDreamSkinRestart],
+    [route, launchForm, settingsForm, settings, overview, update, updateInstallProgress.active, logs, diagnostics, theme, relayFiles, localSessions, selectedProviderSyncTarget, envConflicts, relayEnvironment, ccsProviders, multiLaunchPending, multiLaunchInstances, multiLaunchInstancesLoading, multiLaunchActionPending, dreamSkinLibrary, dreamSkinMarket, dreamSkinCommunity, selectedDreamSkinTheme, savedDreamSkinThemeDraft, dreamSkinThemeDraft, dreamSkinDraftDirty, pendingDreamSkinRestart, getLanguage()],
   );
   const isGlobalPage = globalNavigationRoutes.includes(route);
   const isManagementScreen = route === "relay" || route === "multiLaunch" || route === "sessions" || route === "context" || route === "skills";
@@ -3934,7 +4213,10 @@ export function App() {
             ) : null}
           </div>
         </header>
-        <section className={`screen ${isManagementScreen ? "management-screen" : ""}`} key={route}>
+        <section
+          className={`screen ${isManagementScreen ? "management-screen" : ""} ${route === "requestLog" ? "request-log-screen" : ""}`.trim()}
+          key={route}
+        >
           {route === "imageModels" ? <ImageModelsScreen onPendingChange={state => { imageModelsPending.current = state; }} /> : null}
           {route === "overview" ? (
             <OverviewScreen
@@ -3958,19 +4240,30 @@ export function App() {
             <CodexMultiLaunchScreen form={settingsForm} actions={actions} />
           ) : null}
           {route === "relayEnvironment" ? (
-            <RelayEnvironmentScreen result={relayEnvironment} actions={actions} />
+            <ProxySettingsScreen
+              dirty={settingsDirty}
+              overview={overview}
+              form={settingsForm}
+              relayEnvironment={relayEnvironment}
+              onFormChange={setSettingsForm}
+              actions={actions}
+            />
+          ) : null}
+          {route === "requestLog" ? (
+            <RequestLogScreen />
           ) : null}
           {route === "grok" ? (
             <GrokScreen settings={settings} form={settingsForm} actions={actions} />
           ) : null}
           {route === "claude" ? <ClaudeLocalizationScreen /> : null}
           {route === "sessions" ? (
-            <SessionPage
+            <ProjectSessionPage
               sessions={localSessions}
               onRefresh={async (offset) => { await actions.refreshLocalSessions(false, offset ?? 0); }}
               onDelete={actions.deleteLocalSession}
               onDeleteMany={actions.deleteLocalSessions}
-              notify={actions.showMessage}
+              onArchiveMany={actions.archiveLocalSessions}
+              onListProjectSessions={actions.listProjectSessions}
               repairPanel={<SessionRepairPanel form={settingsForm} providerSyncProgress={providerSyncProgress}
                 sessionIndexRepairActive={sessionIndexRepairActive} sessionIndexRepairReport={sessionIndexRepairReport}
                 sessionIndexRepairReportError={sessionIndexRepairReportError} providerSyncTargets={providerSyncTargets}
@@ -4107,6 +4400,19 @@ export function App() {
         </section>
       </main>
       {signalArchiveOpen ? <Suspense fallback={null}><SignalArchive onClose={() => setSignalArchiveOpen(false)} /></Suspense> : null}
+      {updatePrompt ? (
+        <UpdateDialog
+          update={updatePrompt}
+          progress={updateInstallProgress}
+          onClose={closeUpdatePrompt}
+          onMuteToday={() => {
+            updateNotifications.current.muteToday();
+            setUpdatePrompt(null);
+          }}
+          onUpdate={() => void performUpdate(updatePrompt)}
+          onOpenUrl={(url) => void openExternalUrl(url)}
+        />
+      ) : null}
       {notice ? (
         <NoticeDialog
           key={`${notice.title}-${notice.message}-${notice.status ?? ""}`}
@@ -4187,16 +4493,20 @@ function ModelReasoningLevelsCell({
   levels,
   inherited,
   defaultLevel,
+  parameterMode,
+  onParameterModeChange,
   onChange,
 }: {
   levels: string[];
+  parameterMode: ReasoningParameterMode;
+  onParameterModeChange: (mode: ReasoningParameterMode) => void;
   /// true = 当前值来自内置声明而非该模型的自定义配置。
   inherited: boolean;
   defaultLevel: string | null;
   onChange: (levels: string[], defaultLevel: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const label = formatReasoningLevelsLabel(levels);
+  const label = parameterMode === "omit" ? t("不发送思考参数") : formatReasoningLevelsLabel(levels);
   const toggleLevel = (level: string) => {
     const picked = levels.includes(level)
       ? levels.filter((item) => item !== level)
@@ -4206,7 +4516,7 @@ function ModelReasoningLevelsCell({
     onChange(next, defaultLevel && next.includes(defaultLevel) ? defaultLevel : null);
   };
   const triggerTip = levels.length
-    ? `${levels.join(", ")}${defaultLevel ? ` · ${t("默认等级")}: ${defaultLevel}` : ""}`
+    ? tf("{0}{1}", [levels.join(", "), defaultLevel ? tf(" · {0}: {1}", [t("默认等级"), defaultLevel]) : ""])
     : t("未设置时沿用内置默认档位");
   const { rootRef, menuRef, menuStyle } = usePopoverLayer({
     open,
@@ -4240,6 +4550,13 @@ function ModelReasoningLevelsCell({
           role="listbox"
           style={menuStyle}
         >
+          <div className="relay-reasoning-default">
+            <span>{t("请求参数")}</span>
+            <div className="relay-reasoning-chips">
+              {([ ["auto", t("自动兼容")], ["passthrough", t("原样传等级（Chat）")], ["omit", t("不发送")] ] as const).map(([mode, text]) =>
+                <button key={mode} type="button" className={parameterMode === mode ? "selected" : ""} onClick={() => onParameterModeChange(mode)}>{text}</button>)}
+            </div>
+          </div>
           {REASONING_LEVELS.map((level) => {
             const selected = levels.includes(level);
             return (
@@ -4247,6 +4564,7 @@ function ModelReasoningLevelsCell({
                 aria-selected={selected}
                 className={`app-select-option ${selected ? "selected" : ""}`.trim()}
                 key={level}
+                disabled={parameterMode === "omit"}
                 onClick={() => toggleLevel(level)}
                 onMouseDown={(event) => event.preventDefault()}
                 role="option"
@@ -4262,6 +4580,7 @@ function ModelReasoningLevelsCell({
             <div className="relay-reasoning-chips">
               <button
                 className={defaultLevel ? "" : "selected"}
+                disabled={parameterMode === "omit"}
                 onClick={() => onChange(levels, null)}
                 type="button"
               >
@@ -4271,6 +4590,7 @@ function ModelReasoningLevelsCell({
                 <button
                   className={defaultLevel === level ? "selected" : ""}
                   key={level}
+                  disabled={parameterMode === "omit"}
                   onClick={() => onChange(levels, level)}
                   type="button"
                 >
@@ -4280,7 +4600,9 @@ function ModelReasoningLevelsCell({
             </div>
           </div>
           <p className="relay-reasoning-hint">
-            {inherited
+            {parameterMode === "omit" ? t("请求不发送思考参数；档位草稿保留，切回自动兼容后可恢复。")
+              : parameterMode === "passthrough" ? t("Chat 上游按原值接收 reasoning_effort，不按模型名改写档位。")
+              : inherited
               ? t("当前为内置默认，修改后保存为该模型的自定义思考等级。")
               : t("未设置时沿用内置默认；清空全部档位即恢复内置。")}
           </p>
@@ -4312,6 +4634,10 @@ type Actions = {
   nativeCapabilityPending: (key: string) => boolean;
   refreshSettings: (silent?: boolean) => Promise<BackendSettings | null>;
   resetSettings: () => Promise<void>;
+  exportSettings: () => Promise<void>;
+  importSettings: () => Promise<void>;
+  chooseSettingsPath: () => Promise<void>;
+  resetSettingsPath: () => Promise<void>;
   resetImageOverlaySettings: () => Promise<void>;
   chooseCodexAppPath: (mode: "folder" | "file") => Promise<void>;
   clearCodexAppPath: () => Promise<void>;
@@ -4355,11 +4681,15 @@ type Actions = {
   reloadUserScripts: () => Promise<void>;
   installMarketScript: (id: string) => Promise<void>;
   setUserScriptsEnabled: (enabled: boolean) => Promise<void>;
+  setUserScriptsSkipNextStart: (skip: boolean) => Promise<void>;
   setUserScriptEnabled: (key: string, enabled: boolean) => Promise<void>;
   deleteUserScript: (key: string) => Promise<void>;
   refreshLocalSessions: (silent?: boolean, offset?: number) => Promise<LocalSessionsResult | null>;
-  deleteLocalSession: (session: LocalSession) => Promise<void>;
-  deleteLocalSessions: (sessions: LocalSession[]) => Promise<void>;
+  listProjectSessions: (cwd: string) => Promise<LocalSession[]>;
+  // 返回是否真正执行（用户取消时为 false），调用方据此决定是否清空选择。
+  deleteLocalSession: (session: LocalSession) => Promise<boolean>;
+  deleteLocalSessions: (sessions: LocalSession[]) => Promise<boolean>;
+  archiveLocalSessions: (sessions: LocalSession[], archived?: boolean) => Promise<boolean>;
   openExternalUrl: (url: string) => Promise<void>;
   applyRelayInjection: () => Promise<boolean>;
   applyPureApiInjection: () => Promise<boolean>;
@@ -4391,6 +4721,9 @@ type Actions = {
   copyDiagnostics: () => Promise<void>;
   goLogs: () => Promise<void>;
   setWatcherEnabled: (enabled: boolean) => Promise<void>;
+  setWatcherStartMinimized: (minimized: boolean) => Promise<void>;
+  setWatcherStartCodex: (startCodex: boolean) => Promise<void>;
+  setWatcherStartCodexOnOpen: (enabled: boolean) => Promise<void>;
   setAutoTakeover: (enabled: boolean) => Promise<void>;
   refreshAutoTakeover: () => Promise<void>;
   takeOverNow: () => Promise<void>;
@@ -5258,13 +5591,13 @@ function RelayScreen({
                   </label>
                   <button disabled={ccsPathSaving} onClick={() => void selectCcsDatabase()} type="button">{t("选择数据库")}</button>
                   <button disabled={ccsPathSaving} onClick={() => void saveCcsDbPath()} type="button">{t("保存路径并刷新")}</button>
-                  {ccsProviders && isSuccessStatus(ccsProviders.status) ? <span className="text-xs break-all">{t("实际来源")}：{ccsProviders.dbPath}</span> : null}
+                  {ccsProviders && isSuccessStatus(ccsProviders.status) ? <span className="text-xs break-all">{t("实际来源")}{t("：")}{ccsProviders.dbPath}</span> : null}
                   {ccsProviders?.fallbackReason ? <span className="text-xs break-all">{ccsProviders.fallbackReason}</span> : null}
                   {ccsProviders?.providers.map((provider) => <label key={provider.sourceId}>
                     {provider.name}
                     <select value={ccsBindings[provider.sourceId] || ""} onChange={(event) => setCcsBindings((current) => ({ ...current, [provider.sourceId]: event.currentTarget.value }))}>
                       <option value="">{t("自动识别来源或新增")}</option>
-                      {normalized.relayProfiles.map((profile) => <option key={profile.id} value={profile.id}>{t("关联已有")}：{profile.name}</option>)}
+                      {normalized.relayProfiles.map((profile) => <option key={profile.id} value={profile.id}>{t("关联已有")}{t("：")}{profile.name}</option>)}
                     </select>
                   </label>)}
                   <button
@@ -5434,7 +5767,7 @@ function CodexMultiLaunchScreen({
                     typeof instance.pid === "number" ? `PID ${instance.pid}` : "",
                     typeof instance.debugPort === "number" ? `CDP ${instance.debugPort}` : "",
                     typeof instance.helperPort === "number" ? `API ${instance.helperPort}` : "",
-                    failure ? `${t("启动失败")}：${failure}` : "",
+                    failure ? tf("{0}：{1}", [t("启动失败"), failure]) : "",
                   ].filter(Boolean).join(" · ");
                   return (
                     <div className="multi-launch-instance-card" data-instance-id={instance.instanceId} key={instance.instanceId}>
@@ -5708,6 +6041,16 @@ type DictationLocalModelState = {
   message?: string;
 };
 
+type GlobalDictationHotkeyState = {
+  enabled: boolean;
+  hotkey: string;
+};
+// 后端失败分支的 payload 是 `{}`：只在确实带有热键字段时才当作新状态。
+function hotkeyStateFrom(result: Partial<GlobalDictationHotkeyState> | null | undefined): GlobalDictationHotkeyState | null {
+  if (!result || typeof result.hotkey !== "string") return null;
+  return { enabled: result.enabled === true, hotkey: result.hotkey };
+}
+
 function DictationSettingsPanel({ form, onFormChange }: {
   form: BackendSettings;
   onFormChange: (value: BackendSettings) => void;
@@ -5717,6 +6060,13 @@ function DictationSettingsPanel({ form, onFormChange }: {
   const [localModelState, setLocalModelState] = useState<DictationLocalModelState | null>(null);
   const [localModelDownloading, setLocalModelDownloading] = useState(false);
   const [localModelError, setLocalModelError] = useState("");
+  const [globalHotkey, setGlobalHotkey] = useState<GlobalDictationHotkeyState>({ enabled: false, hotkey: "Ctrl+Shift+Space" });
+  const [globalHotkeyBusy, setGlobalHotkeyBusy] = useState(false);
+  useEffect(() => {
+    void invoke<CommandResult<GlobalDictationHotkeyState>>("load_global_dictation_hotkey")
+      .then((result) => { const next = hotkeyStateFrom(result); if (next) setGlobalHotkey(next); })
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     if (form.dictation.provider !== "sensevoice") return;
     let active = true;
@@ -5741,6 +6091,20 @@ function DictationSettingsPanel({ form, onFormChange }: {
     }
   };
   const downloading = localModelDownloading || localModelState?.phase === "downloading";
+  const saveGlobalHotkey = async () => {
+    setGlobalHotkeyBusy(true);
+    try {
+      const result = await invoke<CommandResult<GlobalDictationHotkeyState>>("set_global_dictation_hotkey", globalHotkey);
+      // 校验/保存失败时后端 payload 为空对象，不能用它覆盖用户刚输入的热键。
+      const next = hotkeyStateFrom(result);
+      if (next) setGlobalHotkey(next);
+      window.alert(result.message);
+    } catch (error) {
+      window.alert(String(error));
+    } finally {
+      setGlobalHotkeyBusy(false);
+    }
+  };
   const updateDictation = (patch: Partial<DictationSettings>) => onFormChange({
     ...form,
     dictation: { ...form.dictation, ...patch },
@@ -5758,6 +6122,23 @@ function DictationSettingsPanel({ form, onFormChange }: {
             checked={form.dictation.enabled}
             onChange={(enabled) => updateDictation({ enabled })}
           />
+          <label className="switch-row compact">
+            <input
+              checked={globalHotkey.enabled}
+              disabled={globalHotkeyBusy || !form.enhancementsEnabled}
+              onChange={(event) => setGlobalHotkey((current) => ({ ...current, enabled: event.currentTarget.checked }))}
+              type="checkbox"
+            />
+            <span><strong>{t("全局听写热键")}</strong><small>{t("Windows 首版：按一次开始录音，再按一次停止并插入文字。")}</small></span>
+            <ToggleVisual />
+          </label>
+          <div className="form-row">
+            <Field label={t("全局热键") }>
+              <Input value={globalHotkey.hotkey} onChange={(event) => setGlobalHotkey((current) => ({ ...current, hotkey: event.currentTarget.value }))} placeholder="Ctrl+Shift+Space" />
+            </Field>
+            <Button disabled={globalHotkeyBusy} onClick={() => void saveGlobalHotkey()} type="button" variant="secondary">{t("保存全局热键")}</Button>
+          </div>
+          <p className="field-hint">{t("热键冲突会在保存时明确报告；macOS 首版暂不注册系统级热键。")}</p>
           <div className="form-row">
             <Field label={t("语音服务预设")}>
               <AppSelect
@@ -6179,7 +6560,7 @@ function EnhanceScreen({
                   onChange={(value) => setEnhanceFlag("codexAppWhaleWidgetEnabled", value)}
                 />
                 <FeatureToggle title={t("活动进度条右侧布局")} detail={t("把 Codex 原生活动进度条、状态波形和活动悬浮框移到右侧，并镜像波形方向。")} checked={form.codexAppActivityOverlayRight} disabled={!masterEnabled} onChange={(value) => setEnhanceFlag("codexAppActivityOverlayRight", value)} />
-                {isWindowsPlatform ? <FeatureToggle title={t("桌宠跟随真实鼠标")} detail={t("仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。")} checked={form.codexAppPetRealMouseLook} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppPetRealMouseLook", value)} /> : null}
+                {supportsPetRealMouseLook ? <FeatureToggle title={t("桌宠跟随真实鼠标")} detail={t("仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。")} checked={form.codexAppPetRealMouseLook} disabled={!masterEnabled} onChange={(value) => setPersistedEnhanceFlag("codexAppPetRealMouseLook", value)} /> : null}
                 {/* 余额配置独占一整行（CSS: > .settings-block），展开时不会牵动上面的开关卡。 */}
                 <WhaleBalanceSettingsFields form={form} onFormChange={onFormChange} />
               </FeatureGroup>
@@ -6619,9 +7000,9 @@ function DreamSkinScreen({
             <div className="dream-skin-pending-state" role="status">
               <Rocket className="h-5 w-5" aria-hidden="true" />
               <div>
-                <strong>{t("待应用主题")}：{pendingRestart.pendingThemeName}</strong>
+                <strong>{t("待应用主题")}{t("：")}{pendingRestart.pendingThemeName}</strong>
                 <small>
-                  {currentThemeLabel}：{pendingRestart.currentThemeName}。{t("配置已保存，可以继续浏览和编辑，稍后重启即可生效。")}
+                  {currentThemeLabel}{t("：")}{pendingRestart.currentThemeName}{t("。")}{t("配置已保存，可以继续浏览和编辑，稍后重启即可生效。")}
                 </small>
               </div>
               <Button disabled={launchPending} onClick={() => void actions.restart()}>
@@ -7098,7 +7479,7 @@ function DreamSkinScreen({
         </CardContent>
       </Panel>
       <RelayFold className="dream-skin-panel dream-skin-diagnostics-fold" title={t("诊断与验证")}>
-        <p className="relay-fold-description">{t("配置保存在 Alunixa X，实时操作通过本机回环 CDP 执行")}。{t("检查官方应用身份、CDP renderer、目标样式和页面布局")}</p>
+        <p className="relay-fold-description">{t("配置保存在 Alunixa X，实时操作通过本机回环 CDP 执行")}{t("。")}{t("检查官方应用身份、CDP renderer、目标样式和页面布局")}</p>
           <div className="dream-skin-diagnostics-grid">
             <DreamSkinCheckList title={t("运行诊断")} checks={runtimeChecks} emptyText={t("刷新状态后显示运行诊断。")}/>
             <DreamSkinCheckList title={t("最近实机验证")} checks={verificationChecks} emptyText={t("运行实机验证后显示页面检查结果。")}/>
@@ -7520,6 +7901,14 @@ function UserScriptsScreen({ settings, market, actions }: { settings: SettingsRe
             >
               {inventory?.enabled === false ? t("开启本地拓展") : t("关闭本地拓展")}
             </Button>
+            <Button
+              onClick={() => void actions.setUserScriptsSkipNextStart(!inventory?.skip_next_start)}
+              disabled={!inventory}
+              variant={inventory?.skip_next_start ? "secondary" : "outline"}
+              title={t("脚本导致黑屏或卡死时，下一次启动先跳过脚本；脚本启停设置不会改变")}
+            >
+              {inventory?.skip_next_start ? t("取消下次启动安全模式") : t("下次启动跳过拓展")}
+            </Button>
             <Button onClick={() => void actions.refreshScriptMarket()}>
               <RefreshCw className="h-4 w-4" />
               {t("刷新市场")}
@@ -7627,7 +8016,43 @@ function SessionRepairPanel({ form, providerSyncProgress, sessionIndexRepairActi
   const providerTargets = providerSyncTargets?.targets ?? [];
   const selectedProviderTarget = providerTargets.find((target) => target.id === selectedProviderSyncTarget);
   const canRepairProviderSessions = Boolean(selectedProviderTarget && isProviderSyncTargetSelectable(selectedProviderTarget));
-  return <Panel className="sessions-overview-panel"><CardHead title={t("会话修复")} detail={t("预览并修复本地会话与索引")} /><CardContent>
+  const maintenanceBusy = providerSyncProgress.active || sessionIndexRepairActive;
+  const maintenanceHasError = Boolean(
+    sessionIndexRepairReportError
+    || providerSyncProgress.result?.status === "failed"
+    || providerSyncProgress.result?.syncStatus === "partial_failure"
+    || providerSyncProgress.result?.recoveryErrors?.length
+    || sessionIndexRepairReport?.abortedReason
+    || sessionIndexRepairReport?.warnings?.length,
+  );
+  const maintenanceNeedsAttention = maintenanceBusy || maintenanceHasError;
+  const [maintenanceExpanded, setMaintenanceExpanded] = useState(maintenanceNeedsAttention);
+
+  useEffect(() => {
+    if (maintenanceNeedsAttention) setMaintenanceExpanded(true);
+  }, [maintenanceNeedsAttention, providerSyncProgress.active, sessionIndexRepairActive, sessionIndexRepairReportError]);
+
+  return <details
+    className="session-maintenance"
+    open={maintenanceExpanded}
+    onToggle={(event) => setMaintenanceExpanded(event.currentTarget.open)}
+  >
+    <summary className="session-maintenance-summary">
+      <Wrench aria-hidden="true" className="h-4 w-4" />
+      <strong>{t("修复与维护")}</strong>
+      <span className="session-maintenance-auto-state" data-enabled={form.providerSyncEnabled}>
+        {form.providerSyncEnabled ? t("自动修复已开启") : t("自动修复已关闭")}
+      </span>
+      <span className="session-maintenance-status" data-error={maintenanceHasError} role="status" aria-live="polite">
+        {providerSyncProgress.active
+          ? <>{t("正在修复历史会话")} {formatProgressPercent(providerSyncProgress.percent)}%</>
+          : sessionIndexRepairActive
+            ? t("正在检查索引…")
+            : maintenanceHasError ? t("需要处理") : null}
+      </span>
+      <ChevronDown aria-hidden="true" className="session-maintenance-chevron h-4 w-4" />
+    </summary>
+    <div className="session-maintenance-content">
           <div className="session-repair-tools">
             <Field className="session-sync-target" label={t("同步目标")}>
               <AppSelect
@@ -7642,7 +8067,7 @@ function SessionRepairPanel({ form, providerSyncProgress, sessionIndexRepairActi
                           : []),
                         ...providerTargets.map((target) => ({
                           value: target.id,
-                          label: `${target.id}${t("（")}${providerSyncTargetLabel(target)}${t("）")}`,
+                          label: tf("{0}{1}{2}{3}", [target.id, t("（"), providerSyncTargetLabel(target), t("）")]),
                           disabled: !isProviderSyncTargetSelectable(target),
                           title: target.unavailableReason ?? undefined,
                         })),
@@ -7666,10 +8091,6 @@ function SessionRepairPanel({ form, providerSyncProgress, sessionIndexRepairActi
             </label>
 
             <div className="session-repair-actions">
-              <Button onClick={() => void actions.refreshLocalSessions()} variant="outline">
-                <RefreshCw className="h-4 w-4" />
-                {t("刷新会话")}
-              </Button>
               <Button
                 disabled={providerSyncProgress.active || sessionIndexRepairActive || !canRepairProviderSessions}
                 onClick={() => void actions.syncProvidersNow()}
@@ -7765,10 +8186,6 @@ function SessionRepairPanel({ form, providerSyncProgress, sessionIndexRepairActi
             </div>
           ) : null}
 
-          <div className="hint-line session-delete-hint">
-            <Info className="h-4 w-4" />
-            <span>{t("删除会创建本地备份；如果 Codex App 正在使用该会话，建议先关闭对应会话窗口再操作。")}</span>
-          </div>
     {providerSyncProgress.result?.recoveryJournalPath ? <div>
       {!providerSyncProgress.active && providerSyncProgress.percent === 0 ? <p role="alert">{providerSyncProgress.message}</p> : null}
       <p role="alert" className="break-all">{t("恢复记录：")}{providerSyncProgress.result.recoveryJournalPath}</p>
@@ -7781,7 +8198,8 @@ function SessionRepairPanel({ form, providerSyncProgress, sessionIndexRepairActi
       {t("仍有改动：")}{providerSyncProgress.result.changedSessionFiles ?? 0} {t("个会话文件，")}
       {providerSyncProgress.result.sqliteRowsUpdated ?? 0} {t("行索引。请查看恢复记录处理剩余冲突。")}
     </p> : null}
-  </CardContent></Panel>;
+    </div>
+  </details>;
 }
 
 function SessionsScreen({
@@ -8034,7 +8452,7 @@ function MaintenanceScreen({
         </CardContent>
       </Panel>
       <Panel>
-        <CardHead title={t("开机打开 Alunixa X")} detail={t("登录系统后打开 Alunixa X 界面，Codex 仍需点击启动")} />
+        <CardHead title={t("开机打开 Alunixa X")} detail={t("登录系统后打开 Alunixa X 界面，可选择自动启动 Codex")} />
         <CardContent>
           <label className="switch-row">
             <input
@@ -8045,7 +8463,46 @@ function MaintenanceScreen({
             />
             <span>
               <strong>{t("登录时自动打开")}</strong>
-              <small>{t("开启后注册系统登录项，关闭时移除；Codex 仍需你手动点击启动。")}</small>
+              <small>{t("开启后注册系统登录项，关闭时移除；是否自动启动 Codex 由下面的独立开关决定。")}</small>
+            </span>
+            <ToggleVisual />
+          </label>
+          <label className="switch-row">
+            <input
+              checked={Boolean(watcher?.start_codex_on_open)}
+              disabled={!watcher}
+              onChange={(event) => void actions.setWatcherStartCodexOnOpen(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>{t("打开 Alunixa X 时自动启动 Codex")}</strong>
+              <small>{t("仅手动打开 Alunixa X 时生效；已有 Codex 会先恢复，不会重复启动。")}</small>
+            </span>
+            <ToggleVisual />
+          </label>
+          <label className="switch-row">
+            <input
+              checked={Boolean(watcher?.start_codex)}
+              disabled={!watcher}
+              onChange={(event) => void actions.setWatcherStartCodex(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>{t("登录时自动启动 Codex")}</strong>
+              <small>{t("仅登录启动 Alunixa X 时自动启动 Codex；手动打开 Alunixa X 仍不会自动启动。")}</small>
+            </span>
+            <ToggleVisual />
+          </label>
+          <label className="switch-row">
+            <input
+              checked={Boolean(watcher?.start_minimized)}
+              disabled={!watcher}
+              onChange={(event) => void actions.setWatcherStartMinimized(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>
+              <strong>{t("启动时自动最小化")}</strong>
+              <small>{t("仅登录启动时隐藏到托盘；手动打开 Alunixa X 仍显示主窗口。")}</small>
             </span>
             <ToggleVisual />
           </label>
@@ -8210,7 +8667,7 @@ function AboutScreen({
             <Metric label={t("资源")} value={update?.assetName ?? "-"} />
             <Metric label={t("进度")} value={`${formatProgressPercent(update?.progress ?? 0)}%`} />
           </div>
-          <Textarea className="log-view" readOnly value={update?.releaseSummary || update?.message || t("尚未检查 GitHub Release；更新会下载并启动安装包。")} />
+          <ReleaseNotes markdown={update?.releaseSummary || update?.message || t("尚未检查 GitHub Release；更新会下载并启动安装包。")} onOpenUrl={(url) => void actions.openExternalUrl(url)} />
           <TaskProgressBox completedTitle={t("上次更新结果")} progress={updateInstallProgress} title={t("安装包更新进度")} />
           <Toolbar>
             <Button onClick={() => void actions.checkUpdate()}>{t("检查更新")}</Button>
@@ -8265,6 +8722,23 @@ function SettingsScreen({
               <span>{t("当前为")}{theme === "dark" ? t("深色") : t("浅色")}{t("模式。")}</span>
             </div>
             <Button variant="secondary" onClick={actions.toggleTheme}>{t("切换主题")}</Button>
+          </div>
+          <div className="settings-block">
+            <strong>{t("配置备份与迁移")}</strong>
+            <p className="field-hint">{t("导出文件包含供应商 API Key 等敏感信息；导入只会读入草稿，检查后仍需点击保存设置。")}</p>
+            <Toolbar>
+              <Button variant="secondary" onClick={() => void actions.exportSettings()}>{t("导出完整配置")}</Button>
+              <Button variant="secondary" onClick={() => void actions.importSettings()}>{t("导入配置草稿")}</Button>
+            </Toolbar>
+          </div>
+          <div className="settings-block">
+            <strong>{t("配置文件路径")}</strong>
+            <Input readOnly value={settings?.settings_path ?? ""} />
+            <p className="field-hint">{t("只迁移 settings.json；日志、备份、Skills 和运行状态仍留在原状态目录。更换后建议重新打开管理器。")}</p>
+            <Toolbar>
+              <Button variant="secondary" onClick={() => void actions.chooseSettingsPath()}>{t("选择路径")}</Button>
+              <Button variant="secondary" onClick={() => void actions.resetSettingsPath()}>{t("恢复默认路径")}</Button>
+            </Toolbar>
           </div>
         </CardContent>
       </Panel>
@@ -8953,7 +9427,7 @@ function RelayProfileDetail({
           </Button>
           <div className="relay-editor-heading-copy">
             <strong>{draft.name || (aggregateProfile ? t("未命名聚合供应商") : t("未命名供应商"))}</strong>
-            <span>{hasUnsavedModelChanges ? `${detailStatus} · ${t("有未保存修改")}` : detailStatus}</span>
+            <span>{hasUnsavedModelChanges ? tf("{0} · {1}", [detailStatus, t("有未保存修改")]) : detailStatus}</span>
             {validationError || modelRowsError ? (
               // 就地写出「为什么存不了」：按钮不再禁用，这里也给人一眼能看到的原因。
               <span className="relay-editor-validation" role="alert">
@@ -9157,7 +9631,77 @@ function RelayProfileEditor({
   setModelWindowRows: (value: ModelWindowRow[]) => void;
 }) {
   const [vlmTestOpen, setVlmTestOpen] = useState(false);
+  const [relayProxyUrl, setRelayProxyUrl] = useState("");
+  const [relayProxyBusy, setRelayProxyBusy] = useState(false);
+  const relayProxyProfileRef = useRef(profile);
+  relayProxyProfileRef.current = profile;
+  const relayProxyRevisionRef = useRef(0);
+  const [stabilizePromptPrefix, setStabilizePromptPrefix] = useState(false);
+  const [stabilizePromptPrefixBusy, setStabilizePromptPrefixBusy] = useState(false);
   const useCommonConfig = profile.useCommonConfig !== false;
+  useEffect(() => {
+    let cancelled = false;
+    const revision = ++relayProxyRevisionRef.current;
+    setRelayProxyUrl("");
+    setIndependentProxyConfigured(profile.id, false);
+    void invoke<{ status: string; proxyUrl?: string; configured?: boolean }>("load_relay_proxy", { profileId: profile.id })
+      .then((result) => {
+        if (!cancelled && revision === relayProxyRevisionRef.current && result.status === "ok") {
+          setIndependentProxyConfigured(profile.id, result.configured ?? Boolean(result.proxyUrl?.trim()));
+          setRelayProxyUrl(result.proxyUrl || "");
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [profile.id]);
+  useEffect(() => {
+    let cancelled = false;
+    setStabilizePromptPrefix(false);
+    void invoke<{ stabilizePromptPrefix?: boolean }>("load_relay_feature", { profileId: profile.id })
+      .then((result) => { if (!cancelled) setStabilizePromptPrefix(result.stabilizePromptPrefix === true); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [profile.id]);
+  const saveRelayProxy = async () => {
+    const profileId = profile.id;
+    ++relayProxyRevisionRef.current;
+    setRelayProxyBusy(true);
+    try {
+      const result = await invoke<{ status: string; message: string; configured?: boolean }>("set_relay_proxy", {
+        profileId,
+        proxyUrl: relayProxyUrl,
+      });
+      if (result.status === "ok") {
+        setIndependentProxyConfigured(profileId, result.configured ?? Boolean(relayProxyUrl.trim()));
+        const current = relayProxyProfileRef.current;
+        if (current.id === profileId) {
+          // 保存响应返回时从最新草稿重算，保留期间编辑的其它字段。
+          onProfileChange(applyRelayProfilePatchToFiles(current, { baseUrl: current.baseUrl }, { allowGenerateFiles: isNew }));
+        }
+      }
+      await actions.showMessage(t("供应商独立代理"), result.message, result.status === "ok" ? "ok" : "failed");
+    } catch (error) {
+      await actions.showMessage(t("供应商独立代理"), String(error), "failed");
+    } finally {
+      setRelayProxyBusy(false);
+    }
+  };
+  const saveStabilizePromptPrefix = async (enabled: boolean) => {
+    setStabilizePromptPrefix(enabled);
+    setStabilizePromptPrefixBusy(true);
+    try {
+      const result = await invoke<{ status: string; message: string }>("set_relay_feature", {
+        profileId: profile.id,
+        stabilizePromptPrefix: enabled,
+      });
+      await actions.showMessage(t("前缀稳定层"), result.message, result.status === "ok" ? "ok" : "failed");
+    } catch (error) {
+      setStabilizePromptPrefix(!enabled);
+      await actions.showMessage(t("前缀稳定层"), String(error), "failed");
+    } finally {
+      setStabilizePromptPrefixBusy(false);
+    }
+  };
   const [activeImportDraft, setActiveImportDraft] = useState<ActiveImportDraft | null>(null);
   const [metadataImportError, setMetadataImportError] = useState("");
   const [builtinMatch, setBuiltinMatch] = useState<BuiltinModelMetadataMatch | null>(null);
@@ -9180,7 +9724,7 @@ function RelayProfileEditor({
   const queryBuiltinCommand = async <T,>(command: string, args?: Record<string, unknown>): Promise<T | null> => {
     try { return await invoke<T>(command, args); } catch (error) {
       // 索引只影响行级标记与便利回填（失败是假阴性、不产错误数据），可诊断即可。
-      console.warn(`[Alunixa X] ${command} 查询失败`, error);
+      console.warn(tf("[Alunixa X] {0} 查询失败", [command]), error);
       return null;
     }
   };
@@ -10204,6 +10748,8 @@ function RelayProfileEditor({
                             <span className="relay-model-cell-label">{t("思考等级")}</span>
                             <ModelReasoningLevelsCell
                               levels={reasoning.levels}
+                              parameterMode={reasoningParameterMode(rowMetadataKey ? importedModelMetadata[rowMetadataKey] : undefined)}
+                              onParameterModeChange={(mode) => commitModelMetadata(setModelReasoningParameterMode(profile.modelMetadata, rowMetadataKey ?? slug, mode))}
                               inherited={!reasoning.overridden}
                               defaultLevel={reasoning.defaultLevel}
                               onChange={(levels, defaultLevel) => commitModelMetadata(
@@ -10264,6 +10810,16 @@ function RelayProfileEditor({
                                 ]}
                               />
                               <p className="field-hint">{t("按当前供应商逐模型声明。仅在上游支持 service_tier=priority 时选择支持；继承会清除自定义声明，取消不会保存修改。")}</p>
+                            </Field>
+                            <Field label={t("Responses Lite 支持")}>
+                              <AppSelect value={metadataImportPreview?.metadata.use_responses_lite === true ? "supported" : metadataImportPreview?.metadata.use_responses_lite === false ? "unsupported" : "inherit"}
+                                options={[{ value: "inherit", label: t("继承模型默认能力") }, { value: "supported", label: t("明确支持 Lite") }, { value: "unsupported", label: t("标准 Responses") }]}
+                                onChange={(value) => {
+                                  const changed = synchronizeModelMetadataLiteSupport(metadataImportDocument, slug, value as "inherit" | "supported" | "unsupported");
+                                  if (!changed) { setMetadataImportError(t("请先修正当前模型的 JSON 配置。")); return; }
+                                  setMetadataImportDocument(changed.document); setMetadataImportPreview(changed.preview); setImportPrefillSource("existing"); setMetadataImportError("");
+                                }} />
+                              <p className="field-hint">{t("保存此模型后还需保存并使用供应商；只为已核实支持 Lite 的上游选择支持。")}</p>
                             </Field>
                             <Textarea
                               autoFocus
@@ -10337,7 +10893,7 @@ function RelayProfileEditor({
                                   disabled={importControls?.rematch.disabled ?? true}
                                   onClick={() => void rematchBuiltinImport(slug)}
                                   size="sm"
-                                  title={t(importControls?.rematch.title ?? "重新匹配")}
+                                  title={t(importControls?.rematch.title ?? t("重新匹配"))}
                                   type="button"
                                   variant="ghost"
                                 >
@@ -10347,7 +10903,7 @@ function RelayProfileEditor({
                                   disabled={importControls?.clear.disabled ?? true}
                                   onClick={() => clearImportDocument()}
                                   size="sm"
-                                  title={t(importControls?.clear.title ?? "清除")}
+                                  title={t(importControls?.clear.title ?? t("清除"))}
                                   type="button"
                                   variant="ghost"
                                 >
@@ -10357,7 +10913,7 @@ function RelayProfileEditor({
                                   disabled={importControls?.cancel.disabled ?? true}
                                   onClick={cancelModelMetadataImport}
                                   size="sm"
-                                  title={t(importControls?.cancel.title ?? "取消")}
+                                  title={t(importControls?.cancel.title ?? t("取消"))}
                                   type="button"
                                   variant="ghost"
                                 >
@@ -10368,9 +10924,9 @@ function RelayProfileEditor({
                                   onClick={applyModelMetadataImport}
                                   size="sm"
                                   type="button"
-                                  title={t(importControls?.save.title ?? "保存此模型")}
+                                  title={t(importControls?.save.title ?? t("保存此模型"))}
                                 >
-                                  {t(importControls?.save.label ?? "保存此模型")}
+                                  {t(importControls?.save.label ?? t("保存此模型"))}
                                 </Button>
                               </div>
                             </div>
@@ -10568,6 +11124,33 @@ function RelayProfileEditor({
               </Field>
             ) : null}
             {showApiFields ? (
+              <Field className="relay-field-proxy" label={t("供应商独立代理")}>
+                <div className="relay-inline-field">
+                  <Input
+                    value={relayProxyUrl}
+                    onChange={(event) => setRelayProxyUrl(event.currentTarget.value)}
+                    placeholder="http://127.0.0.1:7890"
+                  />
+                  <Button disabled={relayProxyBusy} onClick={() => void saveRelayProxy()} size="sm" type="button" variant="secondary">
+                    {t("保存")}
+                  </Button>
+                </div>
+                <span className="hint-line">{t("留空表示使用系统代理；仅影响当前供应商的模型拉取、测试和请求。")}</span>
+              </Field>
+            ) : null}
+            {showApiFields ? (
+              <label className="switch-row compact relay-switch-row">
+                <input
+                  checked={stabilizePromptPrefix}
+                  disabled={stabilizePromptPrefixBusy}
+                  onChange={(event) => void saveStabilizePromptPrefix(event.currentTarget.checked)}
+                  type="checkbox"
+                />
+                <span><strong>{t("前缀稳定层")}</strong><small>{t("按供应商稳定可选历史块的顺序并移除成对 image_resize_notice；默认关闭，适合已确认上游支持的缓存场景。")}</small></span>
+                <ToggleVisual />
+              </label>
+            ) : null}
+            {showApiFields ? (
               <label
                 className={`switch-row compact relay-switch-row relay-field-search-history${profile.protocol === "responses" ? "" : " is-disabled"}`}
                 title={profile.protocol === "responses" ? undefined : t("仅限 Responses API。")}
@@ -10587,6 +11170,16 @@ function RelayProfileEditor({
                 <ToggleVisual />
               </label>
             ) : null}
+            {showApiFields && profile.protocol === "responses" ? <>
+              <label className="switch-row compact relay-switch-row">
+                <input type="checkbox" checked={profile.trustUpstreamCatalogLite === true} onChange={(event) => updateDraft({ trustUpstreamCatalogLite: event.currentTarget.checked })} />
+                <span><strong>{t("保留外部目录的 Lite 声明")}</strong><small>{t("仅在已确认上游支持时启用；保留每个模型的显式声明，不会为全部模型开启 Lite。")}</small></span><ToggleVisual />
+              </label>
+              <label className="switch-row compact relay-switch-row">
+                <input type="checkbox" checked={profile.strictResponsesReasoning === true} onChange={(event) => updateDraft({ strictResponsesReasoning: event.currentTarget.checked })} />
+                <span><strong>{t("严格 Responses 推理历史兼容")}</strong><small>{t("仅当目标上游接受当前账号的加密历史时启用。混合推理只发送可识别的加密信封；占位或无效密文会明确报错。本地记录不变。")}</small></span><ToggleVisual />
+              </label>
+            </> : null}
             {showApiFields ? (
               <Field className="relay-field-custom-headers" label={t("自定义请求头")}>
                 <div className="relay-custom-headers">
@@ -11370,7 +11963,7 @@ function RelayContextManager({
           : skillInventory.skills.length ? skillInventory.skills.map((skill) => (
             <div className="relay-context-row" key={`local-skill-${skill.id}`}>
               <div><strong className="context-title">{skill.name || skill.id}</strong><div className="text-xs">{skill.description}</div></div>
-              <span>{skill.bundled ? t("内置") : t("本地")}{!skill.enabled ? ` · ${t("已停用")}` : ""}</span>
+              <span>{skill.bundled ? t("内置") : t("本地")}{!skill.enabled ? tf(" · {0}", [t("已停用")]) : ""}</span>
             </div>
           )) : <div className="empty">{t("Skills 目录中暂无技能。")}</div>
         ) : visibleEntries.length ? (
@@ -11466,7 +12059,7 @@ function McpJsonImporter({
         </Field>
         {preview ? (
           <div className="relay-context-summary">
-            <div>{tf("将导入 {0} 个：{1}", [preview.entries.length, preview.entries.map((item) => item.id).join("、")])}</div>
+            <div>{tf("将导入 {0} 个：{1}", [preview.entries.length, preview.entries.map((item) => item.id).join(t("、"))])}</div>
             {preview.warnings.map((warning) => <div key={warning}>{warning}</div>)}
           </div>
         ) : null}
@@ -11929,6 +12522,48 @@ function DreamSkinUnsavedDialog({
   );
 }
 
+function UpdateDialog({ update, progress, onClose, onMuteToday, onUpdate, onOpenUrl }: {
+  update: UpdateResult;
+  progress: TaskProgress;
+  onClose: () => void;
+  onMuteToday: () => void;
+  onUpdate: () => void;
+  onOpenUrl: (url: string) => void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open) dialog.close(); };
+  }, []);
+
+  return (
+    <dialog className="modal-card update-dialog" ref={dialogRef} aria-labelledby="update-dialog-title" aria-describedby="update-dialog-description" onCancel={(event) => { event.preventDefault(); onClose(); }}>
+      <div className="modal-head">
+        <div>
+          <h2 id="update-dialog-title">{tf("发现新版本 {0}", [update.latestVersion ?? ""])}</h2>
+          <p id="update-dialog-description">{tf("当前版本 {0}", [update.currentVersion])}</p>
+        </div>
+        <button className="toast-close" onClick={onClose} type="button" aria-label={t("关闭更新提示")}>×</button>
+      </div>
+      <div className="update-dialog-body">
+        <ReleaseNotes markdown={update.releaseSummary || t("发现可用更新。")} onOpenUrl={onOpenUrl} />
+      </div>
+      <TaskProgressBox completedTitle={t("上次更新结果")} progress={progress} title={t("安装包更新进度")} />
+      <p className="update-dialog-hint">{t("也可随时在“关于”页面检查和安装更新。")}</p>
+      {!update.assetName || !update.assetUrl ? <p className="update-dialog-hint">{t("此版本暂未提供适用于当前系统的安装包。")}</p> : null}
+      <Toolbar className="update-dialog-actions">
+        <Button autoFocus disabled={progress.active || !update.assetName || !update.assetUrl} onClick={onUpdate}>
+          <Download className="h-4 w-4" />
+          {progress.active ? t("正在下载安装包…") : t("立即更新")}
+        </Button>
+        <Button variant="secondary" onClick={onClose}>{t("关闭提示")}</Button>
+        <Button variant="ghost" onClick={onMuteToday}>{t("今日不再提示")}</Button>
+      </Toolbar>
+    </dialog>
+  );
+}
+
 function NoticeDialog({
   notice,
   onClose,
@@ -12141,14 +12776,14 @@ function DreamSkinCommunityLinkDialog({
 }
 
 function TaskProgressBox({ progress, title, completedTitle = t("上次修复结果") }: { progress: TaskProgress; title: string; completedTitle?: string }) {
-  if (!progress.active && progress.percent <= 0) return null;
+  if (!progress.active && progress.percent <= 0 && !progress.failed) return null;
   return (
     <div className="provider-sync-progress task-progress" data-active={progress.active}>
       <div className="provider-sync-progress-head">
         <strong>{progress.active ? title : completedTitle}</strong>
-        <span>{progress.indeterminate ? null : `${formatProgressPercent(progress.percent)}%`}</span>
+        <span>{progress.indeterminate || progress.failed ? null : `${formatProgressPercent(progress.percent)}%`}</span>
       </div>
-      <div
+      {!progress.failed ? <div
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={progress.indeterminate ? undefined : progress.percent}
@@ -12160,7 +12795,7 @@ function TaskProgressBox({ progress, title, completedTitle = t("上次修复结�
           className="provider-sync-progress-fill"
           style={progress.indeterminate ? undefined : { width: `${progress.percent}%` }}
         />
-      </div>
+      </div> : null}
       <small>{progress.message}</small>
     </div>
   );
@@ -12371,7 +13006,7 @@ function ClaudeLocalizationScreen() {
             </div>
             <div className="claude-l10n-stat">
               <span>{t("官方词条")}</span>
-              <strong>{s?.catalogEntries != null ? `${s.catalogEntries.toLocaleString()} ${t("条")}` : t("未检测")}</strong>
+              <strong>{s?.catalogEntries != null ? tf("{0} {1}", [s.catalogEntries.toLocaleString(), t("条")]) : t("未检测")}</strong>
             </div>
           </div>
           <div className="claude-l10n-note" role="note">
@@ -12772,7 +13407,7 @@ function GrokScreen({
               <div className="grok-live-item">
                 <span className="grok-live-label">{t("受管模型")}</span>
                 <span className="grok-live-value">
-                  {live.models.length ? live.models.map((model) => model.alias).join("、") : t("无")}
+                  {live.models.length ? live.models.map((model) => model.alias).join(t("、")) : t("无")}
                 </span>
               </div>
             </div>
@@ -12857,7 +13492,7 @@ function ApplicationRail({
           <select className="rail-language-select" aria-label={t("界面语言")} value={getLanguage()}
             onChange={(event) => {
               const language = event.currentTarget.value;
-              if (isLanguage(language) && window.confirm(t("切换语言会重新加载管理器，未保存的编辑将丢失。已保存的配置和 Codex 语言不受影响。"))) setLanguage(language);
+              if (isLanguage(language)) setLanguage(language);
             }}>
             {LANGUAGE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
           </select>
@@ -12916,13 +13551,13 @@ function ToolSwitcher({
           : tf("{0}｜{1}｜供应商配置尚未接入", [tool.name, tool.homeDir || t("未配置目录")]);
         return (
           <button
-            aria-label={tool.switchable ? `${tool.name}${running ? ` · ${t("运行中")}` : ""}` : `${tool.name} · ${t("待接入")}`}
+            aria-label={tool.switchable ? tf("{0}{1}", [tool.name, running ? tf(" · {0}", [t("运行中")]) : ""]) : tf("{0} · {1}", [tool.name, t("待接入")])}
             aria-pressed={selected}
             className={`tool-chip ${selected ? "active" : ""}`}
             disabled={!tool.switchable}
             key={tool.id}
             onClick={() => onSelect(tool.id)}
-            title={`${title}${running ? `｜${t("运行中")}` : ""}`}
+            title={tf("{0}{1}", [title, running ? tf("｜{0}", [t("运行中")]) : ""])}
             type="button"
           >
             {icon ? (
@@ -12934,7 +13569,6 @@ function ToolSwitcher({
             ) : (
               <Blocks aria-hidden="true" className="tool-chip-icon" />
             )}
-            {running ? <span aria-hidden="true" className="tool-chip-running-dot" /> : null}
           </button>
         );
       })}
@@ -13085,15 +13719,6 @@ function ScriptRow({ script, actions }: { script: NonNullable<UserScriptInventor
   );
 }
 
-/// 广告标题原样展示。
-///
-/// 以前这里会在 `｜` / `|` 处截断，把「火山引擎｜方舟 Agent Plan」显示成
-/// 「火山引擎」—— 后半段是作者写的产品名，不该被我们悄悄丢掉。既然卡片
-/// 已经改成按内容自适应高度，就不再需要在标题上省这一点空间。
-function formatAdTitle(title: string) {
-  return title.trim() || title;
-}
-
 function routeTitle(route: Route) {
   return routes.find((item) => item.id === route)?.label ?? t("概览");
 }
@@ -13109,7 +13734,8 @@ function routeSubtitle(route: Route) {
     multiLaunch: t("为不同供应商启动相互隔离的 Codex 实例"),
     grok: t("管理 Grok CLI 的模型与 API 端点"),
     claude: t("保留官方 Claude.app 原样，通过受管副本为 Claude 应用增强功能"),
-    relayEnvironment: t("排查可能干扰中转站配置的本机环境"),
+    relayEnvironment: t("统一管理本地协议代理、供应商代理与重试策略"),
+    requestLog: t("查看代理请求的状态、模型、重试、token 用量与缓存命中"),
     sessions: t("查看、删除和修复 Codex 本地会话"),
     context: t("独立管理 MCP 服务器与插件"),
     skills: t("从 GitHub 仓库安装 Skill 到 Codex"),
@@ -13130,7 +13756,7 @@ function routeSubtitle(route: Route) {
 const contextKindOptions: Array<{ kind: ContextKind; label: string; tableName: string }> = [
   { kind: "mcp", label: "MCP", tableName: "mcp_servers" },
   { kind: "skill", label: "Skills", tableName: "skills" },
-  { kind: "plugin", label: t("插件"), tableName: "plugins" },
+  { kind: "plugin", get label() { return t("插件"); }, tableName: "plugins" },
 ];
 
 function contextKindLabel(kind: ContextKind) {
@@ -13748,7 +14374,7 @@ function truncateSessionDeletePreview(value: string) {
 function healthItems(overview: OverviewResult | null) {
   const conversionEnabled = overview?.runtime_health?.protocol_conversion_enabled;
   const conversionDetail = typeof conversionEnabled === "boolean"
-    ? t(conversionEnabled ? "协议转换已启用" : "协议转换未启用")
+    ? t(conversionEnabled ? t("协议转换已启用") : t("协议转换未启用"))
     : undefined;
   const serviceItem = (title: string, state: RuntimeServiceState | undefined, extraDetail?: string) => ({
     title,
@@ -13841,6 +14467,16 @@ function normalizeSettings(settings: BackendSettings): BackendSettings {
     dictation: normalizeDictationSettings(settings.dictation),
     codexAppTypingEffect: normalizeTypingEffect(settings.codexAppTypingEffect),
     relayProfilesEnabled: settings.relayProfilesEnabled !== false,
+    protocolProxyAutoRetry: settings.protocolProxyAutoRetry !== false,
+    protocolProxyAutoRetryMaxAttempts: clampNumber(settings.protocolProxyAutoRetryMaxAttempts ?? 5, 0, 20),
+    protocolProxyAutoRetryMode:
+      settings.protocolProxyAutoRetryMode === "buffered"
+        ? "buffered"
+        : settings.protocolProxyAutoRetryMode === "streaming-legacy"
+          ? "streaming-legacy"
+          : "streaming",
+    protocolProxyAutoRetryCommitDelayMs: clampNumber(settings.protocolProxyAutoRetryCommitDelayMs ?? 1000, 0, 10000),
+    protocolProxyAutoRetryIntervalSeconds: clampNumber(settings.protocolProxyAutoRetryIntervalSeconds ?? 2, 0, 30),
     codexAppImageOverlayOpacity: clampNumber(settings.codexAppImageOverlayOpacity || 35, 1, 100),
     codexAppImageOverlayFitMode: normalizeImageOverlayFitMode(settings.codexAppImageOverlayFitMode),
     codexAppDreamSkinPaused: settings.codexAppDreamSkinPaused === true,
@@ -13982,6 +14618,8 @@ function normalizeRelayProfile(profile: RelayProfile, defaultContextSelection = 
     sub2apiMultiplier: !profile.noAuth && profile.sub2apiEnabled === true ? profile.sub2apiMultiplier || "" : "",
     standardOpenaiProtocol: profile.standardOpenaiProtocol === true,
     webSearchHistoryCompat: profile.webSearchHistoryCompat === true,
+    trustUpstreamCatalogLite: profile.trustUpstreamCatalogLite === true,
+    strictResponsesReasoning: profile.strictResponsesReasoning === true,
     anthropicAuthHeader: normalizeAnthropicAuthHeader(profile.anthropicAuthHeader),
     anthropicMaxTokens: normalizeAnthropicMaxTokens(profile.anthropicMaxTokens),
     anthropicPromptCache: profile.anthropicPromptCache !== false,
@@ -14231,14 +14869,14 @@ function withGeneratedRelayFiles(profile: RelayProfile): RelayProfile {
 }
 
 function buildRelayConfigToml(
-  profile: Pick<RelayProfile, "model" | "baseUrl" | "upstreamBaseUrl" | "apiKey" | "protocol" | "sessionProvider" | "relayMode" | "officialMixApiKey" | "webSearchHistoryCompat" | "modelProtocols">,
+  profile: Pick<RelayProfile, "id" | "model" | "baseUrl" | "upstreamBaseUrl" | "apiKey" | "protocol" | "sessionProvider" | "relayMode" | "officialMixApiKey" | "webSearchHistoryCompat" | "strictResponsesReasoning" | "modelMetadata" | "modelProtocols">,
   options: { includeBearerToken: boolean; requiresOpenAiAuth?: boolean },
 ): string {
   const searchHistoryCompat = profile.webSearchHistoryCompat === true
     && profile.protocol === "responses"
     && profile.relayMode !== "aggregate"
     && (profile.relayMode !== "official" || profile.officialMixApiKey);
-  const baseUrl = profile.protocol !== "responses" || hasModelProtocols(profile.modelProtocols) || searchHistoryCompat
+  const baseUrl = profile.protocol !== "responses" || hasModelProtocols(profile.modelProtocols) || independentProxyEnabled(profile) || searchHistoryCompat || requestCompatibilityEnabled(profile)
     ? PROTOCOL_PROXY_BASE_URL
     : profile.baseUrl.trim();
   const apiKey = profile.apiKey.trim();
@@ -14390,12 +15028,12 @@ function applyRelayProfilePatchToFiles(
   if ("upstreamBaseUrl" in patch) {
     next.baseUrl = patch.upstreamBaseUrl || "";
   }
-  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch || "modelRoutes" in patch || "modelProtocols" in patch || "webSearchHistoryCompat" in patch) {
+  if ("baseUrl" in patch || "upstreamBaseUrl" in patch || "protocol" in patch || "modelProtocols" in patch || "modelRoutes" in patch || "webSearchHistoryCompat" in patch || "strictResponsesReasoning" in patch || "modelMetadata" in patch) {
     const searchHistoryCompat = next.webSearchHistoryCompat === true
       && next.protocol === "responses"
       && next.relayMode !== "aggregate"
       && (next.relayMode !== "official" || next.officialMixApiKey);
-    const baseUrlForConfig = next.protocol !== "responses" || normalizeRelayModelRoutes(next.modelRoutes).length > 0 || searchHistoryCompat
+    const baseUrlForConfig = next.protocol !== "responses" || independentProxyEnabled(next) || normalizeRelayModelRoutes(next.modelRoutes).length > 0 || searchHistoryCompat || requestCompatibilityEnabled(next)
       ? PROTOCOL_PROXY_BASE_URL
       : next.upstreamBaseUrl || next.baseUrl;
     next.configContents = setCodexProviderStringKey(next.configContents, "base_url", baseUrlForConfig, {
@@ -15248,23 +15886,23 @@ function relayProfileDeleteIssue(settings: BackendSettings, id: string): string 
 const aggregateStrategyOptions: Array<{ value: RelayAggregateStrategy; label: string; description: string }> = [
   {
     value: "failover",
-    label: t("失败切换"),
-    description: t("按成员顺序请求，失败后切到下一个供应商。"),
+    get label() { return t("失败切换"); },
+    get description() { return t("按成员顺序请求，失败后切到下一个供应商。"); },
   },
   {
     value: "conversationRoundRobin",
-    label: t("按对话轮转"),
-    description: t("同一对话保持一个成员，不同对话依次分配。"),
+    get label() { return t("按对话轮转"); },
+    get description() { return t("同一对话保持一个成员，不同对话依次分配。"); },
   },
   {
     value: "requestRoundRobin",
-    label: t("按请求轮转"),
-    description: t("每次请求按成员顺序切换，适合均匀摊请求量。"),
+    get label() { return t("按请求轮转"); },
+    get description() { return t("每次请求按成员顺序切换，适合均匀摊请求量。"); },
   },
   {
     value: "weightedRoundRobin",
-    label: t("权重轮转"),
-    description: t("按成员权重分配请求，权重越高承担越多。"),
+    get label() { return t("权重轮转"); },
+    get description() { return t("按成员权重分配请求，权重越高承担越多。"); },
   },
 ];
 
@@ -15465,8 +16103,705 @@ function loadInitialTheme(): Theme {
 function loadInitialRoute(): Route {
   if (typeof window === "undefined") return "overview";
   const params = new URLSearchParams(window.location.search);
+  const previewRoute = params.get("previewRoute");
+  if (previewRoute && routes.some((item) => item.id === previewRoute)) {
+    return previewRoute as Route;
+  }
   if (params.get("showUpdate") === "1" || window.location.hash === "#about") {
     return "about";
   }
   return "overview";
+}
+
+
+
+function ProxySettingsScreen({
+  dirty,
+  overview,
+  form,
+  relayEnvironment,
+  onFormChange,
+  actions,
+}: {
+  dirty: boolean;
+  overview: OverviewResult | null;
+  form: BackendSettings;
+  relayEnvironment: RelayEnvironmentResult | null;
+  onFormChange: (value: BackendSettings) => void;
+  actions: Actions;
+}) {
+  const proxyProfiles = useMemo(
+    () => (form.relayProfiles ?? []).filter((profile) => profile.relayMode !== "aggregate"),
+    [form.relayProfiles],
+  );
+  const proxyProfileKey = proxyProfiles.map((profile) => profile.id).join("|");
+  const [proxyUrls, setProxyUrls] = useState<Record<string, string>>({});
+  const [proxyConfigured, setProxyConfigured] = useState<Record<string, boolean>>({});
+  const [proxyBusyId, setProxyBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const ids = proxyProfileKey ? proxyProfileKey.split("|") : [];
+    void Promise.all(
+      ids.map(async (id) => {
+        try {
+          const result = await invoke<{ status: string; proxyUrl?: string; configured?: boolean }>(
+            "load_relay_proxy",
+            { profileId: id },
+          );
+          return { id, url: result.status === "ok" ? result.proxyUrl ?? "" : "", configured: result.configured === true };
+        } catch {
+          return { id, url: "", configured: false };
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      const urls: Record<string, string> = {};
+      const configured: Record<string, boolean> = {};
+      entries.forEach((entry) => {
+        urls[entry.id] = entry.url;
+        configured[entry.id] = entry.configured;
+      });
+      setProxyUrls(urls);
+      setProxyConfigured(configured);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [proxyProfileKey]);
+
+  const saveProviderProxy = async (profile: RelayProfile) => {
+    const profileId = profile.id;
+    setProxyBusyId(profileId);
+    try {
+      const result = await invoke<{
+        status: string;
+        message: string;
+        proxyUrl?: string;
+        configured?: boolean;
+      }>("set_relay_proxy", { profileId, proxyUrl: proxyUrls[profileId] ?? "" });
+      if (result.status === "ok") {
+        setProxyUrls((current) => ({ ...current, [profileId]: result.proxyUrl ?? "" }));
+        setProxyConfigured((current) => ({ ...current, [profileId]: result.configured === true }));
+      }
+      await actions.showMessage(t("供应商独立代理"), result.message, result.status === "ok" ? "ok" : "failed");
+    } catch (error) {
+      await actions.showMessage(t("供应商独立代理"), String(error), "failed");
+    } finally {
+      setProxyBusyId(null);
+    }
+  };
+
+  const localServer = overview?.runtime_health?.local_server;
+  const debuggerState = overview?.runtime_health?.debugger;
+  const conversionEnabled = overview?.runtime_health?.protocol_conversion_enabled === true;
+
+  return (
+    <div className="settings-page">
+      <Panel>
+        <CardHead
+          title={t("本地协议代理")}
+          detail={t("从 Alunixa X 启动 Codex 时承载协议转换、聚合与请求避震")}
+        />
+        <CardContent className="settings-content">
+          <div className="status-table">
+            <StatusRow
+              title={t("本地服务器状态")}
+              status={localServer?.status ?? "not_checked"}
+              path={localServer?.address || "http://127.0.0.1:57321"}
+            />
+            <StatusRow
+              title={t("协议转换")}
+              status={conversionEnabled ? "ok" : "disabled"}
+              path={conversionEnabled ? t("协议转换已启用") : t("未启用")}
+            />
+            <StatusRow
+              title={t("调试连接状态")}
+              status={debuggerState?.status ?? "not_checked"}
+              path={debuggerState?.address ?? null}
+            />
+          </div>
+          <p className="field-hint">
+            {t("本地代理地址由 Alunixa X 写入 config.toml；切换供应商或修改协议后重启 Codex 生效。")}
+          </p>
+        </CardContent>
+      </Panel>
+
+      <Panel>
+        <CardHead
+          title={t("请求避震")}
+          detail={t("代理层吸收上游过载冲击：自动重试模型容量/过载错误（含推理与工具调用阶段），尽量不把错误交给 Codex")}
+        />
+        <CardContent className="settings-content">
+          <div className="settings-block">
+            <label className="check-row">
+              <input
+                checked={form.protocolProxyAutoRetry}
+                onChange={(event) =>
+                  onFormChange({ ...form, protocolProxyAutoRetry: event.currentTarget.checked })
+                }
+                type="checkbox"
+              />
+              <span>{t("启用请求避震")}</span>
+            </label>
+            <p className="field-hint">
+              {t("请求避震只处理经过本地协议代理、且以 200 流式响应返回的上游过载/容量错误（server_overloaded、server_is_overloaded、at capacity 等）。流式避震下：推理、工具调用参数等不可见阶段先缓冲，工具调用整项完成或首段可见输出后再等「首字提交延迟」；这段窗口内遇到过载由代理退避重试；提交之后遇到同类过载，会改写成 Codex 可识别的容量错误，由 Codex 自己重试；连接失败、429/5xx、限流等其它错误不重试。保留的「流式避震（旧行为）」模式仍按旧逻辑：第一个输出事件就交给 Codex。整段缓冲避震下，任何时点的过载都由代理重试，但失去流式。")}
+            </p>
+            <div className="form-row">
+              <Field label={t("最多自动重试次数")}>
+                <Input
+                  max={20}
+                  min={0}
+                  type="number"
+                  value={form.protocolProxyAutoRetryMaxAttempts}
+                  onChange={(event) =>
+                    onFormChange({
+                      ...form,
+                      protocolProxyAutoRetryMaxAttempts: clampNumber(
+                        Number(event.currentTarget.value),
+                        0,
+                        20,
+                      ),
+                    })
+                  }
+                />
+              </Field>
+              <Field label={t("首次重试间隔（秒）")}>
+                <Input
+                  max={30}
+                  min={0}
+                  type="number"
+                  value={form.protocolProxyAutoRetryIntervalSeconds}
+                  onChange={(event) =>
+                    onFormChange({
+                      ...form,
+                      protocolProxyAutoRetryIntervalSeconds: clampNumber(
+                        Number(event.currentTarget.value),
+                        0,
+                        30,
+                      ),
+                    })
+                  }
+                />
+              </Field>
+            </div>
+            <p className="field-hint">
+              {t("之后按 2 倍指数退避，单次最长 30 秒；上游返回 Retry-After 时优先采用（同样受上限约束）。")}
+            </p>
+            <div className="form-row">
+              <Field label={t("避震模式")}>
+                <select
+                  className="request-log-filter"
+                  value={form.protocolProxyAutoRetryMode}
+                  onChange={(event) =>
+                    onFormChange({
+                      ...form,
+                      protocolProxyAutoRetryMode:
+                        event.currentTarget.value === "buffered"
+                          ? "buffered"
+                          : event.currentTarget.value === "streaming-legacy"
+                            ? "streaming-legacy"
+                            : "streaming",
+                    })
+                  }
+                >
+                  <option value="streaming">{t("流式避震：工具调用参数与首字宽限内由代理重试，提交后交给 Codex 原生重试")}</option>
+                  <option value="streaming-legacy">{t("流式避震（旧行为）：首个输出事件立即提交，之后交给 Codex 原生重试")}</option>
+                  <option value="buffered">{t("整段缓冲避震：任何时点过载都由代理重试（失去流式）")}</option>
+                </select>
+              </Field>
+              {form.protocolProxyAutoRetryMode === "streaming" ? (
+                <Field label={t("首字提交延迟（毫秒）")}>
+                  <Input
+                    max={10000}
+                    min={0}
+                    step={100}
+                    type="number"
+                    value={form.protocolProxyAutoRetryCommitDelayMs}
+                    onChange={(event) =>
+                      onFormChange({
+                        ...form,
+                        protocolProxyAutoRetryCommitDelayMs: clampNumber(Number(event.currentTarget.value), 0, 10000),
+                      })
+                    }
+                  />
+                </Field>
+              ) : null}
+            </div>
+            <p className="field-hint">
+              {t("流式避震保留实时输出；「首字提交延迟」把首段可见输出也算进可重试窗口：0 = 一出现正文就提交，1000 = 再缓冲 1 秒，期间过载仍由代理重试；工具调用的参数生成阶段始终整项缓冲，不额外增加首字延迟。选「旧行为」则不做这些缓冲，完全回到旧逻辑。整段缓冲避震在所有情况下都不会把过载错误交给 Codex，但回复要等整段生成完才显示。")}
+            </p>
+          </div>
+        </CardContent>
+      </Panel>
+
+      <Panel>
+        <CardHead
+          title={t("供应商独立代理")}
+          detail={t("为单个供应商单独指定 HTTP 代理；留空表示沿用系统代理")}
+        />
+        <CardContent className="settings-content">
+          {proxyProfiles.length ? (
+            <div className="proxy-provider-list">
+              {proxyProfiles.map((profile) => (
+                <div className="proxy-provider-row" key={profile.id}>
+                  <div className="proxy-provider-meta">
+                    <strong>{profile.name || t("未命名供应商")}</strong>
+                    <small>
+                      {relayProtocolLabel(profile.protocol)} ·{" "}
+                      {proxyConfigured[profile.id] ? t("已配置独立代理") : t("未配置独立代理")}
+                    </small>
+                  </div>
+                  <Input
+                    aria-label={tf("{0} 的独立代理", [profile.name || t("未命名供应商")])}
+                    placeholder={t("例如 http://127.0.0.1:7890，留空表示使用系统代理")}
+                    value={proxyUrls[profile.id] ?? ""}
+                    onChange={(event) =>
+                      setProxyUrls((current) => ({ ...current, [profile.id]: event.currentTarget.value }))
+                    }
+                  />
+                  <Button
+                    disabled={proxyBusyId === profile.id}
+                    onClick={() => void saveProviderProxy(profile)}
+                    variant="secondary"
+                  >
+                    {proxyBusyId === profile.id ? t("保存中…") : t("保存")}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="field-hint">{t("还没有可配置独立代理的供应商。")}</p>
+          )}
+          <p className="field-hint">
+            {t("保存后需重新应用该供应商并重启 Codex，独立代理才会作用于会话请求。")}
+          </p>
+        </CardContent>
+      </Panel>
+
+      <RelayEnvironmentScreen result={relayEnvironment} actions={actions} />
+
+      {dirty ? (
+        <div className="settings-save-bar">
+          <span>{t("设置有修改时，保存后才会写入本地配置。")}</span>
+          <Button onClick={() => void actions.saveSettings()}>
+            <Save className="h-4 w-4" />
+            {t("保存设置")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+
+function formatRequestLogTime(timestampMs: number) {
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) return "-";
+  const date = new Date(timestampMs);
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate();
+  const time = date.toLocaleTimeString("zh-CN", { hour12: false });
+  return sameDay ? time : `${date.getMonth() + 1}/${date.getDate()} ${time}`;
+}
+
+
+function formatRequestLogTokens(value?: number | null) {
+  if (value == null) return "-";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+
+/** 缓存命中率展示：≥99% 保留一位小数，只有完全命中才显示 100%。 */
+function formatRequestLogCacheHitRatio(
+  inputTokens?: number | null,
+  cachedTokens?: number | null,
+  ratio?: number | null,
+) {
+  const input = inputTokens ?? 0;
+  const cached = cachedTokens ?? 0;
+  if (input <= 0 || cached <= 0) return "-";
+  if (cached >= input) return "100%";
+  const percent = (ratio ?? cached / input) * 100;
+  if (percent >= 99) return `${percent.toFixed(1)}%`;
+  return `${Math.round(percent)}%`;
+}
+
+
+/** 会话 id 展示：UUIDv7 前缀按时间递增、容易重名，这里取末 8 位区分。 */
+function formatRequestLogSession(threadId?: string | null): string {
+  const value = (threadId ?? "").trim();
+  if (!value) return "-";
+  return value.length > 12 ? `…${value.slice(-8)}` : value;
+}
+
+
+function formatRequestLogDuration(durationMs: number) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return "-";
+  if (durationMs < 1000) return `${durationMs}ms`;
+  if (durationMs < 60_000) return `${(durationMs / 1000).toFixed(1)}s`;
+  return `${Math.floor(durationMs / 60_000)}m${Math.round((durationMs % 60_000) / 1000)}s`;
+}
+
+
+function requestLogRetryLabel(entry: RequestLogEntry) {
+  if (entry.autoRetries > 0) return tf("自动重试 ×{0}", [String(entry.autoRetries)]);
+  if (entry.attempts > 1) return tf("切换 ×{0}", [String(entry.attempts)]);
+  return "-";
+}
+
+
+function RequestLogScreen() {
+  const [entries, setEntries] = useState<RequestLogEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "running" | "success" | "failed" | "retried">("all");
+  const [sessionFilter, setSessionFilter] = useState("all");
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  const hasRunning = entries.some((entry) => entry.state === "running");
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [hasRunning]);
+
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
+    try {
+      const result = await invoke<RequestLogsResult>("load_request_logs", { limit: 300 });
+      if (result.status === "ok") {
+        setEntries(result.entries ?? []);
+        setError("");
+      } else {
+        setError(result.message || t("读取请求日志失败。"));
+      }
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load(true);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [autoRefresh]);
+
+  const clearLogs = async () => {
+    if (!window.confirm(t("清空全部请求日志？此操作不可撤销。"))) return;
+    setClearing(true);
+    try {
+      const result = await invoke<{ status: Status; message: string }>("clear_request_logs");
+      if (result.status !== "ok") setError(result.message);
+      await load(true);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const sessions = useMemo(() => {
+    const found = new Map<string, { id: string; title: string; count: number }>();
+    for (const entry of entries) {
+      const id = (entry.threadId ?? "").trim();
+      if (!id) continue;
+      const title = (entry.threadTitle ?? "").trim();
+      const session = found.get(id);
+      if (session) {
+        session.count += 1;
+        if (!session.title && title) session.title = title;
+      } else {
+        found.set(id, { id, title, count: 1 });
+      }
+    }
+    // entries 本身按时间倒序，Map 的插入顺序即「最近活跃的会话优先」。
+    return [...found.values()];
+  }, [entries]);
+
+  const hasUnknownSession = useMemo(
+    () => entries.some((entry) => !(entry.threadId ?? "").trim()),
+    [entries],
+  );
+
+  // 日志被清空/切换后，避免筛选项停留在已不存在的会话上。
+  useEffect(() => {
+    if (sessionFilter === "all" || sessionFilter === "__none__") return;
+    if (!sessions.some((session) => session.id === sessionFilter)) {
+      setSessionFilter("all");
+    }
+  }, [sessionFilter, sessions]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return entries.filter((entry) => {
+      const running = entry.state === "running";
+      if (filter === "running" && !running) return false;
+      if (filter === "success" && (running || !entry.success)) return false;
+      if (filter === "failed" && (running || entry.success)) return false;
+      if (filter === "retried" && entry.autoRetries === 0 && entry.attempts <= 1) return false;
+      const threadId = (entry.threadId ?? "").trim();
+      if (sessionFilter === "__none__") {
+        if (threadId) return false;
+      } else if (sessionFilter !== "all" && threadId !== sessionFilter) {
+        return false;
+      }
+      if (!needle) return true;
+      return [
+        entry.model,
+        entry.upstreamModel,
+        entry.relayName,
+        entry.path,
+        entry.threadId ?? "",
+        entry.error ?? "",
+        entry.wireApi,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [entries, filter, query]);
+
+  return (
+    <Panel className="request-log-panel">
+      <CardHead
+        title={t("请求日志")}
+        detail={tf("最近 {0} 条代理请求，含状态、模型、重试与 token 用量", [String(entries.length)])}
+      />
+      <CardContent className="request-log-content">
+        <div className="request-log-toolbar">
+          <div className="request-log-search">
+            <Search className="h-4 w-4" aria-hidden="true" />
+            <Input
+              aria-label={t("搜索模型 / 供应商 / 路径 / 错误")}
+              placeholder={t("搜索模型 / 供应商 / 路径 / 错误")}
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+            />
+          </div>
+          <select
+            aria-label={t("状态筛选")}
+            className="request-log-filter"
+            value={filter}
+            onChange={(event) => setFilter(event.currentTarget.value as typeof filter)}
+          >
+            <option value="all">{t("全部")}</option>
+            <option value="running">{t("进行中")}</option>
+            <option value="success">{t("仅成功")}</option>
+            <option value="failed">{t("仅失败")}</option>
+            <option value="retried">{t("含重试")}</option>
+          </select>
+          <select
+            aria-label={t("按会话筛选")}
+            className="request-log-filter request-log-session-filter"
+            onChange={(event) => setSessionFilter(event.currentTarget.value)}
+            title={t("按会话筛选")}
+            value={sessionFilter}
+          >
+            <option value="all">{t("全部会话")}</option>
+            {sessions.map((session) => (
+              <option key={session.id} value={session.id}>
+                {tf("{0}（{1} 条）", [
+                  session.title || tf("会话 {0}", [formatRequestLogSession(session.id)]),
+                  String(session.count),
+                ])}
+              </option>
+            ))}
+            {hasUnknownSession ? <option value="__none__">{t("未记录会话")}</option> : null}
+          </select>
+          <label className="check-row request-log-auto">
+            <input
+              checked={autoRefresh}
+              onChange={(event) => setAutoRefresh(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>{t("自动刷新")}</span>
+          </label>
+          <Button variant="secondary" onClick={() => void load()}>
+            <RefreshCw className="h-4 w-4" />
+            {t("刷新")}
+          </Button>
+          <Button disabled={clearing || entries.length === 0} variant="secondary" onClick={() => void clearLogs()}>
+            <Trash2 className="h-4 w-4" />
+            {t("清空")}
+          </Button>
+        </div>
+
+        {error ? (
+          <p className="field-hint request-log-error" role="alert">{error}</p>
+        ) : null}
+
+        {loading && entries.length === 0 ? (
+          <div className="empty">{t("正在读取请求日志…")}</div>
+        ) : filtered.length ? (
+          <div className="request-log-table" role="table" aria-label={t("请求日志")}>
+            <div className="request-log-row request-log-head" role="row">
+              <span>{t("时间")}</span>
+              <span>{t("状态")}</span>
+              <span>{t("来源")}</span>
+              <span>{t("模型")}</span>
+              <span>{t("重试")}</span>
+              <span>{t("输入")}</span>
+              <span>{t("输出")}</span>
+              <span>{t("缓存")}</span>
+              <span>{t("耗时")}</span>
+            </div>
+            {filtered.map((entry) => (
+              <Fragment key={entry.id}>
+                <button
+                  aria-expanded={expanded === entry.id}
+                  className={`request-log-row request-log-entry ${entry.state === "running" ? "running" : entry.success ? "ok" : "bad"}`}
+                  onClick={() => setExpanded(expanded === entry.id ? null : entry.id)}
+                  role="row"
+                  type="button"
+                >
+                  <span>{formatRequestLogTime(entry.startedAtMs || entry.timestampMs)}</span>
+                  {entry.state === "running" ? (
+                    <span className="request-log-status running">
+                      {t("运行中")}
+                    </span>
+                  ) : (
+                    <span
+                      className={`request-log-status ${entry.success ? "ok" : "bad"}`}
+                      title={entry.error ?? ""}
+                    >
+                      {entry.statusCode || "ERR"}
+                      {!entry.success ? (
+                        <small className="request-log-stream-failed">
+                          {entry.stream ? t("流失败") : t("失败")}
+                        </small>
+                      ) : null}
+                    </span>
+                  )}
+                  <span className="request-log-ellipsis" title={entry.relayName}>{entry.relayName || "-"}</span>
+                  <span className="request-log-ellipsis" title={entry.upstreamModel ? `${entry.model} → ${entry.upstreamModel}` : entry.model}>
+                    {entry.model || "-"}
+                    {entry.upstreamModel && entry.upstreamModel !== entry.model ? (
+                      <small> → {entry.upstreamModel}</small>
+                    ) : null}
+                  </span>
+                  <span
+                    className={entry.autoRetries > 0 ? "request-log-retry" : "request-log-muted"}
+                    title={(entry.retryReasons ?? []).join(t("、"))}
+                  >
+                    {requestLogRetryLabel(entry)}
+                  </span>
+                  <span className="request-log-muted" title={entry.state === "running" ? t("token 用量由上游在请求完成时返回，流式过程中无法准确统计") : ""}>
+                    {entry.state === "running" ? t("流式中") : formatRequestLogTokens(entry.usage?.inputTokens)}
+                  </span>
+                  <span
+                    className="request-log-muted"
+                    title={entry.state === "running"
+                      ? t("按流式增量估算，完成后会更新为准确值")
+                      : ""}
+                  >
+                    {entry.state === "running"
+                      ? entry.estimatedOutputTokens
+                        ? `~${formatRequestLogTokens(entry.estimatedOutputTokens)}`
+                        : t("流式中")
+                      : formatRequestLogTokens(entry.usage?.outputTokens)}
+                  </span>
+                  <span>
+                    {entry.state === "running" ? (
+                      <span className="request-log-muted">{t("流式中")}</span>
+                    ) : entry.usage?.cachedTokens ? (
+                      <>
+                        {formatRequestLogTokens(entry.usage.cachedTokens)}
+                        <small>
+                          {" · "}
+                          {formatRequestLogCacheHitRatio(
+                            entry.usage.inputTokens,
+                            entry.usage.cachedTokens,
+                            entry.cacheHitRatio,
+                          )}
+                        </small>
+                      </>
+                    ) : "-"}
+                  </span>
+                  <span className="request-log-duration">
+                    {formatRequestLogDuration(
+                      entry.state === "running"
+                        ? Math.max(0, nowMs - entry.startedAtMs)
+                        : entry.durationMs,
+                    )}
+                    {entry.state === "running" ? (
+                      <small>{t("进行中")}</small>
+                    ) : entry.firstTokenMs != null ? (
+                      <small>{tf("首字 {0}", [formatRequestLogDuration(entry.firstTokenMs)])}</small>
+                    ) : null}
+                  </span>
+                </button>
+                {expanded === entry.id ? (
+                  <div className="request-log-detail">
+                    <dl>
+                      <div><dt>{t("请求 ID")}</dt><dd><code>{entry.id}</code></dd></div>
+                      <div>
+                        <dt>{t("会话 ID")}</dt>
+                        <dd>
+                          {entry.threadTitle ? <strong className="request-log-session-title">{entry.threadTitle}</strong> : null}
+                          <code>{entry.threadId || "-"}</code>
+                        </dd>
+                      </div>
+                      <div><dt>{t("路径")}</dt><dd><code>{entry.method} {entry.path}</code></dd></div>
+                      <div><dt>{t("上游协议")}</dt><dd>{entry.wireApi || "-"}</dd></div>
+                      <div><dt>{t("上游模型")}</dt><dd>{entry.upstreamModel || "-"}</dd></div>
+                      <div><dt>{t("首字耗时")}</dt><dd>{entry.firstTokenMs == null ? (entry.state === "running" ? t("进行中") : "-") : formatRequestLogDuration(entry.firstTokenMs)}</dd></div>
+                      <div><dt>{t("尝试次数")}</dt><dd>{entry.attempts || "-"}</dd></div>
+                      <div><dt>{t("自动重试")}</dt><dd>{entry.autoRetries}</dd></div>
+                      <div><dt>{t("重试原因")}</dt><dd>{(entry.retryReasons ?? []).join(t("、")) || "-"}</dd></div>
+                      {entry.attemptDetails?.length ? (
+                        <div className="request-log-attempts">
+                          <dt>{t("尝试明细")}</dt>
+                          <dd>
+                            <ul>
+                              {entry.attemptDetails.map((detail) => (
+                                <li key={`${detail.attempt}-${detail.code ?? ""}`}>
+                                  <strong>{tf("第 {0} 次", [detail.attempt])}</strong>
+                                  <code>{detail.code || "-"}</code>
+                                  {detail.delayMs != null ? (
+                                    <small>{tf("退避 {0}", [formatRequestLogDuration(detail.delayMs)])}</small>
+                                  ) : null}
+                                  {detail.message ? <small title={detail.message}>{detail.message}</small> : null}
+                                </li>
+                              ))}
+                            </ul>
+                          </dd>
+                        </div>
+                      ) : null}
+                      <div><dt>{t("流式")}</dt><dd>{entry.stream ? "SSE" : "JSON"}</dd></div>
+                      <div><dt>{t("流结果")}</dt><dd>{entry.streamOutcome || "-"}</dd></div>
+                      <div><dt>{t("推理 tokens")}</dt><dd>{formatRequestLogTokens(entry.usage?.reasoningTokens)}</dd></div>
+                      <div><dt>{t("错误")}</dt><dd>{entry.error || "-"}</dd></div>
+                    </dl>
+                  </div>
+                ) : null}
+              </Fragment>
+            ))}
+          </div>
+        ) : (
+          <div className="empty">
+            {entries.length
+              ? t("没有匹配当前筛选条件的请求。")
+              : t("还没有请求日志。启动 Codex 发起一次对话后即可看到。")}
+          </div>
+        )}
+      </CardContent>
+    </Panel>
+  );
 }

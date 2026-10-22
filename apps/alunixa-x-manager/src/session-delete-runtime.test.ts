@@ -108,8 +108,16 @@ function deleteFixture() {
     rows.forEach((element) => element.setAttribute("data-app-action-sidebar-thread-active", String(element.getAttribute("data-app-action-sidebar-thread-id") === id)));
   };
   activate(uuid);
+  // 删除后隐藏行用的样式表（#2614）：stub 只需支持按 id 取回与追加到 head。
+  const styles = new Map<string, Element & { id?: string }>();
+  const head = { appendChild: (node: Element & { id?: string }) => { node.removed = false; node.remove = () => { node.removed = true; styles.delete(node.id ?? ""); }; styles.set(node.id ?? "", node); return node; } };
   const context = vm.createContext({ Element, HTMLElement: Element, URL, window: { location },
-    document: { activeElement: null, querySelectorAll: () => buttons }, selectors: { threadTitle: ".title" },
+    CSS: { escape: (value: string) => value.replace(/["\\]/g, "\\$&") },
+    document: {
+      activeElement: null, querySelectorAll: () => buttons, head,
+      getElementById: (id: string) => styles.get(id) ?? null,
+      createElement: () => new Element(),
+    }, selectors: { threadTitle: ".title" },
     sessionRows: () => rows.filter((element) => element.isConnected),
     visibleElement: (element: Element) => element.visible && element.isConnected,
     isExtensionUiNode: (element: Element) => !!element.getAttribute("data-alunixa-x-ext"),
@@ -123,7 +131,7 @@ function deleteFixture() {
   vm.runInContext(`${refHelpers}\n${singleFunction(refs, "locationThreadId")}\n${singleFunction(refs, "currentSessionRef")}\n${deletion.slice(deletion.indexOf("  function rowHref(row)"), deletion.indexOf("  async function exportMarkdown(ref)"))}\n${singleFunction(deletion, "refreshRecentConversationsForHost")}\nfunction signal(e,t){return rpc.sendRequest(e,t)}; loadOptionalCodexAppModule=async()=>({signal});`, context);
   const begin = async (element = rows[0]) => { context.openDeleteConfirmForRow(element, button, context.sessionRefFromRow(element), { preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} }); await flush(); };
   const finish = async (result = { status: "local_deleted", session_id: requests[0]?.session_id, message: "deleted" }) => { request.resolve(result); await flush(); };
-  return { context, rows, native, buttons, requests, confirmations, diagnostics, timers, toasts, refreshes, begin, finish, activate, setLocation, reloads: () => reloads };
+  return { context, rows, native, buttons, requests, confirmations, diagnostics, timers, toasts, refreshes, styles, begin, finish, activate, setLocation, reloads: () => reloads };
 }
 
 test("local current deletion uses native navigation and refresh without a page reload", async () => {
@@ -133,6 +141,27 @@ test("local current deletion uses native navigation and refresh without a page r
   assert.equal(f.refreshes.length, 1);
   assert.equal(f.timers.length, 0);
   assert.equal(f.reloads(), 0);
+});
+
+test("local deletion hides React-rebuilt rows of the deleted thread until undo", async () => {
+  // #2614：进设置页再返回时 React 会按内存列表重建侧栏，被删行需按 id 持续隐藏。
+  const f = deleteFixture(); await f.begin(); await f.finish();
+  const style = f.styles.get("alunixa-x-deleted-session-rows");
+  assert.ok(style, "本地删除后应写入隐藏样式表");
+  assert.equal(style.getAttribute("data-alunixa-x-ext"), "deleted-session-rows");
+  assert.match(style.textContent, new RegExp(`data-app-action-sidebar-thread-id="${uuid}"`));
+  assert.doesNotMatch(style.textContent, new RegExp(otherUuid), "不能隐藏其它会话");
+  f.context.unhideDeletedSessionRows([uuid]);
+  assert.equal(f.styles.has("alunixa-x-deleted-session-rows"), false, "撤销后应移除样式表");
+});
+
+test("remote or mismatched deletions never add hide rules", async () => {
+  const remote = deleteFixture(); remote.rows[0].setAttribute("data-app-action-sidebar-thread-host-id", "ssh:fixture");
+  await remote.begin(); await remote.finish({ status: "server_deleted", session_id: uuid, message: "deleted" });
+  assert.equal(remote.styles.size, 0);
+  const mismatch = deleteFixture(); await mismatch.begin();
+  await mismatch.finish({ status: "local_deleted", session_id: otherUuid, message: "deleted" });
+  assert.equal(mismatch.styles.size, 0);
 });
 
 test("async deletion cannot navigate away from a conversation selected in the meantime", async () => {

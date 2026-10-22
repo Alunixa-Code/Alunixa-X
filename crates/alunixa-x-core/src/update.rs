@@ -451,11 +451,14 @@ where
 }
 
 fn update_http_client() -> anyhow::Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
-        .user_agent(format!("Alunixa X/{}", crate::version::VERSION))
-        .connect_timeout(UPDATE_CONNECT_TIMEOUT)
-        .timeout(UPDATE_DOWNLOAD_TIMEOUT)
-        .build()?)
+    // 更新与安装包下载同样要走系统代理：在需要代理才能访问 GitHub 的网络里，
+    // 直连会一直超时，用户看到的是「检查更新成功但下载/安装失败」（#1329）。
+    // 复用统一构造器，保留原有连接/总超时语义。
+    crate::http_client::proxied_client_with_timeouts(
+        &format!("Alunixa X/{}", crate::version::VERSION),
+        UPDATE_CONNECT_TIMEOUT,
+        UPDATE_DOWNLOAD_TIMEOUT,
+    )
 }
 
 pub fn download_asset_to(
@@ -471,7 +474,49 @@ pub fn download_asset_to(
     std::fs::create_dir_all(download_dir)?;
     let path = download_dir.join(safe);
     std::fs::write(&path, bytes)?;
+    // 历史安装包会一直留在 updates/ 里占磁盘（#2544）：每次下载成功后只保留
+    // 最近 `UPDATE_KEEP_INSTALLERS` 个安装包（含本次），其余删除。清理失败
+    // 不影响本次更新。
+    prune_old_installers(download_dir, &path);
     Ok(path)
+}
+
+const UPDATE_KEEP_INSTALLERS: usize = 2;
+
+fn prune_old_installers(download_dir: &Path, current: &Path) {
+    let Ok(entries) = std::fs::read_dir(download_dir) else {
+        return;
+    };
+    let mut installers: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path != current && is_installer_asset_path(path))
+        .filter_map(|path| {
+            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    if installers.is_empty() {
+        return;
+    }
+    installers.sort_by(|left, right| right.0.cmp(&left.0));
+    for (_, stale) in installers
+        .into_iter()
+        .skip(UPDATE_KEEP_INSTALLERS.saturating_sub(1))
+    {
+        let _ = std::fs::remove_file(stale);
+    }
+}
+
+fn is_installer_asset_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "exe" | "msi" | "dmg" | "pkg" | "appimage" | "deb" | "rpm"
+            )
+        })
 }
 
 pub fn safe_asset_name(name: &str) -> anyhow::Result<String> {
@@ -596,6 +641,46 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn prune_old_installers_keeps_only_recent_installers() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("AlunixaX-9.9.9.exe");
+        std::fs::write(&current, b"current").unwrap();
+        for (index, name) in ["old-1.exe", "old-2.dmg", "old-3.exe", "notes.txt"]
+            .iter()
+            .enumerate()
+        {
+            let path = directory.path().join(name);
+            std::fs::write(&path, b"x").unwrap();
+            let stamp =
+                std::time::SystemTime::now() - std::time::Duration::from_secs(100 - index as u64);
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.set_modified(stamp).unwrap();
+        }
+        prune_old_installers(directory.path(), &current);
+        assert!(current.exists(), "本次下载的安装包必须保留");
+        let remaining: Vec<String> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        // 时间戳：old-3 最新，old-2 次之，old-1 最旧。只保留当前 + 最新的 1 个。
+        assert!(
+            remaining.iter().any(|name| name == "old-3.exe"),
+            "最新的历史安装包应保留：{remaining:?}"
+        );
+        assert!(
+            !remaining
+                .iter()
+                .any(|name| name == "old-1.exe" || name == "old-2.dmg"),
+            "更旧的安装包应被清理：{remaining:?}"
+        );
+        assert!(
+            remaining.iter().any(|name| name == "notes.txt"),
+            "非安装包文件不得删除：{remaining:?}"
+        );
+    }
 
     #[tokio::test]
     async fn download_stage_progress_reports_bytes_then_writing() {

@@ -158,7 +158,7 @@ test("failed, missing and rejected replies always release isolated launch owners
 });
 
 test("multi-launch navigation, busy actions and AX-specific panels remain wired", () => {
-  assert.match(app, /id: "multiLaunch", label: t\("Codex多开"\)/);
+  assert.match(app, /id: "multiLaunch", get label\(\) \{ return t\("Codex多开"\); \}/);
   assert.match(app, /route === "multiLaunch"[\s\S]*?<CodexMultiLaunchScreen/);
   assert.match(app, /next === "relay" \|\| next === "multiLaunch"/);
   assert.match(declaration("CodexMultiLaunchScreen"), /actions\.multiLaunchPending !== null/);

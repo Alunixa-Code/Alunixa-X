@@ -218,18 +218,49 @@
   }
 
   /**
+   * 只取真实 turn_id 对应的最近一轮。total_token_usage 是会话累计，不会在换轮时
+   * 清零；旧记录或尾部截断缺少轮边界时只用最后一次调用，避免把前几轮混进来。
+   */
+  function alunixaXUsageLatestTurn(events) {
+    if (!Array.isArray(events) || !events.length) return [];
+    let start = events.length - 1;
+    const turnId = events[start].turn_id;
+    if (typeof turnId === "string" && turnId) {
+      while (start > 0 && events[start - 1].turn_id === turnId) start -= 1;
+    }
+    return events.slice(start);
+  }
+
+  /** 同一轮的多次模型调用按输入 token 加权，不能直接平均各次百分比。 */
+  function alunixaXUsageTurnCache(events) {
+    const segment = alunixaXUsageLatestTurn(events);
+    let input = 0;
+    let cached = 0;
+    for (const event of segment) {
+      const currentInput = Number(event.input_tokens) || 0;
+      const currentCached = Number(event.cached_input_tokens) || 0;
+      if (currentInput > 0) {
+        input += currentInput;
+        cached += Math.max(0, Math.min(currentCached, currentInput));
+      }
+    }
+    return input > 0 ? alunixaXUsagePercent(cached, input) : null;
+  }
+
+  /**
    * 生成速度（token/s）。
    *
    * Codex 只在每次模型调用结束时写一条 token_count，事件间隔里同时包含生成和工具
    * 执行时间，所以这是「吞吐」而不是纯生成速度，会比真实解码速度低。用同一轮内
    * 相邻事件的累计输出差除以时间差得到区间速度，再取最近几个区间平均，避免单次
-   * 抖动。换轮时 turn_output_tokens 会回落，靠这个切段。
+   * 抖动。turn_output_tokens 是历史字段名，实际为会话累计输出，需用真实轮 id 切段。
    */
   function alunixaXUsageRate(events) {
+    const segment = alunixaXUsageLatestTurn(events);
     const rates = [];
-    for (let index = 1; index < events.length; index += 1) {
-      const previous = events[index - 1];
-      const current = events[index];
+    for (let index = 1; index < segment.length; index += 1) {
+      const previous = segment[index - 1];
+      const current = segment[index];
       const previousOutput = Number(previous.turn_output_tokens) || 0;
       const currentOutput = Number(current.turn_output_tokens) || 0;
       if (currentOutput <= previousOutput) continue;
@@ -251,7 +282,7 @@
     const observedAt = Date.parse(latest.t);
     return {
       speed: alunixaXUsageRate(events),
-      cache: alunixaXUsagePercent(Number(latest.cached_input_tokens), Number(latest.input_tokens)),
+      cache: alunixaXUsageTurnCache(events),
       context: alunixaXUsagePercent(Number(latest.total_tokens), Number(latest.context_window)),
       stale: Number.isFinite(observedAt) ? Date.now() - observedAt > alunixaXUsageStaleMs : false,
       modelContextWindow: Number(latest.context_window) || 0,

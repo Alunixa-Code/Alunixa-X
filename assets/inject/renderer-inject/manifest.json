@@ -3,7 +3,7 @@
     {
       "name": "00-prelude.js",
       "description": "IIFE 开头、环境守卫、平台探测、常量与图片覆盖层",
-      "lines": 639
+      "lines": 697
     },
     {
       "name": "00-image-composite.js",
@@ -53,7 +53,7 @@
     {
       "name": "40-backend-settings.js",
       "description": "后端设置读写、心跳同步、用户脚本与市场状态、拓展 UI",
-      "lines": 1838
+      "lines": 1884
     },
     {
       "name": "50-navigation.js",
@@ -63,7 +63,7 @@
     {
       "name": "60-plugin-marketplace.js",
       "description": "插件市场请求/响应补丁、本地兜底与合并",
-      "lines": 1880
+      "lines": 1900
     },
     {
       "name": "61-plugin-market-ui.js",
@@ -88,7 +88,7 @@
     {
       "name": "80-session-share.js",
       "description": "会话运行时工具；分享入口已撤出管理器扫描",
-      "lines": 698
+      "lines": 756
     },
     {
       "name": "81-capacity-auto-retry.js",
@@ -103,7 +103,12 @@
     {
       "name": "83-usage-statusline.js",
       "description": "输入框下方用量状态栏：生成速度、缓存命中率与上下文占用",
-      "lines": 460
+      "lines": 491
+    },
+    {
+      "name": "84-proxy-request-status.js",
+      "description": "输入框上方的请求避震状态条：正在请求 / 等待上游 / 正在重试 / 正在生成",
+      "lines": 280
     },
     {
       "name": "90-action-groups.js",
@@ -123,7 +128,7 @@
     {
       "name": "93-dictation.js",
       "description": "独立 ASR 听写入口、录音、取消重试与原生输入框回填",
-      "lines": 583
+      "lines": 604
     },
     {
       "name": "94-typing-effects.js",

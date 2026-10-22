@@ -6,12 +6,7 @@
 // source text up in the selected dictionary; otherwise we return the
 // original Chinese, so Chinese stays the zero-overhead default.
 //
-// Language is resolved once at module load. Many Chinese literals live in
-// module-level constants (route tables, preset labels, …) that evaluate a
-// single time at import, so a live in-place swap can't reach them. Switching
-// language therefore persists the choice and reloads the webview, which is
-// instant for a local Tauri window and guarantees every literal — module-level
-// or render-level — re-evaluates under the new language.
+// 语言通过外部 store 通知 React 原地更新；模块级标签使用 getter，保留页面和草稿。
 
 import { EN_BACKEND, EN_BACKEND_PATTERNS, EN_PLAIN, EN_TEMPLATE } from "@/i18n-en";
 import { RU_BACKEND, RU_BACKEND_PATTERNS, RU_PLAIN, RU_TEMPLATE } from "@/i18n-ru";
@@ -39,12 +34,16 @@ function resolveInitialLanguage(): Language {
   }
 }
 
-// Resolved once per webview load. Do not mutate at runtime — use setLanguage,
-// which persists and reloads so module-level literals pick up the change.
-const LANG: Language = resolveInitialLanguage();
-const DICTIONARY = LANG === "ru"
+let LANG: Language = resolveInitialLanguage();
+const listeners = new Set<() => void>();
+const dictionary = () => LANG === "ru"
   ? { plain: RU_PLAIN, template: RU_TEMPLATE, backend: RU_BACKEND, patterns: RU_BACKEND_PATTERNS }
   : { plain: EN_PLAIN, template: EN_TEMPLATE, backend: EN_BACKEND, patterns: EN_BACKEND_PATTERNS };
+
+export function subscribeLanguage(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
 export function getLanguage(): Language {
   return LANG;
@@ -57,6 +56,7 @@ export function getLocale(): string {
 /** Translate a plain Chinese literal. Falls back to the source text. */
 export function t(zh: string): string {
   if (LANG === "zh") return zh;
+  const DICTIONARY = dictionary();
   const plain = DICTIONARY.plain[zh] ?? DICTIONARY.backend[zh];
   if (plain !== undefined) return plain;
   for (const [re, replacement] of DICTIONARY.patterns) {
@@ -72,23 +72,27 @@ export function t(zh: string): string {
  * looked-up template (also falling back to the key).
  */
 export function tf(key: string, args: Array<string | number>): string {
-  const template = LANG === "zh" ? key : DICTIONARY.template[key] ?? key;
+  const template = LANG === "zh" ? key : dictionary().template[key] ?? key;
   return template.replace(/\{(\d+)\}/g, (match, index) => {
     const value = args[Number(index)];
     return value === undefined || value === null ? match : String(value);
   });
 }
 
-/** Persist a new language and reload so every literal re-evaluates under it. */
+/** Persist only the locale; React updates without serializing or losing drafts. */
 export function setLanguage(language: Language): boolean {
   if (!isLanguage(language)) return false;
   if (language === LANG) return true;
   try {
     window.localStorage.setItem(STORAGE_KEY, language);
   } catch {
-    // Keep unsaved work intact when persistence is unavailable.
-    return false;
+    // A blocked local store must not prevent an in-memory locale change.
   }
-  window.location.reload();
+  LANG = language;
+  for (const listener of listeners) listener();
   return true;
+}
+
+export function toggleLanguage(): void {
+  setLanguage(LANG === "en" ? "zh" : "en");
 }

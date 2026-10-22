@@ -42,6 +42,7 @@ function harness() {
     isSuccessStatus: (value: string) => value === "ok",
     showNotice: (...args: any[]) => notices.push(args),
     t: (value: string) => value,
+    stringifyError: String,
     run: async (operation: () => Promise<unknown>) => {
       try { return await operation(); } catch (error) { notices.push(error); return null; }
     },
@@ -63,7 +64,12 @@ function harness() {
   vm.runInContext(ts.transpileModule(program, {
     compilerOptions: { target: ts.ScriptTarget.ES2022 },
   }).outputText, context);
-  return { context, requests, notices, persisted: () => persisted, draft: () => draft };
+  return { context, requests, notices, persisted: () => persisted, draft: () => draft,
+    edit: (value: unknown) => { draft = structuredClone(value); },
+    external: () => {
+      transaction = "external-transaction";
+      persisted = { revision: "external-file", codexAppPackagedProxyRepair: false };
+    } };
 }
 
 test("save transport preserves an explicit cross-file revision rather than substituting the file hash", async () => {
@@ -102,4 +108,18 @@ test("real stale transaction failures are not retried with a current revision", 
   }), /配置已被其他页面或程序修改/);
   assert.equal(h.requests.length, 1);
   assert.equal(h.persisted().codexAppPackagedProxyRepair, false);
+});
+
+test("a real concurrent edit leaves the unsaved form and explicit native edits intact", async () => {
+  const h = harness();
+  const pending = { revision: "file-1", codexAppPackagedProxyRepair: true, instructions: "pending fixture" };
+  h.edit(pending);
+  h.context.nativeCapabilityWritesRef.current.set("codexAppPackagedProxyRepair", 1);
+  h.external();
+  assert.equal(await h.context.save(pending, true), null);
+  assert.deepEqual(h.draft(), pending);
+  assert.equal(h.context.nativeCapabilityWritesRef.current.size, 1);
+  assert.equal(h.context.settingsRevisionRef.current, "transaction-1");
+  assert.equal(h.persisted().revision, "external-file");
+  assert.equal(h.requests.length, 1);
 });

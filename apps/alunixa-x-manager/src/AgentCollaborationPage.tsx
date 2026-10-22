@@ -6,7 +6,9 @@ import "./AgentCollaborationPage.css";
 import { getLocale, t, tf } from "@/i18n";
 
 type Agent = { id: string; name: string; executable: string; enabled: boolean; model: string; reuseSavedAuth: boolean };
-type CollaborationConfig = { enabled: boolean; defaultAgentId: string; agents: Agent[] };
+type CollaborationConfig = { enabled: boolean; defaultAgentId: string; agents: Agent[]; maxRuntimeMinutes: number };
+const defaultMaxRuntimeMinutes = 10;
+const maxRuntimeMinutesLimit = 240;
 type Integration = { status: "connected" | "not_connected" | "conflict"; message: string; home?: string; configPath?: string };
 type CodexRuntime = {
   status: "ready" | "partial" | "unavailable" | "error";
@@ -50,6 +52,7 @@ const defaultConfig = (): CollaborationConfig => ({
     { id: "deepseek", name: "DeepSeek Harness", executable: "", enabled: false, model: "", reuseSavedAuth: false },
     { id: "claude", name: "Claude Code", executable: "", enabled: false, model: "", reuseSavedAuth: false },
   ],
+  maxRuntimeMinutes: defaultMaxRuntimeMinutes,
 });
 const statusLabels: Record<TaskStatus, string> = {
   queued: t("排队中"), running: t("执行中"), completed: t("已完成"), failed: t("失败"), cancelled: t("已取消"), interrupted: t("已中断"),
@@ -63,6 +66,8 @@ const runtimeReady = (runtime?: CodexRuntime | null) => runtime?.status === "rea
 const copyConfig = (config: CollaborationConfig): CollaborationConfig => ({
   ...config,
   defaultAgentId: config.defaultAgentId || "deepseek",
+  maxRuntimeMinutes: Number.isInteger(config.maxRuntimeMinutes) && config.maxRuntimeMinutes > 0
+    ? config.maxRuntimeMinutes : defaultMaxRuntimeMinutes,
   agents: config.agents.map((agent) => ({ ...agent, model: agent.model || "", reuseSavedAuth: agent.reuseSavedAuth === true })),
 });
 const formatTime = (value: number) => Number.isFinite(value) && value > 0
@@ -73,6 +78,9 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [runtime, setRuntime] = useState<CodexRuntime | null>(null);
   const [draft, setDraft] = useState<CollaborationConfig>(defaultConfig);
+  // 运行上限输入框保留原始文本：输入过程中的空值或「1」→「15」这类中间态不能立刻钳制，
+  // 否则删掉一位就跳回 10 或 1，无法正常改数。合法时才写进草稿，失焦时还原成草稿值。
+  const [runtimeText, setRuntimeText] = useState(String(defaultMaxRuntimeMinutes));
   const [dirty, setDirty] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState("");
@@ -196,10 +204,32 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
     setDraft(next);
     setNotice("");
   };
+  useEffect(() => { setRuntimeText(String(draft.maxRuntimeMinutes)); }, [draft.maxRuntimeMinutes]);
+  const parsedRuntimeMinutes = (text: string) => {
+    const trimmed = text.trim();
+    if (!/^\d+$/.test(trimmed)) return null;
+    const value = Number(trimmed);
+    return value >= 1 && value <= maxRuntimeMinutesLimit ? value : null;
+  };
+  const editRuntimeText = (text: string) => {
+    setRuntimeText(text);
+    const value = parsedRuntimeMinutes(text);
+    if (value === null) {
+      dirtyRef.current = true;
+      setDirty(true);
+      setNotice("");
+      return;
+    }
+    if (value !== draft.maxRuntimeMinutes) editConfig({ ...draft, maxRuntimeMinutes: value });
+  };
   const editAgent = (id: string, patch: Partial<Agent>) => editConfig({ ...draft, agents: draft.agents.map((agent) => agent.id === id ? { ...agent, ...patch } : agent) });
   const saveConfig = () => {
     const invalid = draft.agents.find((agent) => agent.executable.trim() && !absolutePath(agent.executable));
     if (invalid) { setActionError(tf("请填写 {0} 可执行文件的绝对路径。", [invalid.name])); return; }
+    if (parsedRuntimeMinutes(runtimeText) === null) {
+      setActionError(tf("单个任务运行上限需填写 1 到 {0} 之间的整数分钟。", [maxRuntimeMinutesLimit]));
+      return;
+    }
     void mutate("save_config", { ...draft, agents: draft.agents.map((agent) => ({ ...agent, executable: agent.executable.trim(), model: agent.model.trim() })) }, () => {
       setNotice(t("子 Agent 设置已保存。"));
       setMcpConfig(null);
@@ -338,6 +368,8 @@ export function AgentCollaborationPage({ defaultCwd = "" }: { defaultCwd?: strin
         <div className="agent-collaboration-default">
           <label className="mg-field" htmlFor="agent-collaboration-default"><span>{t("默认子 Agent")}</span><select id="agent-collaboration-default" value={draft.defaultAgentId} disabled={!snapshot || busy === "save_config"} onChange={(event) => editConfig({ ...draft, defaultAgentId: event.target.value })}>{draft.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}{agent.enabled ? "" : t("（未启用）")}</option>)}</select></label>
           <p className="agent-collaboration-hint">{t("说“交给默认子 Agent”时使用此选择；直接说“让 DeepSeek”或“让 Claude Code”时使用指定的子 Agent。")}{draft.enabled && !draft.agents.some((agent) => agent.id === draft.defaultAgentId && agent.enabled) && t(" 所选默认子 Agent 尚未启用，默认分派不可用；仍可点名调用其他已启用的子 Agent。")}</p>
+          <label className="mg-field" htmlFor="agent-collaboration-runtime"><span>{t("单个任务运行上限（分钟）")}</span><input id="agent-collaboration-runtime" type="number" min={1} max={maxRuntimeMinutesLimit} step={1} value={runtimeText} disabled={!snapshot || busy === "save_config"} aria-invalid={parsedRuntimeMinutes(runtimeText) === null} onChange={(event) => editRuntimeText(event.target.value)} onBlur={() => { if (parsedRuntimeMinutes(runtimeText) === null) setRuntimeText(String(draft.maxRuntimeMinutes)); }} /></label>
+          <p className="agent-collaboration-hint">{t("说“交给默认子 Agent”时使用此选择；直接说“让 DeepSeek”或“让 Claude Code”时使用指定的子 Agent。子 Agent 任务超过运行上限（1–240 分钟，默认 10）会被终止。")}{draft.enabled && !draft.agents.some((agent) => agent.id === draft.defaultAgentId && agent.enabled) && t(" 所选默认子 Agent 尚未启用，默认分派不可用；仍可点名调用其他已启用的子 Agent。")}</p>
         </div>
         <div className="agent-collaboration-agents">
           {draft.agents.map((agent) => {

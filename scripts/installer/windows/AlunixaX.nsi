@@ -27,6 +27,7 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 Var ExistingInstall
 Var HadDesktopEntry
+Var LegacyDeleteTries
 
 !define MUI_ICON "${ROOT}\apps\alunixa-x-manager\src-tauri\icons\icon.ico"
 !define MUI_UNICON "${ROOT}\apps\alunixa-x-manager\src-tauri\icons\icon.ico"

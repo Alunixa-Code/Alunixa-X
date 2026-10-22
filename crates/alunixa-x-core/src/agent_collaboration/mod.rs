@@ -67,10 +67,30 @@ pub struct CollaborationConfig {
     #[serde(default = "default_agent_id")]
     pub default_agent_id: String,
     pub agents: Vec<AgentConfig>,
+    /// 单个子 Agent 任务的运行上限（分钟）。旧配置没有此字段时取默认 10 分钟（#2618）。
+    /// 取默认值时不写出：v1.10.0 的结构带 `deny_unknown_fields`，回退旧版本时
+    /// 多出的字段会让整份协作记录读不出来。
+    #[serde(
+        default = "default_max_runtime_minutes",
+        skip_serializing_if = "is_default_max_runtime_minutes"
+    )]
+    pub max_runtime_minutes: u32,
 }
 
 fn default_agent_id() -> String {
     "deepseek".to_string()
+}
+
+pub const DEFAULT_MAX_RUNTIME_MINUTES: u32 = 10;
+/// 上限 4 小时：足够覆盖长任务，又不至于让卡死的 CLI 永久占着工作区。
+pub const MAX_RUNTIME_MINUTES_LIMIT: u32 = 240;
+
+fn default_max_runtime_minutes() -> u32 {
+    DEFAULT_MAX_RUNTIME_MINUTES
+}
+
+fn is_default_max_runtime_minutes(value: &u32) -> bool {
+    *value == DEFAULT_MAX_RUNTIME_MINUTES
 }
 
 impl Default for CollaborationConfig {
@@ -93,6 +113,7 @@ impl Default for CollaborationConfig {
                 reuse_saved_auth: false,
             })
             .collect(),
+            max_runtime_minutes: DEFAULT_MAX_RUNTIME_MINUTES,
         }
     }
 }
@@ -528,6 +549,10 @@ fn normalize_config(config: CollaborationConfig) -> anyhow::Result<Collaboration
     ) {
         bail!("默认子 Agent 必须是 Codex、DeepSeek Harness 或 Claude Code");
     }
+    if !(1..=MAX_RUNTIME_MINUTES_LIMIT).contains(&config.max_runtime_minutes) {
+        bail!("子 Agent 运行上限必须在 1 到 {MAX_RUNTIME_MINUTES_LIMIT} 分钟之间");
+    }
+    normalized.max_runtime_minutes = config.max_runtime_minutes;
     let mut seen = std::collections::HashSet::new();
     for mut agent in config.agents {
         if !seen.insert(agent.id.clone()) {

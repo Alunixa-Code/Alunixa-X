@@ -290,6 +290,12 @@ pub struct RelayProfile {
         default = "default_cooldown_error_statuses"
     )]
     pub cooldown_error_statuses: Vec<u16>,
+    /// 只保留用户指定外部目录中的 Lite 声明，不为未知模型猜测能力。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trust_upstream_catalog_lite: bool,
+    /// 明确选择严格 Responses 历史契约；默认不改写历史。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strict_responses_reasoning: bool,
     /// Anthropic 上游的认证字段：`x-api-key`（默认，Anthropic 原生）或
     /// `authorization`（多数 Claude 系中转网关用 Bearer）。
     #[serde(
@@ -442,6 +448,8 @@ impl Default for RelayProfile {
             channel_queue_enabled: false,
             channel_requests_per_minute: default_channel_requests_per_minute(),
             cooldown_error_statuses: default_cooldown_error_statuses(),
+            trust_upstream_catalog_lite: false,
+            strict_responses_reasoning: false,
             anthropic_auth_header: String::new(),
             anthropic_max_tokens: 0,
             anthropic_prompt_cache: true,
@@ -931,6 +939,44 @@ pub struct BackendSettings {
         deserialize_with = "deserialize_stepwise_protocol"
     )]
     pub codex_app_stepwise_protocol: String,
+    /// 协议代理自动重试：上游瞬时失败（连接失败、408/429/5xx）先在本地代理内部
+    /// 退避重试，不立刻把错误交给 Codex。只影响经过本地协议代理的请求。
+    /// 默认开启：用户看到的失败横幅会显著减少；关闭后恢复「失败立即返回」行为。
+    #[serde(rename = "protocolProxyAutoRetry", default = "default_true")]
+    pub protocol_proxy_auto_retry: bool,
+    /// 最多自动重试次数（不含首次请求）。0 与关闭开关等价。
+    #[serde(
+        rename = "protocolProxyAutoRetryMaxAttempts",
+        default = "default_protocol_proxy_auto_retry_max_attempts"
+    )]
+    pub protocol_proxy_auto_retry_max_attempts: u32,
+    /// 首次重试等待秒数；之后按 2 倍指数退避，单次上限 30 秒。
+    #[serde(
+        rename = "protocolProxyAutoRetryIntervalSeconds",
+        default = "default_protocol_proxy_auto_retry_interval_seconds"
+    )]
+    pub protocol_proxy_auto_retry_interval_seconds: u64,
+    /// 过载错误处理模式：
+    /// - `streaming`（默认，流式；推理/工具调用参数先缓冲，首段可见输出后再等
+    ///   `protocolProxyAutoRetryCommitDelayMs`，窗口内仍由代理重试）；
+    /// - `streaming-legacy`（旧流式：遇到第一个输出事件立即提交，不再为工具
+    ///   参数或首字窗口缓冲）；
+    /// - `buffered`（整段缓冲后转发；任何时点的过载都由代理重试，但失去流式）。
+    #[serde(
+        rename = "protocolProxyAutoRetryMode",
+        default = "default_protocol_proxy_auto_retry_mode"
+    )]
+    pub protocol_proxy_auto_retry_mode: String,
+    /// 流式避震的「首字提交延迟」：出现第一段可见输出后，代理继续缓冲多少毫秒
+    /// 再交给 Codex。窗口内遇到容量/过载错误仍可丢弃重试；0 表示一出现可见输出
+    /// 就提交。推理与工具调用参数阶段本来就不向客户端提交，不占这个延迟，所以
+    /// 工具调用可以整项缓冲到完成后再提交。注意 `streaming-legacy` 模式忽略该
+    /// 字段，始终保持旧行为。
+    #[serde(
+        rename = "protocolProxyAutoRetryCommitDelayMs",
+        default = "default_protocol_proxy_auto_retry_commit_delay_ms"
+    )]
+    pub protocol_proxy_auto_retry_commit_delay_ms: u64,
     /// 按工具分区的配置。`tools.codex` 是上面那批扁平字段的镜像（写盘时同步），
     /// 其它工具（Grok / 后续工具）只存在这里。见 `crate::tools`。
     #[serde(rename = "tools", default)]
@@ -1061,6 +1107,14 @@ impl Default for BackendSettings {
             codex_app_stepwise_generation_mode: default_stepwise_generation_mode(),
             codex_app_answer_outline_enabled: false,
             codex_app_stepwise_protocol: default_stepwise_protocol(),
+            protocol_proxy_auto_retry: true,
+            protocol_proxy_auto_retry_max_attempts: default_protocol_proxy_auto_retry_max_attempts(
+            ),
+            protocol_proxy_auto_retry_interval_seconds:
+                default_protocol_proxy_auto_retry_interval_seconds(),
+            protocol_proxy_auto_retry_mode: default_protocol_proxy_auto_retry_mode(),
+            protocol_proxy_auto_retry_commit_delay_ms:
+                default_protocol_proxy_auto_retry_commit_delay_ms(),
             tools: BTreeMap::new(),
             active_tool: ToolId::Codex,
         }
@@ -1217,6 +1271,8 @@ impl BackendSettings {
             || profile.has_model_protocols()
             || profile.uses_no_auth()
             || profile.web_search_history_compat_enabled()
+            || profile.uses_independent_proxy()
+            || profile.request_compatibility_enabled()
     }
 }
 
@@ -1398,6 +1454,47 @@ pub fn default_relay_test_model() -> String {
     "gpt-5.4-mini".to_string()
 }
 
+/// 协议代理默认最多自动重试 5 次：2+4+8+16+30 秒封顶，合计约 60 秒。
+pub fn default_protocol_proxy_auto_retry_max_attempts() -> u32 {
+    5
+}
+
+pub fn clamp_protocol_proxy_auto_retry_max_attempts(value: u32) -> u32 {
+    value.min(20)
+}
+
+pub fn default_protocol_proxy_auto_retry_interval_seconds() -> u64 {
+    2
+}
+
+pub fn clamp_protocol_proxy_auto_retry_interval_seconds(value: u64) -> u64 {
+    value.min(30)
+}
+
+pub fn default_protocol_proxy_auto_retry_mode() -> String {
+    "streaming".to_string()
+}
+
+pub fn normalize_protocol_proxy_auto_retry_mode(value: &str) -> String {
+    match value.trim() {
+        "buffered" => "buffered".to_string(),
+        // 旧版「流式」行为保留为独立选项，方便随时退回。
+        "streaming-legacy" => "streaming-legacy".to_string(),
+        _ => default_protocol_proxy_auto_retry_mode(),
+    }
+}
+
+/// 流式避震默认在首段可见输出后再缓冲 1 秒：能覆盖「刚开始吐字上游就过载」
+/// 这一大类，首字延迟仍控制在 1 秒内；短回复在 response.completed 到达时
+/// 立即提交，不会白等满 1 秒。
+pub fn default_protocol_proxy_auto_retry_commit_delay_ms() -> u64 {
+    1000
+}
+
+pub fn clamp_protocol_proxy_auto_retry_commit_delay_ms(value: u64) -> u64 {
+    value.min(10_000)
+}
+
 pub fn default_relay_profiles() -> Vec<RelayProfile> {
     vec![RelayProfile::default()]
 }
@@ -1468,6 +1565,50 @@ pub fn percent_from_auto_compact_limit(context_window: u64, limit: u64) -> Optio
 }
 
 impl RelayProfile {
+    pub fn uses_independent_proxy(&self) -> bool {
+        (self.relay_mode != RelayMode::Official || self.official_mix_api_key)
+            && crate::relay_proxy::configured_proxy_for_profile(&self.id).is_some()
+    }
+
+    pub fn model_reasoning_parameters(&self, model: &str) -> &str {
+        let Ok(entries) = serde_json::from_str::<BTreeMap<String, Value>>(&self.model_metadata)
+        else {
+            return "auto";
+        };
+        let Some(metadata) = crate::model_suffix::lookup_model_map(&entries, model) else {
+            return "auto";
+        };
+        match metadata
+            .get("alunixa_x_reasoning_parameters")
+            .and_then(Value::as_str)
+        {
+            Some("omit") => "omit",
+            Some("passthrough") => "passthrough",
+            _ => "auto",
+        }
+    }
+
+    pub fn request_compatibility_enabled(&self) -> bool {
+        if self.relay_mode == RelayMode::Official && !self.official_mix_api_key {
+            return false;
+        }
+        self.protocol == RelayProtocol::Responses && self.strict_responses_reasoning
+            || serde_json::from_str::<Value>(&self.model_metadata)
+                .ok()
+                .is_some_and(|map| {
+                    map.as_object().is_some_and(|map| {
+                        map.values().any(|entry| {
+                            matches!(
+                                entry
+                                    .get("alunixa_x_reasoning_parameters")
+                                    .and_then(Value::as_str),
+                                Some("omit" | "passthrough")
+                            )
+                        })
+                    })
+                })
+    }
+
     pub fn has_model_routes(&self) -> bool {
         self.model_routes
             .iter()
@@ -2324,6 +2465,45 @@ fn merge_known_setting_fields(target: &mut Map<String, Value>, source: &Map<Stri
     if let Some(value) = source.get("relayProfilesEnabled").and_then(Value::as_bool) {
         target.insert("relayProfilesEnabled".to_string(), Value::Bool(value));
     }
+    // 协议代理自动重试：管理器整份保存也会经过 normalize，这里补上部分更新路径，
+    // 保证任何走 /settings/set 的调用都不会被静默丢弃。
+    merge_bool_setting(target, source, "protocolProxyAutoRetry");
+    if let Some(value) = source
+        .get("protocolProxyAutoRetryMaxAttempts")
+        .and_then(Value::as_u64)
+    {
+        target.insert(
+            "protocolProxyAutoRetryMaxAttempts".to_string(),
+            Value::from(clamp_protocol_proxy_auto_retry_max_attempts(value as u32)),
+        );
+    }
+    if let Some(value) = source
+        .get("protocolProxyAutoRetryIntervalSeconds")
+        .and_then(Value::as_u64)
+    {
+        target.insert(
+            "protocolProxyAutoRetryIntervalSeconds".to_string(),
+            Value::from(clamp_protocol_proxy_auto_retry_interval_seconds(value)),
+        );
+    }
+    if let Some(value) = source
+        .get("protocolProxyAutoRetryMode")
+        .and_then(Value::as_str)
+    {
+        target.insert(
+            "protocolProxyAutoRetryMode".to_string(),
+            Value::String(normalize_protocol_proxy_auto_retry_mode(value)),
+        );
+    }
+    if let Some(value) = source
+        .get("protocolProxyAutoRetryCommitDelayMs")
+        .and_then(Value::as_u64)
+    {
+        target.insert(
+            "protocolProxyAutoRetryCommitDelayMs".to_string(),
+            Value::from(clamp_protocol_proxy_auto_retry_commit_delay_ms(value)),
+        );
+    }
     if let Some(value) = source.get("enhancementsEnabled").and_then(Value::as_bool) {
         target.insert("enhancementsEnabled".to_string(), Value::Bool(value));
     }
@@ -2845,6 +3025,22 @@ fn normalize_settings_config_sections(
         .to_string();
     settings.codex_app_memory_embedding_model =
         settings.codex_app_memory_embedding_model.trim().to_string();
+    settings.protocol_proxy_auto_retry_max_attempts = clamp_protocol_proxy_auto_retry_max_attempts(
+        settings.protocol_proxy_auto_retry_max_attempts,
+    );
+    settings.protocol_proxy_auto_retry_interval_seconds =
+        clamp_protocol_proxy_auto_retry_interval_seconds(
+            settings.protocol_proxy_auto_retry_interval_seconds,
+        );
+    settings.protocol_proxy_auto_retry_mode =
+        normalize_protocol_proxy_auto_retry_mode(&settings.protocol_proxy_auto_retry_mode);
+    settings.protocol_proxy_auto_retry_commit_delay_ms =
+        clamp_protocol_proxy_auto_retry_commit_delay_ms(
+            settings.protocol_proxy_auto_retry_commit_delay_ms,
+        );
+    // 扁平字段始终是 Codex 的唯一事实来源，这里把它镜像进 tools.codex；
+    // 其它工具的分片原样保留。放在函数末尾，所有 load / save / update 路径
+    // 都会经过，两边不会漂移。
     settings.sync_tool_shards();
     Ok(settings)
 }
@@ -2885,6 +3081,33 @@ fn normalize_text_config(contents: String) -> String {
     } else {
         format!("{trimmed}\n")
     }
+}
+
+/// 逐级解析软链接（最多 16 层，防环），返回最终目标路径；不是软链接时返回 None。
+fn resolve_symlink_target(path: &Path) -> Option<PathBuf> {
+    let mut current = path.to_path_buf();
+    let mut resolved = false;
+    for _ in 0..16 {
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            break;
+        };
+        if !metadata.file_type().is_symlink() {
+            break;
+        }
+        let Ok(target) = fs::read_link(&current) else {
+            break;
+        };
+        current = if target.is_absolute() {
+            target
+        } else {
+            current
+                .parent()
+                .map(|parent| parent.join(&target))
+                .unwrap_or(target)
+        };
+        resolved = true;
+    }
+    resolved.then_some(current)
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -2962,14 +3185,27 @@ fn replace_file(source: &Path, target: &Path) -> anyhow::Result<()> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    unsafe {
-        MoveFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(target.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )?;
+    // Codex 客户端 / 杀毒软件可能短暂持有目标文件的读句柄，MoveFileExW 会以
+    // ERROR_ACCESS_DENIED / ERROR_SHARING_VIOLATION 失败。一次失败就让整次
+    // 供应商切换报错对用户表现为「无法切换和保存供应商」（#2601 / #2500 /
+    // #2612）。短退避重试几次，仍失败再把错误上抛。
+    let mut last_error = None;
+    for attempt in 0..6 {
+        match unsafe {
+            MoveFileExW(
+                PCWSTR(source.as_ptr()),
+                PCWSTR(target.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        } {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50 * (attempt + 1)));
     }
-    Ok(())
+    Err(last_error
+        .map(anyhow::Error::from)
+        .unwrap_or_else(|| anyhow::anyhow!("替换文件失败")))
 }
 
 fn unique_temp_path_for(path: &Path) -> PathBuf {
@@ -3098,6 +3334,44 @@ mod tests {
         assert_eq!(reloaded, expected);
     }
     use serde_json::json;
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_write_keeps_symlink_and_updates_its_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let dotfiles = temp.path().join("dotfiles");
+        std::fs::create_dir_all(&dotfiles).unwrap();
+        let target = dotfiles.join("config.toml");
+        std::fs::write(&target, "model = \"old\"\n").unwrap();
+        let home = temp.path().join(".codex");
+        std::fs::create_dir_all(&home).unwrap();
+        let link = home.join("config.toml");
+        std::os::unix::fs::symlink("../dotfiles/config.toml", &link).unwrap();
+
+        atomic_write(&link, b"model = \"new\"\n").unwrap();
+
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "软链接不能被替换成普通文件"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "model = \"new\"\n"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&home)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect();
+        assert_eq!(
+            leftovers.len(),
+            1,
+            "链接所在目录不应残留临时文件：{leftovers:?}"
+        );
+    }
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -4700,6 +4974,8 @@ pub fn atomic_write_with(
     path: &Path,
     write_contents: impl FnOnce(&mut File) -> std::io::Result<()>,
 ) -> anyhow::Result<()> {
+    let resolved = resolve_symlink_target(path);
+    let path = resolved.as_deref().unwrap_or(path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create directory {}", parent.display()))?;

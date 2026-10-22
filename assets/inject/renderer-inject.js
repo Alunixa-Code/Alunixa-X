@@ -4,6 +4,64 @@
   const alunixaXIsNodeTestHarness = typeof process === "object" && !!process.versions?.node;
   if (!alunixaXIsNodeTestHarness && (window.top !== window || window.self !== window || !window.electronBridge || !/^app:\/\/\-\//i.test(window.location.href))) return;
   const alunixaXIsWindowsPlatform = /\bWindows\b/i.test(navigator.userAgent || "");
+  const alunixaXIsMacPlatform = /\bMacintosh\b/i.test(navigator.userAgent || "");
+  const alunixaXSupportsPetRealMouseLook = alunixaXIsWindowsPlatform || alunixaXIsMacPlatform;
+
+  function alunixaXStatsigClients() {
+    const root = window.__STATSIG__ || globalThis.__STATSIG__;
+    if (!root || typeof root !== "object") return [];
+    const clients = [root.firstInstance, typeof root.instance === "function" ? root.instance() : null];
+    if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances));
+    return clients.filter((client, index, array) => client && typeof client === "object" && array.indexOf(client) === index);
+  }
+
+  /**
+   * User-triggered Statsig refresh. SDK versions expose different refresh
+   * methods, so only invoke methods proven to exist on the live client and
+   * report unsupported when none is available.
+   */
+  window.__alunixaXRefreshStatsigUiConfig = async () => {
+    const clients = alunixaXStatsigClients();
+    const methods = [];
+    const errors = [];
+    for (const client of clients) {
+      try {
+        if (typeof client.updateUserAsync === "function") {
+          const user = typeof client.getUser === "function" ? client.getUser() : client.user;
+          await client.updateUserAsync(user);
+          methods.push("updateUserAsync");
+        } else if (typeof client.initializeAsync === "function") {
+          await client.initializeAsync();
+          methods.push("initializeAsync");
+        } else if (typeof client.fetchValues === "function") {
+          await client.fetchValues();
+          methods.push("fetchValues");
+        }
+      } catch (error) {
+        errors.push(String(error?.message || error));
+      }
+    }
+    const current = clients[0];
+    let enableI18n = null;
+    try {
+      const layer = typeof current?.getLayer === "function" ? current.getLayer("72216192") : null;
+      if (layer && typeof layer.get === "function") enableI18n = layer.get("enable_i18n", null);
+      if (enableI18n === null && typeof current?.getDynamicConfig === "function") {
+        enableI18n = current.getDynamicConfig("72216192", { disableExposureLog: true })?.get?.("enable_i18n", null) ?? null;
+      }
+    } catch (error) {
+      errors.push(String(error?.message || error));
+    }
+    const result = {
+      status: methods.length ? (errors.length ? "partial" : "ok") : "unsupported",
+      methods: Array.from(new Set(methods)),
+      clientCount: clients.length,
+      enable_i18n: typeof enableI18n === "boolean" ? enableI18n : null,
+      errors,
+    };
+    window.dispatchEvent(new CustomEvent("alunixa-x-statsig-refreshed", { detail: result }));
+    return result;
+  };
 
   // 撤下强制语言后的单次迁移：只撤回仍由旧版管理的设置，不干预用户后来选择的语言。
   async function restoreCodexPlusManagedLocale() {
@@ -7568,6 +7626,10 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
 
   function recordCodexPlusBridgeSuccess() {
     recordCodexPlusBridgeHealth("lastSuccessAt");
+    if (alunixaXBackendGeneration === window.__alunixaXBackendGeneration) {
+      const health = window.__alunixaXBridgeHealth || (window.__alunixaXBridgeHealth = {});
+      health.failures = 0;
+    }
     alunixaXBridgeFailureCount = 0;
   }
 
@@ -7577,6 +7639,12 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
 
   function recordCodexPlusBridgeFailure() {
     alunixaXBridgeFailureCount += 1;
+    if (alunixaXBackendGeneration !== window.__alunixaXBackendGeneration) return;
+    // 看门狗只能读到 window 上的 health 快照：不落 failures/lastFailureAt，
+    // CDP 连接断掉后它会一直把“还在尝试”当成桥接存活，永久不重注入。
+    const health = window.__alunixaXBridgeHealth || (window.__alunixaXBridgeHealth = {});
+    health.lastFailureAt = Date.now();
+    health.failures = alunixaXBridgeFailureCount;
   }
 
   function renderBackendStatus() {
@@ -8627,7 +8695,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
             <section class="alunixa-x-settings-section" aria-label="外观与布局">
               <h2 class="alunixa-x-settings-section-title">外观与布局</h2>
               <div class="alunixa-x-settings-card">
-                ${alunixaXIsWindowsPlatform ? `<div class="alunixa-x-row">
+                ${alunixaXSupportsPetRealMouseLook ? `<div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">桌宠跟随真实鼠标</div><div class="alunixa-x-row-description">仅支持 V2 桌宠；不会修改宠物文件。将 V2 的 Computer Use 光标朝向动作映射到真实鼠标，V1 开启后安全不生效；拖拽、原生悬停或 Computer Use 活跃时自动让步。</div></div>
                   <button type="button" class="alunixa-x-toggle" data-alunixa-x-setting="petRealMouseLook"><span></span></button>
                 </div>` : ""}
@@ -8675,6 +8743,10 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">管理工具</div><div class="alunixa-x-row-description">配置增强功能、模型和语音服务。</div></div>
                   <button type="button" class="alunixa-x-action-button" data-codex-open-manager="true">打开管理工具</button>
+                </div>
+                <div class="alunixa-x-row">
+                  <div><div class="alunixa-x-row-title">刷新 UI 配置</div><div class="alunixa-x-row-description">手动请求当前 Statsig 客户端重新评估远程配置，并显示 enable_i18n 的结果。</div></div>
+                  <button type="button" class="alunixa-x-action-button" data-codex-refresh-statsig="true">刷新 UI 配置</button>
                 </div>
                 <div class="alunixa-x-row">
                   <div><div class="alunixa-x-row-title">打开 DevTools</div><div class="alunixa-x-row-description">打开当前 Codex 页面开发者工具，方便查看用户拓展报错。</div></div>
@@ -8831,6 +8903,38 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
       }
       if (target?.closest("[data-codex-open-manager]")) {
         openManagerFromCodex();
+        return;
+      }
+      const refreshStatsigButton = target?.closest("[data-codex-refresh-statsig]");
+      if (refreshStatsigButton) {
+        const button = refreshStatsigButton;
+        if (button.dataset.pending === "true") return;
+        button.dataset.pending = "true";
+        const originalLabel = button.textContent;
+        button.textContent = "刷新中…";
+        Promise.resolve(window.__alunixaXRefreshStatsigUiConfig?.())
+          .then((result) => {
+            if (!result || result.status === "unsupported") {
+              showToast("当前 Codex 构建没有可用的 Statsig 刷新接口", null);
+            } else if (result.status === "ok" && result.enable_i18n === true) {
+              showToast("UI 配置已刷新，enable_i18n=true", null);
+              // 只有用户主动点击且远端明确返回 true 时刷新页面，让 Codex
+              // 重新走语言包加载 gate；不在启动/网络恢复路径自动触发。
+              window.setTimeout(() => window.location.reload(), 150);
+            } else if (result.status === "ok" && result.enable_i18n === false) {
+              showToast("UI 配置已刷新，enable_i18n=false", null);
+            } else {
+              // showToast 的第二个参数若是字符串会被当成撤销 token（旧签名），
+              // 错误详情必须拼进正文并以对象参数标明类型。
+              const detail = result.errors?.join("；");
+              showToast(`UI 配置刷新${result.status === "partial" ? "部分完成" : "失败"}${detail ? `：${detail}` : ""}`, { type: result.status === "partial" ? "warn" : "error" });
+            }
+          })
+          .catch((error) => showToast(`UI 配置刷新失败：${error?.message || String(error)}`, { type: "error" }))
+          .finally(() => {
+            button.dataset.pending = "false";
+            button.textContent = originalLabel || "刷新 UI 配置";
+          });
         return;
       }
       // 推荐卡片用 window.open 而非原生 <a target="_blank">：Codex 是 Electron
@@ -9589,6 +9693,25 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
     return text.includes("chatgpt authentication required for remote plugin catalog") && text.includes("api key auth is not supported");
   }
 
+  function pluginMarketplaceRemoteUnavailableError(value) {
+    const text = pluginMarketplaceErrorText(value).toLowerCase();
+    if (!text) return false;
+    if (pluginMarketplaceRemoteAuthError(value)) return true;
+    // 纯 API 模式没有 ChatGPT 会话时，Codex 仍会预热 featured 插件目录。
+    // 该远程请求超时会被上游错误提升为全局 connection-failed；插件目录应局部降级，
+    // 不能阻断已经连通的本地 helper、供应商和主模型请求（issue #2598）。
+    const isFeaturedWarmup = text.includes("failed to warm featured plugin ids cache")
+      || text.includes("/backend-api/plugins/featured");
+    const isRemotePluginSync = text.includes("remote installed plugin bundle sync")
+      || text.includes("remote plugin catalog");
+    const isNetworkFailure = text.includes("timeout")
+      || text.includes("timed out")
+      || text.includes("error sending request")
+      || text.includes("network")
+      || text.includes("connection");
+    return (isFeaturedWarmup || isRemotePluginSync) && isNetworkFailure;
+  }
+
   const codexPluginRemoteAuthRetryMs = 60_000;
 
   function clearPluginMarketplaceRemoteCatalogUnavailable() {
@@ -9668,7 +9791,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
         const result = await originalSendRequest(method, requestParams, options);
         return patchPluginMarketplaceResult(requestMethod, result);
       } catch (error) {
-        if (requestMethod === "list-plugins" && pluginMarketplaceRemoteAuthError(error)) {
+        if (requestMethod === "list-plugins" && pluginMarketplaceRemoteUnavailableError(error)) {
           markPluginMarketplaceRemoteCatalogUnavailable(error);
           return requestProfile.remoteOnly
             ? remoteOnlyPluginMarketplaceFallbackResult()
@@ -9781,7 +9904,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
       if (typeof data.bodyJsonString !== "string" || !data.bodyJsonString.trim()) return false;
       try {
         let result = JSON.parse(data.bodyJsonString);
-        if (pluginMarketplaceRemoteAuthError(result?.error || result)) {
+        if (pluginMarketplaceRemoteUnavailableError(result?.error || result)) {
           markPluginMarketplaceRemoteCatalogUnavailable(result?.error || result);
           const fallback = requestProfile?.remoteOnly
             ? remoteOnlyPluginMarketplaceFallbackResult()
@@ -9821,7 +9944,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
       requestIds.delete(requestId);
     }
     if (requestProfiles instanceof Map) requestProfiles.delete(requestId);
-    if (pluginMarketplaceRemoteAuthError(message?.error)) {
+    if (pluginMarketplaceRemoteUnavailableError(message?.error)) {
       markPluginMarketplaceRemoteCatalogUnavailable(message.error);
       delete message.error;
       message.result = requestProfile?.remoteOnly
@@ -9842,6 +9965,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
       patchRequestMessage: patchPluginMarketplaceRequestMessage,
       patchResponseData: patchPluginMarketplaceResponseData,
       remoteAuthError: pluginMarketplaceRemoteAuthError,
+      remoteUnavailableError: pluginMarketplaceRemoteUnavailableError,
       localFallback: localPluginMarketplaceFallbackResult,
       remoteOnlyFallback: remoteOnlyPluginMarketplaceFallbackResult,
       requestProfile: pluginMarketplaceRequestProfile,
@@ -14342,6 +14466,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
         const result = await postJson("/undo", { undo_token: undoToken });
         toast.textContent = result.message || "撤销完成";
         if (result.status === "undone") {
+          settings.onUndone?.();
           const refreshed = await refreshRecentConversationsForHost();
           if (!refreshed) window.location.reload();
         }
@@ -14735,6 +14860,51 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
     return !!left?.session_id && !!left?.host_id && left.session_id === right?.session_id && left.host_id === right?.host_id;
   }
 
+  /**
+   * 已删除会话的侧栏行隐藏表（#2614）。
+   *
+   * 删除后只移除当前 DOM 行不够：通知 Codex 重读列表依赖内部模块，新版 Codex 里
+   * 已找不到，Codex 内存中的列表仍含这条会话，进设置页再返回时 React 重建侧栏，
+   * 它又会出现，直到重启。这里用一张样式表按原始 thread id 隐藏，React 重建出
+   * 的同 id 行也一并隐藏；不走扫描调度，不会产生自喂扫描。撤销时移除对应规则。
+   */
+  const deletedSessionRowStyleId = "alunixa-x-deleted-session-rows";
+  const deletedSessionRowIds = window.__alunixaXDeletedSessionRowIds instanceof Set
+    ? window.__alunixaXDeletedSessionRowIds
+    : (window.__alunixaXDeletedSessionRowIds = new Set());
+
+  function renderDeletedSessionRowStyle() {
+    let style = document.getElementById(deletedSessionRowStyleId);
+    if (!deletedSessionRowIds.size) {
+      style?.remove();
+      return;
+    }
+    if (!style) {
+      style = document.createElement("style");
+      style.id = deletedSessionRowStyleId;
+      style.setAttribute("data-alunixa-x-ext", "deleted-session-rows");
+      document.head.appendChild(style);
+    }
+    style.textContent = Array.from(deletedSessionRowIds)
+      .map((id) => `[data-app-action-sidebar-thread-id="${CSS.escape(id)}"]{display:none !important}`)
+      .join("\n");
+  }
+
+  function hideDeletedSessionRows(rawThreadId) {
+    if (!rawThreadId || isClientNewThreadId(rawThreadId)) return;
+    deletedSessionRowIds.add(rawThreadId);
+    renderDeletedSessionRowStyle();
+  }
+
+  function unhideDeletedSessionRows(rawThreadIds) {
+    let changed = false;
+    for (const id of rawThreadIds || []) changed = deletedSessionRowIds.delete(id) || changed;
+    if (changed) renderDeletedSessionRowStyle();
+  }
+
+  // 注入脚本重跑（页面未刷新）时按已记录的 id 恢复样式表；首次加载 Set 为空，不做任何事。
+  if (deletedSessionRowIds.size) renderDeletedSessionRowStyle();
+
   function removeDeletedRow(row, button, ref, requestContext) {
     // 删除响应期间，React 可能复用或替换 sidebar 行；不能删除其新身份的 DOM。
     if (!row.isConnected || !sameDeletedSessionRef(sessionRefFromRow(row), ref)) return null;
@@ -14805,11 +14975,23 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
         }
         // 远端由原生同主机 thread/deleted 通知更新，不能移除可能已重用的本地 DOM。
         let navigationNotice = null;
+        let hiddenRowIds = [];
         if (ref.host_id === "local") {
+          // 在移除前读原始 id：行可能带 host 前缀，与规范化后的 session_id 不同。
+          const rawThreadId = row.isConnected && sameDeletedSessionRef(sessionRefFromRow(row), ref)
+            ? row.getAttribute("data-app-action-sidebar-thread-id") || ""
+            : "";
           navigationNotice = removeDeletedRow(row, button, ref, requestContext);
+          if (rawThreadId) {
+            hideDeletedSessionRows(rawThreadId);
+            hiddenRowIds = [rawThreadId];
+          }
           await refreshRecentConversationsForHost();
         }
-        showToast(navigationNotice || result.message || "删除成功", result.undo_token);
+        showToast(navigationNotice || result.message || "删除成功", {
+          undoToken: result.undo_token,
+          onUndone: () => unhideDeletedSessionRows(hiddenRowIds),
+        });
       } else {
         showToast(result.message || "删除失败", null);
       }
@@ -15592,18 +15774,49 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
   }
 
   /**
+   * 只取真实 turn_id 对应的最近一轮。total_token_usage 是会话累计，不会在换轮时
+   * 清零；旧记录或尾部截断缺少轮边界时只用最后一次调用，避免把前几轮混进来。
+   */
+  function alunixaXUsageLatestTurn(events) {
+    if (!Array.isArray(events) || !events.length) return [];
+    let start = events.length - 1;
+    const turnId = events[start].turn_id;
+    if (typeof turnId === "string" && turnId) {
+      while (start > 0 && events[start - 1].turn_id === turnId) start -= 1;
+    }
+    return events.slice(start);
+  }
+
+  /** 同一轮的多次模型调用按输入 token 加权，不能直接平均各次百分比。 */
+  function alunixaXUsageTurnCache(events) {
+    const segment = alunixaXUsageLatestTurn(events);
+    let input = 0;
+    let cached = 0;
+    for (const event of segment) {
+      const currentInput = Number(event.input_tokens) || 0;
+      const currentCached = Number(event.cached_input_tokens) || 0;
+      if (currentInput > 0) {
+        input += currentInput;
+        cached += Math.max(0, Math.min(currentCached, currentInput));
+      }
+    }
+    return input > 0 ? alunixaXUsagePercent(cached, input) : null;
+  }
+
+  /**
    * 生成速度（token/s）。
    *
    * Codex 只在每次模型调用结束时写一条 token_count，事件间隔里同时包含生成和工具
    * 执行时间，所以这是「吞吐」而不是纯生成速度，会比真实解码速度低。用同一轮内
    * 相邻事件的累计输出差除以时间差得到区间速度，再取最近几个区间平均，避免单次
-   * 抖动。换轮时 turn_output_tokens 会回落，靠这个切段。
+   * 抖动。turn_output_tokens 是历史字段名，实际为会话累计输出，需用真实轮 id 切段。
    */
   function alunixaXUsageRate(events) {
+    const segment = alunixaXUsageLatestTurn(events);
     const rates = [];
-    for (let index = 1; index < events.length; index += 1) {
-      const previous = events[index - 1];
-      const current = events[index];
+    for (let index = 1; index < segment.length; index += 1) {
+      const previous = segment[index - 1];
+      const current = segment[index];
       const previousOutput = Number(previous.turn_output_tokens) || 0;
       const currentOutput = Number(current.turn_output_tokens) || 0;
       if (currentOutput <= previousOutput) continue;
@@ -15625,7 +15838,7 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
     const observedAt = Date.parse(latest.t);
     return {
       speed: alunixaXUsageRate(events),
-      cache: alunixaXUsagePercent(Number(latest.cached_input_tokens), Number(latest.input_tokens)),
+      cache: alunixaXUsageTurnCache(events),
       context: alunixaXUsagePercent(Number(latest.total_tokens), Number(latest.context_window)),
       stale: Number.isFinite(observedAt) ? Date.now() - observedAt > alunixaXUsageStaleMs : false,
       modelContextWindow: Number(latest.context_window) || 0,
@@ -15832,6 +16045,286 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
     },
   };
   globalThis.__ALUNIXA_X_USAGE_STATUSLINE_SYNC__ = () => alunixaXUsageSchedule(0);
+  /**
+   * 输入框上方的「请求避震」状态条：直接显示当前代理请求走到了哪一步。
+   *
+   * 状态由代理侧 `/proxy-status` 路由提供（POST），阶段包括：
+   *   requesting（正在请求）、waiting（等待上游返回）、
+   *   retrying（正在重试 ×N）、generating（正在生成，可带输出 token 估算）。
+   *
+   * 节点挂在输入卡片之前、同一父容器内（输入框上方），空闲时 display:none，
+   * 不占位；带 data-alunixa-x-ext 让扫描调度器排除自喂循环。
+   */
+  registerCodexPlusExtensionSelector('[data-alunixa-x-ext="builtin-proxy-request-status"]');
+  window.__alunixaXProxyRequestStatusRuntime?.dispose?.();
+
+  const alunixaXProxyStatusId = "alunixa-x-proxy-request-status";
+  const alunixaXProxyStatusStyleId = "alunixa-x-proxy-request-status-style";
+  const alunixaXProxyStatusPollMs = 1200;
+  const alunixaXProxyStatusTickMs = 500;
+
+  const alunixaXProxyStatusState = {
+    disposed: false,
+    pollTimer: 0,
+    tickTimer: 0,
+    node: null,
+    requests: [],
+    nowMs: Date.now(),
+    inFlight: false,
+    failures: 0,
+  };
+
+  function alunixaXProxyStatusVisibleElement(element) {
+    if (!element?.isConnected) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function alunixaXProxyStatusComposerCard() {
+    const cards = [...document.querySelectorAll("[data-composer-surface-variant]")];
+    let fallback = null;
+    for (const card of cards) {
+      if (!alunixaXProxyStatusVisibleElement(card) || card.closest("[data-alunixa-x-ext]")) continue;
+      fallback = card;
+      if (card.querySelector('.ProseMirror[contenteditable="true"], textarea:not(:disabled):not([readonly]), [role="textbox"][contenteditable="true"]')) {
+        return card;
+      }
+    }
+    return fallback;
+  }
+
+  /** 当前输入框所属会话 id，用于只显示本会话的请求。 */
+  function alunixaXProxyStatusThreadId(card) {
+    const composerRoot = card?.closest("[data-codex-composer-root]");
+    const placement = composerRoot?.getAttribute("data-composer-placement");
+    // 首页/新会话的输入框也是 composer，但没有会话归属；必须返回空让状态条隐藏，
+    // 不能退化成“显示所有运行中的请求”，否则别的会话的请求会串到这里。
+    if (placement && placement !== "thread") return "";
+    const fromComposer = composerRoot
+      ?.querySelector("[data-above-composer-conversation-id]")
+      ?.getAttribute("data-above-composer-conversation-id");
+    const inThread = composerRoot?.getAttribute("data-composer-placement") === "thread";
+    const fromSidebar = inThread
+      ? document
+        .querySelector('[data-app-action-sidebar-thread-selected="true"][data-app-action-sidebar-thread-id]')
+        ?.getAttribute("data-app-action-sidebar-thread-id")
+      : null;
+    return String(fromComposer || fromSidebar || "").replace(/^local:/, "").trim();
+  }
+
+  function alunixaXProxyStatusNormalizeThreadId(value) {
+    return String(value || "").replace(/^local:/, "").trim();
+  }
+
+  function alunixaXProxyStatusText() {
+    const language = (document.documentElement?.lang || navigator.language || "").toLowerCase();
+    const zh = language.startsWith("zh");
+    return zh
+      ? {
+          requesting: "正在请求",
+          waiting: "等待上游返回",
+          retrying: (count) => `正在重试 ×${count}`,
+          generating: "正在生成",
+          fallback: "请求进行中",
+          lastError: "上次",
+          aria: "请求避震状态",
+        }
+      : {
+          requesting: "Requesting",
+          waiting: "Waiting for upstream",
+          retrying: (count) => `Retrying ×${count}`,
+          generating: "Generating",
+          fallback: "Request in progress",
+          lastError: "Last",
+          aria: "Request shock absorption status",
+        };
+  }
+
+  function alunixaXProxyStatusInstallStyle() {
+    if (document.getElementById(alunixaXProxyStatusStyleId)) return;
+    const style = document.createElement("style");
+    style.id = alunixaXProxyStatusStyleId;
+    style.dataset.alunixaXExt = "builtin-proxy-request-status";
+    style.textContent = `
+      #${alunixaXProxyStatusId}{display:flex;align-items:center;justify-content:flex-end;gap:8px;box-sizing:border-box;width:100%;margin:0 0 6px;padding:0 12px;font-size:12px;line-height:17px;color:var(--color-token-text-secondary,rgba(205,205,215,.95));color:color-mix(in srgb,var(--color-token-text-primary,#dfdfdf) 82%,transparent);user-select:none;cursor:default}
+      #${alunixaXProxyStatusId}[data-hidden="true"]{display:none}
+      #${alunixaXProxyStatusId} .alunixa-x-proxy-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto;background:#f59e0b;box-shadow:0 0 0 0 rgba(245,158,11,.35);animation:alunixa-x-proxy-pulse 1.4s ease-out infinite}
+      #${alunixaXProxyStatusId}[data-phase="retrying"] .alunixa-x-proxy-dot{background:#f97316}
+      #${alunixaXProxyStatusId}[data-phase="generating"] .alunixa-x-proxy-dot{background:#22c55e}
+      #${alunixaXProxyStatusId}[data-phase="waiting"] .alunixa-x-proxy-dot{background:#60a5fa}
+      #${alunixaXProxyStatusId} .alunixa-x-proxy-phase{font-weight:500;white-space:nowrap}
+      #${alunixaXProxyStatusId} .alunixa-x-proxy-meta{opacity:.65;white-space:nowrap;font-variant-numeric:tabular-nums}
+      #${alunixaXProxyStatusId} .alunixa-x-proxy-error{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#f87171;opacity:.85}
+      @keyframes alunixa-x-proxy-pulse{0%{box-shadow:0 0 0 0 rgba(245,158,11,.35)}70%{box-shadow:0 0 0 5px rgba(245,158,11,0)}100%{box-shadow:0 0 0 0 rgba(245,158,11,0)}}
+    `;
+    document.head?.appendChild(style);
+  }
+
+  function alunixaXProxyStatusEnsureNode(card) {
+    // 挂在 composer root 之前，而不是输入卡片之前：切会话时卡片会被 React
+    // 放进只包住输入框的 relative 容器里，插在卡片前会跑到输入框内部。
+    const anchor = card?.closest("[data-codex-composer-root]") || card;
+    if (!anchor?.parentElement) return null;
+    let node = alunixaXProxyStatusState.node;
+    if (!node) {
+      node = document.createElement("div");
+      node.id = alunixaXProxyStatusId;
+      node.setAttribute("data-alunixa-x-ext", "builtin-proxy-request-status");
+      node.setAttribute("role", "status");
+      alunixaXProxyStatusState.node = node;
+    }
+    if (!node.isConnected || node.nextElementSibling !== anchor) {
+      anchor.insertAdjacentElement("beforebegin", node);
+    }
+    return node;
+  }
+
+  function alunixaXProxyStatusHide() {
+    const node = alunixaXProxyStatusState.node;
+    if (node) node.dataset.hidden = "true";
+  }
+
+  function alunixaXProxyStatusFormatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes > 0 ? `${minutes}m${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
+  }
+
+  function alunixaXProxyStatusRender() {
+    const card = alunixaXProxyStatusComposerCard();
+    const threadId = card ? alunixaXProxyStatusThreadId(card) : "";
+    // 首页/新会话没有当前会话 id：不能把“没有会话”当成“不过滤”，
+    // 否则会把别的会话里正在运行的请求显示到首页（串会话）。
+    if (!card || !threadId) {
+      alunixaXProxyStatusHide();
+      return;
+    }
+    const visibleRequests = alunixaXProxyStatusState.requests.filter(
+      (item) => alunixaXProxyStatusNormalizeThreadId(item?.threadId) === threadId,
+    );
+    const request = visibleRequests[0];
+    if (!request) {
+      alunixaXProxyStatusHide();
+      return;
+    }
+    const node = alunixaXProxyStatusEnsureNode(card);
+    if (!node) return;
+    const text = alunixaXProxyStatusText();
+    const phase = String(request.phase || "");
+    const retries = Number(request.autoRetries) || 0;
+    const attempts = Number(request.attempts) || 0;
+    let label = text.fallback;
+    if (phase === "requesting") label = text.requesting;
+    else if (phase === "waiting") label = text.waiting;
+    else if (phase === "retrying") label = text.retrying(Math.max(1, retries));
+    else if (phase === "generating") label = text.generating;
+    else if (retries > 0) label = text.retrying(retries);
+
+    const attemptDetails = Array.isArray(request.attemptDetails) ? request.attemptDetails : [];
+    const lastAttempt = attemptDetails.length ? attemptDetails[attemptDetails.length - 1] : null;
+    const lastErrorCode = String(lastAttempt?.code || "").trim();
+    const lastErrorMessage = String(lastAttempt?.message || "").trim();
+    const lastError = lastErrorCode || lastErrorMessage.slice(0, 80);
+
+    const meta = [];
+    if (request.model) meta.push(String(request.model));
+    const startedAtMs = Number(request.startedAtMs) || 0;
+    if (startedAtMs > 0) meta.push(alunixaXProxyStatusFormatDuration(alunixaXProxyStatusState.nowMs - startedAtMs));
+    const estimated = Number(request.estimatedOutputTokens) || 0;
+    if (phase === "generating" && estimated > 0) meta.push(`~${estimated > 999 ? `${(estimated / 1000).toFixed(1)}k` : estimated} tok`);
+    else if (attempts > 1) meta.push(`第 ${attempts} 次`);
+    if (visibleRequests.length > 1) meta.push(`+${visibleRequests.length - 1}`);
+
+    node.dataset.hidden = "false";
+    node.dataset.phase = phase || "requesting";
+    node.setAttribute("aria-label", text.aria);
+    node.replaceChildren();
+    const dot = document.createElement("span");
+    dot.className = "alunixa-x-proxy-dot";
+    const phaseNode = document.createElement("span");
+    phaseNode.className = "alunixa-x-proxy-phase";
+    phaseNode.textContent = label;
+    node.append(dot, phaseNode);
+    if (meta.length) {
+      const metaNode = document.createElement("span");
+      metaNode.className = "alunixa-x-proxy-meta";
+      metaNode.textContent = meta.join(" · ");
+      node.appendChild(metaNode);
+    }
+    if (lastError) {
+      const errorNode = document.createElement("span");
+      errorNode.className = "alunixa-x-proxy-error";
+      errorNode.textContent = `${text.lastError} ${lastError}`;
+      errorNode.title = lastErrorMessage || lastErrorCode;
+      node.appendChild(errorNode);
+    }
+  }
+
+  async function alunixaXProxyStatusPostWithTimeout() {
+    // 桥接挂死时 __codexSessionDeleteBridge 的 Promise 可能永远不 settle。
+    // 不设超时会让 inFlight 永久为 true，状态条从此不再刷新（只能重启恢复）。
+    let timer = 0;
+    try {
+      return await Promise.race([
+        postJson("/proxy-status", {}),
+        new Promise((resolve) => {
+          timer = window.setTimeout(
+            () => resolve({ status: "failed", message: "桥接请求超时", timeout: true }),
+            2500,
+          );
+        }),
+      ]);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  async function alunixaXProxyStatusRefresh() {
+    if (alunixaXProxyStatusState.disposed || alunixaXProxyStatusState.inFlight) return;
+    if (document.hidden) return;
+    alunixaXProxyStatusState.inFlight = true;
+    try {
+      const result = await alunixaXProxyStatusPostWithTimeout();
+      if (result?.status === "ok" && Array.isArray(result.requests)) {
+        alunixaXProxyStatusState.requests = result.requests;
+        alunixaXProxyStatusState.failures = 0;
+      } else if (result?.timeout) {
+        // 让看门狗把桥接判定为失效并重注入；桥恢复后下一轮轮询自动接上。
+        recordCodexPlusBridgeFailure();
+        throw new Error("proxy-status bridge timeout");
+      }
+    } catch {
+      alunixaXProxyStatusState.failures += 1;
+    } finally {
+      alunixaXProxyStatusState.inFlight = false;
+    }
+    if (!alunixaXProxyStatusState.disposed) alunixaXProxyStatusRender();
+  }
+
+  alunixaXProxyStatusInstallStyle();
+  alunixaXProxyStatusRender();
+  alunixaXProxyStatusState.pollTimer = window.setInterval(
+    () => void alunixaXProxyStatusRefresh(),
+    alunixaXProxyStatusPollMs,
+  );
+  alunixaXProxyStatusState.tickTimer = window.setInterval(() => {
+    alunixaXProxyStatusState.nowMs = Date.now();
+    alunixaXProxyStatusRender();
+  }, alunixaXProxyStatusTickMs);
+  void alunixaXProxyStatusRefresh();
+
+  window.__alunixaXProxyRequestStatusRuntime = {
+    refresh: alunixaXProxyStatusRefresh,
+    dispose() {
+      alunixaXProxyStatusState.disposed = true;
+      window.clearInterval(alunixaXProxyStatusState.pollTimer);
+      window.clearInterval(alunixaXProxyStatusState.tickTimer);
+      alunixaXProxyStatusState.node?.remove();
+      alunixaXProxyStatusState.node = null;
+      document.getElementById(alunixaXProxyStatusStyleId)?.remove();
+    },
+  };
   function syncActionGroupsLayout(force = false) {
     syncActionGroupLayouts(sessionRows().map(row => ({
       row, group: actionGroupFromRow(row),
@@ -17574,6 +18067,16 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
     return root ? alunixaXDictationEditor(root) : null;
   }
 
+  function alunixaXDictationGlobalEditor() {
+    const active = document.activeElement?.closest?.('[data-codex-composer-root], [data-composer-surface-variant], form');
+    const activeEditor = active ? alunixaXDictationEditor(active) : null;
+    if (activeEditor) return activeEditor;
+    return [...document.querySelectorAll('[data-codex-composer-root], [data-composer-surface-variant], form')]
+      .filter((root) => visibleElement(root) && root.getAttribute('data-composer-placement') !== 'home')
+      .map((root) => alunixaXDictationEditor(root))
+      .find(Boolean) || null;
+  }
+
   async function loadCodexPlusDictationNativeApi() {
     if (alunixaXDictation.nativeApiPromise) return alunixaXDictation.nativeApiPromise;
     alunixaXDictation.nativeApiPromise = loadOptionalCodexAppModule("app-initial-").then((module) => {
@@ -17688,9 +18191,12 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
 
   async function startCodexPlusDictation(footer) {
     if (!alunixaXDictationEnabled() || alunixaXDictation.phase !== "idle") return;
-    const editor = alunixaXDictationScope(footer) && alunixaXDictationEditor(alunixaXDictationScope(footer));
+    const editor = footer
+      ? alunixaXDictationScope(footer) && alunixaXDictationEditor(alunixaXDictationScope(footer))
+      : alunixaXDictationGlobalEditor();
     if (!editor) { showToast("无法找到可编辑的 Codex 输入框", null); return; }
-    if (footer.getAttribute("data-dictation-view")) { showToast("请先结束原生语音输入", null); return; }
+    const footerView = footer || editor.closest?.('.composer-footer, [data-composer-footer-responsive]');
+    if (footerView?.getAttribute("data-dictation-view")) { showToast("请先结束原生语音输入", null); return; }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder !== "function") {
       showToast("当前环境不支持麦克风录音", null); return;
     }
@@ -18101,6 +18607,14 @@ const capacityAutoRetryIntervalCeilingSeconds = 600;
       // 在录音期间，Enter 先结束转写再发送，不能让原生输入框先提交旧草稿。
       event.preventDefault(); event.stopImmediatePropagation();
       if (alunixaXDictation.phase !== "requesting") stopCodexPlusDictation("send");
+    }
+  };
+  window.__alunixaXDictationGlobalToggle = () => {
+    if (alunixaXDictation.phase === "recording") stopCodexPlusDictation("insert");
+    else if (alunixaXDictation.phase === "idle") void startCodexPlusDictation(null);
+    else if (["error", "result"].includes(alunixaXDictation.phase)) {
+      cancelCodexPlusDictation();
+      void startCodexPlusDictation(null);
     }
   };
   document.addEventListener("keydown", alunixaXDictationKeyHandler, true);

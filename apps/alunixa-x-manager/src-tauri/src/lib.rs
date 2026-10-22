@@ -1,6 +1,7 @@
 mod agent_collaboration_commands;
 mod auto_takeover;
 pub mod commands;
+mod global_dictation;
 pub mod install;
 mod restored_operations;
 mod runtime_health;
@@ -71,6 +72,10 @@ pub fn run() {
         );
     }
     let show_update = commands::startup_should_show_update();
+    let autostart = std::env::args().any(|arg| arg == "--autostart");
+    let start_minimized = autostart && alunixa_x_core::watcher::watcher_start_minimized();
+    let start_codex_at_login = autostart && alunixa_x_core::watcher::watcher_start_codex();
+    let start_codex_on_open = !autostart && alunixa_x_core::watcher::watcher_start_codex_on_open();
     let app_result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -82,8 +87,8 @@ pub fn run() {
             let mut main_window_builder =
                 tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App(url.into()))
                     .title("Alunixa X")
-                    .visible(true)
-                    .focused(true)
+                    .visible(!start_minimized)
+                    .focused(!start_minimized)
                     .inner_size(1180.0, 820.0)
                     .min_inner_size(960.0, 720.0);
             if let Some(icon) = app.default_window_icon().cloned() {
@@ -91,6 +96,9 @@ pub fn run() {
             }
             let main_window = main_window_builder.build()?;
             install_tray(app)?;
+            if start_minimized {
+                set_manager_activation_policy(app.handle(), false);
+            }
             let navigation_app = app.handle().clone();
             alunixa_x_launcher::set_navigation_handler(move |_payload| {
                 let app = navigation_app.clone();
@@ -103,9 +111,18 @@ pub fn run() {
             start_window_activation_listener(app.handle().clone());
             commands::start_weixin_connect_from_saved_settings();
             register_main_window_events(main_window);
-            commands::resume_existing_codex_background(app.handle().clone());
+            commands::resume_existing_codex_background(
+                app.handle().clone(),
+                start_codex_at_login || start_codex_on_open,
+            );
             // 自动接管官方 App（默认关闭）：设置里开着才起守护线程。
             auto_takeover::start_supervisor();
+            if let Err(error) = global_dictation::apply_config() {
+                let _ = alunixa_x_core::diagnostic_log::append_diagnostic_log(
+                    "dictation.global_hotkey_start_failed",
+                    serde_json::json!({ "message": error.to_string() }),
+                );
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -128,8 +145,12 @@ pub fn run() {
             commands::repair_codex_feature_config,
             commands::inspect_agent_capabilities,
             commands::packaged_proxy_action,
+            commands::load_request_logs,
+            commands::clear_request_logs,
             commands::dictation_local_model_status,
             commands::download_dictation_local_model,
+            commands::load_global_dictation_hotkey,
+            commands::set_global_dictation_hotkey,
             commands::claude_localization_status,
             commands::claude_localization_action,
             commands::claude_localization_set_voice_input,
@@ -179,7 +200,9 @@ pub fn run() {
             commands::confirm_pending_provider_import,
             commands::dismiss_pending_provider_import,
             commands::list_local_sessions,
+            commands::list_project_sessions,
             commands::delete_local_session,
+            commands::archive_local_sessions,
             commands::load_provider_sync_targets,
             commands::repair_session_index,
             commands::load_session_index_repair_report,
@@ -198,6 +221,7 @@ pub fn run() {
             commands::reload_user_scripts,
             commands::install_market_script,
             commands::set_user_scripts_enabled,
+            commands::set_user_scripts_skip_next_start,
             commands::set_user_script_enabled,
             commands::delete_user_script,
             commands::refresh_skill_catalog,
@@ -218,6 +242,13 @@ pub fn run() {
             commands::perform_update,
             commands::load_watcher_state,
             commands::set_watcher_enabled,
+            commands::set_watcher_start_minimized,
+            commands::set_watcher_start_codex,
+            commands::set_watcher_start_codex_on_open,
+            commands::load_relay_proxy,
+            commands::set_relay_proxy,
+            commands::load_relay_feature,
+            commands::set_relay_feature,
             // 自动接管官方 App：前端 invoke 找不到命令时是运行期静默失败，
             // 没有编译期兜底，所以这三个必须注册在这里（契约测试会守）。
             commands::load_auto_takeover_state,
@@ -228,6 +259,10 @@ pub fn run() {
             commands::scan_agent_cache,
             commands::clean_agent_cache,
             commands::copy_diagnostics,
+            commands::export_settings,
+            commands::preview_import_settings,
+            commands::set_settings_path,
+            commands::reset_settings_path,
             commands::reset_settings,
             commands::reset_image_overlay_settings,
             commands::relay_status,
@@ -244,6 +279,7 @@ pub fn run() {
             commands::upsert_context_entry,
             commands::delete_context_entry,
             commands::parse_mcp_entry,
+            commands::inspect_mcp_startup,
             commands::build_mcp_entry,
             commands::preview_mcp_servers_json,
             commands::import_mcp_servers_json,
@@ -426,6 +462,11 @@ fn register_main_window_events<R: tauri::Runtime>(window: tauri::WebviewWindow<R
             }
 
             api.prevent_close();
+            // Windows 上 Tao 的 VISIBLE 标记可能停在 false（窗口曾被 Win32 直接显示
+            // 或隐藏），此时 hide() 会被框架当成重复操作跳过，窗口既不关闭也不隐藏
+            // （issue #1542）。先强制同步为可见再隐藏，保证 hide() 真正执行。
+            #[cfg(windows)]
+            let _ = close_event_window.show();
             let _ = close_event_window.hide();
             set_manager_activation_policy(&close_event_app, false);
         }

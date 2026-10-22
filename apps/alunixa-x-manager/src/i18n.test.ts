@@ -93,12 +93,13 @@ test("Russian backend patterns preserve dynamic diagnostic content", () => {
   assert.equal(r.api.t("已从「provider-a」获取 21 个模型。"), "От «provider-a» получено моделей: 21.");
 });
 
-test("language change persists once and reloads, without changing the current module snapshot", () => {
+test("language change persists and updates all three languages without reloading", () => {
   const r = runtime("en");
   assert.equal(r.api.setLanguage("ru"), true);
   assert.equal(r.stored, "ru");
-  assert.equal(r.reloads, 1);
-  assert.equal(r.api.getLanguage(), "en");
+  assert.equal(r.reloads, 0);
+  assert.equal(r.api.getLanguage(), "ru");
+  assert.equal(r.api.t("概览"), "Обзор");
   assert.equal(runtime(r.stored).api.t("概览"), "Обзор");
 });
 
@@ -111,7 +112,8 @@ test("unknown and missing saved values retain the existing Chinese default", () 
 test("blocked storage does not reload and discard unsaved edits", () => {
   const r = runtime("en", true);
   assert.equal(r.api.getLanguage(), "zh");
-  assert.equal(r.api.setLanguage("ru"), false);
+  assert.equal(r.api.setLanguage("ru"), true);
+  assert.equal(r.api.t("概览"), "Обзор");
   assert.equal(r.reloads, 0);
   assert.equal(r.stored, "en");
 });
@@ -129,8 +131,8 @@ test("manager language is separate from native Codex locale and updates tray for
   assert.match(app, /aria-label=\{t\("界面语言"\)\}/);
   assert.match(app, /showLabel: t\("显示窗口"\)/);
   assert.match(app, /quitLabel: t\("退出"\)/);
-  assert.match(app, /isLanguage\(language\) && window\.confirm\([\s\S]*?\) setLanguage\(language\)/);
-  assert.match(app, /切换语言会重新加载管理器，未保存的编辑将丢失。已保存的配置和 Codex 语言不受影响。/);
+  assert.match(app, /if \(isLanguage\(language\)\) setLanguage\(language\)/);
+  assert.match(app, /useSyncExternalStore\(subscribeLanguage, getLanguage, getLanguage\)/);
   assert.match(main, /document\.documentElement\.lang = getLocale\(\)/);
   assert.doesNotMatch(source, /codexAppForceChineseLocale|update_settings|config\.toml/);
   assert.doesNotMatch(app, /toLocaleString\("zh-CN"\)|toggleLanguage/);

@@ -64,6 +64,7 @@ function saveHarness(results: Array<"ok" | "failed" | "null" | "throw">) {
     isSuccessStatus: (s: string) => s === "ok",
     showNotice: (...args: unknown[]) => { notices.push(args); },
     t: (s: string) => s,
+    stringifyError: String,
     run: (f: () => unknown) => f(),
     call: async (_: string, args: { settings: unknown; expectedRevision: string }) => {
       calls.push(structuredClone(args));

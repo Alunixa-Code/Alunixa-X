@@ -113,7 +113,23 @@ pub fn try_acquire_provider_sync_lifecycle_guard(
     let home = codex_home
         .map(Path::to_path_buf)
         .unwrap_or_else(default_codex_home_dir);
-    acquire_lock_inner(&home.join("tmp/provider-sync.lock"), false)
+    let lock_path = home.join("tmp/provider-sync.lock");
+    // Windows 上 `拒绝访问 (os error 5)` 既可能是锁被占用，也可能是
+    // `%CODEX_HOME%\tmp` 的 ACL 不允许创建文件（#2612）。原始错误不带路径，
+    // 用户与管理器都无从判断，这里补上实际锁路径与父目录。
+    acquire_lock_inner(&lock_path, false).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            format!(
+                "{error} (provider sync lock: {}; parent: {})",
+                lock_path.display(),
+                lock_path
+                    .parent()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default()
+            ),
+        )
+    })
 }
 
 /// 读取 provider sync 锁的当前状态，不获取也不修改它。
@@ -4435,7 +4451,7 @@ fn backup_sqlite_database(source: &Path, root: &Path, relative: &Path) -> anyhow
         anyhow::bail!("SQLite backup integrity check failed: {integrity}");
     }
     drop(target_db);
-    OpenOptions::new().write(true).open(&target)?.sync_all()?;
+    crate::backup::sync_file(&target)?;
     crate::backup::sync_directory(parent)?;
     Ok(())
 }

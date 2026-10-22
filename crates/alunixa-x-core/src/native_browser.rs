@@ -346,6 +346,8 @@ fn plain_path(path: &Path) -> Result<()> {
 // Open root-first with OPEN_REPARSE_POINT so no checked parent can become a junction.
 fn pin_parents(path: &Path) -> Result<Vec<File>> {
     plain_path(path)?;
+    // 非 Windows 上下面这段 cfg 块整段编译掉，guards 从不被 push。
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut guards = Vec::new();
     #[cfg(windows)]
     {

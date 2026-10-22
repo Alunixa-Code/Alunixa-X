@@ -77,6 +77,8 @@ pub(super) fn preserve_unknown_settings_fields(
         "customHeaders",
         "standardOpenaiProtocol",
         "webSearchHistoryCompat",
+        "trustUpstreamCatalogLite",
+        "strictResponsesReasoning",
         "anthropicAuthHeader",
         "anthropicMaxTokens",
         "anthropicPromptCache",
