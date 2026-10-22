@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import { getLocale } from "./i18n";
+import { getLocale, subscribeLanguage } from "./i18n";
 import "./styles.css";
 
 /* ── Bundled fonts (offline, no Google Fonts request) ──
@@ -12,6 +12,7 @@ import "@fontsource/jetbrains-mono";
 
 const app = document.getElementById("app");
 document.documentElement.lang = getLocale();
+subscribeLanguage(() => { document.documentElement.lang = getLocale(); });
 
 if (app instanceof HTMLElement) {
   createRoot(app).render(<App />);

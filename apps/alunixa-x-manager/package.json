@@ -10,7 +10,8 @@
     "check": "tsc --noEmit -p tsconfig.json",
     "test": "node --experimental-strip-types --test \"src/*.test.ts\"",
     "vite:dev": "vite --host 127.0.0.1 --port 1420",
-    "vite:build": "vite build"
+    "vite:build": "vite build",
+    "web:build": "vite build --config web-preview/vite.config.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

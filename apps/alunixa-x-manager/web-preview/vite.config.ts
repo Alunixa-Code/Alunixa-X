@@ -18,7 +18,7 @@ export default defineConfig({
     ],
   },
   build: {
-    outDir: path.resolve(root, "../../../site/manager-preview"),
+    outDir: path.resolve(root, "../../../docs/manager-preview"),
     emptyOutDir: true,
   },
   server: {

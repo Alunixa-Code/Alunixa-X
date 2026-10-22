@@ -117,7 +117,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
         _ => return reject("input must be text or structured items"),
     };
     let mut calls = BTreeSet::new();
-    let mut outputs = BTreeSet::new();
+    let mut outputs = BTreeMap::new();
     for item in items {
         let kind = item
             .get("type")
@@ -172,7 +172,13 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                 } else {
                     call.get("name").and_then(Value::as_str).unwrap_or("")
                 };
-                if id.is_empty() || name.is_empty() || !calls.insert(id.to_string()) {
+                if id.is_empty() || name.is_empty() {
+                    return reject("missing or duplicate tool call identity");
+                }
+                if outputs.remove(id).is_some() {
+                    calls.remove(id);
+                }
+                if !calls.insert(id.to_string()) {
                     return reject("missing or duplicate tool call identity");
                 }
                 if kind != "custom_tool_call" {
@@ -185,9 +191,17 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
             }
             "tool_search_output" => {
                 let id = item.get("call_id").and_then(Value::as_str).unwrap_or("");
-                if (wire != "anthropic" && !calls.contains(id)) || !outputs.insert(id.to_string()) {
+                if wire != "anthropic" && !calls.contains(id) {
                     return reject("orphan or duplicate tool search output");
                 }
+                let value = item.get("tools").cloned().unwrap_or(Value::Null);
+                if let Some(previous) = outputs.get(id) {
+                    if previous != &value {
+                        return reject("conflicting duplicate tool search output");
+                    }
+                    continue;
+                }
+                outputs.insert(id.to_string(), value);
                 let Some(tools) = item.get("tools").and_then(Value::as_array) else {
                     return reject("tool search output tools must be an array");
                 };
@@ -209,7 +223,7 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .or_else(|| item.pointer("/content/tool_use_id"))
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                if (wire != "anthropic" && !calls.contains(id)) || !outputs.insert(id.to_string()) {
+                if wire != "anthropic" && !calls.contains(id) {
                     return reject(
                         "orphan or duplicate tool output; matching call history is required",
                     );
@@ -219,6 +233,13 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
                     .or_else(|| item.pointer("/content/content"))
                     .or_else(|| item.get("content"))
                     .unwrap_or(&Value::Null);
+                if let Some(previous) = outputs.get(id) {
+                    if previous != content {
+                        return reject("conflicting duplicate tool output");
+                    }
+                    continue;
+                }
+                outputs.insert(id.to_string(), content.clone());
                 if content.is_array() {
                     validate_content(content, wire)?;
                     if wire == "gemini"
@@ -260,7 +281,8 @@ pub(super) fn validate_request(body: &Value, wire: &str) -> anyhow::Result<()> {
             _ => return reject(&format!("unsupported input item type {kind}")),
         }
     }
-    if wire != "anthropic" && calls != outputs {
+    let output_calls: BTreeSet<_> = outputs.keys().cloned().collect();
+    if wire != "anthropic" && calls != output_calls {
         return reject(
             "unanswered tool calls require their original results; history was not discarded",
         );

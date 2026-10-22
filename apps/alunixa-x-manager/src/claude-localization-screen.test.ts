@@ -23,6 +23,7 @@ function harness() {
     React: { createElement: (type: string, props: object, ...children: unknown[]) => ({ type, props: { ...props, children } }) },
     ...Object.fromEntries(["Panel", "CardHead", "CardContent", "Button", "Info", "RefreshCw", "ToggleVisual", "PackageOpen", "Play"].map((name) => [name, name])),
     t: (text: string) => text,
+    tf: (text: string, args: unknown[]) => text.replace(/\{(\d+)\}/g, (_match, index) => String(args[Number(index)])),
     stringifyError: String,
     invoke: (command: string) => new Promise((resolve) => calls.push({ command, resolve })),
     useState: (initial: unknown) => {

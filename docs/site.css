@@ -652,6 +652,17 @@ button {
 }
 .screenshot-controls button[aria-pressed="true"] { border-color: #92adff; background: rgba(125, 150, 230, .16); }
 .screenshot-controls button:focus-visible { outline: 2px solid #b4c4ff; outline-offset: 3px; }
+.manager-preview-frame {
+  display: block;
+  width: 100%;
+  height: 760px;
+  max-height: 85vh;
+  min-height: 560px;
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #101116;
+}
 @media (max-width: 600px) {
   .screenshot-track { aspect-ratio: 4 / 4; }
   .screenshot-track figure { grid-template-rows: minmax(0, 1fr) 82px; }

@@ -1965,7 +1965,6 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             channel_requests_per_minute:
                 alunixa_x_core::settings::default_channel_requests_per_minute(),
             cooldown_error_statuses: alunixa_x_core::settings::default_cooldown_error_statuses(),
-            ..RelayProfile::default()
             trust_upstream_catalog_lite: false,
             strict_responses_reasoning: false,
             anthropic_auth_header: String::new(),
@@ -1973,6 +1972,7 @@ async fn launch_starts_helper_when_chat_protocol_proxy_is_enabled() {
             anthropic_prompt_cache: true,
             anthropic_impersonate_claude_code: false,
             anthropic_thinking_mode: String::new(),
+            ..RelayProfile::default()
         }],
         active_relay_id: "relay-chat".to_string(),
         ..BackendSettings::default()

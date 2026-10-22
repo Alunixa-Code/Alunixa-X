@@ -12068,7 +12068,7 @@ mod response_compatibility_tests {
                 {"type": "function_call", "call_id": "call_1", "name": "exec_command",
                  "arguments": "{\"cmd\":\"pwd\"}"},
                 {"type": "function_call_output", "call_id": "call_1", "output": "first"},
-                {"type": "function_call_output", "call_id": "call_1", "output": "second"}
+                {"type": "function_call_output", "call_id": "call_1", "output": "first"}
             ]
         });
         let converted = responses_to_chat_completions(body).unwrap();
@@ -12080,6 +12080,21 @@ mod response_compatibility_tests {
         assert_eq!(tool_messages.len(), 1, "同一 call_id 的输出只能保留一条");
         assert_eq!(tool_messages[0]["tool_call_id"], "call_1");
         assert_eq!(tool_messages[0]["content"], "first");
+    }
+
+    #[test]
+    fn conflicting_tool_outputs_are_never_silently_dropped() {
+        let body = json!({"model":"fixture","input":[
+            {"type":"function_call","call_id":"call_1","name":"shell","arguments":"{}"},
+            {"type":"function_call_output","call_id":"call_1","output":"first"},
+            {"type":"function_call_output","call_id":"call_1","output":"different"}
+        ]});
+        assert!(
+            responses_to_chat_completions(body)
+                .unwrap_err()
+                .to_string()
+                .contains("conflicting duplicate tool output")
+        );
     }
 
     #[test]

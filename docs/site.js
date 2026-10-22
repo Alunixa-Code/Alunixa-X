@@ -2,6 +2,8 @@ const repository = "Alunixa-Code/Alunixa-X";
 const releasesUrl = `https://github.com/${repository}/releases/latest`;
 
 const translations = {
+  "交互预览": "Interactive preview",
+  "Alunixa X 交互预览": "Alunixa X interactive preview",
   "高级多模型配置": "Advanced model configuration",
   "独立协议、上下文窗口和自动压缩阈值": "Independent protocols, context windows and compaction thresholds",
   "外部 Agent 协作": "External agent collaboration",

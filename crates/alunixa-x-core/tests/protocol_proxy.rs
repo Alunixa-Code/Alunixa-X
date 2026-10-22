@@ -7748,7 +7748,7 @@ async fn proxy_auto_retry_does_not_retry_client_errors() {
 
 fn proxy_sse_response(body: &str) -> String {
     format!(
-        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: text/event-stream\r\n\r\n{body}",
+        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}",
         body.len()
     )
 }

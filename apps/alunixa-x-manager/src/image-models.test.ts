@@ -53,6 +53,6 @@ test("image page is independently persisted and accessible without a mouse", () 
   assert.ok(!screen.includes('"save_settings"'));
   assert.ok(!screen.includes("localStorage"));
   const app = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-  assert.ok(app.includes('{ id: "imageModels", label: t("生图模型")'));
+  assert.ok(app.includes('{ id: "imageModels", get label() { return t("生图模型"); }'));
   assert.ok(app.includes('imageModelsPending.current.dirty'));
 });

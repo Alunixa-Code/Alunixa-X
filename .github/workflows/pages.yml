@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "apps/alunixa-x-manager/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -41,6 +42,10 @@ jobs:
           node-version: "22"
       - name: Validate site
         run: node --test docs/site.test.cjs
+      - name: Install manager dependencies
+        run: npm ci --prefix apps/alunixa-x-manager
+      - name: Build interactive manager preview
+        run: npm --prefix apps/alunixa-x-manager run web:build
       - uses: actions/configure-pages@v5
         if: steps.pages.outputs.configured == 'true'
       - uses: actions/upload-pages-artifact@v3

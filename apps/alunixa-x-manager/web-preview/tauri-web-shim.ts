@@ -11,7 +11,7 @@ const ok = <T extends Record<string, unknown>>(payload: T = {} as T): CommandRes
 });
 
 const demoSettings = {
-  revision: "web-preview",
+  revision: "preview-file-1",
   codexAppPath: "/Applications/Codex.app",
   codexAppAutoTakeover: false,
   codexAppAutoTakeoverWhenActive: "defer",
@@ -152,7 +152,7 @@ const demoSettings = {
 
 const overview = ok({
   codex_app: { status: "found", path: "/Applications/Codex.app" },
-  codex_version: "1.10.0",
+  codex_version: "1.0.47",
   silent_shortcut: { status: "installed", path: null },
   management_shortcut: { status: "installed", path: null },
   latest_launch: null,
@@ -162,7 +162,7 @@ const overview = ok({
     debugger: { status: "disconnected", address: null, message: "等待 Codex 连接" },
     protocol_conversion_enabled: true,
   },
-  current_version: "1.10.1",
+  current_version: "1.0.47",
   update_status: "up_to_date",
   settings_path: "演示模式",
   logs_path: "演示模式",
@@ -177,7 +177,8 @@ const tools = ok({
   activeTool: "codex",
 });
 
-const settingsResult = () => ok({ revision: "web-preview", settings: demoSettings, settings_path: "演示模式", user_scripts: { enabled: true, skip_next_start: false, scripts: [] } });
+let previewRevision = 1;
+const settingsResult = () => ok({ revision: `preview-transaction-${previewRevision}`, settings: structuredClone(demoSettings), settings_path: "演示模式", user_scripts: { enabled: true, skip_next_start: false, scripts: [] } });
 
 export async function invoke<T = unknown>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   switch (command) {
@@ -192,7 +193,13 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "set_settings_path":
     case "reset_settings_path":
     case "refresh_user_script_inventory":
-      if (command === "save_settings" && args.settings) return ok({ revision: "web-preview", settings: args.settings, settings_path: "演示模式", user_scripts: { enabled: true, skip_next_start: false, scripts: [] } }) as T;
+      if (command === "save_settings" && args.settings) {
+        const draft = args.settings as typeof demoSettings;
+        if (args.expectedRevision !== `preview-transaction-${previewRevision}` || draft.revision !== demoSettings.revision)
+          return {status:"failed",message:"settings_revision_conflict: reload the preview"} as T;
+        previewRevision++;
+        Object.assign(demoSettings, structuredClone(draft), {revision:`preview-file-${previewRevision}`});
+      }
       return settingsResult() as T;
     case "relay_status": return ok({ authenticated: true, authSource: "演示", accountLabel: "Web preview", configPath: "演示模式", configured: true, requiresOpenaiAuth: false, hasBearerToken: true, backupPath: null }) as T;
     case "read_relay_files": return ok({ configPath: "演示模式", authPath: "演示模式", configContents: "[model_providers.custom]", authContents: "{}" }) as T;
@@ -202,7 +209,7 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "load_pending_dream_skin_community": return ok({ versionId: "" }) as T;
     case "load_watcher_state": return ok({ enabled: false, running: false, status: "disabled", message: "演示模式" }) as T;
     case "load_auto_takeover_state": return ok({ running: false, enabled: false, message: "演示模式" }) as T;
-    case "update_check": return ok({ currentVersion: "1.10.1", latestVersion: "1.10.1", updateAvailable: false }) as T;
+    case "update_check": return ok({ currentVersion: "1.0.47", latestVersion: "1.0.47", updateAvailable: false }) as T;
     case "refresh_script_market": return ok({ market: { status: "ok", message: "演示模式", scripts: [] }, user_scripts: { enabled: true, skip_next_start: false, scripts: [] } }) as T;
     case "load_ccs_providers": return ok({ providers: [] }) as T;
     case "weixin_connect_status": return ok({ state: "disconnected", message: "演示模式", accountId: "", hasToken: false, lastPeerId: "", lastMessageAtMs: 0, processedMessages: 0 }) as T;
@@ -210,6 +217,11 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "list_local_sessions": return ok({ dbPath: "演示模式", dbPaths: [], sessions: [], offset: 0, limit: 50, hasMore: false, totalCount: 0 }) as T;
     case "load_relay_environment":
     case "check_relay_environment": return ok({ clashVergeTun: { enabled: false, configPath: null }, proxyEnvironment: { variables: [] }, codexEnvFile: { exists: false, path: "" } }) as T;
+    case "load_request_logs": return ok({ entries: [] }) as T;
+    case "load_image_models": return ok({models:[],revision:"preview-images"}) as T;
+    case "inspect_agent_capabilities": return {revision:demoSettings.revision, configPath:"preview/config.toml",
+      cliPath:null,scope:"preview",overrides:[],entries:[]} as T;
+    case "load_global_dictation_hotkey": return ok({enabled:false,hotkey:"Ctrl+Alt+Space"}) as T;
     default: return ok() as T;
   }
 }

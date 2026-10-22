@@ -39,6 +39,14 @@ pub fn state_dir_override() -> Option<PathBuf> {
     state_dir_override_from(std::env::var_os(STATE_DIR_ENV).as_deref())
 }
 
+fn has_isolated_state_dir() -> bool {
+    state_dir_override().is_some()
+        || multi_state_dir_from_env(
+            std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").as_deref(),
+            std::env::var_os("ALUNIXA_X_STATE_HOME").as_deref(),
+        ).is_some()
+}
+
 pub fn default_app_state_dir() -> PathBuf {
     // Windows Known Folder APIs ignore HOME. A multi-worker must never borrow
     // the main manager's provider, launch status or diagnostic files.
@@ -65,7 +73,7 @@ fn default_state_base_dir() -> PathBuf {
 }
 
 pub fn settings_path_pointer_path() -> PathBuf {
-    default_state_base_dir().with_file_name(SETTINGS_PATH_POINTER_FILE)
+    default_state_base_dir().join(SETTINGS_PATH_POINTER_FILE)
 }
 
 fn read_settings_path_pointer() -> Option<PathBuf> {
@@ -78,7 +86,7 @@ fn read_settings_path_pointer() -> Option<PathBuf> {
 pub fn set_settings_path_pointer(target: Option<&Path>) -> std::io::Result<()> {
     // 指针文件是全局的，而设置了状态目录覆盖的多开实例读取时会忽略它：
     // 在多开实例里写入只会改掉主实例的配置路径，自己却不生效。
-    if state_dir_override().is_some() {
+    if has_isolated_state_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "多开实例使用独立的状态目录，不支持修改配置文件路径；请在主实例中修改",
@@ -104,7 +112,7 @@ pub fn default_settings_path() -> PathBuf {
     if let Some(path) = settings_path_for_tests() {
         return path;
     }
-    if state_dir_override().is_none()
+    if !has_isolated_state_dir()
         && let Some(path) = read_settings_path_pointer()
     {
         return path;
@@ -173,7 +181,11 @@ mod tests {
     fn settings_path_pointer_accepts_only_absolute_targets() {
         let dir = tempfile::tempdir().unwrap();
         let pointer = dir.path().join("settings.path");
-        fs::write(&pointer, "/tmp/codex-settings.json\n").unwrap();
+        fs::write(
+            &pointer,
+            format!("{}\n", dir.path().join("codex-settings.json").display()),
+        )
+        .unwrap();
         let absolute = fs::read_to_string(&pointer).unwrap();
         assert!(PathBuf::from(absolute.trim()).is_absolute());
 

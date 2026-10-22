@@ -61,31 +61,35 @@ with fixture.server_url() as url, sync_playwright() as playwright:
         checkbox = page.get_by_label("会话项目移动", exact=True)
         initial = checkbox.is_checked()
         checkbox.locator("..").click()
+        page.get_by_role("button", name="保存增强设置", exact=True).click()
         page.wait_for_function("window.__fixtureSaves.length===1")
         expect(checkbox).to_be_checked() if not initial else expect(checkbox).not_to_be_checked()
+        page.keyboard.press("Escape")
         checkbox.locator("..").click()
+        page.get_by_role("button", name="保存增强设置", exact=True).click()
         page.wait_for_function("window.__fixtureSaves.length===2")
         requests = page.evaluate("window.__saveRequests")
         assert [request["expectedRevision"] for request in requests] == ["transaction-1", "transaction-2"]
         assert [request["settings"]["revision"] for request in requests] == ["file-1", "file-2"]
         assert len(page.evaluate("window.__fixtureSettings.relayProfiles")) == 3
 
+        page.keyboard.press("Escape")
         page.get_by_label("Instructions 提示词", exact=True).locator("..").click()
         page.get_by_label("提示词正文", exact=True).fill("draft survives conflict and language changes")
         identity = page.evaluate("window.__pageIdentity")
         for locale in ["en", "ru", "zh"]:
             page.locator(".rail-language-select").select_option(locale)
             assert page.evaluate("window.__pageIdentity") == identity
-        expect(page.get_by_label("提示词正文", exact=True)).to_have_value(
-            "draft survives conflict and language changes")
+        page.wait_for_function("""() => [...document.querySelectorAll('textarea')].some(
+            node => node.value === 'draft survives conflict and language changes')""")
         page.evaluate("""() => {
           window.__transaction="external-transaction";
           window.__fixtureSettings.revision="external-file";
         }""")
         page.get_by_role("button", name="保存增强设置", exact=True).click()
         page.get_by_text("配置已被其他页面或程序修改", exact=False).wait_for()
-        expect(page.get_by_label("提示词正文", exact=True)).to_have_value(
-            "draft survives conflict and language changes")
+        page.wait_for_function("""() => [...document.querySelectorAll('textarea')].some(
+            node => node.value === 'draft survives conflict and language changes')""")
         assert len(page.evaluate("window.__fixtureSaves")) == 2
         assert page.evaluate("window.__fixtureSettings.revision") == "external-file"
         assert len(page.evaluate("window.__saveRequests")) == 3, "must not silently retry a conflict"

@@ -4706,9 +4706,10 @@ enabled = true
         updated.contains(r#"[plugins."figma@openai-curated"]"#),
         "{updated}"
     );
-    assert!(
-        !updated.contains(r#"[plugins."notion@alunixa-x-market"]"#),
-        "{updated}"
+    let parsed: toml_edit::DocumentMut = updated.parse().unwrap();
+    assert_eq!(
+        parsed["plugins"]["notion@alunixa-x-market"]["enabled"].as_bool(),
+        Some(false)
     );
 }
 
@@ -7030,7 +7031,7 @@ experimental_bearer_token = "sk-test-redacted"
 }
 
 #[test]
-fn non_utf8_live_config_keeps_non_provider_settings_and_backs_up_once() {
+fn non_utf8_live_config_never_overwrites_original_bytes_during_provider_switch() {
     // #585 回归：GBK 字节的 live config.toml 不能按「空配置」处理，否则切换供应商
     // 会悄悄删掉 MCP、沙箱、features 等非供应商设置；同一份原始内容只备份一次。
     let temp = tempfile::tempdir().unwrap();
@@ -7046,33 +7047,17 @@ fn non_utf8_live_config_keeps_non_provider_settings_and_backs_up_once() {
         ..RelayProfile::default()
     };
 
-    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
-    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
-
-    let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(config.contains("[mcp_servers.mine]"), "{config}");
-    assert!(config.contains("sandbox = \"elevated\""), "{config}");
-    assert!(config.contains("memories = true"), "{config}");
-    assert!(
-        config.contains("base_url = \"https://relay.example/v1\""),
-        "{config}"
-    );
-    let backups: Vec<_> = std::fs::read_dir(temp.path())
-        .unwrap()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .contains(".invalid-utf8-")
-        })
-        .collect();
-    assert_eq!(backups.len(), 1, "同一份原始内容只备份一次");
-    assert_eq!(
-        std::fs::read(backups[0].path()).unwrap(),
-        live,
-        "备份必须是原始字节"
-    );
+    for _ in 0..2 {
+        let error =
+            apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap_err();
+        assert!(format!("{error:#}").contains("UTF-8"));
+        assert_eq!(
+            std::fs::read(temp.path().join("config.toml")).unwrap(),
+            live
+        );
+        assert!(!temp.path().join("auth.json").exists());
+        assert!(!temp.path().join("model-catalogs").exists());
+    }
 }
 
 #[test]
@@ -7104,7 +7089,7 @@ fn official_profile_window_without_model_list_keeps_builtin_models() {
 }
 
 #[test]
-fn unparsable_live_config_does_not_block_switching_provider() {
+fn unparsable_live_config_is_preserved_instead_of_losing_unknown_settings() {
     // #2478/#2500：live config.toml 被改坏（这里表头缺右括号）时，切换供应商照常写出新配置。
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(
@@ -7121,14 +7106,11 @@ fn unparsable_live_config_does_not_block_switching_provider() {
         auth_contents: r#"{"OPENAI_API_KEY":"sk-new"}"#.to_string(),
         ..RelayProfile::default()
     };
-    apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap();
+    let error =
+        apply_relay_profile_files_to_home_with_context(temp.path(), &profile, "").unwrap_err();
+    assert!(format!("{error:#}").contains("解析"));
     let config = std::fs::read_to_string(temp.path().join("config.toml")).unwrap();
-    assert!(
-        config.contains("base_url = \"https://relay.example/v1\""),
-        "{config}"
-    );
-    assert!(
-        config.parse::<toml_edit::DocumentMut>().is_ok(),
-        "写出的配置必须可解析：{config}"
-    );
+    assert_eq!(config, "model = \"old\"\n[mcp_servers.a\ncommand = \"x\"\n");
+    assert!(!temp.path().join("auth.json").exists());
+    assert!(!temp.path().join("model-catalogs").exists());
 }

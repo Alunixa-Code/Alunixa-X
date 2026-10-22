@@ -4,7 +4,7 @@ import "../src/styles.css";
 import "@fontsource/jetbrains-mono";
 
 const previewLanguage = new URLSearchParams(window.location.search).get("lang");
-if (previewLanguage === "en" || previewLanguage === "zh") {
+if (previewLanguage === "en" || previewLanguage === "zh" || previewLanguage === "ru") {
   window.localStorage.setItem("alunixa-x-lang", previewLanguage);
 }
 

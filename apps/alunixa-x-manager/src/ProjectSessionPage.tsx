@@ -4,7 +4,6 @@ import { t, tf } from "./i18n";
 import { matchesManagementQuery, sessionGroups, type ManagedSession } from "./management-model";
 import { ManagementDrawer } from "./ManagementPages";
 import "./ManagementPages.css";
-import { t, tf } from "@/i18n";
 
 type SessionPageData = { sessions: ManagedSession[]; totalCount: number; hasMore: boolean; offset: number; limit: number };
 function Button({ children, className = "", danger, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { danger?: boolean }) {

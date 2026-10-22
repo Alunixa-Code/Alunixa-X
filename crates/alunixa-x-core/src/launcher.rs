@@ -3490,9 +3490,6 @@ async fn forward_protocol_proxy_stream(
                 if !bytes.is_empty() && first_output_at_ms.is_none() {
                     first_output_at_ms = Some(current_time_ms());
                 }
-                if !bytes.is_empty() && first_output_at_ms.is_none() {
-                    first_output_at_ms = Some(current_time_ms());
-                }
                 let converted = converter.push_bytes(&bytes);
                 stream.write_all(&converted).await?;
                 if converter.has_failed() {

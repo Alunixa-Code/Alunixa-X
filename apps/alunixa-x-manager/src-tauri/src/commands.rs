@@ -6984,7 +6984,8 @@ pub fn preview_import_settings(path: String) -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub fn set_settings_path(path: String) -> CommandResult<SettingsPayload> {
-    if alunixa_x_core::paths::state_dir_override().is_some() {
+    if alunixa_x_core::paths::state_dir_override().is_some()
+        || std::env::var("ALUNIXA_X_MULTI_INSTANCE").as_deref() == Ok("1") {
         return failed(
             "多开实例使用独立的状态目录，不支持修改配置文件路径；请在主实例中修改。",
             fallback_settings_payload(),
@@ -7063,7 +7064,8 @@ pub fn set_settings_path(path: String) -> CommandResult<SettingsPayload> {
 
 #[tauri::command]
 pub fn reset_settings_path() -> CommandResult<SettingsPayload> {
-    if alunixa_x_core::paths::state_dir_override().is_some() {
+    if alunixa_x_core::paths::state_dir_override().is_some()
+        || std::env::var("ALUNIXA_X_MULTI_INSTANCE").as_deref() == Ok("1") {
         return failed(
             "多开实例使用独立的状态目录，不支持修改配置文件路径；请在主实例中修改。",
             fallback_settings_payload(),

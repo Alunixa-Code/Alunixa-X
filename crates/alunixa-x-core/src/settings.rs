@@ -5210,6 +5210,8 @@ impl BackendSettings {
             || profile.has_model_protocols()
             || profile.web_search_history_compat_enabled()
             || profile.uses_no_auth()
+            || profile.uses_independent_proxy()
+            || profile.request_compatibility_enabled()
     }
 }
 

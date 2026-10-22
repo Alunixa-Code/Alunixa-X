@@ -31,3 +31,5 @@ XJ.md
 YHYQ.md
 .tmp/
 .aider*
+# Generated public preview is built from the manager source by Pages CI.
+/docs/manager-preview/
