@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.47：修复配置持续保存失败，同步上游 v1.10.1
+
+修复事务修订号与设置文件修订号混用导致首次、连续保存都报冲突的问题；真正并发修改仍拒绝覆盖并保留草稿。同步上游 `c541516c` 的请求日志、请求避震、会话管理、代理、听写、配置迁移和状态条重连等非广告更新，保留全部 AX 高级模型与增强功能。详见[三语发行说明](docs/releases/v1.0.47.md)及[同步验证记录](docs/reports/2026-10-22-upstream-v1101-sync.md)。
+
 ## v1.0.46：同步上游 v1.5.0 至 v1.10.0 非广告更新
 
 同步供应商命名 Key、本机配置快照、模型聚合、外部 Agent 协作、Skills 仓库、会话分页与备份、用量状态栏、Claude 与多开兼容等更新，补齐协议压缩、原始补丁和媒体启动修复。保留高级逐模型五协议/上下文/压缩、完整增强、独立 Anthropic 转换、独立生图和俄语，不导入广告。详见[三语发行说明](docs/releases/v1.0.46.md)和[范围与验证记录](docs/reports/2026-10-21-upstream-v110-sync.md)。

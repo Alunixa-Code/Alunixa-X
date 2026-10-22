@@ -222,6 +222,8 @@ export async function invoke<T = unknown>(command: string, args: Record<string, 
     case "inspect_agent_capabilities": return {revision:demoSettings.revision, configPath:"preview/config.toml",
       cliPath:null,scope:"preview",overrides:[],entries:[]} as T;
     case "load_global_dictation_hotkey": return ok({enabled:false,hotkey:"Ctrl+Alt+Space"}) as T;
+    case "native_browser_status": return {compatibility:{state:"not_started",detail:"preview"},
+      connection:{state:"unavailable",browsers:[],message:"preview"}} as T;
     default: return ok() as T;
   }
 }

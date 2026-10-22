@@ -44,7 +44,8 @@ fn has_isolated_state_dir() -> bool {
         || multi_state_dir_from_env(
             std::env::var_os("ALUNIXA_X_MULTI_INSTANCE").as_deref(),
             std::env::var_os("ALUNIXA_X_STATE_HOME").as_deref(),
-        ).is_some()
+        )
+        .is_some()
 }
 
 pub fn default_app_state_dir() -> PathBuf {

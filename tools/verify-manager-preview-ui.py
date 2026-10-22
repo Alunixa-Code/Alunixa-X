@@ -30,6 +30,8 @@ try:
                       wait_until="networkidle")
             page.get_by_role("button", name="Codex增强", exact=True).click()
             page.screenshot(path=str(OUTPUT / "preview-inspect.png"), full_page=True)
+            if errors:
+                raise AssertionError(errors)
             checkbox = page.get_by_label("会话项目移动", exact=True)
             first = checkbox.is_checked()
             checkbox.locator("..").click()
@@ -42,7 +44,7 @@ try:
             page.keyboard.press("Escape")
             expect(checkbox).to_be_checked() if first else expect(checkbox).not_to_be_checked()
             page.get_by_role("button", name="请求日志", exact=True).click()
-            expect(page.get_by_role("heading", name="请求日志", exact=True)).to_be_visible()
+            expect(page.get_by_role("heading", name="请求日志", exact=True).first).to_be_visible()
             page.get_by_role("button", name="代理设置", exact=True).click()
             expect(page.get_by_text("请求避震", exact=True).first).to_be_visible()
             for locale in ["en", "ru", "zh"]:
