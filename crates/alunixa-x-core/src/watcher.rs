@@ -1667,6 +1667,367 @@ pub fn stop_codex_processes_for_debug_port_with_fallback(
     );
 }
 
+#[cfg(any(windows, test))]
+struct RestartProcess {
+    id: u32,
+    parent: u32,
+    arguments: Option<Vec<String>>,
+}
+
+/// The caller supplies only processes whose executable has already been verified.
+/// No CDP response is required: a hung/missing debugger must not turn restart into activate.
+#[cfg(any(windows, test))]
+fn main_restart_targets(processes: &[RestartProcess], port: u16) -> anyhow::Result<Vec<u32>> {
+    let mut matched = Vec::new();
+    let mut uninstrumented = Vec::new();
+    for process in processes {
+        let Some(args) = &process.arguments else {
+            continue;
+        };
+        if args
+            .iter()
+            .any(|arg| arg == "--type" || arg.starts_with("--type="))
+        {
+            continue;
+        }
+        let command_line = args.join(" ");
+        match debug_port_from_command_line(&command_line) {
+            Some(actual) if actual == port => matched.push(process.id),
+            Some(_) => {}
+            None if !args.iter().any(|arg| {
+                arg == "--user-data-dir"
+                    || arg.starts_with("--user-data-dir=")
+                    || arg == "--remote-debugging-port"
+                    || arg.starts_with("--remote-debugging-port=")
+            }) =>
+            {
+                uninstrumented.push(process.id)
+            }
+            None => {}
+        }
+    }
+    let mut targets = if matched.is_empty() {
+        uninstrumented
+    } else {
+        matched
+    };
+    anyhow::ensure!(targets.len() <= 1, "存在多个候选 Codex 主进程，未执行重启");
+    anyhow::ensure!(
+        !targets.is_empty()
+            || !processes.iter().any(|process| {
+                process.arguments.is_none()
+                    && !processes.iter().any(|parent| parent.id == process.parent)
+            }),
+        "无法读取 Codex 主进程身份，未执行重启"
+    );
+    loop {
+        let before = targets.len();
+        for process in processes {
+            if targets.contains(&process.parent) && !targets.contains(&process.id) {
+                // An independently instrumented instance is never a child to stop.
+                if process.arguments.as_ref().is_some_and(|args| {
+                    debug_port_from_command_line(&args.join(" "))
+                        .is_some_and(|actual| actual != port)
+                }) {
+                    continue;
+                }
+                targets.push(process.id);
+            }
+        }
+        if targets.len() == before {
+            break;
+        }
+    }
+    Ok(targets)
+}
+
+#[cfg(windows)]
+fn capture_main_restart_processes(
+    port: u16,
+    app_dir: Option<&Path>,
+) -> anyhow::Result<Vec<crate::windows_integration::TrackedWindowsProcess>> {
+    use crate::windows_integration::TrackedWindowsProcess;
+    let Some(app_dir) = app_dir else {
+        return Ok(Vec::new());
+    };
+    let executable = crate::app_paths::build_codex_executable(app_dir);
+    let normalize = |path: &Path| {
+        path.to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_ascii_lowercase()
+    };
+    let expected = normalize(&executable.canonicalize().unwrap_or(executable.clone()));
+    let mut handles = Vec::new();
+    let mut candidates = Vec::new();
+    for process in crate::windows_integration::enumerate_processes() {
+        if !executable.file_name().is_some_and(|name| {
+            name.to_string_lossy()
+                .eq_ignore_ascii_case(&process.exe_file)
+        }) {
+            continue;
+        }
+        if !process.executable_path.as_deref().is_some_and(|path| {
+            normalize(&path.canonicalize().unwrap_or_else(|_| path.to_path_buf())) == expected
+        }) {
+            continue;
+        }
+        // Capture is read-only until selection finishes; every later termination uses this
+        // same handle, so PID reuse cannot redirect it at another application.
+        let handle =
+            match TrackedWindowsProcess::capture_for_restart(process.process_id, &executable) {
+                Ok(Some(handle)) => handle,
+                Ok(None) => continue,
+                Err(_) if process_id_is_running(process.process_id) == Some(false) => continue,
+                Err(error) => return Err(error),
+            };
+        if !handle.is_alive()? {
+            continue;
+        }
+        candidates.push(RestartProcess {
+            id: process.process_id,
+            parent: process.parent_process_id,
+            arguments: handle.arguments(),
+        });
+        handles.push(handle);
+    }
+    let targets = main_restart_targets(&candidates, port)?;
+    Ok(handles
+        .into_iter()
+        .filter(|handle| targets.contains(&handle.process_id))
+        .collect())
+}
+
+#[cfg(windows)]
+pub fn main_codex_restart_processes(port: u16, app_dir: Option<&Path>) -> anyhow::Result<Vec<u32>> {
+    Ok(capture_main_restart_processes(port, app_dir)?
+        .iter()
+        .map(|process| process.process_id)
+        .collect())
+}
+
+/// Stop only the verified main desktop instance and its Electron descendants.
+/// Errors and exit timeouts block relaunch instead of silently activating the old window.
+#[cfg(windows)]
+pub fn stop_main_codex_for_restart(port: u16, app_dir: Option<&Path>) -> anyhow::Result<()> {
+    let targets = capture_main_restart_processes(port, app_dir)?;
+    for target in targets.iter().rev() {
+        target.terminate()?;
+    }
+    let deadline = std::time::Instant::now() + Duration::from_millis(RESTART_STOP_WAIT_TIMEOUT_MS);
+    loop {
+        let remaining = targets
+            .iter()
+            .map(|target| target.is_alive())
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        if !remaining.contains(&true) {
+            break;
+        }
+        anyhow::ensure!(
+            std::time::Instant::now() < deadline,
+            "Codex 目标进程未在限定时间内退出"
+        );
+        std::thread::sleep(Duration::from_millis(RESTART_STOP_WAIT_INTERVAL_MS));
+    }
+    anyhow::ensure!(
+        main_codex_restart_processes(port, app_dir)?.is_empty(),
+        "Codex 目标进程仍在运行，未启动新实例"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+mod main_restart_tests {
+    use super::*;
+
+    fn process(id: u32, parent: u32, arguments: &[&str]) -> RestartProcess {
+        RestartProcess {
+            id,
+            parent,
+            arguments: Some(arguments.iter().map(|arg| arg.to_string()).collect()),
+        }
+    }
+
+    #[test]
+    fn restart_uses_the_actual_port_and_keeps_other_instances_alive() {
+        let processes = [
+            process(1, 0, &["Codex.exe", "--remote-debugging-port=36649"]),
+            process(2, 1, &["Codex.exe", "--type=renderer"]),
+            process(
+                3,
+                0,
+                &[
+                    "Codex.exe",
+                    "--remote-debugging-port=9229",
+                    "--user-data-dir=other",
+                ],
+            ),
+            process(4, 3, &["Codex.exe", "--type=gpu-process"]),
+        ];
+        assert_eq!(main_restart_targets(&processes, 36649).unwrap(), vec![1, 2]);
+    }
+
+    #[test]
+    fn restart_without_cdp_stops_only_the_uninstrumented_main_desktop() {
+        let processes = [
+            process(1, 0, &["ChatGPT.exe"]),
+            process(2, 1, &["ChatGPT.exe", "--type=renderer"]),
+            process(
+                3,
+                0,
+                &[
+                    "ChatGPT.exe",
+                    "--remote-debugging-port=9301",
+                    "--user-data-dir=other",
+                ],
+            ),
+            process(4, 0, &["ChatGPT.exe", "--user-data-dir=isolated"]),
+            RestartProcess {
+                id: 5,
+                parent: 0,
+                arguments: None,
+            },
+        ];
+        assert_eq!(main_restart_targets(&processes, 9229).unwrap(), vec![1, 2]);
+    }
+
+    #[test]
+    fn restart_refuses_ambiguous_roots_and_invalid_debug_flags() {
+        assert!(
+            main_restart_targets(
+                &[process(1, 0, &["Codex.exe"]), process(2, 0, &["Codex.exe"]),],
+                9229
+            )
+            .is_err()
+        );
+        assert!(
+            main_restart_targets(
+                &[process(
+                    1,
+                    0,
+                    &["Codex.exe", "--remote-debugging-port=invalid"]
+                ),],
+                9229
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            main_restart_targets(
+                &[RestartProcess {
+                    id: 1,
+                    parent: 0,
+                    arguments: None
+                },],
+                9229
+            )
+            .is_err()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "owned subprocess entry, executed by the restart lifecycle test"]
+    fn restart_fixture_child() {
+        assert_eq!(
+            std::env::var("ALUNIXA_X_RESTART_FIXTURE").as_deref(),
+            Ok("1")
+        );
+        std::fs::write(
+            std::env::var_os("ALUNIXA_X_RESTART_FIXTURE_READY").unwrap(),
+            b"ready",
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_secs(90));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn restart_really_terminates_an_owned_desktop_without_cdp_and_can_launch_again() {
+        use std::os::windows::process::CommandExt;
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let target = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        for directory in [target.path(), other.path()] {
+            std::fs::copy(
+                std::env::current_exe().unwrap(),
+                directory.join("Codex.exe"),
+            )
+            .unwrap();
+        }
+        let spawn = |directory: &Path| {
+            let ready = directory.join("ready");
+            let _ = std::fs::remove_file(&ready);
+            let mut child = Child(
+                Command::new(directory.join("Codex.exe"))
+                    .args([
+                        "--ignored",
+                        "--exact",
+                        "watcher::main_restart_tests::restart_fixture_child",
+                    ])
+                    .env("ALUNIXA_X_RESTART_FIXTURE", "1")
+                    .env("ALUNIXA_X_RESTART_FIXTURE_READY", &ready)
+                    .creation_flags(crate::windows_integration::CREATE_NO_WINDOW)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .unwrap(),
+            );
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !ready.exists() {
+                assert!(
+                    child.0.try_wait().unwrap().is_none(),
+                    "restart fixture exited before ready"
+                );
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "restart fixture did not become ready"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            child
+        };
+        let mut unrelated = spawn(other.path());
+        let mut first = spawn(target.path());
+        let original = first.0.id();
+        let selected = main_codex_restart_processes(36649, Some(target.path())).unwrap();
+        assert_eq!(
+            selected,
+            vec![original],
+            "snapshot: {:?}; executable: {:?}; arguments: {:?}",
+            crate::windows_integration::enumerate_processes()
+                .into_iter()
+                .find(|process| process.process_id == original),
+            crate::app_paths::build_codex_executable(target.path()),
+            crate::windows_integration::process_command_line(original)
+        );
+        stop_main_codex_for_restart(36649, Some(target.path())).unwrap();
+        assert!(
+            first.0.try_wait().unwrap().is_some(),
+            "old desktop must actually exit"
+        );
+        assert!(
+            unrelated.0.try_wait().unwrap().is_none(),
+            "unrelated desktop must remain alive"
+        );
+        let mut second = spawn(target.path());
+        assert_ne!(
+            second.0.id(),
+            original,
+            "restart must produce a new process"
+        );
+        stop_main_codex_for_restart(36649, Some(target.path())).unwrap();
+        assert!(second.0.try_wait().unwrap().is_some());
+        assert!(unrelated.0.try_wait().unwrap().is_none());
+    }
+}
+
 #[cfg(not(any(windows, target_os = "macos")))]
 pub fn stop_codex_processes_for_debug_port_and_wait(_debug_port: u16) {
     stop_codex_processes_and_wait();

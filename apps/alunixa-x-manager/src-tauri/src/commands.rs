@@ -2357,17 +2357,82 @@ fn restart_disposition(sync_active_relay: bool, app_running: bool) -> RestartDis
     }
 }
 
+fn restart_target_port(
+    requested: u16,
+    owned_port: Option<u16>,
+    latest: Option<&LaunchStatus>,
+) -> u16 {
+    owned_port
+        .filter(|port| *port != 0)
+        .or_else(|| {
+            latest
+                .filter(|status| {
+                    matches!(
+                        status.status.as_str(),
+                        "running" | "running_degraded" | "starting" | "failed"
+                    )
+                })
+                .and_then(|status| status.debug_port)
+                .filter(|port| *port != 0)
+        })
+        .unwrap_or(requested)
+}
+
 fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
     let _launch_guard = match try_acquire_launch_guard() {
         Ok(guard) => guard,
         Err(message) => return failed(message, json!({})),
     };
     let request = normalize_launch_request(request);
-    // 按本实例的调试端口判定是否在跑。
-    // 早先用 `find_codex_processes_for_debug_port`，但它在非 macOS 上返回全部
-    // Codex 进程：Windows 上只要有多开实例在跑，就会把「主 Codex 没开」误判成
-    // 「已运行」，进而走进重启分支去停进程。
-    let app_running = alunixa_x_core::cdp::endpoint_available(request.debug_port);
+    // 表单端口是下次启动的偏好值，不能拿它代替上次启动实际分配的端口。
+    // CDP 不可用时仍须结束本实例的目标进程，而不是只激活旧窗口。
+    let session = alunixa_x_launcher::session_snapshot();
+    let latest = StatusStore::default().load_latest().ok().flatten();
+    let target_port = restart_target_port(
+        request.debug_port,
+        session.owned.then_some(session.debug_port).flatten(),
+        latest.as_ref(),
+    );
+    #[cfg(windows)]
+    let target_app = {
+        let settings = SettingsStore::default().load().ok();
+        alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+            latest
+                .as_ref()
+                .and_then(|status| status.codex_app.as_deref())
+                .map(Path::new),
+            settings
+                .as_ref()
+                .map(|settings| settings.codex_app_path.as_str()),
+        )
+        .or_else(|| {
+            alunixa_x_core::app_paths::resolve_codex_app_dir_with_saved(
+                None,
+                settings
+                    .as_ref()
+                    .map(|settings| settings.codex_app_path.as_str()),
+            )
+        })
+    };
+    #[cfg(windows)]
+    let target_processes = match alunixa_x_core::watcher::main_codex_restart_processes(
+        target_port,
+        target_app.as_deref(),
+    ) {
+        Ok(processes) => processes,
+        Err(error) => {
+            return failed(
+                &format!("无法确认重启目标，未结束任何进程：{error}"),
+                json!({}),
+            );
+        }
+    };
+    #[cfg(not(windows))]
+    let target_processes =
+        alunixa_x_core::watcher::find_codex_processes_for_debug_port(target_port);
+    let app_running = session.owned
+        || !target_processes.is_empty()
+        || alunixa_x_core::cdp::endpoint_available(target_port);
     if restart_disposition(request.sync_active_relay, app_running) == RestartDisposition::LaunchOnly
     {
         return spawn_alunixa_x_launch(request, "Codex 未运行，已按直接启动方式在后台唤起。");
@@ -2412,20 +2477,15 @@ fn restart_alunixa_x_blocking(request: LaunchRequest) -> CommandResult<Value> {
     ));
     let native_browser_shutdown = match stop_alunixa_x_for_restart(
         || {
-            // 主实例在 Windows 上是 AUMID 激活的，命令行未必带调试端口；
-            // 这里允许「按端口没匹配到就退回全局结束」，否则重启会卡在
-            // 「Codex 进程尚未退出」。多开页的结束走的是不允许退回的那个版本。
             #[cfg(windows)]
-            alunixa_x_core::watcher::stop_codex_processes_for_debug_port_with_fallback(
-                request.debug_port,
-                true,
-            );
+            alunixa_x_core::watcher::stop_main_codex_for_restart(
+                target_port,
+                target_app.as_deref(),
+            )?;
             #[cfg(not(windows))]
-            alunixa_x_core::watcher::stop_codex_processes_for_debug_port_and_wait(
-                request.debug_port,
-            );
+            alunixa_x_core::watcher::stop_codex_processes_for_debug_port_and_wait(target_port);
             anyhow::ensure!(
-                !alunixa_x_core::cdp::endpoint_available(request.debug_port),
+                !alunixa_x_core::cdp::endpoint_available(target_port),
                 "Codex 进程尚未退出；未启动新实例"
             );
             Ok(())
@@ -9945,6 +10005,22 @@ base_url = "https://example.invalid/v1"
         assert!(try_acquire_launch_guard().is_err());
         drop(first);
         assert!(try_acquire_launch_guard().is_ok());
+    }
+
+    #[test]
+    fn restart_targets_the_actual_session_not_the_launch_form_preference() {
+        let mut latest = LaunchStatus {
+            status: "running_degraded".into(),
+            debug_port: Some(36649),
+            ..LaunchStatus::default()
+        };
+        assert_eq!(restart_target_port(9229, None, Some(&latest)), 36649);
+        assert_eq!(restart_target_port(9229, Some(61265), Some(&latest)), 61265);
+        latest.status = "failed".into();
+        assert_eq!(restart_target_port(9229, None, Some(&latest)), 36649);
+        latest.status = "stopped".into();
+        assert_eq!(restart_target_port(9229, None, Some(&latest)), 9229);
+        assert_eq!(restart_target_port(9229, Some(0), None), 9229);
     }
 
     #[test]

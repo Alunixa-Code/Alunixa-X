@@ -145,20 +145,20 @@
   /* 焦点圈 */
   --focus-ring: 0 0 0 3px hsl(var(--brand-accent) / 0.28);
 
-  /* 界面字体：对齐 DSH（纯系统字体栈，不打包 Web 字体） */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
-  /* 等宽字体：对齐 DSH 的代码字体栈（SF Mono 优先，回退打包的 JetBrains Mono） */
-  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
-    "Liberation Mono", Menlo, Courier, "PingFang SC", "Microsoft YaHei";
-
-  font-family: var(--font-sans);
+  /* v1.0.42 经典界面的离线字体。 */
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  /* 代码与数值继续使用随应用打包的等宽字体。 */
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 13.5px;
   font-variant-numeric: tabular-nums;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
 }
 
 :root.light {
@@ -2284,12 +2284,6 @@ details.relay-fold[open] > .relay-fold-body {
 }
 
 @media (max-width: 860px) {
-  .relay-options-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@container relay-editor (max-width: 560px) {
   .relay-options-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -5764,16 +5758,16 @@ input[type="range"]:disabled {
   display: grid;
   min-width: 0;
   gap: 8px;
-  /* 一行一个模型：容器再窄也不改成多行卡片，横向滚动兜底。 */
+  /* 宽屏使用表格，窄屏使用带字段标签的经典模型卡片。 */
   overflow-x: auto;
 }
 
 .relay-model-row {
   display: grid;
   min-width: 0;
-  grid-template-columns: 28px minmax(108px, 1.4fr) minmax(64px, 0.55fr) minmax(84px, 0.7fr) minmax(104px, 0.9fr) minmax(116px, 1fr) 30px 30px;
+  grid-template-columns: 32px minmax(220px, 1.6fr) minmax(130px, 0.7fr) minmax(110px, 0.6fr) minmax(180px, 1fr) minmax(130px, 0.7fr) 40px 40px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-height: var(--relay-control-height);
 }
 
@@ -7351,10 +7345,13 @@ select {
   }
 }
 
-/* 模型表保持「一行一个模型」：字段压缩到最小宽度，容器更窄时横向滚动（见
-   .relay-model-row-editor）。只有窄到手机宽度（≤560px）才切换成带字段标签的
-   多行卡片布局。 */
 @container relay-editor (max-width: 560px) {
+  .relay-options-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@container relay-editor (max-width: 900px) {
   .relay-model-row-head {
     display: none;
   }
@@ -7380,21 +7377,16 @@ select {
 
   .relay-model-cell-window {
     grid-column: 2;
-    grid-row: 2;
+    grid-row: 3;
   }
 
   .relay-model-cell-compact {
     grid-column: 3;
-    grid-row: 2;
+    grid-row: 3;
   }
 
   .relay-model-cell-image {
     grid-column: 4;
-    grid-row: 2;
-  }
-
-  .relay-model-cell-reasoning {
-    grid-column: 2 / -1;
     grid-row: 3;
   }
 
@@ -7414,6 +7406,16 @@ select {
     grid-column: 6;
     grid-row: 1;
   }
+
+  .relay-model-cell-protocol {
+    grid-column: 2 / 4;
+    grid-row: 2;
+  }
+
+  .relay-model-cell-reasoning {
+    grid-column: 2 / -1;
+    grid-row: 4;
+  }
 }
 
 @container relay-editor (max-width: 560px) {
@@ -7421,10 +7423,6 @@ select {
   .relay-api-fields,
   .relay-advanced-fields,
   .relay-vlm-section {
-    grid-template-columns: 1fr;
-  }
-
-  .relay-mode-options {
     grid-template-columns: 1fr;
   }
 
@@ -7441,11 +7439,6 @@ select {
   }
 
   .relay-model-cell-image {
-    grid-column: 1 / -1;
-    grid-row: 3;
-  }
-
-  .relay-model-cell-reasoning {
     grid-column: 1 / -1;
     grid-row: 4;
   }
@@ -7467,6 +7460,16 @@ select {
   .relay-custom-header-row > button {
     grid-column: 2;
     grid-row: 1 / 3;
+  }
+
+  .relay-model-cell-protocol {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .relay-model-cell-reasoning {
+    grid-column: 1 / -1;
+    grid-row: 5;
   }
 }
 
@@ -7492,8 +7495,7 @@ select {
 
   .relay-model-cell-window,
   .relay-model-cell-compact,
-  .relay-model-cell-image,
-  .relay-model-cell-reasoning {
+  .relay-model-cell-image {
     grid-column: 1 / -1;
   }
 
@@ -7505,8 +7507,8 @@ select {
     grid-row: 4;
   }
 
-  .relay-model-cell-reasoning {
-    grid-row: 5;
+  .relay-model-cell-protocol, .relay-model-cell-reasoning{
+    grid-column: 1 / -1;
   }
 }
 

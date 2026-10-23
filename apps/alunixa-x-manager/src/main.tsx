@@ -5,10 +5,12 @@ import "./styles.css";
 
 /* ── Bundled fonts (offline, no Google Fonts request) ──
      Fontsource packages ship woff2 files that Vite bundles into dist/.
-     CSS @font-face declarations are injected at build time.
-     界面字体已对齐 DSH：改走系统字体栈（--font-sans），不再打包 Inter；
-     这里只保留 DSH 代码字体栈里排第二的 JetBrains Mono 作等宽回退。      */
+     CSS @font-face declarations are injected at build time.              */
 import "@fontsource/jetbrains-mono";
+import "@fontsource/inter/400.css";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
 
 const app = document.getElementById("app");
 document.documentElement.lang = getLocale();

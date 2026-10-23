@@ -53,21 +53,10 @@
   --mg-accent-ink: color-mix(in srgb, hsl(var(--brand-accent)), hsl(var(--foreground)) 28%);
   background:hsl(var(--background));
 }
-.dark .mg-skills-page {
-  --background:228 8% 11%;
-  --surface-raised:228 7% 15%;
-  --surface-sunken:228 8% 9%;
-  --muted:228 7% 17%;
-}
-.mg-skills-page :is(.mg-skill-list,.mg-skill-head,.mg-skill-row,.mg-drawer,.mg-drawer>header,.mg-drawer>footer) { border-color:var(--mg-divider); }
-.mg-skills-page :is(.mg-header-title h1,.mg-drawer h2,.mg-skill-name strong) { letter-spacing:0; }
-.mg-skills-page .mg-skill-list { border-radius:8px; box-shadow:none; }
 .mg-skills-page :is(.mg-button,.mg-icon-button) { font-size:12px; font-weight:500; height:32px; white-space:nowrap; box-sizing:border-box; transition:background-color .14s,border-color .14s; }
-.mg-skills-page .mg-button { border-color:var(--mg-divider); box-shadow:none; }
-.mg-skills-page .mg-primary { background:hsl(232 76% 54%); color:#fff; border-color:transparent; }
 .mg-skills-page .mg-primary:hover { filter:brightness(1.1); }
 .mg-skills-page :is(button,input):focus-visible { outline:2px solid hsl(var(--ring)); outline-offset:2px; }
-.mg-skills-page .mg-link-button { color:var(--mg-accent-ink); }
+.mg-skills-page .mg-link-button { color:hsl(var(--brand-accent)); }
 .mg-drawer.mg-drawer-wide { width:100vw; max-width:none; height:100dvh; border:0; box-shadow:none; }
 .mg-drawer-wide .mg-drawer-body { flex:1; min-height:0; padding:0; overflow:hidden; }
 .mg-drawer-wide>header { flex-shrink:0; padding-inline:22px; background:hsl(var(--surface-raised)); }
@@ -163,12 +152,12 @@
 
 /* 会话管理以列表为主；覆盖共享管理页的外框，避免宽度再叠加左右 margin。 */
 .screen.management-screen > .mg-session-page {
-  width:100%;
+  width:calc(100% - 44px);
   min-width:0;
-  margin:0;
-  border:0;
-  border-radius:0;
-  background:transparent;
+  margin:0 22px 22px;
+  border:1px solid hsl(var(--border));
+  border-radius:14px;
+  background:hsl(var(--background));
 }
 .mg-session-page .mg-session-toolbar {
   display:flex;
@@ -176,7 +165,7 @@
   flex-shrink:0;
   align-items:center;
   gap:12px;
-  padding:0 0 14px;
+  padding:16px 20px 14px;
 }
 .mg-session-page .mg-search {
   flex:1;
@@ -203,13 +192,13 @@
 .mg-session-toolbar-actions { flex-shrink:0; }
 .mg-session-page .mg-session-refresh { width:34px; padding:0; }
 .mg-session-page .mg-session-toolbar-actions [aria-pressed=true] { background:hsl(var(--accent)); border-color:hsl(var(--ring)/.6); }
-.mg-session-page > .session-maintenance { flex-shrink:0; margin-bottom:14px; border-top:0; }
+.mg-session-page > .session-maintenance { flex-shrink:0; margin:0 20px 14px; border-top:0; }
 .screen.management-screen > .mg-session-page > .mg-content {
   flex:1 1 auto;
   min-width:0;
   min-height:0;
   margin:0;
-  padding:0;
+  padding:0 20px 20px;
   border:0;
   border-radius:0;
   background:transparent;
@@ -217,9 +206,9 @@
   overflow:hidden;
 }
 .screen.management-screen > .mg-session-page > .mg-content > .mg-session-list {
-  border-radius:9px;
-  background:hsl(var(--card)/.7);
-  box-shadow:none;
+  border-radius:14px;
+  background:hsl(var(--card));
+  box-shadow:var(--shadow-sm);
   scrollbar-gutter:stable;
 }
 .mg-session-group + .mg-session-group { border-top:1px solid hsl(var(--border)); }
@@ -288,3 +277,4 @@
   .mg-session-group-count { min-width:52px; }
   .mg-session-page .mg-pagination { flex-wrap:wrap; }
 }
+@media (max-width:760px) { .screen.management-screen > .mg-session-page { width:calc(100% - 28px); margin:0 14px 18px; } .mg-session-page .mg-session-toolbar { padding-inline:14px; } .screen.management-screen > .mg-session-page > .mg-content { padding-inline:14px; } }

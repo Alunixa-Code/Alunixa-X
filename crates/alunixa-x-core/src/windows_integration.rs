@@ -836,15 +836,32 @@ impl TrackedWindowsProcess {
         process_id: u32,
         expected_executable: &std::path::Path,
     ) -> anyhow::Result<Option<Self>> {
+        Self::capture_with_access(process_id, expected_executable, false)
+    }
+
+    pub(crate) fn capture_for_restart(
+        process_id: u32,
+        expected_executable: &std::path::Path,
+    ) -> anyhow::Result<Option<Self>> {
+        anyhow::ensure!(
+            process_id != std::process::id(),
+            "cannot restart the manager process"
+        );
+        Self::capture_with_access(process_id, expected_executable, true)
+    }
+
+    fn capture_with_access(
+        process_id: u32,
+        expected_executable: &std::path::Path,
+        terminate: bool,
+    ) -> anyhow::Result<Option<Self>> {
         use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
-        let handle = unsafe {
-            OpenProcess(
-                PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                false,
-                process_id,
-            )
+        let mut access = PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION;
+        if terminate {
+            access |= PROCESS_TERMINATE | PROCESS_VM_READ;
         }
-        .with_context(|| format!("failed to open Windows process id {process_id}"))?;
+        let handle = unsafe { OpenProcess(access, false, process_id) }
+            .with_context(|| format!("failed to open Windows process id {process_id}"))?;
         let handle = unsafe { OwnedHandle::from_raw_handle(handle.0) };
         let native_handle = HANDLE(handle.as_raw_handle());
         let mut image = vec![0_u16; 32768];
@@ -859,6 +876,7 @@ impl TrackedWindowsProcess {
         }
         .context("failed to query tracked Windows process image")?;
         let actual = PathBuf::from(OsString::from_wide(&image[..len as usize]));
+        let actual = std::fs::canonicalize(&actual).unwrap_or(actual);
         let expected = std::fs::canonicalize(expected_executable)
             .unwrap_or_else(|_| expected_executable.to_path_buf());
         let normalize = |path: &std::path::Path| {
@@ -880,6 +898,22 @@ impl TrackedWindowsProcess {
             birth_id: ((birth.dwHighDateTime as u64) << 32) | birth.dwLowDateTime as u64,
             handle,
         }))
+    }
+
+    pub(crate) fn arguments(&self) -> Option<Vec<String>> {
+        use std::os::windows::io::AsRawHandle;
+        command_line_arguments(&process_command_line_from_handle(HANDLE(
+            self.handle.as_raw_handle(),
+        ))?)
+    }
+
+    pub(crate) fn terminate(&self) -> anyhow::Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        if self.is_alive()? {
+            unsafe { TerminateProcess(HANDLE(self.handle.as_raw_handle()), 0) }
+                .context("failed to terminate the verified Codex restart target")?;
+        }
+        Ok(())
     }
 
     pub fn is_alive(&self) -> anyhow::Result<bool> {
