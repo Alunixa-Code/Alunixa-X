@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.49: macOS packaging detach race fix
+
+Fixes the macOS x64 GitHub Actions race that could leave the private build DMG attached, while retaining the classic interface and Codex restart repair from v1.0.48. See the [release notes](docs/releases/v1.0.49.md).
+
 ## v1.0.48: Classic interface and reliable Codex restart
 
 Restores the v1.0.42 styling while retaining newer functionality. Restart uses the actual session port and verifies desktop-process exit even without CDP, rather than activating the old window or stopping unrelated instances. Injection and tray exit are unchanged. See the [release notes](docs/releases/v1.0.48.md).

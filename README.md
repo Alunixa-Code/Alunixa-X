@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.49：修复 macOS 打包卸载竞态
+
+修复 macOS x64 GitHub Actions 在 DMG 生成后卸载私有构建设备的竞态，并保留 v1.0.48 的经典界面与 Codex 重启修复。详见[三语发行说明](docs/releases/v1.0.49.md)。
+
 ## v1.0.48：经典界面与 Codex 重启修复
 
 恢复 v1.0.42 的界面样式，保留新版全部功能；重启使用实际会话端口，调试端点失效时仍确认目标进程退出，避免只激活旧窗口或误停其他实例。注入与托盘退出逻辑不变，详见[三语发行说明](docs/releases/v1.0.48.md)。
