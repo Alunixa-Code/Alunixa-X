@@ -341,6 +341,15 @@ detach_dmg() {
     sleep "$attempt"
   done
 
+  # Finder can retain a private CI image after it has already detached the volume.
+  # If the backing device is still registered, try one last lazy detach; this is
+  # scoped to the temporary image created by this script and never touches user disks.
+  if [[ "$target" == /dev/* ]] && hdiutil detach "$target" -force -lazy >/dev/null 2>&1; then
+    return 0
+  fi
+  if target_is_gone; then
+    return 0
+  fi
   echo "error: failed to detach DMG device: $target" >&2
   return 1
 }
