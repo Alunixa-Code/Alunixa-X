@@ -24,6 +24,10 @@
   <img src="assets/brand/alunixa-x-social.png" alt="Alunixa X — AI Agent Control System" width="860">
 </p>
 
+## v1.0.48: Classic interface and reliable Codex restart
+
+Restores the v1.0.42 styling while retaining newer functionality. Restart uses the actual session port and verifies desktop-process exit even without CDP, rather than activating the old window or stopping unrelated instances. Injection and tray exit are unchanged. See the [release notes](docs/releases/v1.0.48.md).
+
 ## v1.0.47: Settings save repair and upstream v1.10.1
 
 Fixes the transaction/file revision mismatch that rejected ordinary and consecutive saves. Real concurrent changes still fail without overwriting data or losing drafts. Integrates non-advertising upstream `c541516c` request logs, overload handling, session management, proxies, dictation, configuration migration and bridge recovery while retaining advanced AX models and enhancements. See [release notes](docs/releases/v1.0.47.md) and the [scope and verification record](docs/reports/2026-10-22-upstream-v1101-sync.md).

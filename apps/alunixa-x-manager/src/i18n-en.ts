@@ -1969,6 +1969,10 @@ export const EN_TEMPLATE: Record<string, string> = {
 };
 
 export const EN_BACKEND: Record<string, string> = {
+  "存在多个候选 Codex 主进程，未执行重启": "Multiple Codex desktop targets were found; restart was not performed.",
+  "无法读取 Codex 主进程身份，未执行重启": "The Codex desktop process could not be verified; restart was not performed.",
+  "Codex 目标进程未在限定时间内退出": "The selected Codex process did not exit before the deadline.",
+  "Codex 目标进程仍在运行，未启动新实例": "The selected Codex process is still running; no new instance was started.",
   "扫描已失效，请重新扫描。": "The scan is no longer valid. Scan again.",
   "扫描已过期，请重新扫描。": "The scan has expired. Scan again.",
   "请选择缓存项目。": "Select cache items first.",
@@ -2111,6 +2115,7 @@ export const EN_BACKEND: Record<string, string> = {
 };
 
 export const EN_BACKEND_PATTERNS: Array<[RegExp, string]> = [
+  [new RegExp("^无法确认重启目标，未结束任何进程：([\\s\\S]+)$", ""), "Could not verify the restart target; no processes were stopped: $1"],
   [new RegExp("^请先退出 (.+) 应用及其 CLI，再重新扫描清理。$", ""), "Quit $1 and its CLI, then scan again to clean caches."],
   [new RegExp("^缓存扫描失败：(.+)$", ""), "Cache scan failed: $1"],
   [new RegExp("^缓存清理失败：(.+)$", ""), "Cache cleanup failed: $1"],

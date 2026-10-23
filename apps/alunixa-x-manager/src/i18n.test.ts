@@ -137,3 +137,10 @@ test("manager language is separate from native Codex locale and updates tray for
   assert.doesNotMatch(source, /codexAppForceChineseLocale|update_settings|config\.toml/);
   assert.doesNotMatch(app, /toLocaleString\("zh-CN"\)|toggleLanguage/);
 });
+
+test("restart identity errors explain that no process was stopped in all three languages", () => {
+  const message = "无法确认重启目标，未结束任何进程：fixture";
+  assert.equal(runtime("zh").api.t(message), message);
+  assert.match(runtime("en").api.t(message), /^Could not verify the restart target; no processes were stopped: fixture$/);
+  assert.match(runtime("ru").api.t(message), /^Не удалось проверить цель перезапуска; процессы не остановлены: fixture$/);
+});

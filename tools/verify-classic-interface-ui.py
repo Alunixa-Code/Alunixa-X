@@ -68,6 +68,7 @@ with fixture.server_url() as url, sync_playwright() as p:
                     overlap_y = min(left["y"] + left["h"], right["y"] + right["h"]) - max(left["y"], right["y"])
                     assert overlap_x < 1 or overlap_y < 1, (width, left, right)
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+            rows.first.scroll_into_view_if_needed()
             page.screenshot(path=str(OUTPUT / f"classic-models-{width}.png"), full_page=True)
         page.get_by_role("button", name="返回列表", exact=True).click()
         for label in ["Skills", "会话管理", "Agent 增强"]:
